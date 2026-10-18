@@ -1,0 +1,14 @@
+[package]
+name = "mem-store"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mem-core = { workspace = true }
+turso = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }

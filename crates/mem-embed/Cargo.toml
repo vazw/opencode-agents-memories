@@ -1,0 +1,7 @@
+[package]
+name = "mem-embed"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mem-core = { workspace = true }

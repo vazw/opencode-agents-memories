@@ -1,0 +1,12 @@
+[package]
+name = "mem-web"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mem-core = { workspace = true }
+mem-store = { workspace = true }
+mem-embed = { workspace = true }
+mem-ai = { workspace = true }
+mem-profile = { workspace = true }
+mem-episodic = { workspace = true }
