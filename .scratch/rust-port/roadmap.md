@@ -3,7 +3,7 @@
 **Revision:** 3 — adds the web-explorer UI stack ruling (§0b D5: Leptos CSR + Thaw), reworked Phase 6 web waves (W6.1 static-hosting + new W6.5), risks R8/R11, ADR candidate (6). Rev-2: verified crate research (ort / turso / sqlite-vec), 2026-10-18
 
 **Status:** DRAFT (pre-blueprint; feeds issue generation)
-**Scope authority:** `OVERVIEW.md` (5 epics, user stories US x.y). Reference: `example/opencode-mem/` v2.31.3 @ 906038e (READ-ONLY).
+**Scope:** `OVERVIEW.md` for epics and user stories (US x.y); roadmap.md is authoritative for stack decisions (§0b), sequencing, and shipped-wave addenda. Reference: `example/opencode-mem/` v2.31.3 @ 906038e (READ-ONLY).
 **Stack commitments (per OVERVIEW.md, refined by verified research — see §0b):** `tokio`; storage on the **`turso` crate 0.8.x** (NOT the Rust `libsql` crate — no vector support in its engine build); embeddings on **`ort = "=2.0.0-rc.14"` + `tokenizers`**; `axum`; `serde`/`jsonc_parser`.
 
 House structure: **Phase → Wave.** A wave is a batch of independently-grabbable work the fleet runs with parallel agents once its prerequisites are done. Waves are numbered `W<p>.<n>`; each wave ends at a verifiable, demoable state and decomposes into **tracer-bullet slices** (thin vertical cuts, finalized by the issue flow).
@@ -159,7 +159,7 @@ These rulings supersede OVERVIEW.md's vaguer "`libsql`/`turso` crate" recommenda
 ### W3.2 — Learning service, profile manager, language detection
 - **Delivers:** extraction of preferences/languages/conventions from prompts via `AiProvider` into the profile store; **US 3.1** (extraction half).
 - **Entry prerequisites:** W2.1, W3.1.
-- **Verification:** `tests/user-profile-learning-language.test.ts`, `user-profile-learning-prompt-mode`, `user-profile-learning-error`, `profile-tool-runtime`.
+- **Verification:** `tests/user-profile-learning-language.test.ts`, `user-profile-learning-prompt-mode`, `user-profile-learning-error`. (profile-tool-runtime is deferred to W5.4 — the tool-registration surface does not exist before W5.4.)
 - **Parallelism:** language-detector (pure) runs alongside the learning service.
 - **Tracer-bullet slices:** (a) profile storage schema; (b) learning service loop; (c) language detector.
 
@@ -169,6 +169,7 @@ These rulings supersede OVERVIEW.md's vaguer "`libsql`/`turso` crate" recommenda
 - **Verification:** `tests/profile-utils.test.ts`, `user-profile-decay`, `user-profile-learning-confidence`, `ai-cleanup.test.ts`, `ai-cleanup-apply`.
 - **Parallelism:** decay/confidence (pure math, `profile-utils`) vs. ai-cleanup (provider-dependent).
 - **Tracer-bullet slices:** (a) profile-utils math; (b) validator port; (c) cleanup apply loop.
+- **Shipped (rulings R1–R13):** EMA α = 0.3 inside `sync_confidence` (prior = stored confidence, observation = Beta estimator); 30-day base half-life with upstream's frequency scaling routed through the pure `mem_profile::decay` kernel; lazy read (`decay_in_memory`) + persisted daily sweep (`sweep_decay_daily`, injected clock, 24 h gate); incremental cleanup scoped by `mem_core::dedup` (landed trait + `[0.65, 0.9)` conflict-band neighbours) applied through upstream's scoped loop with the no-data-loss-outside-the-pair guarantee; validation bounds 3–500 chars enforced inside `UserProfileValidator::validate`; no timer/thread/queue (D-W3), no new dependencies, no DDL, no `provider_gateway.rs` change. Justified-addition test files: `crates/mem-profile/tests/decay.rs` (8), `validation.rs` (6), `incremental_cleanup.rs` (3), `round_incremental_cleanup.rs` (4) and `crates/mem-core/tests/dedup.rs` (6). **Carry-over (R13):** `ProfileStore::sweep_decay_daily(now)` still needs a daily caller in the host lifecycle (`mem-bridge` W5.x + the composition root), which must also construct `ProfileCleanupHook` before `LearningRound::with_incremental_cleanup(...)`; `mem-web` (W6.1) supplies the serve-loop caller if it hosts the profile store.
 
 ---
 
@@ -230,7 +231,7 @@ These rulings supersede OVERVIEW.md's vaguer "`libsql`/`turso` crate" recommenda
 ### W5.4 — Memory tools registration
 - **Delivers:** all agent-facing tools live in OpenCode: existing memory tools ported from `src/services/ai/tools/tool-schema.ts` + `recall_project_sessions`; scope rules enforced per tool; **US 1.4** (tool half), plus the `memory-portability-tool` path.
 - **Entry prerequisites:** W5.1; W4.2 for the recall tool.
-- **Verification:** `tests/tool-scope.test.ts`, `memory-timeline-orphan`, `memory-portability-tool.test.ts`, `profile-tool-runtime`.
+- **Verification:** `tests/tool-scope.test.ts`, `memory-timeline-orphan`, `memory-portability-tool.test.ts`, `profile-tool-runtime` (carries the W3.2-deferred cases: query rejection, blank content, private-content block, missing email, lock acquire/release, fail-closed contention).
 - **Parallelism:** tool-by-tool slices.
 - **Tracer-bullet slices:** (a) tool registration plumbing; (b) recall_project_sessions; (c) remaining tools port; (d) portability tool.
 
@@ -292,8 +293,9 @@ These rulings supersede OVERVIEW.md's vaguer "`libsql`/`turso` crate" recommenda
 ### W7.2 — Full parity matrix & upgrade rehearsal
 - **Delivers:** a coverage matrix mapping every one of the 110 upstream test files to a Rust test (ported / covered-by-superior-test / N-A); an end-to-end rehearsal: TS plugin uninstalled, Rust plugin installed, same project, memories readable, **web UI functional (the port's Leptos UI; the REST contract additionally keeps the upstream Svelte build usable)**.
 - **Entry prerequisites:** all prior waves.
-- **Verification:** the matrix document itself + rehearsal transcript; zero unexplained red cells.
+- **Verification:** the matrix document itself + rehearsal transcript; zero unexplained red cells. Doc authority consistency: OVERVIEW.md ↔ roadmap.md §0b (storage crate, UI primacy, Epic 1 split, authority claim) agree; zero unexplained red cells.
 - **Parallelism:** matrix audit vs. rehearsal script.
+- **Tracer-bullet slices:** (a) parity matrix audit; (b) upgrade rehearsal script; (c) doc authority consistency row.
 
 ---
 

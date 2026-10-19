@@ -1,9 +1,11 @@
+> Scope: epics & user stories (US x.y). Verified-research amendments, stack decisions, and sequencing: roadmap.md §0b.
+
 # Epic Overview:
 
 - **Goal:** Rewrite the existing TypeScript/Bun `opencode-mem` plugin and service architecture into a high-performance, memory-safe Rust binary/library, while extending the memory model from two tiers (Global User Profile + Static Project/Global Facts) to include a third tier: **Per-Project Agent Episodic/Session Memory**.
 - **Target Rust Stack Recommendations:**
   - **Async Runtime:** `tokio`
-  - **Database & Vector Store:** `libsql` / `turso` crate (matching the existing Turso/SQLite shard architecture in `src/services/turso/`)
+  - **Database & Vector Store:** `turso` crate 0.8.x (matching the existing Turso/SQLite shard architecture in `src/services/turso/`). Verified research: `roadmap.md` §0b (D1, and the deferred escape hatch in D3).
   - **Local Embeddings:** `ort` (Rust bindings for ONNX Runtime, replacing `src/services/onnxruntime-resolve.ts` and `src/services/embedding.ts`)
   - **HTTP / Web API:** `axum` or `actix-web` (replacing `src/services/web-server.ts` and `src/services/api-handlers.ts`)
   - **Serialization & Config:** `serde`, `serde_json`, `jsonc_parser` (replacing `src/services/jsonc.ts` and `src/config.ts`)
@@ -13,6 +15,8 @@
 ## Epic 1: Per-Project Agent Session Memory _(New Feature — The Missing Piece)_
 
 _Enable agents working within a specific project to record, summarize, and recall what they (or other agents/sub-agents) did in previous sessions._
+
+> **Scope split:** storage-side scope (schema, queries, consolidation) lands in roadmap Phase 4; wiring-side scope (capture hooks, context injection) lands in Phase 5. US 1.1's capture hooks land in Phase 5.
 
 ### User Story 1.1: Automatic Per-Project Agent Session Journal & Capture
 
@@ -174,16 +178,17 @@ _Port the LLM provider abstractions, privacy filters, skills manager, and import
 
 ## Epic 5: Host Plugin Bridge, TUI & Web Explorer Backend (Rust Port)
 
-_Maintain backward compatibility with the OpenCode host environment, and with the existing Svelte Web UI at the REST-contract level: the Rust port serves the exact upstream REST API contract (ADR-0003) and ships its own Leptos/Thaw explorer UI (§0b D5); the upstream Svelte build remains usable against the Rust server._
+_Maintain backward compatibility with the OpenCode host environment. The port ships its own Leptos/Thaw explorer UI (ADR-0003, `web-ui`) as the sole UI deliverable; the REST contract is its API contract (verified research: `roadmap.md` §0b D5)._
 
 ### User Story 5.1: Web Server API & Explorer Compatibility
 
-- **As a** user of the `opencode-mem` Svelte web dashboard (`web/`),
-- **I want** the Rust backend to serve the exact same REST API contract (plus endpoints for the new Per-Project Agent Session Memory),
-- **So that** the REST contract stays drop-in compatible — the upstream Svelte frontend (`web/src/App.svelte`) works seamlessly against the Rust server — and the port's own Leptos/Thaw explorer UI (ADR-0003, `web-ui`) can display a new "Session History / Timeline" tab per project.
+- **As a** user of the web explorer,
+- **I want** the REST contract as the API contract for the Leptos/Thaw UI (ADR-0003, `web-ui`), including the Session History/Timeline tab,
+- **So that** the port's own Leptos/Thaw explorer UI (ADR-0003, `web-ui`) can display project session history and the REST contract stays the sole API contract.
 - **Acceptance Criteria:**
   - Port `src/services/web-server.ts`, `src/services/api-handlers.ts`, `src/services/web-auth.ts`, `src/services/web-api-auth.ts`, and `src/services/cors.ts` to `axum`.
   - Add REST endpoints `GET /api/projects/:project_id/sessions` and `DELETE /api/projects/:project_id/sessions/:session_id` to inspect and manage per-project agent session memories.
+- Verified research: `roadmap.md` §0b D5 and `docs/adr/0003-web-explorer-ui-stack.md`.
 
 ### User Story 5.2: OpenCode V1/V2 Plugin Adapter & TUI Companion
 
@@ -194,3 +199,5 @@ _Maintain backward compatibility with the OpenCode host environment, and with th
   - Support the V1/V2 plugin contracts (`src/plugin.ts`, `src/v2/plugin.ts`, `src/v2/adapter.ts`, `src/v2/toast-rpc.ts`, `src/tui.ts`) via a lightweight JS/N-API wrapper or JSON-RPC stdio/HTTP bridge to the compiled Rust binary.
   - Ensure graceful shutdown and resource cleanup on host exit (`tests/plugin-shutdown.test.ts`).
 
+
+> Deferred to hardening (Phase 7): auto-update, i18n, request-timeout polish, bundle-boundary/loader-contract parity audit, drop-in rehearsal — see roadmap §Sequencing 7, W7.1–W7.2.
