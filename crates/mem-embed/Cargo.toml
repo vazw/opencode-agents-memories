@@ -5,3 +5,11 @@ edition.workspace = true
 
 [dependencies]
 mem-core = { workspace = true }
+ort = { workspace = true }
+tokenizers = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

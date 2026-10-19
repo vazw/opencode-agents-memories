@@ -1,6 +1,6 @@
 # 07 — W1.4 · Embedding pipeline — local ORT + remote (US 2.3)
 
-Status: ready-for-agent
+Status: done — 2026-10-18
 
 ## What to build
 
@@ -16,3 +16,7 @@ Status: ready-for-agent
 ## Blocked by
 
 - 02 · W0.2 (can run concurrently with 05–06)
+
+## Comments
+
+- **2026-10-18:** Closed. Reviewer APPROVED (session `ses_ead65a2bfffeWplMJyfVdst6pk`). Test evidence: 419 passed / 0 failed / 2 ignored (baseline 330 + 89 new). Fan-out wave: s1 (steps 3-6, 32 tests), s2 (steps 7-8, 14 tests), s3 (steps 9-12, 37 tests), captain (steps 1-2, 13-14). Golden-vector: cosine 1.000000, max-abs 1.416e-7. L1-L6 ledger battery green over all four ledgers. One attributed foreign clippy failure (octal_escapes in s3's embedding_service.rs:289, left untouched per directive). Cross-shard integration fix: token_type_ids/type_ids in s1's session.rs. Next: W1.5 r1 coder (encryption + operation lock, approved `b667e70e972a`).

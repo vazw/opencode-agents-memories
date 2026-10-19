@@ -5,7 +5,7 @@
 
 mod common;
 
-use mem_store::db::Value;
+use mem_store::db::{BatchMode, Value};
 use mem_store::error::StoreError;
 use mem_store::schema_migrations::{
     MigrationOptions, apply_schema_migrations, memory_shard_migrations,
@@ -13,7 +13,7 @@ use mem_store::schema_migrations::{
 use mem_store::vector::{
     MemoryInsert, ProjectAssociation, count_all_vectors, count_vectors_by_container_tag,
     get_all_memories, get_distinct_tags, get_project_path_counts, insert_vector,
-    resolve_session_id, update_project_association, vector_to_text,
+    insert_vector_statement, resolve_session_id, update_project_association, vector_to_text,
 };
 
 use mem_store::config::StoreConfig;
@@ -343,4 +343,64 @@ fn test_resolve_session_id_explicit_wins_then_metadata() {
     assert_eq!(resolve_session_id(None, None), None);
     let _: Option<mem_store::db::Row> = None;
     let _ = std::sync::Arc::new(0u8);
+}
+
+// ---------------------------------------------------------------------------
+// statement-form helper (blueprint W1.3 step 2)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_insert_vector_statement_batch_matches_single_insert() {
+    let config = common::store_config("vec-stmt-batch");
+    let db = prepared_db(&config, "shard.db", 2).await;
+    let value = record("mem_stmt_batch", 10, true, Some("/proj/a"));
+
+    // Commit the statement through one write batch (the seam the migrators
+    // and re-embed staging use).
+    db.batch(vec![insert_vector_statement(&value)], BatchMode::Write)
+        .await
+        .expect("statement batch");
+
+    // A reference row inserted through `insert_vector` (single execute).
+    let mut reference = record("mem_stmt_single", 10, true, Some("/proj/a"));
+    reference.id = "mem_stmt_single".to_string();
+    insert_vector(db.as_ref(), &reference)
+        .await
+        .expect("single insert");
+
+    let rows = db
+        .query(
+            "SELECT id, content, vector_extract(vector) AS v, vector_extract(tags_vector) AS tv,\
+                    container_tag, tags, type, created_at, updated_at, metadata, display_name, \
+                    user_name, user_email, project_path, project_name, git_repo_url \
+             FROM memories ORDER BY id",
+            vec![],
+        )
+        .await
+        .expect("probe");
+    assert_eq!(rows.len(), 2);
+    let batched = &rows[0];
+    let single = &rows[1];
+    for column in [
+        "v",
+        "tv",
+        "container_tag",
+        "tags",
+        "type",
+        "metadata",
+        "display_name",
+        "user_name",
+        "user_email",
+        "project_path",
+        "project_name",
+        "git_repo_url",
+    ] {
+        assert_eq!(
+            batched.text(column).as_deref(),
+            single.text(column).as_deref(),
+            "batch statement row matches single insert on {column}"
+        );
+    }
+    assert_eq!(batched.i64("created_at"), single.i64("created_at"));
+    assert_eq!(batched.i64("updated_at"), single.i64("updated_at"));
 }

@@ -306,6 +306,87 @@ mod frozen {
              container_tag = ?, project_path = ?, project_name = ?,
              display_name = ?, git_repo_url = ?
            WHERE container_tag != ?"#;
+
+    /// vector-search.ts L257-263 (exactScanKind, columnName=vector, unfiltered)
+    pub const FROZEN_SEARCH_EXACT_VECTOR_ALL: &str = r#"
+        SELECT m.id AS id, vector_distance_cos(m.vector, vector32(?)) AS dist
+        FROM memories m
+        WHERE m.vector IS NOT NULL
+        ORDER BY dist ASC
+        LIMIT ?
+      "#;
+
+    /// vector-search.ts L264-270 (exactScanKind, columnName=vector, filtered)
+    pub const FROZEN_SEARCH_EXACT_VECTOR_TAGGED: &str = r#"
+        SELECT m.id AS id, vector_distance_cos(m.vector, vector32(?)) AS dist
+        FROM memories m
+        WHERE m.vector IS NOT NULL AND m.container_tag = ?
+        ORDER BY dist ASC
+        LIMIT ?
+      "#;
+
+    /// vector-search.ts L257-263 (exactScanKind, columnName=tags_vector, unfiltered)
+    pub const FROZEN_SEARCH_EXACT_TAGS_VECTOR_ALL: &str = r#"
+        SELECT m.id AS id, vector_distance_cos(m.tags_vector, vector32(?)) AS dist
+        FROM memories m
+        WHERE m.tags_vector IS NOT NULL
+        ORDER BY dist ASC
+        LIMIT ?
+      "#;
+
+    /// vector-search.ts L264-270 (exactScanKind, columnName=tags_vector, filtered)
+    pub const FROZEN_SEARCH_EXACT_TAGS_VECTOR_TAGGED: &str = r#"
+        SELECT m.id AS id, vector_distance_cos(m.tags_vector, vector32(?)) AS dist
+        FROM memories m
+        WHERE m.tags_vector IS NOT NULL AND m.container_tag = ?
+        ORDER BY dist ASC
+        LIMIT ?
+      "#;
+
+    /// vector-search.ts L227-232 (keywordScores, unfiltered)
+    pub const FROZEN_KEYWORD_SCORES_ALL: &str = r#"
+          SELECT id FROM memories
+          WHERE content LIKE ? ESCAPE '\' OR IFNULL(tags, '') LIKE ? ESCAPE '\'
+          LIMIT ?
+        "#;
+
+    /// vector-search.ts L233-238 (keywordScores, filtered)
+    pub const FROZEN_KEYWORD_SCORES_TAGGED: &str = r#"
+          SELECT id FROM memories
+          WHERE container_tag = ?
+            AND (content LIKE ? ESCAPE '\' OR IFNULL(tags, '') LIKE ? ESCAPE '\')
+          LIMIT ?
+        "#;
+
+    /// vector-search.ts L410-417 (getMemoriesBySessionID)
+    pub const FROZEN_GET_MEMORIES_BY_SESSION_ID: &str = r#"
+      SELECT * FROM memories
+      WHERE session_id = ?
+         OR (session_id IS NULL AND metadata LIKE ?)
+      ORDER BY created_at DESC
+    "#;
+
+    /// vector-search.ts L505 (pinMemory)
+    pub const FROZEN_PIN_MEMORY: &str = r#"UPDATE memories SET is_pinned = 1 WHERE id = ?"#;
+
+    /// vector-search.ts L509 (unpinMemory)
+    pub const FROZEN_UNPIN_MEMORY: &str = r#"UPDATE memories SET is_pinned = 0 WHERE id = ?"#;
+
+    /// migration-service.ts L269-275 (rebuildShardSafely re-embed source select)
+    pub const FROZEN_SELECT_REEMBED_SOURCE: &str = r#"
+      SELECT
+        id, content, container_tag, tags, type, created_at, updated_at, metadata,
+        display_name, user_name, user_email, project_path, project_name, git_repo_url, is_pinned
+      FROM memories
+      ORDER BY created_at DESC
+    "#;
+
+    /// legacy-migrator.ts L360 (SELECT * FROM memories, unordered source read)
+    pub const FROZEN_GET_MEMORIES_UNORDERED: &str = r#"SELECT * FROM memories"#;
+
+    /// legacy-migrator.ts L172-174 (shard_metadata value probe; Rust generalizes the key to a bound param)
+    pub const FROZEN_GET_SHARD_METADATA_VALUE: &str =
+        r#"SELECT value FROM shard_metadata WHERE key = ?"#;
 }
 
 use mem_store::config::{Platform, StoreConfig};
@@ -313,6 +394,7 @@ use mem_store::db::{BatchMode, ConnectFactory, ConnectOptions, Db, DbHandle, Val
 use mem_store::sql;
 use mem_store::sql::set_user_version_sql;
 use mem_store::turso_connect_factory;
+use mem_store::vector_utils::escape_like_pattern;
 
 /// A hermetic `StoreConfig` with encryption disabled over `dir`.
 fn test_config(dir: &std::path::Path, dims: u32) -> StoreConfig {
@@ -1243,4 +1325,341 @@ async fn test_pragma_user_version_roundtrips_via_set_sql() {
         .expect("set user_version");
     let rows = db.query(sql::PRAGMA_USER_VERSION, vec![]).await.unwrap();
     assert_eq!(rows[0].i64("user_version"), Some(3));
+}
+
+// ---------------------------------------------------------------------------
+// 13/15
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_frozen_search_statements_match_library_and_execute() {
+    let dir = common::temp_dir("golden-search-stmts");
+    let config = test_config(&dir, 2);
+    let db = open_db(&config, "shard.db").await;
+    batch_write(
+        db.as_ref(),
+        vec![sql::shard_metadata_ddl(), &sql::memories_ddl(2)],
+    )
+    .await;
+    batch_write(
+        db.as_ref(),
+        vec![
+            sql::MEMORY_SHARD_V2_ALTER,
+            sql::MEMORY_SHARD_V2_INDEX,
+            sql::MEMORY_SHARD_V2_BACKFILL,
+        ],
+    )
+    .await;
+
+    // Byte-equality pins for every W1.3 search/session/pin/reembed/metadata
+    // constant against the frozen upstream literals.
+    assert_eq!(
+        sql::SEARCH_EXACT_VECTOR_ALL,
+        frozen::FROZEN_SEARCH_EXACT_VECTOR_ALL
+    );
+    assert_eq!(
+        sql::SEARCH_EXACT_VECTOR_TAGGED,
+        frozen::FROZEN_SEARCH_EXACT_VECTOR_TAGGED
+    );
+    assert_eq!(
+        sql::SEARCH_EXACT_TAGS_VECTOR_ALL,
+        frozen::FROZEN_SEARCH_EXACT_TAGS_VECTOR_ALL
+    );
+    assert_eq!(
+        sql::SEARCH_EXACT_TAGS_VECTOR_TAGGED,
+        frozen::FROZEN_SEARCH_EXACT_TAGS_VECTOR_TAGGED
+    );
+    assert_eq!(sql::KEYWORD_SCORES_ALL, frozen::FROZEN_KEYWORD_SCORES_ALL);
+    assert_eq!(
+        sql::KEYWORD_SCORES_TAGGED,
+        frozen::FROZEN_KEYWORD_SCORES_TAGGED
+    );
+    assert_eq!(
+        sql::GET_MEMORIES_BY_SESSION_ID,
+        frozen::FROZEN_GET_MEMORIES_BY_SESSION_ID
+    );
+    assert_eq!(sql::PIN_MEMORY, frozen::FROZEN_PIN_MEMORY);
+    assert_eq!(sql::UNPIN_MEMORY, frozen::FROZEN_UNPIN_MEMORY);
+    assert_eq!(
+        sql::SELECT_REEMBED_SOURCE,
+        frozen::FROZEN_SELECT_REEMBED_SOURCE
+    );
+    assert_eq!(
+        sql::GET_MEMORIES_UNORDERED,
+        frozen::FROZEN_GET_MEMORIES_UNORDERED
+    );
+    assert_eq!(
+        sql::GET_SHARD_METADATA_VALUE,
+        frozen::FROZEN_GET_SHARD_METADATA_VALUE
+    );
+
+    // Seed: mem_exact is the nearest to [1,0]; mem_half is second; the tagged
+    // pair splits container tags so the filtered scan returns one row.
+    async fn insert(db: &dyn Db, id: &str, vector: &str, tag: &str) {
+        db.execute(
+            sql::INSERT_WITHOUT_TAGS,
+            vec![
+                text(id),
+                text(format!("content-{id}")),
+                text(vector),
+                text(tag),
+                Value::Null,
+                Value::Null,
+                Value::Integer(1),
+                Value::Integer(1),
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+            ],
+        )
+        .await
+        .unwrap();
+    }
+    insert(db.as_ref(), "mem_exact", "[1,0]", "opencode_exact").await;
+    insert(db.as_ref(), "mem_half", "[1,1]", "opencode_exact").await;
+    insert(db.as_ref(), "mem_orthogonal", "[0,1]", "opencode_other").await;
+
+    // Unfiltered exact scan: nearest first, limit respected.
+    let rows = db
+        .query(
+            sql::SEARCH_EXACT_VECTOR_ALL,
+            vec![text("[1,0]"), Value::Integer(2)],
+        )
+        .await
+        .expect("exact scan executes");
+    let ids: Vec<String> = rows.iter().map(|row| row.text("id").unwrap()).collect();
+    assert_eq!(ids, vec!["mem_exact", "mem_half"]);
+    for row in &rows {
+        assert!(row.get("dist").is_some(), "dist column returned: {row:?}");
+    }
+
+    // Filtered exact scan: container_tag predicate applies.
+    let rows = db
+        .query(
+            sql::SEARCH_EXACT_VECTOR_TAGGED,
+            vec![text("[1,0]"), text("opencode_exact"), Value::Integer(10)],
+        )
+        .await
+        .expect("tagged exact scan executes");
+    let ids: Vec<String> = rows.iter().map(|row| row.text("id").unwrap()).collect();
+    assert_eq!(ids, vec!["mem_exact", "mem_half"]);
+    let rows = db
+        .query(
+            sql::SEARCH_EXACT_VECTOR_TAGGED,
+            vec![text("[1,0]"), text("opencode_other"), Value::Integer(10)],
+        )
+        .await
+        .expect("tagged exact scan executes");
+    let ids: Vec<String> = rows.iter().map(|row| row.text("id").unwrap()).collect();
+    assert_eq!(ids, vec!["mem_orthogonal"]);
+}
+
+// ---------------------------------------------------------------------------
+// 14/15
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_frozen_hydrate_candidates_sql_placeholders_and_execution() {
+    // Placeholder count == id count; ids are BOUND PARAMS (never interpolated).
+    let unfiltered = sql::hydrate_candidates_sql(2, false);
+    assert!(
+        unfiltered.contains("WHERE id IN (?, ?)"),
+        "two placeholders: {unfiltered}"
+    );
+    assert!(!unfiltered.contains("container_tag = ?"));
+    let expected = "SELECT id, content, tags, created_at, metadata, container_tag,\n             display_name, user_name, user_email, project_path, project_name,\n             git_repo_url, is_pinned, session_id,\n             vector_distance_cos(vector, vector32(?)) AS content_dist,\n             CASE WHEN tags_vector IS NOT NULL\n               THEN vector_distance_cos(tags_vector, vector32(?))\n               ELSE NULL END AS tags_dist\n      FROM memories\n      WHERE id IN (?, ?)\n    ";
+    assert_eq!(unfiltered, expected);
+
+    // Filtered variant appends the container_tag predicate.
+    let filtered = sql::hydrate_candidates_sql(2, true);
+    assert!(
+        filtered.contains("WHERE id IN (?, ?) AND container_tag = ?"),
+        "filtered suffix: {filtered}"
+    );
+    let expected_filtered = "SELECT id, content, tags, created_at, metadata, container_tag,\n             display_name, user_name, user_email, project_path, project_name,\n             git_repo_url, is_pinned, session_id,\n             vector_distance_cos(vector, vector32(?)) AS content_dist,\n             CASE WHEN tags_vector IS NOT NULL\n               THEN vector_distance_cos(tags_vector, vector32(?))\n               ELSE NULL END AS tags_dist\n      FROM memories\n      WHERE id IN (?, ?) AND container_tag = ?\n    ";
+    assert_eq!(filtered, expected_filtered);
+
+    // Id-count clamp: at most 1000 placeholders regardless of the request.
+    let clamped = sql::hydrate_candidates_sql(5000, false);
+    let in_clause = clamped
+        .split("WHERE id IN (")
+        .nth(1)
+        .and_then(|rest| rest.split(')').next())
+        .expect("IN clause present");
+    assert_eq!(in_clause.matches('?').count(), 1000);
+
+    // Execution: 2 leading vector32(?) args, then the bound ids.
+    let dir = common::temp_dir("golden-hydrate");
+    let config = test_config(&dir, 2);
+    let db = open_db(&config, "shard.db").await;
+    batch_write(
+        db.as_ref(),
+        vec![sql::shard_metadata_ddl(), &sql::memories_ddl(2)],
+    )
+    .await;
+    batch_write(
+        db.as_ref(),
+        vec![
+            sql::MEMORY_SHARD_V2_ALTER,
+            sql::MEMORY_SHARD_V2_INDEX,
+            sql::MEMORY_SHARD_V2_BACKFILL,
+        ],
+    )
+    .await;
+
+    async fn insert(db: &dyn Db, id: &str) {
+        db.execute(
+            sql::INSERT_WITHOUT_TAGS,
+            vec![
+                text(id),
+                text(format!("content-{id}")),
+                text("[1,0]"),
+                text("opencode_hydrate"),
+                Value::Null,
+                Value::Null,
+                Value::Integer(1),
+                Value::Integer(1),
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+            ],
+        )
+        .await
+        .unwrap();
+    }
+    insert(db.as_ref(), "mem_h1").await;
+    insert(db.as_ref(), "mem_h2").await;
+    insert(db.as_ref(), "mem_h3").await;
+
+    let rows = db
+        .query(
+            &sql::hydrate_candidates_sql(2, false),
+            vec![text("[1,0]"), text("[1,0]"), text("mem_h1"), text("mem_h3")],
+        )
+        .await
+        .expect("hydrate executes");
+    let ids: Vec<String> = rows.iter().map(|row| row.text("id").unwrap()).collect();
+    assert_eq!(ids, vec!["mem_h1", "mem_h3"]);
+    for row in &rows {
+        assert!(row.get("content_dist").is_some());
+    }
+    // Filtered execution binds the container tag AFTER the ids.
+    let rows = db
+        .query(
+            &sql::hydrate_candidates_sql(1, true),
+            vec![
+                text("[1,0]"),
+                text("[1,0]"),
+                text("mem_h2"),
+                text("opencode_hydrate"),
+            ],
+        )
+        .await
+        .expect("hydrate filtered executes");
+    let ids: Vec<String> = rows.iter().map(|row| row.text("id").unwrap()).collect();
+    assert_eq!(ids, vec!["mem_h2"]);
+}
+
+// ---------------------------------------------------------------------------
+// 15/15
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_frozen_keyword_like_escape_matches_literals() {
+    let dir = common::temp_dir("golden-like-escape");
+    let config = test_config(&dir, 2);
+    let db = open_db(&config, "shard.db").await;
+    batch_write(
+        db.as_ref(),
+        vec![sql::shard_metadata_ddl(), &sql::memories_ddl(2)],
+    )
+    .await;
+    batch_write(
+        db.as_ref(),
+        vec![
+            sql::MEMORY_SHARD_V2_ALTER,
+            sql::MEMORY_SHARD_V2_INDEX,
+            sql::MEMORY_SHARD_V2_BACKFILL,
+        ],
+    )
+    .await;
+
+    // One row with a LITERAL `%`/`_` in content; one row that only a bare
+    // wildcard pattern would additionally match.
+    async fn insert(db: &dyn Db, id: &str, content: &str) {
+        db.execute(
+            sql::INSERT_WITHOUT_TAGS,
+            vec![
+                text(id),
+                text(content),
+                text("[1,0]"),
+                text("opencode_like"),
+                Value::Null,
+                Value::Null,
+                Value::Integer(1),
+                Value::Integer(1),
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+            ],
+        )
+        .await
+        .unwrap();
+    }
+    insert(db.as_ref(), "mem_literal", "progress 100%_done today").await;
+    insert(db.as_ref(), "mem_wildcard", "progress 100Xdone today").await;
+
+    // escape_like_pattern + ESCAPE '\': the literal pattern matches only the
+    // row whose content holds the raw `%`/`_` characters.
+    let escaped = escape_like_pattern("100%_done");
+    assert_eq!(escaped, "100\\%\\_done");
+    let escaped_pattern = format!("%{}%", escaped);
+    let rows = db
+        .query(
+            sql::KEYWORD_SCORES_ALL,
+            vec![
+                text(&escaped_pattern),
+                text(&escaped_pattern),
+                Value::Integer(10),
+            ],
+        )
+        .await
+        .expect("keyword scan executes");
+    let ids: Vec<String> = rows.iter().map(|row| row.text("id").unwrap()).collect();
+    assert_eq!(
+        ids,
+        vec!["mem_literal"],
+        "escaped wildcards match literally"
+    );
+
+    // A bare (unescaped) pattern widens the match via LIKE wildcards.
+    let bare_pattern = "%100%_done%".to_string();
+    let rows = db
+        .query(
+            sql::KEYWORD_SCORES_ALL,
+            vec![text(&bare_pattern), text(&bare_pattern), Value::Integer(10)],
+        )
+        .await
+        .expect("keyword scan executes");
+    let ids: Vec<String> = rows.iter().map(|row| row.text("id").unwrap()).collect();
+    assert_eq!(
+        ids,
+        vec!["mem_literal", "mem_wildcard"],
+        "bare wildcards widen the match"
+    );
 }

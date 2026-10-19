@@ -264,29 +264,27 @@ impl ConnectOptions {
 }
 
 /// Upstream `resolveDatabaseEncryption` (+ the missing-key guard): disabled
-/// configuration yields `None`; enabled-without-key fails with
-/// [`StoreError::EncryptionKeyMissing`]; otherwise the configured cipher +
-/// key are handed to turso. Key-file provisioning stays with the encryption
-/// wave (recorded divergence).
+/// configuration yields `None`; enabled configuration resolves or provisions
+/// a key (explicit hex, `env://VAR`, `file://path`, a bare path, or the
+/// auto-created default key file — upstream
+/// `resolveOrCreateDatabaseEncryptionKey`); the resolved cipher + key are
+/// handed to turso. [`StoreError::EncryptionKeyMissing`] remains a defensive
+/// guard for a resolver that yields `None` while encryption is enabled, which
+/// the standard auto-provision path cannot reach.
 pub fn resolve_database_encryption(
     config: &StoreConfig,
 ) -> Result<Option<EncryptionOptions>, StoreError> {
-    if !config.database_encryption_enabled {
-        return Ok(None);
-    }
-    let Some(hexkey) = config
-        .database_encryption_key
-        .clone()
-        .filter(|key| !key.is_empty())
-    else {
-        return Err(StoreError::EncryptionKeyMissing {
+    let resolved = crate::encryption_key::resolve_or_create_database_encryption_key(config)?;
+    match resolved {
+        Some(hexkey) => Ok(Some(EncryptionOptions {
+            cipher: config.database_encryption_cipher.clone(),
+            hexkey,
+        })),
+        None if config.database_encryption_enabled => Err(StoreError::EncryptionKeyMissing {
             storage_path: config.storage_path.clone(),
-        });
-    };
-    Ok(Some(EncryptionOptions {
-        cipher: config.database_encryption_cipher.clone(),
-        hexkey,
-    }))
+        }),
+        None => Ok(None),
+    }
 }
 
 // ---------------------------------------------------------------------------

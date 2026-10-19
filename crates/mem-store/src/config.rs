@@ -19,8 +19,10 @@ pub struct StoreConfig {
     /// Rendered cipher name (upstream `CONFIG.databaseEncryptionCipher`
     /// string form, e.g. `aes256gcm`).
     pub database_encryption_cipher: String,
-    /// The raw configured key; key-file resolution is the encryption wave's
-    /// job (`resolve_database_encryption` rejects enabled-without-key).
+    /// The raw configured key; resolution/provisioning lives in
+    /// `resolve_database_encryption` (explicit hex, `env://VAR`, `file://path`,
+    /// a bare path, or the auto-created default key file when encryption is
+    /// enabled without an explicit key).
     pub database_encryption_key: Option<String>,
 }
 

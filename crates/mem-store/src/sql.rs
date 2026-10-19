@@ -203,6 +203,128 @@ pub const UPDATE_PROJECT_ASSOCIATION: &str = r#"
       WHERE container_tag = ?
     "#;
 
+// ---------------------------------------------------------------------------
+// W1.3 exact-scan search + pins + re-embed source (blueprint step 2; FROZEN
+// after this step — pinned by tests/golden_sql.rs)
+// ---------------------------------------------------------------------------
+
+// vector-search.ts L257-263 (exactScanKind, columnName=vector, unfiltered).
+pub const SEARCH_EXACT_VECTOR_ALL: &str = r#"
+        SELECT m.id AS id, vector_distance_cos(m.vector, vector32(?)) AS dist
+        FROM memories m
+        WHERE m.vector IS NOT NULL
+        ORDER BY dist ASC
+        LIMIT ?
+      "#;
+
+// vector-search.ts L264-270 (exactScanKind, columnName=vector, filtered).
+pub const SEARCH_EXACT_VECTOR_TAGGED: &str = r#"
+        SELECT m.id AS id, vector_distance_cos(m.vector, vector32(?)) AS dist
+        FROM memories m
+        WHERE m.vector IS NOT NULL AND m.container_tag = ?
+        ORDER BY dist ASC
+        LIMIT ?
+      "#;
+
+// vector-search.ts L257-263 (exactScanKind, columnName=tags_vector, unfiltered).
+pub const SEARCH_EXACT_TAGS_VECTOR_ALL: &str = r#"
+        SELECT m.id AS id, vector_distance_cos(m.tags_vector, vector32(?)) AS dist
+        FROM memories m
+        WHERE m.tags_vector IS NOT NULL
+        ORDER BY dist ASC
+        LIMIT ?
+      "#;
+
+// vector-search.ts L264-270 (exactScanKind, columnName=tags_vector, filtered).
+pub const SEARCH_EXACT_TAGS_VECTOR_TAGGED: &str = r#"
+        SELECT m.id AS id, vector_distance_cos(m.tags_vector, vector32(?)) AS dist
+        FROM memories m
+        WHERE m.tags_vector IS NOT NULL AND m.container_tag = ?
+        ORDER BY dist ASC
+        LIMIT ?
+      "#;
+
+/// Upstream hydration select (vector-search.ts L127-149): 15 columns +
+/// `content_dist`/`tags_dist` CASE, `WHERE id IN (<id_count × '?'>)`
+/// [+ `AND container_tag = ?`]. Ids are BOUND PARAMS (count-clamped to
+/// 1000; never interpolated values).
+pub fn hydrate_candidates_sql(id_count: usize, filtered: bool) -> String {
+    let count = id_count.min(1000);
+    let placeholders = vec!["?"; count].join(", ");
+    if filtered {
+        format!(
+            r#"SELECT id, content, tags, created_at, metadata, container_tag,
+             display_name, user_name, user_email, project_path, project_name,
+             git_repo_url, is_pinned, session_id,
+             vector_distance_cos(vector, vector32(?)) AS content_dist,
+             CASE WHEN tags_vector IS NOT NULL
+               THEN vector_distance_cos(tags_vector, vector32(?))
+               ELSE NULL END AS tags_dist
+      FROM memories
+      WHERE id IN ({placeholders}) AND container_tag = ?
+    "#
+        )
+    } else {
+        format!(
+            r#"SELECT id, content, tags, created_at, metadata, container_tag,
+             display_name, user_name, user_email, project_path, project_name,
+             git_repo_url, is_pinned, session_id,
+             vector_distance_cos(vector, vector32(?)) AS content_dist,
+             CASE WHEN tags_vector IS NOT NULL
+               THEN vector_distance_cos(tags_vector, vector32(?))
+               ELSE NULL END AS tags_dist
+      FROM memories
+      WHERE id IN ({placeholders})
+    "#
+        )
+    }
+}
+
+// vector-search.ts L227-232 (keywordScores, unfiltered).
+pub const KEYWORD_SCORES_ALL: &str = r#"
+          SELECT id FROM memories
+          WHERE content LIKE ? ESCAPE '\' OR IFNULL(tags, '') LIKE ? ESCAPE '\'
+          LIMIT ?
+        "#;
+
+// vector-search.ts L233-238 (keywordScores, filtered).
+pub const KEYWORD_SCORES_TAGGED: &str = r#"
+          SELECT id FROM memories
+          WHERE container_tag = ?
+            AND (content LIKE ? ESCAPE '\' OR IFNULL(tags, '') LIKE ? ESCAPE '\')
+          LIMIT ?
+        "#;
+
+// vector-search.ts L410-417 (getMemoriesBySessionID).
+pub const GET_MEMORIES_BY_SESSION_ID: &str = r#"
+      SELECT * FROM memories
+      WHERE session_id = ?
+         OR (session_id IS NULL AND metadata LIKE ?)
+      ORDER BY created_at DESC
+    "#;
+
+// vector-search.ts L505 (pinMemory).
+pub const PIN_MEMORY: &str = r#"UPDATE memories SET is_pinned = 1 WHERE id = ?"#;
+
+// vector-search.ts L509 (unpinMemory).
+pub const UNPIN_MEMORY: &str = r#"UPDATE memories SET is_pinned = 0 WHERE id = ?"#;
+
+// migration-service.ts L269-275 (rebuildShardSafely re-embed source select).
+pub const SELECT_REEMBED_SOURCE: &str = r#"
+      SELECT
+        id, content, container_tag, tags, type, created_at, updated_at, metadata,
+        display_name, user_name, user_email, project_path, project_name, git_repo_url, is_pinned
+      FROM memories
+      ORDER BY created_at DESC
+    "#;
+
+// legacy-migrator.ts L172-174 (shard_metadata value probe; Rust generalizes
+// the key to a bound param).
+pub const GET_SHARD_METADATA_VALUE: &str = r#"SELECT value FROM shard_metadata WHERE key = ?"#;
+
+// legacy-migrator.ts L360 (SELECT * FROM memories, unordered source read).
+pub const GET_MEMORIES_UNORDERED: &str = r#"SELECT * FROM memories"#;
+
 // shard-manager.ts L129-135 (getActiveShard).
 pub const GET_ACTIVE_SHARD: &str = r#"
       SELECT * FROM shards

@@ -6,3 +6,14 @@ edition.workspace = true
 [dependencies]
 mem-core = { workspace = true }
 mem-embed = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+reqwest = { workspace = true }
+tower = { workspace = true }
+tracing = { workspace = true }
+zeroize = { workspace = true }

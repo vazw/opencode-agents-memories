@@ -78,10 +78,14 @@ pub enum StoreError {
             .unwrap_or_default(),
     )]
     MigrationLocked { pid: u32, operation: Option<String> },
-    /// Encryption is enabled but no key is resolvable (upstream
-    /// `resolveOrCreateDatabaseEncryptionKey` returning null; key-file
-    /// provisioning arrives with the encryption wave). The hexkey itself is
-    /// never part of any error or log.
+    /// Encryption is enabled but no key is resolvable. Upstream
+    /// `resolveOrCreateDatabaseEncryptionKey` auto-provisions the default key
+    /// file when encryption is enabled without an explicit key, so in practice
+    /// this guard fires only if a resolver returns `None` while encryption is
+    /// enabled (unreachable through the standard auto-provision path). An
+    /// explicitly configured but unreadable/invalid key source instead fails
+    /// as [`StoreError::Internal`]. The hexkey itself is never part of any
+    /// error or log.
     #[error(
         "Database encryption is enabled but no databaseEncryptionKey is available \
          for storage {storage_path}. Configure databaseEncryptionKey to use encrypted shards."

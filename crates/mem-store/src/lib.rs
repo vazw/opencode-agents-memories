@@ -11,8 +11,13 @@ pub const CRATE_NAME: &str = "mem-store";
 pub mod config;
 pub mod connection;
 pub mod db;
+pub mod encryption_key;
+pub mod encryption_migrator;
+pub mod engine_migrator;
 pub mod error;
+pub mod legacy_migrator;
 pub mod lifecycle;
+pub mod migration_service;
 pub mod operation_lock;
 pub mod platform;
 pub mod project_tags;
@@ -24,7 +29,9 @@ pub mod shard_manager;
 pub mod shard_path_migration;
 pub mod sql;
 pub mod sqlite_files;
-pub use mem_core::scope;
 pub mod vector;
+pub mod vector_utils;
+
+pub use mem_core::scope;
 
 pub use crate::db::{TursoConnectFactory, turso_connect_factory};

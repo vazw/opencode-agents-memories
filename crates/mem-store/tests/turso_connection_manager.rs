@@ -178,7 +178,7 @@ async fn test_opens_databases_with_experimental_encryption_flags_but_no_encrypti
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_passes_encryption_options_when_configured_and_fails_clearly_when_key_missing() {
+async fn test_passes_encryption_options_when_configured_and_fails_clearly_when_key_unresolvable() {
     let mut config = common::store_config("cm-enc");
     config.database_encryption_enabled = true;
     config.database_encryption_key = Some("00112233445566778899aabbccddeeff".to_string());
@@ -196,9 +196,17 @@ async fn test_passes_encryption_options_when_configured_and_fails_clearly_when_k
     assert_eq!(encryption.cipher, "aes256gcm");
     assert_eq!(encryption.hexkey, "00112233445566778899aabbccddeeff");
 
-    // Missing key: connection refused BEFORE the factory runs.
+    // Unresolvable key: connection refused BEFORE the factory runs.
+    //
+    // W1.5 supersession: upstream `resolveOrCreateDatabaseEncryptionKey`
+    // auto-provisions the default key file when encryption is enabled without
+    // an explicit key, so `enabled && key == None` is no longer an error (the
+    // pre-W1.5 expectation here asserted `EncryptionKeyMissing`, which the
+    // auto-provision path now makes unreachable). The reachable "key missing"
+    // failure is an explicit key source that cannot be resolved — here an
+    // `env://` reference to an unset variable.
     let mut missing = config.clone();
-    missing.database_encryption_key = None;
+    missing.database_encryption_key = Some("env://OPENCODE_MEM_W15_UNSET_KEY_7f3a9c".to_string());
     let factory2 = Arc::new(common::FakeConnectFactory::default());
     let manager2 = ConnectionManager::new(
         missing.storage_path.clone(),
@@ -211,7 +219,14 @@ async fn test_passes_encryption_options_when_configured_and_fails_clearly_when_k
         .await
         .err()
         .unwrap_or_else(|| panic!("expected error"));
-    assert!(matches!(error, StoreError::EncryptionKeyMissing { .. }));
+    assert!(
+        matches!(
+            &error,
+            StoreError::Internal { message }
+                if message.contains("must resolve to a 32- or 64-character hex string")
+        ),
+        "unresolvable env:// key must fail clearly: {error}"
+    );
     assert_eq!(factory2.opens.load(std::sync::atomic::Ordering::SeqCst), 0);
 }
 

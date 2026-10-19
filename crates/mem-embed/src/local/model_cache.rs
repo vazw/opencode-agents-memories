@@ -1,0 +1,135 @@
+//! Model-cache layout: which ONNX weight variant is already cached for a
+//! model, and whether `config.json` declares one.
+//!
+//! Port of `readDeclaredDtype` / `detectCachedDtype` / `resolveLocalOnnxDtype`
+//! from upstream `src/services/embedding.ts`, including the pinned precedence:
+//!
+//! 1. a declared **string** dtype in `transformers.js_config.dtype` wins;
+//! 2. a declared **per-file object** map disables the probe entirely (passing
+//!    `dtype` would override the per-file config transformers.js resolves);
+//! 3. otherwise the first cached `onnx/model{suffix}.onnx` in
+//!    [`ONNX_DTYPE_VARIANTS`] order decides.
+//!
+//! Divergences from upstream (recorded): an unknown declared string falls
+//! through to the cache probe instead of being forwarded and failing later,
+//! and the result is an `Option` (the `"auto"` member is never produced).
+
+use std::path::{Path, PathBuf};
+
+pub use mem_core::config::LocalOnnxDtype;
+
+/// ONNX weight variants in descending precision, mirroring transformers.js'
+/// `DEFAULT_DTYPE_SUFFIX_MAPPING` (`(dtype, file-name suffix)`; fp32 has no
+/// suffix). The order is part of the contract: the probe returns the first hit.
+pub const ONNX_DTYPE_VARIANTS: [(&str, &str); 12] = [
+    ("fp32", ""),
+    ("fp16", "_fp16"),
+    ("q8", "_quantized"),
+    ("int8", "_int8"),
+    ("uint8", "_uint8"),
+    ("q4", "_q4"),
+    ("q4f16", "_q4f16"),
+    ("bnb4", "_bnb4"),
+    ("q2", "_q2"),
+    ("q2f16", "_q2f16"),
+    ("q1", "_q1"),
+    ("q1f16", "_q1f16"),
+];
+
+/// Concrete weight files, keyed by dtype (the name each dtype maps to under
+/// `{model}/onnx/`).
+const WEIGHTS_FILES: [(LocalOnnxDtype, &str); 12] = [
+    (LocalOnnxDtype::Fp32, "onnx/model.onnx"),
+    (LocalOnnxDtype::Fp16, "onnx/model_fp16.onnx"),
+    (LocalOnnxDtype::Q8, "onnx/model_quantized.onnx"),
+    (LocalOnnxDtype::Int8, "onnx/model_int8.onnx"),
+    (LocalOnnxDtype::Uint8, "onnx/model_uint8.onnx"),
+    (LocalOnnxDtype::Q4, "onnx/model_q4.onnx"),
+    (LocalOnnxDtype::Q4F16, "onnx/model_q4f16.onnx"),
+    (LocalOnnxDtype::Bnb4, "onnx/model_bnb4.onnx"),
+    (LocalOnnxDtype::Q2, "onnx/model_q2.onnx"),
+    (LocalOnnxDtype::Q2F16, "onnx/model_q2f16.onnx"),
+    (LocalOnnxDtype::Q1, "onnx/model_q1.onnx"),
+    (LocalOnnxDtype::Q1F16, "onnx/model_q1f16.onnx"),
+];
+
+/// `{cacheRoot}/{model}` — the transformers.js cache directory for a model id.
+pub fn model_cache_root(model: &str, cache_root: &Path) -> PathBuf {
+    cache_root.join(model)
+}
+
+/// What `config.json` declares about the dtype.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeclaredDtype {
+    /// A known concrete dtype string (outranks the cache probe).
+    Declared(LocalOnnxDtype),
+    /// A per-file `{ model: "q8", ... }` map — never override it.
+    PerFileObject,
+    /// Missing, unreadable, malformed, blank or of another JSON type.
+    Absent,
+}
+
+/// Read `transformers.js_config.dtype` from the cached `config.json`.
+fn read_declared_dtype(model: &str, cache_root: &Path) -> DeclaredDtype {
+    let Ok(text) = std::fs::read_to_string(model_cache_root(model, cache_root).join("config.json"))
+    else {
+        return DeclaredDtype::Absent;
+    };
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return DeclaredDtype::Absent;
+    };
+    let Some(declared) = parsed
+        .get("transformers.js_config")
+        .and_then(|config| config.get("dtype"))
+    else {
+        return DeclaredDtype::Absent;
+    };
+    match declared {
+        serde_json::Value::String(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return DeclaredDtype::Absent;
+            }
+            // Unknown strings fall through to the probe (recorded divergence).
+            match LocalOnnxDtype::from_str(trimmed) {
+                Some(dtype) => DeclaredDtype::Declared(dtype),
+                None => DeclaredDtype::Absent,
+            }
+        }
+        // Note: arrays are excluded, exactly like upstream's
+        // `declared && typeof declared === "object" && !Array.isArray(declared)`.
+        serde_json::Value::Object(_) => DeclaredDtype::PerFileObject,
+        _ => DeclaredDtype::Absent,
+    }
+}
+
+/// The dtype whose ONNX weights are already cached, per the pinned variant
+/// order (so a quantized-only repo is not asked for fp32 weights).
+fn detect_cached_dtype(model: &str, cache_root: &Path) -> Option<LocalOnnxDtype> {
+    let onnx_dir = model_cache_root(model, cache_root).join("onnx");
+    ONNX_DTYPE_VARIANTS
+        .iter()
+        .find_map(|(dtype, suffix)| {
+            let candidate = onnx_dir.join(format!("model{suffix}.onnx"));
+            candidate.exists().then_some(*dtype)
+        })
+        .and_then(LocalOnnxDtype::from_str)
+}
+
+/// Resolve the concrete dtype for a cached model, or `None` to leave dtype
+/// selection to the loader's default (`Auto` is never produced).
+pub fn resolve_local_onnx_dtype(model: &str, cache_root: &Path) -> Option<LocalOnnxDtype> {
+    match read_declared_dtype(model, cache_root) {
+        DeclaredDtype::Declared(dtype) => Some(dtype),
+        DeclaredDtype::PerFileObject => None,
+        DeclaredDtype::Absent => detect_cached_dtype(model, cache_root),
+    }
+}
+
+/// The cache-relative weights file for a dtype, or `None` for
+/// [`LocalOnnxDtype::Auto`] (which is resolution input, not a concrete file).
+pub fn weights_file_name(dtype: LocalOnnxDtype) -> Option<&'static str> {
+    WEIGHTS_FILES
+        .iter()
+        .find_map(|(candidate, file)| (*candidate == dtype).then_some(*file))
+}

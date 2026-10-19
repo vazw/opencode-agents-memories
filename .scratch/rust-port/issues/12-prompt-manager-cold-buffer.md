@@ -1,6 +1,6 @@
 # 12 — W3.1 · Prompt manager & cross-process cold buffer (US 3.1)
 
-Status: needs-triage
+Status: ready-for-agent
 
 ## What to build
 

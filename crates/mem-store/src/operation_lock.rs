@@ -55,10 +55,19 @@ pub fn read_live_lock(
         Ok(contents) => contents,
         Err(_) => return None, // missing file (or unreadable) -> no lock
     };
+    // W1.5 short-write guard: a file that exists but reads back
+    // empty/whitespace-only is a truncated/partial write (crash between
+    // `create_new` and `write_all`) and can never be a valid `LockState`.
+    // Treat it exactly like corrupt JSON: unlink best-effort, report no lock.
+    if contents.trim().is_empty() {
+        let _ = fs::remove_file(&path);
+        return None;
+    }
     match serde_json::from_str::<LockState>(&contents) {
         Ok(state) if state.pid > 0 && is_process_alive(state.pid, probe) => return Some(state),
         _ => {
             // Corrupt JSON, non-positive pid, or dead owner: try to remove.
+            // (A live-pid lock is never stolen — it returns above.)
         }
     }
     let _ = fs::remove_file(&path);
@@ -138,6 +147,11 @@ pub fn acquire_turso_operation_lock(
     {
         Ok(mut file) => {
             file.write_all(body.as_bytes())?;
+            // W1.5 short-write hardening: flush the lock body to disk before
+            // the handle is dropped so a crash cannot leave a truncated
+            // (empty/partial) lock file. Best-effort — `sync_all` failures on
+            // exotic filesystems must not fail an otherwise valid acquire.
+            let _ = file.sync_all();
         }
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             assert_no_turso_migration_in_progress(storage_path, probe.as_ref())?;
@@ -152,9 +166,130 @@ pub fn acquire_turso_operation_lock(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Legacy migration lock (blueprint W1.3 step 5 — port of upstream
+// `legacy-migrator.ts` `acquireMigrationLock`/`releaseMigrationLock`, L107-156)
+// ---------------------------------------------------------------------------
+
+/// Upstream `MigrationLock` (`{ pid, timestamp }` — compact JSON, no
+/// `operation` field; foreign writers may carry extra fields, which serde
+/// ignores).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LegacyLockState {
+    pid: u32,
+    timestamp: String,
+}
+
+fn legacy_lock_path(storage_path: &Path) -> PathBuf {
+    storage_path.join(LEGACY_MIGRATION_LOCK_FILE)
+}
+
+/// Upstream `acquireMigrationLock` (boolean form). A live holder blocks
+/// (no unlink — the foreign file is NEVER touched); a stale (dead/non-positive
+/// pid) or corrupt lock is unlinked best-effort and the atomic `wx`
+/// (`create_new`) create runs; a lost create race reports failure.
+/// `process.kill(pid, 0)` becomes the injected [`ProcessProbe`].
+pub fn acquire_legacy_migration_lock(storage_path: &Path, probe: &dyn ProcessProbe) -> bool {
+    let path = legacy_lock_path(storage_path);
+    if let Ok(contents) = fs::read_to_string(&path) {
+        match serde_json::from_str::<LegacyLockState>(&contents) {
+            Ok(state) if state.pid != 0 && is_process_alive(state.pid, probe) => return false,
+            _ => {
+                // stale or corrupt — try to remove
+                let _ = fs::remove_file(&path);
+            }
+        }
+    } else if path.exists() {
+        // unreadable file: upstream catch also unlinks before re-creating
+        let _ = fs::remove_file(&path);
+    }
+    let state = LegacyLockState {
+        pid: std::process::id(),
+        timestamp: now_rfc3339_millis(),
+    };
+    let Ok(body) = serde_json::to_string(&state) else {
+        return false;
+    };
+    let Ok(mut file) = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    else {
+        return false;
+    };
+    file.write_all(body.as_bytes()).is_ok()
+}
+
+/// Release handle for the legacy lock: removal is PID-guarded (a lock
+/// re-taken by another process is never unlinked); a corrupt lock file is
+/// unlinked (upstream `catch { unlinkSync }`). `Drop` is the fallback, the
+/// explicit [`Self::release`] mirrors upstream's `finally` call.
+pub struct LegacyMigrationLock {
+    storage_path: PathBuf,
+    pid: u32,
+}
+
+impl LegacyMigrationLock {
+    /// Upstream `releaseMigrationLock`.
+    pub fn release(&self) {
+        let path = legacy_lock_path(&self.storage_path);
+        if !path.exists() {
+            return;
+        }
+        match fs::read_to_string(&path) {
+            Ok(contents) => match serde_json::from_str::<LegacyLockState>(&contents) {
+                Ok(state) if state.pid == self.pid => {
+                    let _ = fs::remove_file(&path);
+                }
+                _ => {}
+            },
+            Err(_) => {
+                let _ = fs::remove_file(&path);
+            }
+        }
+    }
+}
+
+impl Drop for LegacyMigrationLock {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+/// Upstream `acquireMigrationLockWithRetry` (`max_attempts` default 3).
+/// DIVERGENCE (pinned by the legacy-lock test): upstream sleeps after EVERY
+/// failed attempt including the last; this port sleeps only BETWEEN attempts
+/// — exactly `[200ms, 350ms]` for 3 attempts — and never before the terminal
+/// `locked by another process` error.
+pub fn acquire_legacy_migration_lock_with_retry(
+    storage_path: &Path,
+    probe: Arc<dyn ProcessProbe>,
+    sleep: &crate::platform::SleepFn,
+    max_attempts: u32,
+) -> Result<LegacyMigrationLock, StoreError> {
+    for attempt in 0..max_attempts {
+        if acquire_legacy_migration_lock(storage_path, probe.as_ref()) {
+            return Ok(LegacyMigrationLock {
+                storage_path: storage_path.to_path_buf(),
+                pid: std::process::id(),
+            });
+        }
+        if attempt + 1 < max_attempts {
+            let delay = 200u64 + 150 * u64::from(attempt);
+            sleep(std::time::Duration::from_millis(delay));
+        }
+    }
+    Err(StoreError::internal(
+        "Turso legacy migration locked by another process",
+    ))
+}
+
 /// `new Date().toISOString()` — UTC, millisecond precision, trailing `Z`
 /// (`Utc::now().to_rfc3339_opts(Millis, true)` chrono equivalent).
-fn now_rfc3339_millis() -> String {
+/// `pub(crate)`: W1.3 reuses it for the engine + legacy migration markers
+/// (blueprint W1.3 step 4: "reuse/extract the existing RFC3339-millis
+/// helper from `operation_lock.rs`").
+pub(crate) fn now_rfc3339_millis() -> String {
     fn to_iso_millis(unix_millis: i64) -> String {
         let days = unix_millis.div_euclid(86_400_000);
         let millis_of_day = unix_millis.rem_euclid(86_400_000);

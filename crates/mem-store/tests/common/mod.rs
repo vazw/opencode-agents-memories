@@ -541,3 +541,279 @@ impl mem_store::prompts::PromptPathUpdater for RecordingPromptUpdater {
         })
     }
 }
+
+// ---------------------------------------------------------------------------
+// W1.3 migration fixtures: FakeReEmbedder + RecordingSleeper + DiskANN
+// fixture helpers (blueprint step 2)
+// ---------------------------------------------------------------------------
+
+use std::sync::atomic::AtomicUsize;
+use std::time::Duration;
+
+/// Injected `ReEmbedder` (upstream `embeddingService` seam): deterministic
+/// `[1, 0, 0, 0]` vectors, optional fail-on-substring, call recording.
+pub struct FakeReEmbedder {
+    pub vector: Vec<f32>,
+    pub fail_on: std::sync::Mutex<Option<String>>,
+    pub calls: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    pub warmups: AtomicUsize,
+    pub clears: AtomicUsize,
+}
+
+impl FakeReEmbedder {
+    pub fn new() -> Self {
+        Self {
+            vector: vec![1.0, 0.0, 0.0, 0.0],
+            fail_on: std::sync::Mutex::new(None),
+            calls: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            warmups: AtomicUsize::new(0),
+            clears: AtomicUsize::new(0),
+        }
+    }
+
+    /// The synthetic error text (upstream test stub message).
+    pub fn failure_message() -> &'static str {
+        "synthetic embedding failure"
+    }
+}
+
+impl mem_store::migration_service::ReEmbedder for FakeReEmbedder {
+    fn warmup(&self) -> mem_store::db::BoxFuture<'_, Result<(), StoreError>> {
+        self.warmups.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn clear_cache(&self) {
+        self.clears.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn embed(&self, input: &str) -> mem_store::db::BoxFuture<'_, Result<Vec<f32>, StoreError>> {
+        let fail_on = self.fail_on.lock().unwrap().clone();
+        let calls = std::sync::Arc::clone(&self.calls);
+        let vector = self.vector.clone();
+        let input = input.to_string();
+        Box::pin(async move {
+            if let Some(needle) = fail_on
+                && input.contains(&needle)
+            {
+                return Err(StoreError::Internal {
+                    message: Self::failure_message().to_string(),
+                });
+            }
+            calls.lock().unwrap().push(input);
+            Ok(vector)
+        })
+    }
+}
+
+/// Recording sleeper: captures requested retry delays instead of wall-clock
+/// sleeps (upstream `delay(ms)` — `setTimeout` inside the lock retry).
+pub struct RecordingSleeper {
+    pub delays: std::sync::Arc<std::sync::Mutex<Vec<Duration>>>,
+}
+
+impl RecordingSleeper {
+    pub fn new() -> Self {
+        Self {
+            delays: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
+
+    pub fn recorded(&self) -> Vec<Duration> {
+        self.delays.lock().unwrap().clone()
+    }
+
+    /// The injected `SleepFn` (production uses `platform::system_sleep`).
+    pub fn as_sleep_fn(&self) -> mem_store::platform::SleepFn {
+        let delays = std::sync::Arc::clone(&self.delays);
+        std::sync::Arc::new(move |delay| {
+            delays.lock().unwrap().push(delay);
+        })
+    }
+}
+
+/// Path of the shipped DiskANN fixture (pure data; never mutated in place).
+pub fn diskann_fixture_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("legacy_diskann_shard.db")
+}
+
+/// Copies the DiskANN fixture (main + sidecars) into `dir` as `name`.
+pub fn copy_diskann_fixture(dir: &Path, name: &str) -> PathBuf {
+    let source = diskann_fixture_path();
+    let target = dir.join(name);
+    for suffix in ["", "-wal", "-shm", "-tshm", "-journal"] {
+        // The fixture is a fixed filename; sidecars are `<fixture><suffix>`.
+        let from = {
+            let mut text = source.as_os_str().to_os_string();
+            if !suffix.is_empty() {
+                text.push(suffix);
+            }
+            PathBuf::from(text)
+        };
+        if from.exists() {
+            let mut to_text = target.as_os_str().to_os_string();
+            if !suffix.is_empty() {
+                to_text.push(suffix);
+            }
+            std::fs::copy(&from, PathBuf::from(to_text)).expect("fixture sidecar copy");
+        }
+    }
+    target
+}
+
+// ---------------------------------------------------------------------------
+// W1.5 encryption fixtures (blueprint step 2, captain scaffold)
+// ---------------------------------------------------------------------------
+
+/// The TS-pinned aes256gcm key from the read-compat spike
+/// (`/tmp/turso-probe/ts-encrypted.db`): 64 hex chars. Reused by every
+/// encryption test so the cipher/key pair stays a single pinned literal.
+pub fn hex_key_64() -> String {
+    "b1bbfda4f589dc9daaf004fe21111e00dc00c98237102f5c7002a5669fc76327".to_string()
+}
+
+/// A store config over a fresh temp dir with encryption enabled and an
+/// explicit hex key (never the real home; hermetic).
+pub fn encrypted_store_config(prefix: &str, key_hex: &str) -> StoreConfig {
+    let mut config = store_config(prefix);
+    config.database_encryption_enabled = true;
+    config.database_encryption_cipher = "aes256gcm".to_string();
+    config.database_encryption_key = Some(key_hex.to_string());
+    config
+}
+
+/// The default key-file path *inside* a storage dir — tests never touch the
+/// real `~/.config` path; production resolution is asserted separately by
+/// pinning the config key to this hermetic location via `file://`.
+pub fn default_key_path(dir: &Path) -> PathBuf {
+    dir.join("opencode-mem-db.key")
+}
+
+/// Alias of [`default_key_path`] (the blueprint's file-structure summary
+/// names the helper `key_file`; step 2 names it `default_key_path`).
+pub fn key_file(dir: &Path) -> PathBuf {
+    default_key_path(dir)
+}
+
+// ---------------------------------------------------------------------------
+// W1.5 cross-process lock-holder fixtures (blueprint step 2, captain scaffold)
+// ---------------------------------------------------------------------------
+
+/// Resolves the compiled `lock_holder` example binary next to the running
+/// test executable (`<target>/<profile>/examples/lock_holder`). Fails loudly
+/// when the example was not built: a plain `cargo test -p mem-store` and
+/// `cargo test --workspace` build examples, but a scoped
+/// `cargo test -p mem-store --test <file>` does NOT — run
+/// `cargo build -p mem-store --example lock_holder` first.
+pub fn lock_holder_binary_path() -> PathBuf {
+    let exe = std::env::current_exe().expect("current_exe");
+    let profile_dir = exe
+        .parent()
+        .and_then(|deps| deps.parent())
+        .expect("target profile directory")
+        .to_path_buf();
+    let name = if cfg!(windows) {
+        "lock_holder.exe"
+    } else {
+        "lock_holder"
+    };
+    let candidate = profile_dir.join("examples").join(name);
+    assert!(
+        candidate.exists(),
+        "lock_holder example not built at {} — run `cargo build -p mem-store --example lock_holder`",
+        candidate.display()
+    );
+    candidate
+}
+
+/// A spawned `lock_holder` with stdout/stderr redirected to files (never
+/// pipes — a chatty child must not deadlock the parent).
+pub struct LockHolderRun {
+    pub child: std::process::Child,
+    pub stdout_path: PathBuf,
+    pub stderr_path: PathBuf,
+}
+
+impl LockHolderRun {
+    /// Bounded wait: polls `try_wait()` until the deadline, then kills and
+    /// reaps (never leaves an orphan).
+    pub fn wait(&mut self, timeout: Duration) -> Option<std::process::ExitStatus> {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(status)) => return Some(status),
+                Ok(None) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                _ => {
+                    let _ = self.child.kill();
+                    let _ = self.child.wait();
+                    return None;
+                }
+            }
+        }
+    }
+
+    pub fn captured_stderr(&self) -> String {
+        std::fs::read_to_string(&self.stderr_path).unwrap_or_default()
+    }
+
+    pub fn captured_stdout(&self) -> String {
+        std::fs::read_to_string(&self.stdout_path).unwrap_or_default()
+    }
+}
+
+/// Spawns `lock_holder --storage <dir> --hold-ms <n> --wait-ms <n>`.
+pub fn spawn_lock_holder(storage: &Path, hold_ms: u64, wait_ms: u64) -> LockHolderRun {
+    let binary = lock_holder_binary_path();
+    let capture_dir = temp_dir("lock-holder-capture");
+    let stdout_path = capture_dir.join("stdout.txt");
+    let stderr_path = capture_dir.join("stderr.txt");
+    let child = std::process::Command::new(binary)
+        .arg("--storage")
+        .arg(storage)
+        .arg("--hold-ms")
+        .arg(hold_ms.to_string())
+        .arg("--wait-ms")
+        .arg(wait_ms.to_string())
+        .stdout(std::fs::File::create(&stdout_path).expect("stdout capture file"))
+        .stderr(std::fs::File::create(&stderr_path).expect("stderr capture file"))
+        .spawn()
+        .expect("spawn lock_holder");
+    LockHolderRun {
+        child,
+        stdout_path,
+        stderr_path,
+    }
+}
+
+/// Polls until `path` exists or the deadline elapses (bounded barrier wait).
+pub fn wait_for_path(path: &Path, timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if path.exists() {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// Writes a re-embed swap journal (camelCase JSON, byte-shaped like the
+/// TS-written journal) and returns its path.
+pub fn write_reembed_swap_state(db_path: &Path, staged: &Path, backup: &Path) -> PathBuf {
+    let state_path = PathBuf::from(format!("{}.reembed-swap.json", db_path.display()));
+    let body = format!(
+        r#"{{"dbPath":"{}","stagedPath":"{}","backupPath":"{}"}}"#,
+        db_path.display(),
+        staged.display(),
+        backup.display()
+    );
+    std::fs::write(&state_path, body).expect("swap state write");
+    state_path
+}

@@ -18,10 +18,11 @@
 
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use tokio::sync::OnceCell;
+use tokio::sync::{Mutex as AsyncMutex, OnceCell};
 
 use mem_core::scope::{Scope, assert_safe_scope_hash};
 
@@ -95,6 +96,7 @@ pub struct ShardManager {
     probe: Arc<dyn ProcessProbe>,
     metadata: Mutex<Option<DbHandle>>,
     init: Mutex<Option<Arc<InitCell>>>,
+    scope_write_locks: Arc<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>>,
 }
 
 impl Clone for ShardManager {
@@ -106,6 +108,7 @@ impl Clone for ShardManager {
             probe: self.probe.clone(),
             metadata: Mutex::new(self.metadata.lock().unwrap().clone()),
             init: Mutex::new(self.init.lock().unwrap().clone()),
+            scope_write_locks: self.scope_write_locks.clone(),
         }
     }
 }
@@ -150,7 +153,47 @@ impl ShardManager {
             probe,
             metadata: Mutex::new(None),
             init: Mutex::new(None),
+            scope_write_locks: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// The store config (legacy migrator + migration service read
+    /// dims/model without reaching into `Arc<ShardManager>` privates).
+    pub fn config(&self) -> &StoreConfig {
+        &self.config
+    }
+
+    /// The process probe (live-lock checks in the migration paths).
+    pub fn process_probe(&self) -> Arc<dyn ProcessProbe> {
+        Arc::clone(&self.probe)
+    }
+
+    /// Upstream `withScopeWriteLock`: per-`(scope, scope_hash)` async
+    /// mutex — operations on the same scope serialize; distinct scopes run
+    /// unblocked. The std guard is cloned out and DROPPED before `.await`
+    /// (never held across a yield); the async guard is held for the whole
+    /// `op().await`.
+    pub async fn with_scope_write_lock<'a, T, F>(
+        &self,
+        scope: Scope,
+        scope_hash: &str,
+        op: F,
+    ) -> Result<T, StoreError>
+    where
+        T: 'a,
+        F: FnOnce() -> BoxFuture<'a, Result<T, StoreError>>,
+    {
+        let key = format!("{}:{}", scope.as_str(), scope_hash);
+        let mutex = {
+            let mut locks = self.scope_write_locks.lock().unwrap();
+            Arc::clone(
+                locks
+                    .entry(key)
+                    .or_insert_with(|| Arc::new(AsyncMutex::new(()))),
+            )
+        };
+        let _guard = mutex.lock().await;
+        op().await
     }
 
     /// Connection seam for tests and later waves: open (or join) the

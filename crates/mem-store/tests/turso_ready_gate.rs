@@ -126,17 +126,19 @@ async fn test_runs_all_steps_once_and_initializes_metadata() {
     );
     assert_eq!(
         gate.step_names(),
+        // W1.3: the composition now ends with the real legacy step.
         vec![
             "legacy-migration",
             "encryption-migration",
+            "legacy-migration",
             "path-migrate-recovery",
-            "shard-warmup"
+            "shard-warmup",
         ]
     );
 }
 
 // ---------------------------------------------------------------------------
-// 2/7
+// 2/8
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -382,11 +384,13 @@ async fn test_injected_steps_run_in_registration_order() {
     ));
     assert_eq!(
         gate.step_names(),
+        // W1.3: real legacy step appended after the injected probes.
         vec![
             "legacy-migration",
             "encryption-migration",
+            "legacy-migration",
             "path-migrate-recovery",
-            "shard-warmup"
+            "shard-warmup",
         ]
     );
     gate.ensure_ready().await.expect("runs");
@@ -423,4 +427,134 @@ async fn test_recovery_is_idempotent_when_journal_is_absent() {
         storage.join("metadata.db").exists(),
         "warmup created metadata"
     );
+}
+
+// ---------------------------------------------------------------------------
+// 8/8 — W1.3: the real legacy step recovers an interrupted re-embed swap
+// BEFORE the engine probe touches the active path (upstream ready.ts order:
+// recoverInterruptedReembedSwaps -> runTursoEngineMigration, legacy-migrator.ts
+// L621-645). Our port refuses the DiskANN conversion loudly (recorded W1.3
+// divergence — upstream converts in place); the refusal error is what proves
+// the engine step ran on the RESTORED active path.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_ready_gate_recovers_interrupted_reembed_swap_before_engine_conversion() {
+    let config = common::store_config("ready-reembed-recovery");
+    let (config, connections, shards) = real_components(config).await;
+    let storage = config.storage_path.clone();
+    let registry: Arc<dyn ShardRegistry> = Arc::new(shards.clone());
+
+    let scope_dir = storage.join("projects");
+    std::fs::create_dir_all(&scope_dir).expect("projects dir");
+    let active = common::copy_diskann_fixture(&scope_dir, "project_a1b2c3d4e5f60003_shard_0.db");
+    let staged = std::path::PathBuf::from(format!("{}.reembed-fixture.tmp", active.display()));
+    let backup = std::path::PathBuf::from(format!("{}.pre-reembed-fixture.bak", active.display()));
+    mem_store::sqlite_files::rename_sqlite_database(&active, &staged).expect("move to staged");
+    assert!(!active.exists() && staged.exists());
+    let state = common::write_reembed_swap_state(&active, &staged, &backup);
+
+    let gate = Arc::new(mem_store::ready::build_ready_gate(
+        &storage,
+        connections.clone(),
+        Arc::new(shards.clone()),
+        registry.clone(),
+    ));
+
+    let error = gate
+        .ensure_ready()
+        .await
+        .expect_err("DiskANN shard refuses the engine conversion");
+    assert!(
+        error
+            .message()
+            .contains("invalid expression in CREATE INDEX"),
+        "engine step must have probed the restored active path: {}",
+        error.message()
+    );
+
+    // Recovery completed before the refusal: staged consumed, journal gone,
+    // active restored with the fixture content (the probe's open is the only
+    // permitted mutation — compare via an open-identical control copy).
+    assert!(!staged.exists(), "staged replacement renamed to active");
+    assert!(!state.exists(), "swap journal consumed");
+    assert!(active.exists(), "active shard restored");
+    let control_dir = storage.join("open-control");
+    std::fs::create_dir_all(&control_dir).expect("control dir");
+    let control = common::copy_diskann_fixture(&control_dir, "ctl_probe.db");
+    {
+        // The DiskANN open fails exactly like the migrator's probe (step-4
+        // pattern): tolerate the error, keep the bookkeeping identical.
+        if let Ok(db) = connections.get_connection(&control).await {
+            let _ = db.query("SELECT 1", Vec::new()).await;
+        }
+        connections.close_connection(&control).await;
+    }
+    let control_bytes = std::fs::read(&control).expect("control bytes");
+    let restored_bytes = std::fs::read(&active).expect("active bytes");
+    assert_eq!(
+        restored_bytes, control_bytes,
+        "restored active is byte-identical to an open-identical control copy \
+         of the fixture (turso opens mutate headers; W1.3 step-4 precedent)"
+    );
+
+    // No marker, no `.pre-tursodb-*` backup: the refusal happened before any
+    // conversion bookkeeping (recorded divergence vs upstream's in-place
+    // DiskANN conversion).
+    assert!(
+        !storage
+            .join(mem_store::legacy_migrator::MIGRATION_MARKER)
+            .exists(),
+        "no migration marker after refusal"
+    );
+    let pre_tursodb = std::fs::read_dir(&storage)
+        .expect("storage read")
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".pre-tursodb-")
+        })
+        .count();
+    assert_eq!(pre_tursodb, 0, "no upstream-style pre-tursodb backup");
+}
+
+// ---------------------------------------------------------------------------
+// 9/9 — W1.5: the encryption builder places the encryption step between the
+// legacy step and swap recovery (upstream ready.ts order), and the step is a
+// no-op when encryption is off.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_ready_gate_runs_encryption_step_between_legacy_and_recovery() {
+    let config = common::store_config("ready-encryption-step");
+    let (config, connections, shards) = real_components(config).await;
+    let storage = config.storage_path.clone();
+    let registry: Arc<dyn ShardRegistry> = Arc::new(shards.clone());
+
+    let gate = Arc::new(mem_store::ready::build_ready_gate_with_encryption(
+        &storage,
+        connections.clone(),
+        Arc::new(shards.clone()),
+        registry.clone(),
+        &config,
+        Vec::new(),
+    ));
+
+    assert_eq!(
+        gate.step_names(),
+        vec![
+            "legacy-migration",
+            "encryption-migration",
+            "path-migrate-recovery",
+            "shard-warmup",
+        ]
+    );
+
+    // Encryption is off in `store_config`: the step still appears and is a
+    // no-op (the whole gate must complete).
+    gate.ensure_ready()
+        .await
+        .expect("ready with the encryption step");
 }

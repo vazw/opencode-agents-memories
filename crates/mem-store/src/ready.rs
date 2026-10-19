@@ -1,11 +1,13 @@
 //! Turso ready gate — port of upstream `src/services/turso/ready.ts`
-//! (blueprint W1.2 step 9).
+//! (blueprint W1.2 step 9, W1.3 step 6 completes the composition).
 //!
-//! Upstream order: legacy migration, encryption migration, interrupted
-//! swap recovery, shard warmup (`getAllShards("user", "")`). W1.2 ships
-//! the recovery + warmup steps only: the legacy/encryption steps are W1.5
-//! wiring and there are deliberately NO placeholder no-op steps (a silent
-//! no-op would fake "migrated" forever).
+//! Upstream order: legacy migration (which itself recovers interrupted
+//! re-embed swaps, then runs the engine migration — legacy-migrator.ts
+//! L621-645), interrupted path-migrate swap recovery, shard warmup
+//! (`getAllShards("user", "")`). W1.5 owns the encryption slot directly via
+//! `build_ready_gate_with_encryption` (no injection via pre-steps); there are
+//! deliberately NO placeholder no-op steps — a silent no-op would fake
+//! "migrated" forever).
 //!
 //! Concurrency model: upstream `initPromise`/`isReady` become a shared
 //! `OnceCell<Result>` installed under the gate state — concurrent waiters
@@ -108,6 +110,36 @@ impl ReadyGate {
     }
 }
 
+/// Upstream legacy-migration half of the ready pipeline (W1.3 step 6):
+/// `recoverInterruptedReembedSwaps → runTursoEngineMigration → marker /
+/// lock / migrate / reconcile` via [`crate::legacy_migrator`] — the two
+/// upstream `ready.ts` calls (`ensureTursoMigrated` + the legacy sweep)
+/// collapse into the single ported entry point.
+pub fn legacy_migration_step(
+    storage_path: &Path,
+    connections: Arc<ConnectionManager>,
+    shards: Arc<ShardManager>,
+) -> ReadyStep {
+    let storage: PathBuf = storage_path.to_path_buf();
+    ReadyStep {
+        name: "legacy-migration",
+        run: Arc::new(move || {
+            let (storage, connections, shards) =
+                (storage.clone(), connections.clone(), shards.clone());
+            Box::pin(async move {
+                let sleep = Arc::new(crate::platform::system_sleep) as crate::platform::SleepFn;
+                crate::legacy_migrator::run_legacy_turso_migration(
+                    &storage,
+                    &shards,
+                    &connections,
+                    &sleep,
+                )
+                .await
+            })
+        }),
+    }
+}
+
 /// Upstream `shardPathMigrationService.recoverInterruptedSwap()` step.
 pub fn path_migrate_recovery_step(
     storage_path: &Path,
@@ -148,7 +180,11 @@ pub fn shard_warmup_step(shards: Arc<ShardManager>) -> ReadyStep {
     }
 }
 
-/// Upstream composition (legacy/encryption steps arrive in W1.5).
+/// Upstream composition WITHOUT the encryption slot: injected pre-steps
+/// (none) ++ legacy ++ recovery ++ warmup. Encryption is deliberately not
+/// wired here — use [`build_ready_gate_with_encryption`] for encrypted
+/// configs; this builder stays for W1.3 compatibility and unencrypted
+/// defaults.
 pub fn build_ready_gate(
     storage_path: &Path,
     connections: Arc<ConnectionManager>,
@@ -158,7 +194,10 @@ pub fn build_ready_gate(
     build_ready_gate_with(storage_path, connections, shards, registry, Vec::new())
 }
 
-/// Composition with injected PRE steps (W1.3/W1.5 injection point).
+/// Composition with injected PRE steps. The encryption slot is NOT part of
+/// this list — [`build_ready_gate_with_encryption`] supersedes this builder
+/// for encrypted configs (it appends the encryption step between legacy and
+/// recovery itself).
 pub fn build_ready_gate_with(
     storage_path: &Path,
     connections: Arc<ConnectionManager>,
@@ -167,6 +206,55 @@ pub fn build_ready_gate_with(
     pre_steps: Vec<ReadyStep>,
 ) -> ReadyGate {
     let mut steps = pre_steps;
+    // Upstream order (ready.ts + legacy-migrator.ts L621-645): the legacy
+    // step internally recovers re-embed swaps and runs the engine
+    // migration before touching any legacy shard.
+    steps.push(legacy_migration_step(
+        storage_path,
+        connections.clone(),
+        shards.clone(),
+    ));
+    steps.push(path_migrate_recovery_step(
+        storage_path,
+        connections,
+        registry,
+    ));
+    steps.push(shard_warmup_step(shards));
+    ReadyGate::new(steps)
+}
+
+/// Composition with the encryption slot wired in (blueprint W1.5): injected
+/// PRE steps (ADDITIONAL steps only — never the standard ones) ++ legacy ++
+/// encryption ++ recovery ++ warmup.
+///
+/// CONTRACT (pinned by the blueprint): this builder ALWAYS appends the four
+/// standard steps itself, so callers must NOT re-add any of them through
+/// `pre_steps` — that would double-add relative to [`build_ready_gate_with`],
+/// which also appends legacy/recovery/warmup. It supersedes
+/// [`build_ready_gate_with`] for encrypted configs; `build_ready_gate_with`
+/// stays for W1.3 compatibility and unencrypted defaults.
+pub fn build_ready_gate_with_encryption(
+    storage_path: &Path,
+    connections: Arc<ConnectionManager>,
+    shards: Arc<ShardManager>,
+    registry: Arc<dyn ShardRegistry>,
+    config: &crate::config::StoreConfig,
+    pre_steps: Vec<ReadyStep>,
+) -> ReadyGate {
+    let mut steps = pre_steps;
+    steps.push(legacy_migration_step(
+        storage_path,
+        connections.clone(),
+        shards.clone(),
+    ));
+    // The encryption slot sits between the legacy step and swap recovery,
+    // exactly as upstream `ready.ts` orders it.
+    steps.push(crate::encryption_migrator::encryption_migration_step(
+        storage_path,
+        connections.clone(),
+        shards.clone(),
+        config,
+    ));
     steps.push(path_migrate_recovery_step(
         storage_path,
         connections,
