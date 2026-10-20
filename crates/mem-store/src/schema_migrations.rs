@@ -238,6 +238,70 @@ pub fn user_prompts_migrations() -> Vec<SchemaMigration> {
     }]
 }
 
+/// Upstream `USER_PROFILES_MIGRATIONS` (data-only until W3.1 wired the
+/// profile store): baseline `user_profiles` + `user_profile_changelogs` with
+/// their indexes, DDL order preserved.
+pub fn user_profiles_migrations() -> Vec<SchemaMigration> {
+    vec![SchemaMigration {
+        version: 1,
+        description: "Baseline user_profiles + changelogs",
+        statements: [
+            crate::sql::USER_PROFILES_DDL,
+            crate::sql::USER_PROFILE_CHANGELOGS_DDL,
+        ]
+        .into_iter()
+        .chain(crate::sql::USER_PROFILES_INDEXES.iter().copied())
+        .map(|sql| Statement::new(sql, Vec::new()))
+        .collect(),
+    }]
+}
+
+/// NET-NEW (R10): the episodic `agent_sessions` baseline (W4.1) plus the
+/// W4.2 soft-delete/orphan set (v2) and the W4.3 milestone table (v3). The
+/// DDL lives in `episodic_sql` (no upstream oracle) and is never added to the
+/// golden-SQL locus. The label is set-level since v2 (D-10); per-version
+/// identity lives in `description`.
+pub fn episodic_migrations(dimensions: u32) -> Vec<SchemaMigration> {
+    let mut statements = vec![Statement::new(
+        crate::episodic_sql::agent_sessions_ddl(dimensions),
+        Vec::new(),
+    )];
+    for index in crate::episodic_sql::EPISODIC_INDEXES {
+        statements.push(Statement::new(index, Vec::new()));
+    }
+    let mut v2_statements: Vec<Statement> = crate::episodic_sql::EPISODIC_V2_ALTERS
+        .iter()
+        .map(|sql| Statement::new(*sql, Vec::new()))
+        .collect();
+    for index in crate::episodic_sql::EPISODIC_V2_INDEXES {
+        v2_statements.push(Statement::new(index, Vec::new()));
+    }
+    let mut v3_statements = vec![Statement::new(
+        crate::episodic_sql::episodic_milestones_ddl(dimensions),
+        Vec::new(),
+    )];
+    for index in crate::episodic_sql::EPISODIC_V3_INDEXES {
+        v3_statements.push(Statement::new(index, Vec::new()));
+    }
+    vec![
+        SchemaMigration {
+            version: 1,
+            description: "episodic-v1: Baseline agent_sessions with embedding",
+            statements,
+        },
+        SchemaMigration {
+            version: 2,
+            description: "episodic-v2: Soft-delete and orphan tracking for session timelines",
+            statements: v2_statements,
+        },
+        SchemaMigration {
+            version: 3,
+            description: "episodic-v3: Consolidated milestone records (W4.3)",
+            statements: v3_statements,
+        },
+    ]
+}
+
 // ---------------------------------------------------------------------------
 // user_prompt column upgrade
 // ---------------------------------------------------------------------------

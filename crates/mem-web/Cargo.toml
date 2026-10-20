@@ -10,3 +10,14 @@ mem-embed = { workspace = true }
 mem-ai = { workspace = true }
 mem-profile = { workspace = true }
 mem-episodic = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }
+tower = { workspace = true }
+base64 = { workspace = true }
+subtle = { workspace = true }
+url = { workspace = true }
+getrandom = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true, features = ["net"] }

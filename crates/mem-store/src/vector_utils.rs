@@ -14,7 +14,6 @@ use crate::db::Value as DbValue;
 
 /// Upstream `vectorToJson` — kept in `vector.rs` (serde_json maps non-finite
 /// floats to `null`, matching `JSON.stringify`).
-
 /// Upstream `blobToFloat32Array`: `null`/non-blob non-text → `None`;
 /// `Value::Blob`: empty or `len % 4 != 0` → `None`, else raw F32 LE chunks;
 /// `Value::Text`: JSON array of f64 → lossy `as f32`, parse failure → `None`.
@@ -24,10 +23,11 @@ pub fn blob_to_float32_array(value: &DbValue) -> Option<Vec<f32>> {
             if bytes.is_empty() || bytes.len() % 4 != 0 {
                 return None;
             }
+            let (chunks, _rest) = bytes.as_chunks::<4>();
             Some(
-                bytes
-                    .chunks_exact(4)
-                    .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                chunks
+                    .iter()
+                    .map(|chunk| f32::from_le_bytes(*chunk))
                     .collect(),
             )
         }

@@ -1,6 +1,6 @@
 # 14 — W3.3 · Confidence, decay, AI cleanup & validation (US 3.2)
 
-Status: needs-triage
+Status: done — 2026-10-19 (reviewer APPROVED iter1: 209/209 mem-profile, 992/0/6 workspace, mandate-8 privacy gate PASS)
 
 ## What to build
 
@@ -8,10 +8,65 @@ Confidence scoring and temporal decay for profile traits; AI-assisted deduplicat
 
 ## Acceptance criteria
 
-- [ ] Behaviors ported: `profile-utils`, `user-profile-decay`, `user-profile-learning-confidence`, `ai-cleanup`, `ai-cleanup-apply`.
-- [ ] One-off traits decay rather than becoming permanent rules (decay semantics match upstream).
-- [ ] Contradictory traits resolved by cleanup without data loss outside the merged pair.
+- [x] Behaviors ported: `profile-utils`, `user-profile-decay`, `user-profile-learning-confidence`, `ai-cleanup`, `ai-cleanup-apply`.
+- [x] One-off traits decay rather than becoming permanent rules (decay semantics match upstream).
+- [x] Contradictory traits resolved by cleanup without data loss outside the merged pair.
+
+## Rulings recorded
+
+- **R1 — PRD locks live in `mem_profile::decay`**: `CONFIDENCE_EMA_ALPHA = 0.3` applied inside `sync_confidence` (prior = stored confidence, observation = Beta estimator) and `HALF_LIFE_DAYS = 30.0` applied inside the same function; both are public constants with the PRD quote, never a magic literal at a call site. Falsified by `user_profile_decay.rs::test_sync_confidence_blends_the_stored_prior_with_the_beta_observation_at_alpha_three_tenths`.
+- **R2 — Upstream's frequency-scaled half-life is retained**: `halfLife = 30 d · (1 + log2(1 + freq))`, so `HALF_LIFE_DAYS` is the frequency-1 *base* (60 days effective) and the 30-day grace threshold is the same constant — a disclosed divergence from the bare PRD reading.
+- **R3 — The EMA blend replaces upstream's Beta-mean merge confidence**: deliberate, PRD-driven. On the legacy `confidence = 1.0` path `lazy_migrate_alpha` seeds `alpha ≈ 100`, so the blended value lands ≈0.99 — inside `profile_write.rs`'s existing `> 0.6 && <= 1.0` range. The only landed equality assertion (`Some(1.0)`) is on the create path, which derives nothing.
+- **R4 — Decay semantics are upstream's**: per-category staleness (`age > stale_days && evidence < min_evidence_for_retention` ⇒ dropped) plus `lazy_migrate_alpha` and the confidence re-derivation for survivors; no new eviction rule.
+- **R5 — The daily sweep persists**: `ProfileStore::sweep_decay_daily(now)` writes through `update_profile` ("Decay sweep: confidence decayed") only when `decay_in_memory` reports changes, and records its stamp only after the loop completes (a mid-sweep fault retries next tick).
+- **R6 — Cleanup is incremental and scoped**: the trigger stays upstream's prompt-count interval boundary, but the *scope* becomes the landed traits plus their `mem_core::dedup` conflict-band neighbours (never the full profile).
+- **R7 — No data loss outside the merged pair**: only ids inside `include_ids` can change disposition; everything else is carried from `current_profile` verbatim, and a rejected merge/removal is restored from `old_profile_data`.
+- **R8 — Validation bounds are net-new and enforced on the payload**: `TraitType` + `TRAIT_MIN_CHARS = 3` / `TRAIT_MAX_CHARS = 500` (characters, inclusive) inside `UserProfileValidator::validate`, with every upstream sentence byte-for-byte. Falsified by `validation.rs::test_validator_rejects_a_description_outside_the_three_to_five_hundred_char_bounds`.
+- **R9 — `mem_core::dedup` lands here and is genuinely consumed**: W3.3's cleanup scope is its first consumer; W4.3's consolidation reuses the same `dedup_groups` signature.
+- **R10 — The cleanup provider path is W3.2's `StructuredCompletion` seam**: native-when-available, faults verbatim (never masked as "No AI provider configured"), no external fallback while a native completion exists; upstream's host `session.create`/`session.delete` lifecycle is N-A at this layer.
+- **R11 — W3.2's binding rulings stand**: no queue/worker pool; the hook runs after `mark_many` and its fault is logged and swallowed, so a completed round never becomes a failure.
+- **R12 — `ProfileConfig::confidence_decay_days` stays unwired by `sync_confidence`**: the 30-day value is the constant `decay::HALF_LIFE_DAYS` (a config read would be a behaviour change with no upstream oracle).
+- **R13 — Carry-over to W5/W6 (disclosed gap):** nothing in this wave schedules the sweep or constructs the cleanup hook in production — no timer, thread, task or queue was added (D-W3). The host lifecycle in `mem-bridge` (W5.x) plus the composition root (`src/`) must call `ProfileStore::sweep_decay_daily(now)` on a daily tick and build `ProfileCleanupHook` before `LearningRound::with_incremental_cleanup(...)`; `mem-web` (W6.1) supplies the serve-loop caller if it hosts the profile store. Until then the sweep is exercised only by tests.
 
 ## Blocked by
 
 - 13 · W3.2
+
+## Comments
+
+- **2026-10-19 — triaged `ready-for-agent`** (blocked-by #13 satisfied: W3.2 closed with reviewer APPROVED).
+  > *This was generated by AI during triage.*
+
+  ## Agent Brief
+
+  **Category:** enhancement
+  **Summary:** Port confidence scoring (EMA), 30-day half-life temporal decay, incremental AI-assisted cleanup with AI-mediated contradiction merge, and trait validation into the profile tier.
+
+  **Current behavior:**
+  After W3.1/W3.2, the profile store persists traits with confidence values and timestamps, and the single learning round merges provider output into existing profiles (parse-before-provider, verbatim failure contract). Nothing decays: a trait learned once persists at its initial confidence forever. Trait shape is unvalidated, and contradictions between an incoming trait and stored traits simply coexist.
+
+  **Desired behavior:**
+  - Confidence updates use an exponential moving average with α = 0.3 (PRD-locked, §Phase 3).
+  - Decay uses an exponential half-life of 30 days (PRD-locked), applied lazily on read plus a daily background sweep; one-off traits fade rather than becoming permanent rules — semantics match upstream `user-profile-decay`.
+  - AI cleanup runs incrementally — triggered when a new trait lands, never as a full scan — and resolves contradictions by an AI-mediated merge through the configured provider; no data may be lost outside the merged pair.
+  - Validation: trait type enum + content length bounds 3–500 chars (PRD-locked).
+  - A shared dedup service (mem-core) is introduced here and must be reusable by W4.3's consolidation.
+
+  **Key interfaces:**
+  - `ProfileStore` / `ProfileData` (JSON profile documents over the dedicated profile DB) — the daily sweep must persist decayed confidence, not only compute it at read time
+  - `LearningRound`'s merge step — where incoming trait confidence lands; cleanup hooks trigger after merge
+  - The provider seam from W3.2 (`StructuredCompletion` / the gateway) — cleanup and merge calls go through it
+  - A new pure math module for EMA/half-life — no provider, no DB, independently testable with an injectable clock for the sweep
+
+  **Acceptance criteria:**
+  - [x] Behaviors ported: `profile-utils`, `user-profile-decay`, `user-profile-learning-confidence`, `ai-cleanup`, `ai-cleanup-apply`
+  - [x] One-off traits decay rather than becoming permanent rules (decay semantics match upstream)
+  - [x] Contradictory traits resolved by cleanup without data loss outside the merged pair
+  - [x] EMA α = 0.3 and the 30-day half-life are the locked parameters; any deviation needs a ratified ruling, not silence
+  - [x] Decay math is pure and independently tested; the daily sweep uses an injected clock (no wall-clock sleeps)
+  - [x] Existing W3.1/W3.2 suites stay green unchanged
+
+  **Out of scope:**
+  - Episodic consolidation/compaction and fact promotion (W4.3) — only the shared dedup service lands here
+  - Tool registration surfaces (W5.4)
+  - Re-litigating the PRD-locked decay/cleanup parameters

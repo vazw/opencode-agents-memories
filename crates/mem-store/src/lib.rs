@@ -14,6 +14,7 @@ pub mod db;
 pub mod encryption_key;
 pub mod encryption_migrator;
 pub mod engine_migrator;
+pub mod episodic_sql;
 pub mod error;
 pub mod legacy_migrator;
 pub mod lifecycle;
@@ -35,3 +36,11 @@ pub mod vector_utils;
 pub use mem_core::scope;
 
 pub use crate::db::{TursoConnectFactory, turso_connect_factory};
+
+// Workspace-stack re-exports consumed by downstream crates that build on the
+// storage layer (W4.1 `mem-episodic`): keeps those crates free of new
+// dependency edges while the very same crate versions remain in use.
+pub use serde;
+pub use serde_json;
+pub use tokio;
+pub use tracing;

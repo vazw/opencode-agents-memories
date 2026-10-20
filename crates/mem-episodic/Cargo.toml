@@ -8,3 +8,9 @@ mem-core = { workspace = true }
 mem-store = { workspace = true }
 mem-embed = { workspace = true }
 mem-ai = { workspace = true }
+# The `AiProvider::complete` seam returns a `futures::Stream`; draining it
+# needs the `Stream` trait, which is NOT nameable through `core` on stable
+# Rust and is not re-exported by any crate in this workspace. `futures` is
+# already a workspace dependency (mem-ai uses it) — no new crate enters the
+# build graph, and the mem-* edge graph (ADR-0001) is unchanged.
+futures = { workspace = true }

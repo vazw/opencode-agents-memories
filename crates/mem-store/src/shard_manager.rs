@@ -685,6 +685,56 @@ impl ShardManager {
         scope_hash: &str,
     ) -> Result<ShardInfo, StoreError> {
         assert_no_turso_migration_in_progress(&self.storage_path, self.probe.as_ref())?;
+        self.resolve_write_shard(scope, scope_hash).await
+    }
+
+    /// The write shard for `scope`/`scope_hash`, tolerating an operation
+    /// lock held by THIS process.
+    ///
+    /// [`get_write_shard`](Self::get_write_shard) refuses to resolve a shard
+    /// while ANY live operation lock exists — including one this very
+    /// process holds. The W4.3 consolidation run holds that lock for its
+    /// whole duration (ADR-0006 D-25), and its promotion writes land in a
+    /// shard: without this seam the consolidation could never promote
+    /// anything, because its own marker would block it.
+    ///
+    /// A lock held by ANOTHER process still blocks the write, and so does
+    /// the legacy migration lock file (a different marker).
+    pub async fn get_write_shard_allowing_own_lock(
+        &self,
+        scope: Scope,
+        scope_hash: &str,
+    ) -> Result<ShardInfo, StoreError> {
+        if let Some(state) = crate::operation_lock::read_live_lock(
+            &self.storage_path,
+            crate::operation_lock::OPERATION_LOCK_FILE,
+            self.probe.as_ref(),
+        ) && state.pid != std::process::id()
+        {
+            return Err(StoreError::MigrationLocked {
+                pid: state.pid,
+                operation: state.operation,
+            });
+        }
+        if let Some(state) = crate::operation_lock::read_live_lock(
+            &self.storage_path,
+            crate::operation_lock::LEGACY_MIGRATION_LOCK_FILE,
+            self.probe.as_ref(),
+        ) {
+            return Err(StoreError::MigrationLocked {
+                pid: state.pid,
+                operation: state.operation,
+            });
+        }
+        self.resolve_write_shard(scope, scope_hash).await
+    }
+
+    /// The write-shard resolution behind [`get_write_shard`](Self::get_write_shard).
+    async fn resolve_write_shard(
+        &self,
+        scope: Scope,
+        scope_hash: &str,
+    ) -> Result<ShardInfo, StoreError> {
         // Upstream budget: 3 attempts; both terminal branches return, so the
         // third iteration is unreachable unless a future branch keeps looping.
         #[allow(clippy::never_loop)]

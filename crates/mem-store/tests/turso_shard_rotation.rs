@@ -532,3 +532,74 @@ async fn test_archive_shard_rejects_deep_traversal_override() {
     assert!(full.exists(), "the shard file was never archived");
     assert!(!override_path.exists(), "no file escaped the scope dir");
 }
+
+// ---------------------------------------------------------------------------
+// 14/14 — the own-lock-tolerant write path (W4.3, ADR-0006 D-25)
+// ---------------------------------------------------------------------------
+
+/// `get_write_shard_allowing_own_lock` tolerates OUR OWN operation lock and
+/// refuses a FOREIGN one; `get_write_shard` refuses both ("a lock blocks
+/// even its own holder").
+///
+/// The foreign-pid refusal is the property the W4.3 own-lock bypass rests
+/// on: without it, a live lock held by another process would be treated as
+/// our own and the write would proceed into a migrating shard.
+#[tokio::test]
+async fn test_get_write_shard_allowing_own_lock_refuses_a_foreign_lock_but_allows_our_own() {
+    let config = common::test_store_config("rot-own-lock", 2, 100);
+    let storage = config.storage_path.clone();
+    // `FakeProbe` answers `true` for EVERY pid: a foreign pid reads as live.
+    let (_config, _connections, manager) =
+        common::real_components_with_probe(config, Arc::new(common::FakeProbe::default())).await;
+    let hash = scope_hash(14);
+
+    // A FOREIGN live lock blocks the tolerant path...
+    write_lock_state(
+        &storage,
+        OPERATION_LOCK_FILE,
+        4242,
+        Some("foreign-migration"),
+    );
+    let error = manager
+        .get_write_shard_allowing_own_lock(Scope::Project, &hash)
+        .await
+        .expect_err("a foreign lock is refused");
+    match error {
+        StoreError::MigrationLocked { pid, .. } => {
+            assert_eq!(pid, 4242, "the foreign owner's pid is reported");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+    // ...and the strict path refuses it too.
+    let error = manager
+        .get_write_shard(Scope::Project, &hash)
+        .await
+        .expect_err("a foreign lock is refused by the strict path");
+    assert!(
+        matches!(error, StoreError::MigrationLocked { .. }),
+        "typed: {error}"
+    );
+
+    // OUR OWN lock is tolerated by the tolerant path...
+    write_lock_state(
+        &storage,
+        OPERATION_LOCK_FILE,
+        std::process::id(),
+        Some("episodic-consolidation"),
+    );
+    let shard = manager
+        .get_write_shard_allowing_own_lock(Scope::Project, &hash)
+        .await
+        .expect("our own lock is tolerated by the tolerant path");
+    assert_eq!(shard.shard_index, 0);
+
+    // ...but NOT by the strict path: a lock blocks even its own holder.
+    let error = manager
+        .get_write_shard(Scope::Project, &hash)
+        .await
+        .expect_err("the strict path still blocks our own lock");
+    assert!(
+        matches!(error, StoreError::MigrationLocked { .. }),
+        "typed: {error}"
+    );
+}

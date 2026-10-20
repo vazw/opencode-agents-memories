@@ -63,12 +63,16 @@ A grilling session was conducted across all five phases, producing concrete, loc
 - Profile store: Turso table in shard (`profile_traits` with confidence, source_prompt_id, timestamps).
 - Extraction prompt: config-overridable with default template.
 
+> **§W3.2 reconciliation (as shipped):** `whatlang` is adopted as the single detector mechanism (user-ratified); the earlier "pure, no-deps, franc-min-matching" wording is withdrawn. Truncation is two **char-safe** caps — 4096 chars per prompt plus a 32768-char head-only whole-context cap closed with the upstream `[... context truncated to userProfileMaxContextBytes ...]` marker. The "bounded mpsc + worker pool (max 2)" item is **overruled**: upstream has no queue, and W3.1's shipped single-flight round (in-process flag + cross-process lock) is the scheduler — a second pool would fork the round and contend on that same lock. The shard-level `profile_traits` table is **retired**, including its `source_prompt_id` column: W3.2 reuses W3.1's shipped `user-profiles.db` JSON `ProfileData` store instead of introducing a second profile schema. Failed rounds leave prompts unmarked (`user_learning_captured = 0`) in `user-prompts.db` — that unmarked retry *is* the "re-queue failed prompts" behavior; no separate buffer is added.
+
 **W3.3 — Confidence, Decay & Cleanup:**
 - Confidence: exponential moving average (α=0.3).
 - Decay: exponential half-life (30 days), lazy on read + daily background sweep.
 - AI cleanup: incremental on new trait (not full scan).
 - Contradiction resolution: AI-mediated merge via provider.
 - Validation: trait type enum + content length bounds (3–500 chars).
+
+> **§W3.3 reconciliation (as shipped):** The PRD's two locks are named constants in `mem_profile::decay` — `CONFIDENCE_EMA_ALPHA = 0.3`, applied inside `sync_confidence` (the single place a stored confidence is derived), and `HALF_LIFE_DAYS = 30.0` as the **base** half-life, with upstream's frequency scaling `halfLife = 30 d · (1 + log2(1 + freq))` retained (a frequency-1 trait therefore has a 60-day effective half-life). Decay is lazy on read (`ProfileStore::decay_in_memory`, injected clock — no `SystemTime::now`, no sleeps) plus a **persisted** daily sweep (`ProfileStore::sweep_decay_daily`, 24 h gate, written through the existing optimistic-version `update_profile`), **with no production scheduler yet — the daily tick and the cleanup-hook construction are carried to W5/W6** (R13). AI cleanup is incremental and scoped by `mem_core::dedup::dedup_groups` (the landed trait plus its `[0.65, 0.9)` conflict-band neighbours) instead of upstream's full-profile automatic call, and the model's mapping is auto-accepted inside that scope; every item outside the scope is carried over verbatim and a rejected merge/removal is restored from the pre-analysis snapshot (no data loss outside the merged pair). Validation adds the PRD's trait-type enum and the 3–500 **character** content bounds, enforced on the provider payload before any merge. `mem_core::dedup` is the shared service W4.3's consolidation reuses. No new dependencies, no DDL, and no `provider_gateway.rs` change.
 
 ### Phase 4 — Episodic Session Memory (W4.1–W4.3)
 

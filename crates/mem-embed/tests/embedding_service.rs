@@ -286,5 +286,8 @@ fn test_cache_fingerprint_lists_invalidation_inputs() {
 
     // Upstream `embeddingCacheFingerprint`: model, pooling, query prefix
     // ("" when unset), document prefix, prefixes flag, dtype ("" when unset).
-    assert_eq!(service.fingerprint(), "test-model\0cls\0\0passage: \01\0");
+    // `\x001` disambiguates the two adjacent escapes (NUL then the ASCII
+    // digit `1`) — a bare `\01` is an octal-lookalike clippy rejects with
+    // `-D warnings` and reads identically at runtime.
+    assert_eq!(service.fingerprint(), "test-model\0cls\0\0passage: \x001\0");
 }

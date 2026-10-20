@@ -140,6 +140,51 @@ mod frozen {
     /// schema-migrations.ts L198-209 (idx_user_prompts_user_learning)
     pub const FROZEN_IDX_USER_PROMPTS_USER_LEARNING: &str = r#"CREATE INDEX IF NOT EXISTS idx_user_prompts_user_learning ON user_prompts(user_learning_captured)"#;
 
+    /// schema-migrations.ts L218-232 (USER_PROFILES_MIGRATIONS v1 stmt 1)
+    pub const FROZEN_USER_PROFILES_DDL: &str = r#"
+          CREATE TABLE IF NOT EXISTS user_profiles (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            user_name TEXT NOT NULL,
+            user_email TEXT NOT NULL,
+            profile_data TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL,
+            last_analyzed_at INTEGER NOT NULL,
+            total_prompts_analyzed INTEGER NOT NULL DEFAULT 0,
+            is_active BOOLEAN NOT NULL DEFAULT 1
+          )
+        "#;
+
+    /// schema-migrations.ts L234-245 (USER_PROFILES_MIGRATIONS v1 stmt 2)
+    pub const FROZEN_USER_PROFILE_CHANGELOGS_DDL: &str = r#"
+          CREATE TABLE IF NOT EXISTS user_profile_changelogs (
+            id TEXT PRIMARY KEY,
+            profile_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            change_type TEXT NOT NULL,
+            change_summary TEXT NOT NULL,
+            profile_data_snapshot TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (profile_id) REFERENCES user_profiles(id) ON DELETE CASCADE
+          )
+        "#;
+
+    /// schema-migrations.ts L246-255 (idx_user_profiles_user_id)
+    pub const FROZEN_IDX_USER_PROFILES_USER_ID: &str =
+        r#"CREATE INDEX IF NOT EXISTS idx_user_profiles_user_id ON user_profiles(user_id)"#;
+
+    /// schema-migrations.ts L246-255 (idx_user_profiles_is_active)
+    pub const FROZEN_IDX_USER_PROFILES_IS_ACTIVE: &str =
+        r#"CREATE INDEX IF NOT EXISTS idx_user_profiles_is_active ON user_profiles(is_active)"#;
+
+    /// schema-migrations.ts L246-255 (idx_user_profile_changelogs_profile_id)
+    pub const FROZEN_IDX_USER_PROFILE_CHANGELOGS_PROFILE_ID: &str = r#"CREATE INDEX IF NOT EXISTS idx_user_profile_changelogs_profile_id ON user_profile_changelogs(profile_id)"#;
+
+    /// schema-migrations.ts L246-255 (idx_user_profile_changelogs_version)
+    pub const FROZEN_IDX_USER_PROFILE_CHANGELOGS_VERSION: &str = r#"CREATE INDEX IF NOT EXISTS idx_user_profile_changelogs_version ON user_profile_changelogs(version DESC)"#;
+
     /// vector-search.ts L50-55
     pub const FROZEN_INSERT_WITH_TAGS: &str = r#"
   INSERT INTO memories (
@@ -575,6 +620,78 @@ async fn test_frozen_user_prompts_ddl_executes_and_matches_library() {
             "capture_attempts",
             "provider_id",
             "model_id",
+        ]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 3b/12 (W3.1)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_frozen_user_profiles_ddl_executes_and_matches_library() {
+    let dir = common::temp_dir("golden-profiles-ddl");
+    let config = test_config(&dir, 2);
+    let db = open_db(&config, "user-profiles.db").await;
+
+    assert_eq!(sql::USER_PROFILES_DDL, frozen::FROZEN_USER_PROFILES_DDL);
+    assert_eq!(
+        sql::USER_PROFILE_CHANGELOGS_DDL,
+        frozen::FROZEN_USER_PROFILE_CHANGELOGS_DDL
+    );
+    let indexes = sql::user_profiles_indexes();
+    assert_eq!(indexes[0], frozen::FROZEN_IDX_USER_PROFILES_USER_ID);
+    assert_eq!(indexes[1], frozen::FROZEN_IDX_USER_PROFILES_IS_ACTIVE);
+    assert_eq!(
+        indexes[2],
+        frozen::FROZEN_IDX_USER_PROFILE_CHANGELOGS_PROFILE_ID
+    );
+    assert_eq!(
+        indexes[3],
+        frozen::FROZEN_IDX_USER_PROFILE_CHANGELOGS_VERSION
+    );
+
+    batch_write(
+        db.as_ref(),
+        mem_store::schema_migrations::user_profiles_migrations()
+            .into_iter()
+            .flat_map(|migration| migration.statements)
+            .map(|statement| statement.sql)
+            .collect::<Vec<String>>()
+            .iter()
+            .map(String::as_str)
+            .collect(),
+    )
+    .await;
+
+    let profile_columns = column_names(db.as_ref(), "user_profiles").await;
+    assert_eq!(
+        profile_columns,
+        vec![
+            "id",
+            "user_id",
+            "display_name",
+            "user_name",
+            "user_email",
+            "profile_data",
+            "version",
+            "created_at",
+            "last_analyzed_at",
+            "total_prompts_analyzed",
+            "is_active",
+        ]
+    );
+    let changelog_columns = column_names(db.as_ref(), "user_profile_changelogs").await;
+    assert_eq!(
+        changelog_columns,
+        vec![
+            "id",
+            "profile_id",
+            "version",
+            "change_type",
+            "change_summary",
+            "profile_data_snapshot",
+            "created_at",
         ]
     );
 }

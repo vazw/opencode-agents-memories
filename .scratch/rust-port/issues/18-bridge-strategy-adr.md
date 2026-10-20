@@ -1,6 +1,6 @@
 # 18 — W5.0 · Bridge-strategy decision — JSON-RPC stdio vs N-API (ADR) (US 5.2)
 
-Status: needs-triage
+Status: done — 2026-10-19 (grilling complete: 12 decisions resolved; ADR to be written at W5.1 start per issue 19 prerequisite)
 
 ## What to build
 

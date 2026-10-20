@@ -289,9 +289,27 @@ pub async fn real_components(
     std::sync::Arc<mem_store::connection::ConnectionManager>,
     mem_store::shard_manager::ShardManager,
 ) {
+    use mem_store::platform::SystemProcessProbe;
+    real_components_with_probe(config, std::sync::Arc::new(SystemProcessProbe)).await
+}
+
+/// Wired real components over a temp storage root with an INJECTED process
+/// probe.
+///
+/// The probe decides whether a lock file's owner is alive, so a fake probe
+/// makes a FOREIGN pid report "live" without a real process (the seam the
+/// own-lock-ownership contract needs).
+pub async fn real_components_with_probe(
+    config: StoreConfig,
+    probe: std::sync::Arc<dyn mem_store::platform::ProcessProbe>,
+) -> (
+    StoreConfig,
+    std::sync::Arc<mem_store::connection::ConnectionManager>,
+    mem_store::shard_manager::ShardManager,
+) {
     use mem_store::connection::ConnectionManager;
     use mem_store::db::TursoConnectFactory;
-    use mem_store::platform::{Platform, SystemProcessProbe};
+    use mem_store::platform::Platform;
     use mem_store::shard_manager::ShardManager;
 
     let connections = std::sync::Arc::new(ConnectionManager::new(
@@ -304,7 +322,7 @@ pub async fn real_components(
         config.storage_path.clone(),
         config.clone(),
         connections.clone(),
-        std::sync::Arc::new(SystemProcessProbe),
+        probe,
     );
     (config, connections, manager)
 }

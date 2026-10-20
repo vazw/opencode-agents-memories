@@ -2,3 +2,49 @@
 
 /// Stable crate identifier for composition checks.
 pub const CRATE_NAME: &str = "mem-episodic";
+
+pub mod attribution;
+pub mod consolidation;
+pub mod embedding;
+pub mod error;
+pub mod gate;
+pub mod ids;
+pub mod milestone;
+pub mod payload;
+pub mod promotion;
+pub mod record;
+pub mod store;
+pub mod summarizer;
+pub mod timeline;
+pub mod tool_schema;
+pub mod validation;
+
+pub use attribution::{
+    MessageInfo, MessageRole, compaction_injection_agent, resolve_session_agent,
+};
+pub use consolidation::{
+    ConsolidationDeps, ConsolidationPolicy, ConsolidationReport, Consolidator, EpisodicBatchWriter,
+    PromotionScope, SkipReason, SkippedAgent, StoreBatchWriter,
+};
+pub use embedding::{UNKNOWN_BRANCH, compose_embedded_document};
+pub use error::EpisodicError;
+pub use milestone::{
+    Contributor, MAX_CONTRIBUTORS_FRAMING_BYTES_PER_ROW, Milestone, decode_contributors,
+    encode_contributors, max_contributors_bytes, plan_milestone,
+};
+pub use payload::SessionMetadata;
+pub use promotion::{
+    PermanentMemorySink, PromotableFact, PromoteOutcome, PromotionRecord, ShardPermanentMemorySink,
+    VectorCountBump, select_promotable_facts,
+};
+pub use record::{AgentSession, Decision, NewAgentSession, WorkItem, WorkKind};
+pub use store::{Clock, EPISODIC_DB_NAME, EpisodicStore, IdFactory, SessionSearchHit};
+pub use summarizer::{
+    MAX_TRANSCRIPT_BYTES, MILESTONE_SYSTEM_PROMPT, MilestoneSummarizer, ProviderSummarizer,
+    build_transcript, fit_prefix, stripped_source_summary,
+};
+pub use timeline::{DEFAULT_TIMELINE_LIMIT, MAX_TIMELINE_LIMIT, SessionSummary, TimelineFilter};
+pub use tool_schema::{
+    RECALL_PROJECT_SESSIONS_DESCRIPTION, RECALL_PROJECT_SESSIONS_TOOL_NAME, RecallMode,
+    RecallProjectSessionsArgs, RecallProjectSessionsResult,
+};

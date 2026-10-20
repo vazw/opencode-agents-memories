@@ -138,6 +138,51 @@ pub fn user_prompts_indexes() -> [&'static str; 6] {
     USER_PROMPTS_INDEXES
 }
 
+// schema-migrations.ts L218-232 (USER_PROFILES_MIGRATIONS v1 stmt 1).
+pub const USER_PROFILES_DDL: &str = r#"
+          CREATE TABLE IF NOT EXISTS user_profiles (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            user_name TEXT NOT NULL,
+            user_email TEXT NOT NULL,
+            profile_data TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL,
+            last_analyzed_at INTEGER NOT NULL,
+            total_prompts_analyzed INTEGER NOT NULL DEFAULT 0,
+            is_active BOOLEAN NOT NULL DEFAULT 1
+          )
+        "#;
+
+// schema-migrations.ts L234-245 (USER_PROFILES_MIGRATIONS v1 stmt 2).
+pub const USER_PROFILE_CHANGELOGS_DDL: &str = r#"
+          CREATE TABLE IF NOT EXISTS user_profile_changelogs (
+            id TEXT PRIMARY KEY,
+            profile_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            change_type TEXT NOT NULL,
+            change_summary TEXT NOT NULL,
+            profile_data_snapshot TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (profile_id) REFERENCES user_profiles(id) ON DELETE CASCADE
+          )
+        "#;
+
+/// schema-migrations.ts L246-255 (USER_PROFILES_MIGRATIONS v1 indexes, in
+/// DDL order).
+pub const USER_PROFILES_INDEXES: [&str; 4] = [
+    r#"CREATE INDEX IF NOT EXISTS idx_user_profiles_user_id ON user_profiles(user_id)"#,
+    r#"CREATE INDEX IF NOT EXISTS idx_user_profiles_is_active ON user_profiles(is_active)"#,
+    r#"CREATE INDEX IF NOT EXISTS idx_user_profile_changelogs_profile_id ON user_profile_changelogs(profile_id)"#,
+    r#"CREATE INDEX IF NOT EXISTS idx_user_profile_changelogs_version ON user_profile_changelogs(version DESC)"#,
+];
+
+/// schema-migrations.ts L246-255 in DDL order (see `USER_PROFILES_INDEXES`).
+pub fn user_profiles_indexes() -> [&'static str; 4] {
+    USER_PROFILES_INDEXES
+}
+
 // vector-search.ts L50-55.
 pub const INSERT_WITH_TAGS: &str = r#"
   INSERT INTO memories (
