@@ -1,0 +1,1 @@
+{"id":"hello-1","jsonrpc":"2.0","result":{"capabilities":{"fire_and_forget_capture":true,"standalone":true,"web":true},"engine_version":"0.1.0","methods":["capture","inject","recall","health","shutdown"],"protocol":"1.0.0"}}

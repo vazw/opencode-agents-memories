@@ -13,6 +13,7 @@ pub mod connection;
 pub mod db;
 pub mod encryption_key;
 pub mod encryption_migrator;
+pub mod engine_lock;
 pub mod engine_migrator;
 pub mod episodic_sql;
 pub mod error;

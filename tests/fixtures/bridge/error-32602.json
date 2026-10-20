@@ -1,0 +1,1 @@
+{"error":{"code":-32602,"data":{"session_id":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx","violation":"overlong"},"message":"Invalid params"},"id":"capture-2","jsonrpc":"2.0"}

@@ -1,0 +1,1 @@
+{"id":"inject-1","jsonrpc":"2.0","method":"inject","params":{"agent_id":"agent-1","include":["summary","metadata"],"project_id":"proj-1","session_id":"oc-bridge-4242","token_budget":800}}

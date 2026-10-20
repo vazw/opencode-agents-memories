@@ -283,6 +283,10 @@ pub fn episodic_migrations(dimensions: u32) -> Vec<SchemaMigration> {
     for index in crate::episodic_sql::EPISODIC_V3_INDEXES {
         v3_statements.push(Statement::new(index, Vec::new()));
     }
+    let v4_statements: Vec<Statement> = crate::episodic_sql::EPISODIC_V4_ALTERS
+        .iter()
+        .map(|sql| Statement::new(*sql, Vec::new()))
+        .collect();
     vec![
         SchemaMigration {
             version: 1,
@@ -298,6 +302,11 @@ pub fn episodic_migrations(dimensions: u32) -> Vec<SchemaMigration> {
             version: 3,
             description: "episodic-v3: Consolidated milestone records (W4.3)",
             statements: v3_statements,
+        },
+        SchemaMigration {
+            version: 4,
+            description: "episodic-v4: Additive client-minted capture_id on agent_sessions (W5.1)",
+            statements: v4_statements,
         },
     ]
 }

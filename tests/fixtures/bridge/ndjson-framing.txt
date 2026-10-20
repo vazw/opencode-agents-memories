@@ -1,0 +1,3 @@
+{"id":"hello-1","jsonrpc":"2.0","method":"hello","params":{"client":"opencode-mem-plugin","min_protocol":"1.0.0","protocol":"1.0.0"}}
+{"id":"capture-1","jsonrpc":"2.0","method":"capture","params":{"agent_id":"agent-1","agent_name":"build","capture_id":"019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b","metadata":{"turn":1},"parent_session_id":null,"project_id":"proj-1","session_id":"oc-bridge-4242","summary":"greeting","transcript":"hello world"}}
+{"id":"health-1","jsonrpc":"2.0","method":"health","params":{"session_id":"oc-bridge-4242"}}

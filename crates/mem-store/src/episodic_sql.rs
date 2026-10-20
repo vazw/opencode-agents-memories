@@ -84,6 +84,11 @@ pub const EPISODIC_V3_INDEXES: [&str; 1] = [
     "CREATE INDEX IF NOT EXISTS idx_episodic_milestones_project_agent_created ON episodic_milestones(project_id, agent_id, created_at)",
 ];
 
+/// v4 additive column (D-36): the client-minted `capture_id` on
+/// `agent_sessions`. Nullable, no default — rows written before the W5.1
+/// bridge carry NULL, and W5.1 inserts no value (W5.3 owns the write path).
+pub const EPISODIC_V4_ALTERS: [&str; 1] = ["ALTER TABLE agent_sessions ADD COLUMN capture_id TEXT"];
+
 // ---------------------------------------------------------------------------
 // Query statements (net-new, parameterized)
 // ---------------------------------------------------------------------------

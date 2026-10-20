@@ -1,0 +1,1 @@
+{"id":"recall-1","jsonrpc":"2.0","method":"recall","params":{"limit":5,"query":"vector store","scope":"session","session_id":"oc-bridge-4242","tags":["storage"]}}
