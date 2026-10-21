@@ -30,6 +30,10 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::task::JoinHandle;
 
+use mem_profile::profile_store::ProfileStore;
+use mem_profile::prompt::UserPromptManager;
+use mem_store::shard_manager::ShardManager;
+
 use crate::capture::{CaptureParams, CaptureService};
 use crate::error_map::{self, ErrorKind};
 use crate::inject::{InjectParams, InjectService};
@@ -548,16 +552,44 @@ impl HostConfig {
 // WebLauncher seam (M1) + WebHandle (B3)
 // ---------------------------------------------------------------------------
 
+/// The stores the ROOT composition root turns into `ApiServices::production(...)`.
+///
+/// mem-bridge never depends on mem-web (ADR-0007:584); the root crate owns that
+/// edge and builds the mem-web services itself. Every field here is already a
+/// mem-bridge dependency (`mem-store` / `mem-profile` / `mem-embed`), so this
+/// struct adds no manifest entry and no new edge. Every field is `Send + Sync`,
+/// so the boxed launcher future keeps its bounds.
+#[derive(Clone)]
+pub struct WebStoreDeps {
+    /// The composed shard manager (a CLONE of the one `build_composed_runtime`
+    /// opened — its manual `Clone` shares the connection manager, the init cell
+    /// and the scope write locks, so it is still one manager).
+    pub shards: ShardManager,
+    /// The user-prompt store (opened by the composition root for the first time
+    /// in W6.7).
+    pub prompts: Arc<UserPromptManager>,
+    /// The user-profile store (likewise first opened in W6.7).
+    pub profile: Arc<ProfileStore>,
+    /// The engine's embedder, wrapped by the root into the mem-web embed port.
+    pub embedder: Arc<dyn mem_embed::embedder::Embedder>,
+}
+
 /// The web server's launch inputs, filled from the host config.
-#[derive(Debug, Clone)]
+///
+/// No `Debug`: none of `ShardManager` / `UserPromptManager` / `ProfileStore` /
+/// `dyn Embedder` is `Debug`, and this struct is never rendered or logged.
+#[derive(Clone)]
 pub struct WebConfig {
     pub host: String,
     pub port: u16,
     pub storage_root: PathBuf,
+    /// The composed stores, or `None` when composition failed: the launcher then
+    /// wires the documented unavailable stub and the engine degrades.
+    pub deps: Option<WebStoreDeps>,
 }
 
 /// A started web server's stop handle. `stop` is an OWNED deferred future —
-/// the launcher builds it around `mem_web`'s `WebServerHandle::stop` and
+/// the launcher builds it around `mem-web`'s `WebServerHandle::stop` and
 /// absorbs its `Result` (the D-45 budget ignores a failing stop).
 /// The stop closure type: an owned `FnOnce` returning the deferred future.
 type StopClosure = Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
@@ -777,17 +809,64 @@ pub async fn run_in_runtime(
         Arc::new(mem_store::platform::SystemProcessProbe);
     let lock = acquire_outcome(&config.storage_root, probe);
 
+    // The production composition root: every W5.3 service over the resolved
+    // config. A composition failure DEGRADES (D-38): the engine keeps its
+    // stdio purpose, `capture`/`inject` answer -32001, and the warning is
+    // structured on stderr. Fixture-only `Engine::new` remains the no-I/O
+    // constructor.
+    //
+    // W6.7: composition runs BEFORE the web launch, because the launcher now
+    // receives the composed stores (`WebStoreDeps`) and the ROOT crate turns
+    // them into `ApiServices::production(...)`. The engine lock is still
+    // acquired first (§B3), and a composition failure still launches the web
+    // server with `deps: None` — the existing degrade path.
+    let composed = match crate::composition::build_composed_runtime(
+        &config.storage_root,
+        &core_config,
+        crate::composition::embedder_from_config(&core_config),
+        None,
+    )
+    .await
+    {
+        Ok(runtime) => Some(Arc::new(runtime)),
+        Err(detail) => {
+            structured_stderr(
+                "engine.composition_failed",
+                "warn",
+                "engine",
+                serde_json::json!({ "detail_short": true }),
+            );
+            tracing::warn!(
+                detail,
+                "runtime composition failed; engine degrades to no-write"
+            );
+            None
+        }
+    };
+
     // Web server inside THIS process (D-32); `Ok(None)` → disabled handle.
     // A WEB LAUNCH FAILURE DEGRADES (D-38): the engine keeps its stdio
     // purpose with a disabled web handle and a structured stderr warning —
     // the axum surface is auxiliary; an AddrInUse/Bind failure must never
     // crash the bridge (and concurrent engines on one host do not wedge
     // each other over the default port).
+    let deps = composed.as_ref().map(|runtime| WebStoreDeps {
+        // The deref-clone is required: `ComposedRuntime.shards` is
+        // `Arc<ShardManager>` while `WebStoreDeps.shards` is by value. The
+        // manual `Clone` shares the connection manager, the init cell and the
+        // scope write locks, so the composition root and the web surface still
+        // use exactly ONE manager.
+        shards: (*runtime.shards).clone(),
+        prompts: runtime.prompts.clone(),
+        profile: runtime.profile.clone(),
+        embedder: runtime.embedder.clone(),
+    });
     let web = match launcher
         .launch(WebConfig {
             host: config.web_host.clone(),
             port: config.web_port,
             storage_root: config.storage_root.clone(),
+            deps,
         })
         .await
     {
@@ -815,34 +894,6 @@ pub async fn run_in_runtime(
         ..EngineConfig::default()
     };
 
-    // The production composition root: every W5.3 service over the resolved
-    // config. A composition failure DEGRADES (D-38): the engine keeps its
-    // stdio purpose, `capture`/`inject` answer -32001, and the warning is
-    // structured on stderr. Fixture-only `Engine::new` remains the no-I/O
-    // constructor.
-    let composed = match crate::composition::build_composed_runtime(
-        &config.storage_root,
-        &core_config,
-        crate::composition::embedder_from_config(&core_config),
-        None,
-    )
-    .await
-    {
-        Ok(runtime) => Some(Arc::new(runtime)),
-        Err(detail) => {
-            structured_stderr(
-                "engine.composition_failed",
-                "warn",
-                "engine",
-                serde_json::json!({ "detail_short": true }),
-            );
-            tracing::warn!(
-                detail,
-                "runtime composition failed; engine degrades to no-write"
-            );
-            None
-        }
-    };
     let engine = match &composed {
         Some(runtime) => Engine::with_runtime(
             engine_config,

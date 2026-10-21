@@ -1,0 +1,23 @@
+# The Trunk pipeline for the `web-ui` SPA (ADR-0003, W6.5 shell slice).
+#
+# `public_url = "/"` is load-bearing: trunk 0.22 writes the hashed assets to
+# the ROOT of `dist/` and only rewrites the URLs. `mem-web` serves `dist/`
+# with `ServeDir` rooted at the server root, so "/assets/..." would 404.
+# The consequence (hashed assets are served `no-cache`, not `immutable`) is
+# recorded in the blueprint's [SECURITY & EDGE CASES].
+
+[build]
+target = "index.html"
+dist = "dist"
+public_url = "/"
+filehash = true
+release = true
+cargo_profile = "wasm-release"
+
+# Trunk manages its own wasm-bindgen / wasm-opt copies under ~/.cache/trunk/
+# and downloads them on demand: a fresh clone needs no system wasm-bindgen-cli.
+# The `wasm_bindgen` pin MUST equal the `wasm-bindgen` crate version in
+# Cargo.lock -- the CLI refuses a wasm built by a different crate version.
+[tools]
+wasm_bindgen = "0.2.129"
+wasm_opt = "version_123"

@@ -33,10 +33,13 @@ use mem_bridge::engine::structured_stderr;
 use mem_bridge::engine::{HostConfig, run as engine_run};
 use mem_core::CRATE_NAME as MEM_CORE;
 use mem_embed::CRATE_NAME as MEM_EMBED;
+use mem_embed::{EmbeddingService, EmbeddingServiceOptions};
 use mem_episodic::CRATE_NAME as MEM_EPISODIC;
 use mem_profile::CRATE_NAME as MEM_PROFILE;
 use mem_store::CRATE_NAME as MEM_STORE;
 use mem_web::CRATE_NAME as MEM_WEB;
+use mem_web::api::ports::ApiServices;
+use mem_web::api::store_adapter::{ProductionDeps, ProductionEmbed};
 use opencode_agents_memory::web_dist::{self, ResolvedDist};
 
 /// The workspace crates in composition order — printed by
@@ -73,8 +76,15 @@ fn version_line() -> String {
 /// handed to mem-web; a `Missing` one refuses the launch — with a structured
 /// `web.dist_missing` line naming the candidates — so the engine's existing
 /// `web.launch_failed` degradation fires and no silent 404 shell is served.
+///
+/// W6.7: the launcher is ALSO the mem-web composition root. mem-bridge hands it
+/// the composed stores (`WebConfig::deps`) because mem-bridge may never depend
+/// on mem-web (ADR-0007:584); the root crate owns that edge and is the only
+/// place that calls [`ApiServices::production`]. With no deps (composition
+/// failed) it wires the documented unavailable stub and the engine degrades.
 struct RootWebLauncher {
     dist: ResolvedDist,
+    config: mem_core::config::Config,
 }
 
 impl WebLauncher for RootWebLauncher {
@@ -82,10 +92,14 @@ impl WebLauncher for RootWebLauncher {
         &self,
         config: WebConfig,
     ) -> Pin<Box<dyn Future<Output = Result<WebHandle, String>> + Send + '_>> {
-        let host = config.host;
-        let port = config.port;
-        let storage_root = config.storage_root;
+        let WebConfig {
+            host,
+            port,
+            storage_root,
+            deps,
+        } = config;
         let dist = self.dist.clone();
+        let core_config = self.config.clone();
         Box::pin(async move {
             let dist_dir = match &dist {
                 ResolvedDist::Ready { dir } => dir.clone(),
@@ -107,6 +121,26 @@ impl WebLauncher for RootWebLauncher {
                 auth_username: None,
                 api_token: None,
             };
+            // The mem-web production wiring lives HERE, in the root crate,
+            // because mem-bridge must not take a mem-web edge.
+            let api = match deps {
+                Some(deps) => {
+                    let service = EmbeddingService::new(
+                        EmbeddingServiceOptions::from_config(&core_config),
+                        deps.embedder.clone(),
+                    );
+                    Arc::new(ApiServices::production(ProductionDeps {
+                        shards: deps.shards.clone(),
+                        prompts: deps.prompts.clone(),
+                        profile: deps.profile.clone(),
+                        embed: Arc::new(ProductionEmbed::new(Arc::new(service))),
+                    }))
+                }
+                // The documented degrade path: no composed stores means the
+                // endpoints answer `PortError::Unavailable`, exactly as before
+                // W6.7.
+                None => Arc::new(ApiServices::unavailable()),
+            };
             let state = mem_web::server::AppState {
                 basic_auth: mem_web::web_auth::WebAuth::new(None, None, "engine"),
                 api_token: None,
@@ -115,7 +149,7 @@ impl WebLauncher for RootWebLauncher {
                 )),
                 dist_dir,
                 host_allowlist: mem_web::host_allowlist::HostAllowlist::for_bind_host(&host),
-                api: Arc::new(mem_web::api::ports::ApiServices::unavailable()),
+                api,
                 user_id: "unknown".to_owned(),
                 bind_host: host.clone(),
             };
@@ -267,16 +301,24 @@ fn main() {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let dist = web_dist::resolve(explicit.as_deref(), &exe_dir, &cwd);
 
+    // The resolved core config is loaded SYNCHRONOUSLY here (M1) and carried
+    // into the engine by value. W6.7 also needs it in the launcher (the
+    // embedding service options for the mem-web embed port), so it is hoisted
+    // and cloned rather than loaded twice.
+    let core_config = mem_core::config::Config::load_default(&mem_core::env::ProcessEnv)
+        .unwrap_or_else(|error| {
+            eprintln!("config load failed: {error}");
+            std::process::exit(70);
+        });
+
     let exit = engine_run(
         config.mode,
         config,
-        mem_core::config::Config::load_default(&mem_core::env::ProcessEnv).unwrap_or_else(
-            |error| {
-                eprintln!("config load failed: {error}");
-                std::process::exit(70);
-            },
-        ),
-        Box::new(RootWebLauncher { dist }),
+        core_config.clone(),
+        Box::new(RootWebLauncher {
+            dist,
+            config: core_config,
+        }),
     );
     std::process::exit(exit);
 }

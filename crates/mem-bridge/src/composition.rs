@@ -20,6 +20,8 @@ use std::time::Duration;
 
 use mem_core::config::Config;
 use mem_episodic::store::EpisodicStore;
+use mem_profile::profile_store::{ProfileConfig, ProfileStore};
+use mem_profile::prompt::UserPromptManager;
 use mem_store::connection::ConnectionManager;
 use mem_store::platform::{Platform, SystemProcessProbe};
 use mem_store::shard_manager::ShardManager;
@@ -33,6 +35,14 @@ pub struct ComposedRuntime {
     pub inject: Arc<InjectService>,
     pub store: Arc<EpisodicStore>,
     pub shards: Arc<ShardManager>,
+    /// The user-prompt store the mem-web surface reads (W6.7). Nothing in
+    /// mem-bridge or the root opened it before this wave; it is constructed
+    /// exactly once here so the root composition root can hand it to
+    /// `ApiServices::production(...)`.
+    pub prompts: Arc<UserPromptManager>,
+    /// The user-profile store the mem-web surface reads (W6.7), constructed
+    /// here for the same reason.
+    pub profile: Arc<ProfileStore>,
     pub embedder: Arc<dyn mem_embed::embedder::Embedder>,
     pub episodic_config: mem_core::config::Episodic,
     /// The shared in-flight consolidation gate (set by the scheduler's RAII
@@ -71,6 +81,22 @@ pub async fn build_composed_runtime(
         .ready()
         .await
         .map_err(|error| format!("episodic store init failed: {error}"))?;
+
+    // W6.7: the two profile-tier stores the mem-web surface needs. Both take
+    // their own database files (`user-prompts.db` / `user-profiles.db`) under
+    // the SAME storage root and the SAME derived store config, and both open
+    // lazily — so constructing them here costs handles, not I/O. They are
+    // built BEFORE `store_config` is moved into the shard manager.
+    let prompts = Arc::new(UserPromptManager::new(
+        storage_root.to_path_buf(),
+        store_config.clone(),
+        3,
+    ));
+    let profile = Arc::new(ProfileStore::new(
+        storage_root.to_path_buf(),
+        store_config.clone(),
+        ProfileConfig::default(),
+    ));
 
     let probe: Arc<dyn mem_store::platform::ProcessProbe> = Arc::new(SystemProcessProbe);
     let connections = Arc::new(ConnectionManager::new(
@@ -201,6 +227,8 @@ pub async fn build_composed_runtime(
         inject: Arc::new(inject),
         store,
         shards,
+        prompts,
+        profile,
         embedder,
         episodic_config: config.episodic,
         consolidation_active,

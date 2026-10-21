@@ -1,0 +1,4 @@
+# The wasm test runner. Without it, `cargo test --target wasm32-unknown-unknown`
+# tries to exec the .wasm file and dies with "Exec format error".
+[target.wasm32-unknown-unknown]
+runner = "wasm-bindgen-test-runner"
