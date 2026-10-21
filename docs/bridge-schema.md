@@ -230,9 +230,39 @@ reimplementation and no wrong-arch exec: an exec failure degrades. Whether `darw
 the port's own target matrix is an **open question for the user** (ADR-0007, documented
 limitation (iv)); an absent binary degrades — that is all this contract asserts.
 
+### Web-launch diagnostics: `web.dist_missing` + `web.launch_failed` (W6.8)
+
+The composition root resolves the web UI directory (§9). When no candidate is READY it does
+**not** bind a socket; it fails the auxiliary web LAUNCH:
+
+- `web.dist_missing` — emitted by the **composition root** (`src/main.rs`), level `warn`,
+  component `engine`, payload
+  `{"dist_candidates":["<path>", …],"reason":"<sentence>"}`. The candidate list is lossy path
+  strings (never raw non-UTF-8 paths) and the sentence names the offending or explicitly
+  configured path. No token, credential or request data ever appears in it.
+- `web.launch_failed` — the engine's existing degradation line, emitted immediately after with
+  its `detail_short: true` posture; the engine keeps its stdio purpose with a disabled web
+  handle.
+
+Both lines are expected on stderr when no build resolves, and the port stays closed. The extra
+`web.dist_missing` line exists because `web.launch_failed` carries no detail and the run path
+installs no tracing subscriber, so the detail would otherwise be dropped.
+
+**Lane limitation (issue 36):** a plugin-launched engine receives neither
+`OPENCODE_MEM_WEB_DIST` nor `--web-dist`, and the packaging script stages no UI bundle, so until
+**issue 36** lands every plugin-launched engine refuses its web launch and the **ENTIRE axum
+surface** — REST API **AND** `/api/health`, not merely the UI — is unavailable for it. The W6.7
+browser smoke and the W7.2 "web UI functional" rehearsal cannot pass before issue 36 closes.
+
 ## 9. Environment and defaults
 
-Both lanes read the **same names** and the **same default**:
+Both lanes read the **same names** and the **same default**, with ONE
+engine-direct exception: `OPENCODE_MEM_WEB_DIST` (and its CLI twin
+`--web-dist`) is read by the **engine lane only**. The wrapper's minimal child
+environment does not forward the name and its argv builder has no
+`--web-dist`; forwarding the setting from the wrapper is tracked as **issue
+36** (`W6.8 follow-up · Package the web UI beside the engine and forward the
+dist setting`).
 
 | variable | default | meaning |
 |---|---|---|
@@ -240,9 +270,42 @@ Both lanes read the **same names** and the **same default**:
 | `OPENCODE_MEM_MODE` | `stdio` | engine launch mode |
 | `OPENCODE_MEM_WEB_HOST` | loopback (`127.0.0.1`) | axum bind host (standalone mode) |
 | `OPENCODE_MEM_WEB_PORT` | `3742` | axum bind port (standalone mode) |
+| `OPENCODE_MEM_WEB_DIST` | first READY exe-relative candidate: `<exe_dir>/web-ui/dist`, then `<exe_dir>/../../web-ui/dist` | directory holding the built web UI that mem-web serves (engine-direct only) |
 
 The wrapper needs the storage root to write the status file **before any engine exists**,
 which is why the default is shared rather than engine-only.
+
+### The web UI directory (`OPENCODE_MEM_WEB_DIST` / `--web-dist`, W6.8)
+
+- **Precedence:** CLI flag `--web-dist <path>` / `--web-dist=<path>` > env var
+  `OPENCODE_MEM_WEB_DIST` > the runtime-derived default. A blank or
+  whitespace-only value falls through exactly like an unset one.
+- **No config-file surface:** the setting is deliberately **not** an
+  `opencode-mem.json` key, so a config file can never redirect the static
+  host. It is also not a `mem_core` config field (upstream has no
+  `webDistDir`).
+- **Default:** derived from the running binary (`--web-dist`'s value is
+  absolutized against the process cwd). Candidate 1 is the PACKAGED layout
+  (the bundle staged beside the engine binary); candidate 2 is the
+  CARGO-CHECKOUT dev layout (`target/<profile>/opencode-agents-memory` →
+  `../..` is the checkout root). The first candidate that EXISTS **and** holds
+  `index.html` as a regular file wins; a stale partial build is skipped in
+  favour of a later candidate. Nothing is hard-coded to an absolute or
+  repo-relative path, and a custom `CARGO_TARGET_DIR` simply makes candidate 2
+  wrong — the explicit setting covers that.
+- **A missing build REFUSES the web launch** at the composition root (never a
+  bind-and-404): the launcher emits `web.dist_missing` (see §8) and returns an
+  error, so the engine's existing `web.launch_failed` degradation fires and the
+  stdio purpose survives.
+- **Lane limitation (issue 36):** because the wrapper forwards neither the env
+  name nor the flag, a **plugin-launched** engine resolves only the
+  exe-relative default — and `plugin/scripts/stage-engine.sh` stages no UI
+  bundle. **Until issue 36 lands, every plugin-launched engine emits
+  `web.dist_missing` + `web.launch_failed` at every start and runs with the
+  ENTIRE axum surface — the REST API AND `/api/health`, not merely the UI —
+  unavailable.** The W6.7 browser smoke and the W7.2 "web UI functional"
+  rehearsal cannot pass before issue 36 closes. That regression is owned by
+  issue 36, not by this composition contract.
 
 ## 10. Secrets (security posture (a)–(j), mandates 1–2, 9)
 
