@@ -48,6 +48,23 @@ pub const EPISODIC_MIGRATION_LABEL: &str = "episodic";
 /// The producer of an agent-session row id (`SELECT uuid7_str()` by default).
 pub type IdFactory = Arc<dyn Fn() -> String + Send + Sync>;
 
+/// What [`EpisodicStore::upsert_session`](Self::upsert_session) decided
+/// (W5.3): the recapture ladder's terminal decisions are observable so the
+/// capture layer can truthfully report "no second tier-1 write".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpsertOutcome {
+    /// A fresh triple: the row was inserted.
+    Inserted,
+    /// A newer capture id updated the live row in place.
+    Updated,
+    /// The same capture id is already stored (no write).
+    AlreadyApplied,
+    /// An older capture id arrived; the row keeps the newer content.
+    Superseded,
+    /// The triple matches a tombstone; nothing was written.
+    TombstoneUnchanged,
+}
+
 /// The injected time source (W4.3): a millisecond clock the store reads.
 ///
 /// `None` means "use the wall clock"; the consolidation path always injects
@@ -229,27 +246,8 @@ impl EpisodicStore {
         // stays defensive/unreachable through the public write surface.
         if let Some(parent_id) = session.parent_session_id.clone() {
             let db = self.ready().await?;
-            match visible_row_state(db.as_ref(), &parent_id).await? {
-                None => {
-                    return Err(EpisodicError::NotFound {
-                        entity: "parent_session".to_string(),
-                    });
-                }
-                Some(parent_row) => {
-                    if !parent_row.is_null("deleted_at") {
-                        return Err(EpisodicError::NotFound {
-                            entity: "parent_session".to_string(),
-                        });
-                    }
-                    if parent_row.text("project_id").as_deref() != Some(session.project_id.as_str())
-                    {
-                        return Err(EpisodicError::validation(
-                            "parent_session_id",
-                            "must be in the same project as the child session",
-                        ));
-                    }
-                }
-            }
+            self.ensure_parent_visible(db.as_ref(), &session, &parent_id)
+                .await?;
         }
 
         let db = self.ready().await?;
@@ -272,6 +270,11 @@ impl EpisodicStore {
         let metadata_json = session.to_metadata_json()?;
         let params = vec![
             Value::Text(session.id.clone()),
+            session
+                .capture_id
+                .clone()
+                .map(Value::Text)
+                .unwrap_or(Value::Null),
             Value::Text(session.project_id.clone()),
             Value::Text(session.session_id.clone()),
             Value::Text(session.agent_id.clone()),
@@ -288,10 +291,174 @@ impl EpisodicStore {
             Value::Null,
             Value::Integer(0),
         ];
-        match db.execute(sql::INSERT_SESSION, params).await {
+        // One local transaction (batch Write). W5.3: the INSERT ride the
+        // atomic batch seam like every other episodic write.
+        let statements = vec![Statement::new(sql::INSERT_SESSION, params)];
+        match db.batch(statements, BatchMode::Write).await {
             Ok(_) => Ok(id),
             Err(error) if is_unique_violation(&error) => Err(EpisodicError::Conflict),
             Err(error) => Err(EpisodicError::Store(error)),
+        }
+    }
+
+    /// W5.3 — the capture-aware upsert (one local transaction per call).
+    ///
+    /// Unique key stays `(project_id, session_id, agent_id)`. For a fresh
+    /// triple this inserts; for an existing LIVE row the client-minted
+    /// capture ids decide: the same `capture_id` is already applied (no-op),
+    /// a lexicographically newer id updates the row in place, an older id
+    /// is superseded (no write), and a tombstone is never mutated.
+    /// The parent-visibility and embedding-dimension checks re-run on the
+    /// update path like on the insert path; nothing is written unless every
+    /// earlier stage succeeds.
+    pub async fn upsert_session(
+        &self,
+        new: NewAgentSession,
+        embedder: &dyn Embedder,
+    ) -> Result<UpsertOutcome, EpisodicError> {
+        let now = self.now();
+        let mut session = new.into_session(now);
+        validate(&session)?;
+
+        if let Some(parent_id) = session.parent_session_id.clone() {
+            let db = self.ready().await?;
+            self.ensure_parent_visible(db.as_ref(), &session, &parent_id)
+                .await?;
+        }
+
+        let embedding = crate::embedding::embed_document(embedder, &session).await?;
+        if embedding.len() != self.dimensions as usize {
+            return Err(EpisodicError::validation(
+                "embedding",
+                format!(
+                    "expected {} dimensions, got {}",
+                    self.dimensions,
+                    embedding.len()
+                ),
+            ));
+        }
+        session.embedding = embedding;
+
+        let db = self.ready().await?;
+        let existing_row = query_one(
+            db.as_ref(),
+            sql::SELECT_SESSION_BY_TRIPLE,
+            vec![
+                Value::Text(session.project_id.clone()),
+                Value::Text(session.session_id.clone()),
+                Value::Text(session.agent_id.clone()),
+            ],
+        )
+        .await
+        .map_err(EpisodicError::Store)?;
+
+        let Some(existing_row) = existing_row else {
+            // Fresh triple: mint the row id and insert (one local Write
+            // transaction).
+            let id = self.mint_id(db.as_ref()).await?;
+            session.id = id.clone();
+            let metadata_json = session.to_metadata_json()?;
+            let params = vec![
+                Value::Text(session.id.clone()),
+                session
+                    .capture_id
+                    .clone()
+                    .map(Value::Text)
+                    .unwrap_or(Value::Null),
+                Value::Text(session.project_id.clone()),
+                Value::Text(session.session_id.clone()),
+                Value::Text(session.agent_id.clone()),
+                session
+                    .parent_session_id
+                    .clone()
+                    .map(Value::Text)
+                    .unwrap_or(Value::Null),
+                Value::Text(session.summary.clone()),
+                Value::Text(metadata_json),
+                Value::Text(vector_to_text(&session.embedding)),
+                Value::Integer(session.created_at),
+                Value::Integer(session.updated_at),
+                Value::Null,
+                Value::Integer(0),
+            ];
+            let statements = vec![Statement::new(sql::INSERT_SESSION, params)];
+            db.batch(statements, BatchMode::Write).await?;
+            return Ok(UpsertOutcome::Inserted);
+        };
+
+        // Tombstone: never mutated.
+        if !existing_row.is_null("deleted_at") {
+            return Ok(UpsertOutcome::TombstoneUnchanged);
+        }
+
+        // The capture-id ladder: existing row's id vs the arriving id.
+        let existing_capture = existing_row.text("capture_id");
+        match session.capture_id.clone() {
+            Some(_) if existing_capture.as_deref() == session.capture_id.as_deref() => {
+                // Already applied: the exact same capture is stored.
+                return Ok(UpsertOutcome::AlreadyApplied);
+            }
+            Some(arriving) if existing_capture.is_none_or(|old| arriving > old) => {}
+
+            Some(_) => {
+                // An older capture id is superseded; the row keeps the
+                // newer content.
+                return Ok(UpsertOutcome::Superseded);
+            }
+            None => {
+                return Err(EpisodicError::validation(
+                    "capture_id",
+                    "upsert requires a client-minted capture_id",
+                ));
+            }
+        }
+
+        let metadata_json = session.to_metadata_json()?;
+        let existing_id = existing_row.text("id").unwrap_or_default();
+        let statements = vec![Statement::new(
+            sql::UPDATE_SESSION_RECAPTURE,
+            vec![
+                Value::Text(session.summary.clone()),
+                Value::Text(metadata_json),
+                Value::Text(vector_to_text(&session.embedding)),
+                Value::Integer(now),
+                Value::Text(session.capture_id.clone().unwrap_or_default()),
+                Value::Text(existing_id),
+                Value::Text(session.project_id.clone()),
+            ],
+        )];
+        db.batch(statements, BatchMode::Write).await?;
+        Ok(UpsertOutcome::Updated)
+    }
+
+    /// D-11 parent visibility pre-check (shared by `insert_session` and
+    /// `upsert_session`): the parent must exist, be live and be in the
+    /// SAME project as the child.
+    async fn ensure_parent_visible(
+        &self,
+        db: &dyn Db,
+        session: &AgentSession,
+        parent_id: &str,
+    ) -> Result<(), EpisodicError> {
+        match visible_row_state(db, parent_id).await? {
+            None => Err(EpisodicError::NotFound {
+                entity: "parent_session".to_string(),
+            }),
+            Some(parent_row) => {
+                if !parent_row.is_null("deleted_at") {
+                    return Err(EpisodicError::NotFound {
+                        entity: "parent_session".to_string(),
+                    });
+                }
+                if parent_row.text("project_id").as_deref() != Some(session.project_id.as_str()) {
+                    Err(EpisodicError::validation(
+                        "parent_session_id",
+                        "must be in the same project as the child session",
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
         }
     }
 
@@ -964,6 +1131,14 @@ fn is_unique_violation(error: &mem_store::error::StoreError) -> bool {
         ..
     } = error
     else {
+        // W5.3 divergence (documented): the `transactional_batch` path wraps
+        // constraint errors WITHOUT the structured `is_constraint` flag
+        // ("batch statement 0 failed: …"), so the batched INSERT classifies
+        // via the message text alone — the message is the SQLite engine's
+        // "UNIQUE constraint failed" literal, never interpolation.
+        if let mem_store::error::StoreError::Turso { message, .. } = error {
+            return message.to_ascii_lowercase().contains("unique");
+        }
         return false;
     };
     error.message().to_ascii_lowercase().contains("unique")
@@ -988,6 +1163,7 @@ fn row_to_session(row: &Row) -> Result<AgentSession, EpisodicError> {
         updated_at: row.i64("updated_at").unwrap_or(0),
         deleted_at: row.i64("deleted_at"),
         orphaned: row.i64("orphaned").unwrap_or(0) != 0,
+        capture_id: row.text("capture_id"),
     })
 }
 

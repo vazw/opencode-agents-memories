@@ -93,6 +93,9 @@ pub struct AgentSession {
     pub updated_at: i64,
     /// Soft-delete stamp (unix millis; `None` = live, D-11).
     pub deleted_at: Option<i64>,
+    /// The client-minted capture id that produced this row (W5.3; `None`
+    /// for W4-written rows).
+    pub capture_id: Option<String>,
     /// True when this record's parent link was severed by a parent delete
     /// (D-12 write-time flag; never computed from the link at read time).
     pub orphaned: bool,
@@ -143,6 +146,8 @@ pub struct NewAgentSession {
     pub extra: std::collections::BTreeMap<String, mem_store::serde_json::Value>,
     /// Explicit metadata timestamp; `None` means "use `now`".
     pub timestamp: Option<i64>,
+    /// The client-minted capture id (upsert keying; `None` = plain insert).
+    pub capture_id: Option<String>,
 }
 
 impl NewAgentSession {
@@ -169,6 +174,7 @@ impl NewAgentSession {
         };
         AgentSession {
             id: String::new(),
+            capture_id: self.capture_id.clone(),
             project_id: self.project_id,
             session_id: self.session_id,
             agent_id: self.agent_id,

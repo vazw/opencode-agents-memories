@@ -5,7 +5,14 @@
 /// Stable crate identifier for composition checks.
 pub const CRATE_NAME: &str = "mem-bridge";
 
+pub mod capture;
+pub mod capture_context;
+pub mod capture_prompt;
+pub mod composition;
 pub mod db_lane;
 pub mod engine;
 pub mod error_map;
+pub mod inject;
 pub mod jsonrpc;
+pub mod project_scope;
+pub mod scope_resolver;

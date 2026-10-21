@@ -9,6 +9,7 @@ pub mod embedding;
 pub mod error;
 pub mod gate;
 pub mod ids;
+pub mod inbox;
 pub mod milestone;
 pub mod payload;
 pub mod promotion;
@@ -28,6 +29,11 @@ pub use consolidation::{
 };
 pub use embedding::{UNKNOWN_BRANCH, compose_embedded_document};
 pub use error::EpisodicError;
+
+/// Stream plumbing re-export (upstream `AiProvider::complete` returns a
+/// `futures::Stream`; downstream crates drain it without a NEW dependency
+/// edge — same house pattern as `mem-store`'s serde/tokio re-exports).
+pub use futures;
 pub use milestone::{
     Contributor, MAX_CONTRIBUTORS_FRAMING_BYTES_PER_ROW, Milestone, decode_contributors,
     encode_contributors, max_contributors_bytes, plan_milestone,
@@ -38,7 +44,9 @@ pub use promotion::{
     VectorCountBump, select_promotable_facts,
 };
 pub use record::{AgentSession, Decision, NewAgentSession, WorkItem, WorkKind};
-pub use store::{Clock, EPISODIC_DB_NAME, EpisodicStore, IdFactory, SessionSearchHit};
+pub use store::{
+    Clock, EPISODIC_DB_NAME, EpisodicStore, IdFactory, SessionSearchHit, UpsertOutcome,
+};
 pub use summarizer::{
     MAX_TRANSCRIPT_BYTES, MILESTONE_SYSTEM_PROMPT, MilestoneSummarizer, ProviderSummarizer,
     build_transcript, fit_prefix, stripped_source_summary,

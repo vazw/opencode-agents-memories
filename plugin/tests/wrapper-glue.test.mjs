@@ -138,28 +138,47 @@ if (process.env.DRIVER_MODE_OVERRIDE !== undefined) process.env.OPENCODE_MEM_MOD
 const mod = await import(pathToFileURL(path.join(pkgDir, "dist", "plugin.js")));
 const plugin = mod.default;
 const ctx = JSON.parse(fs.readFileSync(process.env.DRIVER_CTX_PATH, "utf8"));
+let client = ctx.client ?? null;
+if (client && typeof client === "object" && client.sessionStub) {
+  const stubData = client.sessionStub.data;
+  client = {
+    session: {
+      messages: async (args) =>
+        args && args.path && args.path.id ? { data: stubData } : { data: [] },
+    },
+  };
+}
 const hooks = await plugin.server({
-  client: ctx.client ?? null,
+  client,
   project: ctx.project ?? null,
   directory: pkgDir,
   worktree: null,
   $: null,
 });
-await hooks.hooks["chat.message"](
-  { sessionID: process.env.DRIVER_SESSION || "sess-1" },
-  { message: { id: "msg-1", parts: [{ type: "text", text: "hello world" }] } }
-);
+const events = process.env.DRIVER_EVENTS_PATH
+  ? JSON.parse(fs.readFileSync(process.env.DRIVER_EVENTS_PATH, "utf8"))
+  : [
+      {
+        hook: "chat.message",
+        input: { sessionID: process.env.DRIVER_SESSION || "sess-1" },
+        output: { message: { id: "msg-1", parts: [{ type: "text", text: "hello world" }] } },
+      },
+    ];
+for (const event of events) {
+  await hooks.hooks[event.hook](event.input ?? {}, event.output ?? {});
+}
 const logPath = process.env.STUB_LOG;
+const waitMethod = process.env.DRIVER_WAIT_METHOD ?? "capture";
 const deadline = Date.now() + 15000;
 let seenCapture = false;
 for (;;) {
   let text = "";
   try { text = fs.readFileSync(logPath, "utf8"); } catch {}
-  if (text.includes('"method":"capture"')) { seenCapture = true; break; }
+  if (waitMethod === "none" || text.includes('"method":"' + waitMethod + '"')) { seenCapture = true; break; }
   if (Date.now() > deadline) break;
   await new Promise((resolve) => setTimeout(resolve, 20));
 }
-fs.writeFileSync(process.env.DRIVER_DONE_PATH, seenCapture ? "capture-seen" : "deadline");
+fs.writeFileSync(process.env.DRIVER_DONE_PATH, seenCapture ? "seen" : "deadline");
 if (process.env.DRIVER_MODE === "linger") {
   fs.writeFileSync(process.env.STUB_READY, "ready");
   await new Promise(() => {});
@@ -195,8 +214,18 @@ function runDriver(driverPath, args, env, timeoutMs = 30000) {
 
 /* ------------------------------------------------------------ tests */
 
-test("test_wrapper_forwards_chat_message_as_capture", { timeout: 60000 }, async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-glue-"));
+
+/* Replacement control flow (W5.3 Step 8 / issue 34): the idle event owns
+ * the capture; chat.message owns the injection ONLY; `project_id` is the
+ * host `input.directory` frozen ONCE. Justified (reviewer note): the W5.1
+ * oracle `test_wrapper_forwards_chat_message_as_capture` pinned the exact
+ * per-message capture call W5.3's blueprint REMOVES; its coverage lives on
+ * in these five oracles (AC7).
+ */
+
+// Shared helper: run the staged driver and parse the stub's stdin log.
+async function runGlueTest(tmpRootSuffix, { ctx, events, wait }) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), tmpRootSuffix));
   const pkgDir = stagePackage(tmp);
   const requestLogPath = path.join(tmp, "stub-requests.ndjson");
   const manifestPath = path.join(tmp, "stub-manifest.json");
@@ -205,26 +234,171 @@ test("test_wrapper_forwards_chat_message_as_capture", { timeout: 60000 }, async 
   fs.writeFileSync(driverPath, DRIVER_SOURCE);
   const driverResult = await runDriver(driverPath, [pkgDir], {
     STUB_LOG: requestLogPath,
-    DRIVER_CTX_PATH: writeCtxFile(tmp, { client: null, project: null }),
+    DRIVER_CTX_PATH: writeCtxFile(tmp, ctx ?? { client: null, project: null }),
     DRIVER_STORAGE_ROOT: path.join(tmp, "storage"),
     DRIVER_DONE_PATH: path.join(tmp, "driver-done.txt"),
+    DRIVER_EVENTS_PATH: writeEventsFile(tmp, events ?? []),
+    DRIVER_WAIT_METHOD: wait ?? "none",
   });
   assert.equal(driverResult.code, 0, `engine driver failed: stderr=${driverResult.stderr}`);
-  const parsed = fs
+  return fs
     .readFileSync(requestLogPath, "utf8")
     .split("\n")
     .filter((line) => line.trim().length > 0)
     .map((line) => JSON.parse(line).got);
-  assert.ok(parsed.length >= 2, "stub stdin must see at least hello + capture");
-  assert.equal(parsed[0].method, "hello", "first message after spawn must be hello");
-  const capture = parsed.find((message) => message.method === "capture");
-  assert.ok(capture, "stub stdin must receive a capture request line");
-  assert.equal(capture.id, "capture-2");
-  assert.equal(capture.params.session_id, "sess-1", "session_id from the hook must be forwarded");
+}
+
+function writeEventsFile(tmpRoot, events) {
+  const eventsPath = path.join(tmpRoot, "driver-events.json");
+  fs.writeFileSync(eventsPath, JSON.stringify(events));
+  return eventsPath;
+}
+
+function chatMessage(sessionID, parts) {
+  return {
+    hook: "chat.message",
+    input: { sessionID: sessionID ?? "sess-1" },
+    output: { message: { id: "msg-1", parts: parts ?? [{ type: "text", text: "hello world" }] } },
+  };
+}
+
+function idleEvent(sessionID, properties) {
+  return {
+    hook: "event",
+    input: {
+      sessionID: sessionID ?? "sess-1",
+      event: {
+        type: "event",
+        properties: { type: "session.idle", sessionID: sessionID ?? "sess-1", ...(properties ?? {}) },
+      },
+    },
+  };
+}
+
+test("test_wrapper_does_not_capture_on_every_chat_message", { timeout: 60000 }, async () => {
+  const wire = await runGlueTest("om-glue-dc-", {
+    events: [chatMessage(), chatMessage(), chatMessage()],
+    wait: "none",
+  });
+  assert.ok(wire.length >= 2, "stub stdin must see at least hello + one runtime call");
+  assert.ok(
+    !wire.some((message) => message.method === "capture"),
+    "a chat.message hook NEVER mints a per-message capture"
+  );
+  const injects = wire.filter((message) => message.method === "inject");
+  assert.equal(injects.length, 3, "each eligible chat.message awaits inject");
+  assert.equal(injects[0].params.session_id, "sess-1");
+});
+
+test("test_wrapper_project_id_comes_from_host_directory", { timeout: 60000 }, async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-glue-"));
+  const pkgDir = stagePackage(tmp);
+  // A hostile payload tries to override the project scope from transcript
+  // AND event data; the wrapper must ONLY trust input.directory.
+  const requestLogPath = path.join(tmp, "stub-requests.ndjson");
+  stageEngine(pkgDir, { linger: true, requestLogPath, manifestPath: path.join(tmp, "stub-manifest.json") });
+  const driverPath = path.join(tmp, "driver.mjs");
+  fs.writeFileSync(driverPath, DRIVER_SOURCE);
+  const driverResult = await runDriver(driverPath, [pkgDir], {
+    STUB_LOG: requestLogPath,
+    DRIVER_CTX_PATH: writeCtxFile(tmp, { client: { sessionStub: { data: [
+      { info: { id: "u1", role: "user" }, parts: [{ type: "text", text: "hello" }] },
+      { info: { id: "a1", role: "assistant" }, parts: [{ type: "text", text: "hi" }] },
+    ] } }, project: { id: "hostile-project-override" } }),
+    DRIVER_STORAGE_ROOT: path.join(tmp, "storage"),
+    DRIVER_DONE_PATH: path.join(tmp, "driver-done.txt"),
+    DRIVER_EVENTS_PATH: writeEventsFile(tmp, [
+      {
+        hook: "chat.message",
+        input: { sessionID: "sess-1", projectId: "hostile" },
+        output: {
+          message: {
+            id: "msg-1",
+            parts: [{ type: "text", text: "hello" }],
+            projectId: "hostile",
+          },
+        },
+      },
+      idleEvent("sess-1", { projectId: "hostile" }),
+    ]),
+    DRIVER_WAIT_METHOD: "capture",
+  });
+  assert.equal(driverResult.code, 0, `engine driver failed: stderr=${driverResult.stderr}`);
+  const wire = fs
+    .readFileSync(requestLogPath, "utf8")
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line).got);
+  const capture = wire.find((message) => message.method === "capture");
+  assert.ok(capture, "the idle event captured");
+  assert.equal(capture.params.project_id, pkgDir, "project_id == input.directory, byte-frozen");
+});
+
+test("test_wrapper_captures_session_idle_with_project_id", { timeout: 60000 }, async () => {
+  const wire = await runGlueTest("om-glue-idle-", {
+    ctx: {
+      client: {
+        sessionStub: {
+          data: [
+            { info: { id: "u1", role: "user" }, parts: [{ type: "text", text: "fix the login bug" }] },
+            { info: { id: "a1", role: "assistant" }, parts: [{ type: "text", text: "done — updated the handler" }] },
+            { info: { id: "a2", role: "assistant" }, parts: [{ type: "tool", tool: "edit", state: { input: { path: "src/h.js" } } }] },
+          ],
+        },
+      },
+    },
+    events: [idleEvent("sess-1")],
+    wait: "capture",
+  });
+  const capture = wire.find((message) => message.method === "capture");
+  assert.ok(capture, "the idle event captured");
+  const context = capture.params.metadata.autoCaptureContext;
+  assert.equal(context.userPrompt, "fix the login bug");
+  assert.equal(
+    context.textResponses[0],
+    "done — updated the handler",
+    "the eligible prompt's assistant RESPONSE text is assembled"
+  );
+  assert.equal(context.toolCalls[0].name, "edit");
+  assert.ok(capture.params.metadata.promptId === "u1", "the eligible user-message id as promptId");
   assert.ok(
     typeof capture.params.capture_id === "string" && capture.params.capture_id.length <= 64,
-    "capture params must carry a capture_id of at most 64 chars"
+    "idle capture carries a valid capture_id"
   );
+});
+
+test("test_wrapper_reuses_capture_id_for_replayed_idle", { timeout: 60000 }, async () => {
+  const wire = await runGlueTest("om-glue-replay-", {
+    ctx: { client: { sessionStub: { data: [
+      { info: { id: "u1", role: "user" }, parts: [{ type: "text", text: "fix the login bug" }] },
+      { info: { id: "a1", role: "assistant" }, parts: [{ type: "text", text: "done" }] },
+    ] } } },
+    events: [idleEvent("sess-1"), idleEvent("sess-1")],
+    wait: "capture",
+  });
+  const captures = wire.filter((message) => message.method === "capture");
+  assert.equal(captures.length, 2, "both idle deliveries queued their capture");
+  assert.equal(
+    captures[0].params.capture_id,
+    captures[1].params.capture_id,
+    "the replayed idle delivery REUSES the same capture_id (idempotent upsert)"
+  );
+});
+
+test("test_wrapper_injects_on_chat_message_not_session_start", { timeout: 60000 }, async () => {
+  const wire = await runGlueTest("om-glue-inject-", {
+    ctx: { client: { sessionStub: { data: [
+      { info: { id: "u1", role: "user" }, parts: [{ type: "text", text: "prompt" }] },
+      { info: { id: "a1", role: "assistant" }, parts: [{ type: "text", text: "response" }] },
+    ] } } },
+    events: [idleEvent("sess-1"), chatMessage()],
+    wait: "capture",
+  });
+  const injects = wire.filter((message) => message.method === "inject");
+  assert.equal(injects.length, 1, "exactly one chat.message fired inject");
+  const captures = wire.filter((message) => message.method === "capture");
+  assert.equal(captures.length, 1, "the idle event captured once");
+  assert.ok(wire[0]?.method === "hello", "hello precedes everything");
 });
 
 test("test_capture_id_is_uuidv7_shaped_and_bounded", { timeout: 10000 }, async () => {

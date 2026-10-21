@@ -30,7 +30,9 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::task::JoinHandle;
 
+use crate::capture::{CaptureParams, CaptureService};
 use crate::error_map::{self, ErrorKind};
+use crate::inject::{InjectParams, InjectService};
 use crate::jsonrpc::{ParseLineError, Request, Response, encode_response, parse_line};
 
 /// The protocol version this engine speaks (ADR-0007 D-43 baseline).
@@ -131,6 +133,17 @@ pub struct Engine {
     /// Number of internal lifecycle tasks spawned through [`Engine::spawn_tracked`]
     /// and not yet finished (step 10's no-live-tasks oracle reads it).
     live_tasks: Arc<AtomicUsize>,
+    /// The W5.3 runtime services. `None` is the FIXTURE-only engine
+    /// (`Engine::new`): `capture`/`inject` degrade (-32001) and never
+    /// touch storage; `hello`/`health`/`shutdown` are unchanged.
+    runtime: Option<Arc<EngineRuntime>>,
+}
+
+/// The dependency-bearing runtime: composed ONCE by the engine root
+/// (`run_in_runtime`), shared by dispatch.
+pub struct EngineRuntime {
+    pub capture: Arc<CaptureService>,
+    pub inject: Arc<InjectService>,
 }
 
 impl Engine {
@@ -140,13 +153,21 @@ impl Engine {
             started: Instant::now(),
             shutting_down: Arc::new(AtomicBool::new(false)),
             live_tasks: Arc::new(AtomicUsize::new(0)),
+            runtime: None,
         }
+    }
+
+    /// The production constructor: fixture fields + the runtime services.
+    pub fn with_runtime(config: EngineConfig, runtime: Arc<EngineRuntime>) -> Self {
+        let mut engine = Self::new(config);
+        engine.runtime = Some(runtime);
+        engine
     }
 
     /// Dispatches one parsed request. Always answers with either a result
     /// or a SPECIFIC error code — a classifyable failure NEVER gets the
     /// generic -32603 (step 6's map).
-    pub fn dispatch(&self, request: &Request) -> Response {
+    pub async fn dispatch(&self, request: &Request) -> Response {
         if request.method == "hello" {
             return self.hello(request);
         }
@@ -175,8 +196,8 @@ impl Engine {
             return response;
         }
         match request.method.as_str() {
-            "capture" => self.capture(request),
-            "inject" => self.inject(request),
+            "capture" => self.call_capture(request).await,
+            "inject" => self.call_inject(request).await,
             "recall" => self.stub_recall(request),
             "health" => self.health(request),
             "shutdown" => self.shutdown(request),
@@ -244,31 +265,107 @@ impl Engine {
         None
     }
 
-    /// `capture` stub: a fire-and-forget ack. THE ACK CARRIES NO DURABILITY
-    /// GUARANTEE in W5.1 (M25); the structured warning says so on stderr
-    /// with NO params (the params include the transcript).
-    fn capture(&self, request: &Request) -> Response {
-        structured_stderr(
-            "capture.stub_not_durable",
-            "warn",
-            "engine",
-            serde_json::json!({}),
-        );
+    /// `capture`: the D-48 durable path — validated params, the inbox
+    /// enqueue is AWAITED (durable), only then `{"accepted":true}` comes
+    /// back; a full inbox is `-32002`; degraded mode refuses writes with
+    /// `-32001` and NO inbox write.
+    async fn call_capture(&self, request: &Request) -> Response {
+        let runtime = match &self.runtime {
+            Some(runtime) => runtime,
+            None => return degraded_capture(request),
+        };
+        if self.config.degraded_reason.is_some() {
+            return degraded_capture(request);
+        }
+
+        // A2, WRITE path: `capture` with a missing or blank `project_id`
+        // is `-32602` BEFORE any enqueue.
+        let project_id = request
+            .param("project_id")
+            .and_then(serde_json::Value::as_str);
+        match project_id {
+            Some(project_id) if !project_id.trim().is_empty() => project_id.to_string(),
+            _ => {
+                return Response::error_with_data(
+                    request.id.clone(),
+                    error_map::code_for(ErrorKind::InvalidParams),
+                    error_map::message_for(ErrorKind::InvalidParams),
+                    serde_json::json!({ "project_id": null, "violation": "missing" }),
+                );
+            }
+        };
+        if let Some(response) = capture_validator(request) {
+            return response;
+        }
+
+        let params: CaptureParams =
+            serde_json::from_value(request.params.clone()).unwrap_or_default();
+        use crate::capture::ObjError;
+        match runtime.capture.enqueue(&params).await {
+            Ok(()) => {}
+            Err(ObjError::Full) => {
+                return Response::error(
+                    request.id.clone(),
+                    error_map::code_for(ErrorKind::InboxFull),
+                    error_map::message_for(ErrorKind::InboxFull),
+                );
+            }
+            Err(ObjError::Store(_)) => {
+                return Response::error(
+                    request.id.clone(),
+                    error_map::code_for(ErrorKind::Internal),
+                    error_map::message_for(ErrorKind::Internal),
+                );
+            }
+        }
+
+        // Fire-and-forget drain — spawn-tracked so the shutdown oracle
+        // sees it; the ACK remains the durability guarantee (queued now).
+        let capture = runtime.capture.clone();
+        self.spawn_tracked(async move {
+            let _ = capture.drain_once().await;
+        });
+
         Response::result(request.id.clone(), serde_json::json!({ "accepted": true }))
     }
 
-    /// `inject` stub: an empty injection block (W5.1).
-    fn inject(&self, request: &Request) -> Response {
-        Response::result(
-            request.id.clone(),
-            serde_json::json!({
-                "block": serde_json::Value::Null,
-                "handling_ms": self.elapsed_ms(),
-                "memory_count": 0,
-                "tokens": 0,
-                "truncated": false,
-            }),
-        )
+    /// `inject`: the A2 absent-param-window — a missing or blank
+    /// `project_id` never errors (-32602) and never queries; the assembly's
+    /// empty result IS the answer.
+    async fn call_inject(&self, request: &Request) -> Response {
+        let runtime = match &self.runtime {
+            Some(runtime) => runtime,
+            None => return empty_inject(request, self.elapsed_ms()),
+        };
+        let inject_params: InjectParams =
+            serde_json::from_value(request.params.clone()).unwrap_or_default();
+        match runtime.inject.assemble(&inject_params).await {
+            Ok(result) => Response::result(
+                request.id.clone(),
+                serde_json::json!({
+                    "block": result.block,
+                    "handling_ms": result.handling_ms,
+                    "memory_count": result.memory_count,
+                    "tokens": result.tokens,
+                    "truncated": result.truncated,
+                }),
+            ),
+            Err(crate::inject::InjectError::Overflow) => Response::error(
+                request.id.clone(),
+                error_map::code_for(ErrorKind::InvalidParams),
+                error_map::message_for(ErrorKind::InvalidParams),
+            ),
+            Err(crate::inject::InjectError::Scope(_)) => Response::error(
+                request.id.clone(),
+                error_map::code_for(ErrorKind::InvalidParams),
+                error_map::message_for(ErrorKind::InvalidParams),
+            ),
+            Err(crate::inject::InjectError::Store(_)) => Response::error(
+                request.id.clone(),
+                error_map::code_for(ErrorKind::Internal),
+                error_map::message_for(ErrorKind::Internal),
+            ),
+        }
     }
 
     /// `recall` stub: an empty result list (W5.1).
@@ -570,7 +667,12 @@ pub async fn shutdown_pipeline(
 ///
 /// Order (B3): engine lock → `launch` (axum in-process) → stdio/standalone
 /// loop → ordered shutdown → exit code.
-pub fn run(mode: LaunchMode, config: HostConfig, launcher: Box<dyn WebLauncher>) -> i32 {
+pub fn run(
+    mode: LaunchMode,
+    config: HostConfig,
+    core_config: mem_core::config::Config,
+    launcher: Box<dyn WebLauncher>,
+) -> i32 {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -579,6 +681,7 @@ pub fn run(mode: LaunchMode, config: HostConfig, launcher: Box<dyn WebLauncher>)
         .block_on(run_in_runtime(
             mode,
             config,
+            core_config,
             launcher,
             graceful_signal_futures(mode),
         ))
@@ -618,10 +721,54 @@ fn graceful_signal_futures(mode: LaunchMode) -> Pin<Box<dyn Future<Output = ()> 
 /// A future that never resolves (kept local — no extra dependency edge).
 async fn futures_never() {}
 
+fn degraded_capture(request: &Request) -> Response {
+    Response::error(
+        request.id.clone(),
+        error_map::code_for(ErrorKind::Degraded),
+        error_map::message_for(ErrorKind::Degraded),
+    )
+}
+
+fn empty_inject(request: &Request, handling_ms: u64) -> Response {
+    Response::result(
+        request.id.clone(),
+        serde_json::json!({
+            "block": serde_json::Value::Null,
+            "handling_ms": handling_ms,
+            "memory_count": 0,
+            "tokens": 0,
+            "truncated": false,
+        }),
+    )
+}
+
+/// The `capture_id`/A2 bind check (bridge-schema §3): required, non-blank,
+/// ≤ 64 characters. Returns an EMPTY vec on success.
+fn capture_validator(request: &Request) -> Option<Response> {
+    match request
+        .param("capture_id")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(value) if !value.trim().is_empty() && value.chars().count() <= 64 => None,
+        _ => Some(Response::error_with_data(
+            request.id.clone(),
+            error_map::code_for(ErrorKind::InvalidParams),
+            error_map::message_for(ErrorKind::InvalidParams),
+            serde_json::json!({ "capture_id": null, "violation": "missing" }),
+        )),
+    }
+}
+
 /// The `run` body, testable with injected signals and any stream pair.
+///
+/// `core_config` is the resolved `mem_core::Config` loaded SYNCHRONOUSLY by
+/// `src/main.rs` (the resolved config has no other carrier into the engine —
+/// `HostConfig` is the host §9 surface only); it is a parameter so
+/// `main.rs` never touches the runtime or the scheduler.
 pub async fn run_in_runtime(
     mode: LaunchMode,
     config: HostConfig,
+    core_config: mem_core::config::Config,
     launcher: Box<dyn WebLauncher>,
     shutdown_signal: Pin<Box<dyn Future<Output = ()> + Send>>,
 ) -> Result<i32, String> {
@@ -667,7 +814,71 @@ pub async fn run_in_runtime(
             .into_owned(),
         ..EngineConfig::default()
     };
-    let engine = Engine::new(engine_config);
+
+    // The production composition root: every W5.3 service over the resolved
+    // config. A composition failure DEGRADES (D-38): the engine keeps its
+    // stdio purpose, `capture`/`inject` answer -32001, and the warning is
+    // structured on stderr. Fixture-only `Engine::new` remains the no-I/O
+    // constructor.
+    let composed = match crate::composition::build_composed_runtime(
+        &config.storage_root,
+        &core_config,
+        crate::composition::embedder_from_config(&core_config),
+        None,
+    )
+    .await
+    {
+        Ok(runtime) => Some(Arc::new(runtime)),
+        Err(detail) => {
+            structured_stderr(
+                "engine.composition_failed",
+                "warn",
+                "engine",
+                serde_json::json!({ "detail_short": true }),
+            );
+            tracing::warn!(
+                detail,
+                "runtime composition failed; engine degrades to no-write"
+            );
+            None
+        }
+    };
+    let engine = match &composed {
+        Some(runtime) => Engine::with_runtime(
+            engine_config,
+            Arc::new(EngineRuntime {
+                capture: runtime.capture.clone(),
+                inject: runtime.inject.clone(),
+            }),
+        ),
+        None => Engine::new(engine_config),
+    };
+
+    // The startup capture drain stays AWAITED before the stdio loop: Step 7
+    // requires durable replay to complete before the first `inject` reads.
+    // The Q8 consolidation lifecycle is SCHEDULED, not awaited: the startup
+    // tick scans up to 64 projects and awaits an LLM summarizer per project,
+    // while the plugin's `hello` handshake is timeout-bounded — so awaiting it
+    // here would let an aged store push the handshake past that deadline and
+    // degrade the plugin to no-engine. Injection stays correct meanwhile: the
+    // tick's RAII guard sets `consolidation_active` for the duration of every
+    // `Consolidator::run`, which makes `InjectService` skip ONLY the tier-1
+    // leg (blueprint Step 9). Consequence, by design: the first `inject` after
+    // launch may run before promoted facts exist and may skip the tier-1 leg
+    // while a tick is in flight (ADR-0008 D-W5.3-8).
+    if let Some(runtime) = &composed {
+        let _ = runtime.capture.drain_once().await;
+        let scheduler = Arc::new(ConsolidationScheduler::new(
+            runtime.store.clone(),
+            runtime.scope_resolver.clone(),
+            runtime.consolidation_runner.clone(),
+            runtime.consolidation_active.clone(),
+            Arc::clone(&engine.shutting_down),
+            Duration::from_secs(CONSOLIDATION_INTERVAL_SECS),
+            CONSOLIDATION_MAX_PROJECTS,
+        ));
+        spawn_consolidation_lifecycle(&engine, scheduler);
+    }
 
     match mode {
         LaunchMode::Stdio | LaunchMode::HangOnShutdown => {
@@ -678,11 +889,21 @@ pub async fn run_in_runtime(
         }
     }
 
-    // Ordered teardown inside the D-45 budget. The DB flush leg is the
-    // W5.1 stub's flush (the SerialDbLane runner drains what the stub
-    // queued; W5.3 wires real work onto this future).
+    // Ordered teardown inside the D-45 budget. The DB flush leg drains only
+    // queued entries whose summary was ALREADY supplied — the shutdown path
+    // never invokes an LLM and leaves other entries queued for the next
+    // start's durable replay.
     let web_stop = web.stop();
-    let report = shutdown_pipeline(Some(web_stop), Box::pin(async {})).await;
+    let flush_leg: Pin<Box<dyn Future<Output = ()> + Send>> = match &composed {
+        Some(runtime) => {
+            let capture = runtime.capture.clone();
+            Box::pin(async move {
+                let _ = capture.flush_supplied_summary_queued().await;
+            })
+        }
+        None => Box::pin(async {}),
+    };
+    let report = shutdown_pipeline(Some(web_stop), flush_leg).await;
     drop(lock); // lifetime scope: the lock releases with the engine's life
     structured_stderr(
         "engine.shutdown_complete",
@@ -751,7 +972,7 @@ where
             break;
         }
         let response = match parse_line(&line) {
-            Ok(request) => engine.dispatch(&request),
+            Ok(request) => engine.dispatch(&request).await,
             Err(ParseLineError::Parse) => Response::parse_error(),
             Err(ParseLineError::InvalidRequest) => Response::invalid_request(),
         };
@@ -776,4 +997,251 @@ where
         web_stopped_in_budget: true,
         db_flushed_in_budget: true,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Q8 — the consolidation scheduler (startup + periodic, bounded, busy-safe)
+// ---------------------------------------------------------------------------
+
+/// The periodic consolidation interval (Q8). The episodic config exposes the
+/// age threshold, not a schedule interval, so the scheduler's cadence is a
+/// W5.3-new constant (ADR-0008 D-W5.3-8 records it beside the batch bound).
+pub const CONSOLIDATION_INTERVAL_SECS: u64 = 3600;
+
+/// The per-tick project-scan bound. It is deliberately DIFFERENT from
+/// `DEFAULT_BATCH_LIMIT = 200` (rows per agent batch): 64 bounds how many
+/// projects one tick visits, 200 bounds the rows claimed per agent
+/// (ADR-0008 D-W5.3-8).
+pub const CONSOLIDATION_MAX_PROJECTS: usize = 64;
+
+/// The per-tick consolidation runner seam. `Ok(true)` is a busy skip (another
+/// run holds a lock), `Ok(false)` a completed run, `Err` a logged failure.
+pub trait ConsolidationRunner: Send + Sync {
+    fn run<'a>(
+        &'a self,
+        project_id: &'a str,
+        scope: &'a crate::project_scope::ResolvedProjectScope,
+    ) -> mem_embed::embedder::BoxFuture<'a, Result<bool, String>>;
+}
+
+/// The production runner: one `Consolidator::run` per project under the
+/// shared scope (the same `{container_tag, scope_hash}` the capture writer
+/// and the injector read with).
+pub struct DefaultConsolidationRunner {
+    consolidator: mem_episodic::consolidation::Consolidator,
+}
+
+impl DefaultConsolidationRunner {
+    pub fn new(consolidator: mem_episodic::consolidation::Consolidator) -> Self {
+        Self { consolidator }
+    }
+}
+
+impl ConsolidationRunner for DefaultConsolidationRunner {
+    fn run<'a>(
+        &'a self,
+        project_id: &'a str,
+        scope: &'a crate::project_scope::ResolvedProjectScope,
+    ) -> mem_embed::embedder::BoxFuture<'a, Result<bool, String>> {
+        let promotion = mem_episodic::consolidation::PromotionScope {
+            container_tag: scope.container_tag.clone(),
+            scope_hash: scope.scope_hash.clone(),
+        };
+        Box::pin(async move {
+            match self.consolidator.run(project_id, &promotion).await {
+                Ok(report) => Ok(report.busy),
+                Err(error) => Err(error.to_string()),
+            }
+        })
+    }
+}
+
+/// RAII: sets the shared `consolidation_active` flag for the WHOLE run and
+/// clears it on every return/error (so `InjectService` skips tier-1 only
+/// while a run really is in flight).
+struct ConsolidationActiveGuard {
+    flag: Arc<AtomicBool>,
+}
+
+impl ConsolidationActiveGuard {
+    fn set(flag: Arc<AtomicBool>) -> Self {
+        flag.store(true, Ordering::SeqCst);
+        Self { flag }
+    }
+}
+
+impl Drop for ConsolidationActiveGuard {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::SeqCst);
+    }
+}
+
+/// What one scheduler tick did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SchedulerTickReport {
+    /// Project ids returned by the bounded scan.
+    pub projects_scanned: usize,
+    /// Runs that completed (not busy).
+    pub runs: usize,
+    /// Runs that found a live lock (clean skip).
+    pub busy: usize,
+    /// Runs that failed (logged; capture/inject continue).
+    pub failed: usize,
+}
+
+/// The Q8 scheduler: startup tick + periodic ticks, bounded project scans,
+/// a clean busy skip, and prompt stop on shutdown.
+pub struct ConsolidationScheduler {
+    store: Arc<mem_episodic::store::EpisodicStore>,
+    resolver: Arc<dyn crate::scope_resolver::ProjectScopeResolver>,
+    runner: Arc<dyn ConsolidationRunner>,
+    consolidation_active: Arc<AtomicBool>,
+    shutting_down: Arc<AtomicBool>,
+    interval: Duration,
+    max_projects: usize,
+}
+
+impl ConsolidationScheduler {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        store: Arc<mem_episodic::store::EpisodicStore>,
+        resolver: Arc<dyn crate::scope_resolver::ProjectScopeResolver>,
+        runner: Arc<dyn ConsolidationRunner>,
+        consolidation_active: Arc<AtomicBool>,
+        shutting_down: Arc<AtomicBool>,
+        interval: Duration,
+        max_projects: usize,
+    ) -> Self {
+        Self {
+            store,
+            resolver,
+            runner,
+            consolidation_active,
+            shutting_down,
+            interval,
+            max_projects,
+        }
+    }
+
+    /// The bounded `SELECT DISTINCT project_id` scan (one SQL locus: the
+    /// statement lives in `mem_store::episodic_sql`).
+    pub async fn project_ids(&self) -> Result<Vec<String>, mem_episodic::error::EpisodicError> {
+        let db = self.store.ready().await?;
+        let rows = db
+            .query(
+                mem_store::episodic_sql::DISTINCT_LIVE_PROJECT_IDS,
+                vec![mem_store::db::Value::Integer(
+                    i64::try_from(self.max_projects).unwrap_or(i64::MAX),
+                )],
+            )
+            .await
+            .map_err(mem_episodic::error::EpisodicError::Store)?;
+        Ok(rows
+            .iter()
+            .filter_map(|row| row.text("project_id"))
+            .collect())
+    }
+
+    /// One tick: at most `max_projects` scans, at most one run per id.
+    ///
+    /// **Loop invariant:** every visited project id has exactly one explicit
+    /// outcome (run / busy / failed), the index advances once per finite list
+    /// item, and the scan is already truncated to `max_projects`.
+    pub async fn run_tick(
+        &self,
+    ) -> Result<SchedulerTickReport, mem_episodic::error::EpisodicError> {
+        let project_ids = self.project_ids().await?;
+        let mut report = SchedulerTickReport {
+            projects_scanned: project_ids.len(),
+            ..Default::default()
+        };
+        for project_id in project_ids {
+            if self.shutting_down.load(Ordering::SeqCst) {
+                break;
+            }
+            let scope = match self.resolver.resolve(&project_id) {
+                Ok(scope) => scope,
+                Err(_) => {
+                    report.failed += 1;
+                    continue;
+                }
+            };
+            let _active = ConsolidationActiveGuard::set(self.consolidation_active.clone());
+            match self.runner.run(&project_id, &scope).await {
+                Ok(true) => report.busy += 1,
+                Ok(false) => report.runs += 1,
+                Err(error) => {
+                    report.failed += 1;
+                    structured_stderr(
+                        "consolidation.run_failed",
+                        "warn",
+                        "consolidation",
+                        serde_json::json!({ "detail_short": true }),
+                    );
+                    tracing::warn!(error, "consolidation run failed; capture/inject continue");
+                }
+            }
+        }
+        Ok(report)
+    }
+
+    /// The periodic loop (the caller schedules the startup tick in the SAME
+    /// tracked task immediately before this). Sleeps in small slices so a
+    /// shutdown stops it promptly.
+    pub async fn run_periodic(self: Arc<Self>) {
+        let slice = Duration::from_millis(50);
+        let mut elapsed = Duration::ZERO;
+        while !self.shutting_down.load(Ordering::SeqCst) {
+            tokio::time::sleep(slice).await;
+            if self.shutting_down.load(Ordering::SeqCst) {
+                break;
+            }
+            elapsed += slice;
+            if elapsed < self.interval {
+                continue;
+            }
+            elapsed = Duration::ZERO;
+            let _ = self.run_tick().await;
+        }
+    }
+}
+
+/// The Q8 lifecycle: ONE tracked task — the startup tick, then the periodic
+/// loop.
+///
+/// The startup tick is deliberately NOT awaited before `serve_stdio`: it
+/// iterates up to 64 projects and awaits an LLM per project, and the plugin's
+/// `hello` handshake is timeout-bounded (an aged store would otherwise push
+/// the handshake past that deadline and degrade the plugin to no-engine).
+/// Injection stays correct because the tick's RAII guard sets
+/// `consolidation_active` for the duration of every `Consolidator::run`,
+/// which makes `InjectService` skip only the tier-1 leg. A failed tick never
+/// kills the periodic loop.
+pub fn spawn_consolidation_lifecycle(engine: &Engine, scheduler: Arc<ConsolidationScheduler>) {
+    engine.spawn_tracked(async move {
+        match scheduler.run_tick().await {
+            Ok(report) => structured_stderr(
+                "consolidation.startup_tick",
+                "info",
+                "consolidation",
+                serde_json::json!({
+                    "projects_scanned": report.projects_scanned,
+                    "runs": report.runs,
+                    "busy": report.busy,
+                    "failed": report.failed,
+                }),
+            ),
+            Err(error) => {
+                structured_stderr(
+                    "consolidation.startup_failed",
+                    "warn",
+                    "consolidation",
+                    serde_json::json!({ "detail_short": true }),
+                );
+                tracing::warn!(%error, "startup consolidation tick failed; engine continues");
+            }
+        }
+        // No `?`: a failed tick must never kill the periodic loop.
+        scheduler.run_periodic().await;
+    });
 }

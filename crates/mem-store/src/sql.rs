@@ -543,3 +543,16 @@ fn starts_with_keyword(text: &str, keyword: &str) -> bool {
             .map(|ch| !(ch.is_ascii_alphanumeric() || ch == '_'))
             .unwrap_or(true)
 }
+// vector-search.ts L373-380 (listMemories, container-tag branch).
+pub const LIST_MEMORIES_BY_CONTAINER_TAG: &str = r#"
+      SELECT * FROM memories
+      WHERE container_tag = ?
+      ORDER BY is_pinned DESC, created_at DESC
+      LIMIT ?
+    "#;
+// vector-search.ts L364-372 (listMemories, the empty-tag branch).
+pub const LIST_MEMORIES_ALL: &str = r#"
+      SELECT * FROM memories
+      ORDER BY is_pinned DESC, created_at DESC
+      LIMIT ?
+    "#;

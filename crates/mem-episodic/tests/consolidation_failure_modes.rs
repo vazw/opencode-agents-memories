@@ -39,6 +39,7 @@ fn session(agent_name: &str, summary: &str) -> AgentSession {
         created_at: 11,
         updated_at: 11,
         deleted_at: None,
+        capture_id: None,
         orphaned: false,
     }
 }

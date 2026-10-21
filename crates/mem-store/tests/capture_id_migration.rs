@@ -57,8 +57,8 @@ async fn test_capture_id_migration_adds_column() {
     let version = apply_schema_migrations(&*db, &episodic_migrations(DIMS), &options)
         .await
         .expect("apply fresh");
-    assert_eq!(version, 4, "the episodic migration set's max version is v4");
-    assert_eq!(user_version(&*db).await, 4);
+    assert_eq!(version, 5, "the episodic migration set's max version is v5");
+    assert_eq!(user_version(&*db).await, 5);
 
     let columns = table_columns(&*db).await;
     assert!(
@@ -135,14 +135,14 @@ async fn test_capture_id_migration_idempotent() {
     let first = apply_schema_migrations(&*db, &episodic_migrations(DIMS), &options)
         .await
         .expect("apply v4");
-    assert_eq!(first, 4);
+    assert_eq!(first, 5);
 
     // Re-applying is a no-op: no duplicate column, version unchanged.
     let second = apply_schema_migrations(&*db, &episodic_migrations(DIMS), &options)
         .await
         .expect("re-apply");
-    assert_eq!(second, 4, "nothing is pending after v4");
-    assert_eq!(user_version(&*db).await, 4);
+    assert_eq!(second, 5, "nothing is pending after v5");
+    assert_eq!(user_version(&*db).await, 5);
 
     let columns = table_columns(&*db).await;
     let capture_id_count = columns

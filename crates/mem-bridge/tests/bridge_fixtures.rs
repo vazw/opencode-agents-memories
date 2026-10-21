@@ -15,6 +15,10 @@
 
 use std::path::PathBuf;
 
+mod common;
+
+use std::sync::Arc;
+
 use mem_bridge::engine::{Engine, EngineConfig};
 use mem_bridge::jsonrpc::{
     Request, RequestId, Response, encode_request, encode_response, parse_line,
@@ -35,8 +39,28 @@ fn fixture(name: &str) -> String {
         .unwrap_or_else(|error| panic!("fixture {} is unreadable: {error}", path.display()))
 }
 
+/// The fixture engine now carries a REAL runtime over a temp storage dir:
+/// the W5.3 durable queue made `capture`/`inject` real; the frozen
+/// fixtures then double as behavioral responses to REAL store calls.
 fn full_engine() -> Engine {
-    Engine::new(EngineConfig::default())
+    let dir = common::TestDir::new("w53-fixture-engine");
+    let storage = dir.path().to_path_buf();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("fixture runtime");
+    let fixture = rt.block_on(common::build_fixture_runtime(&storage));
+    // EngineRuntime takes the services; the AtomicBool gate and stores are
+    // shared Arcs — no cross-lane handles leak.
+    let runtime = mem_bridge::engine::EngineRuntime {
+        capture: fixture.capture,
+        inject: fixture.inject,
+    };
+    // The temp dir's lifetime: the guard is dropped with the engine's test
+    // run (a leaked TestDir is bounded by the test count).
+    let _leak_dir = Box::leak(Box::new(dir));
+    std::mem::forget(rt);
+    Engine::with_runtime(EngineConfig::default(), Arc::new(runtime))
 }
 
 fn request(name: &str) -> Request {
@@ -86,7 +110,11 @@ fn assert_response_schema_equal_after_mask(
     fixture_name: &str,
     request_name: &str,
 ) {
-    let response = engine.dispatch(&request(request_name));
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("mask runtime");
+    let response = rt.block_on(engine.dispatch(&request(request_name)));
     let actual = serde_json::to_value(&response).expect("response serializes");
     let expected: Value = serde_json::from_str(&fixture(fixture_name))
         .unwrap_or_else(|error| panic!("{fixture_name} must parse: {error}"));
@@ -96,10 +124,6 @@ fn assert_response_schema_equal_after_mask(
         "{fixture_name}: response drifted from the frozen schema"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Requests: byte-exact
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_hello_request_fixture_byte_equal() {

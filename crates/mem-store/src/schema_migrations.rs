@@ -287,6 +287,13 @@ pub fn episodic_migrations(dimensions: u32) -> Vec<SchemaMigration> {
         .iter()
         .map(|sql| Statement::new(*sql, Vec::new()))
         .collect();
+    let mut v5_statements = vec![Statement::new(
+        crate::episodic_sql::CAPTURE_INBOX_DDL,
+        Vec::new(),
+    )];
+    for index in crate::episodic_sql::CAPTURE_INBOX_V5_INDEXES {
+        v5_statements.push(Statement::new(index, Vec::new()));
+    }
     vec![
         SchemaMigration {
             version: 1,
@@ -307,6 +314,11 @@ pub fn episodic_migrations(dimensions: u32) -> Vec<SchemaMigration> {
             version: 4,
             description: "episodic-v4: Additive client-minted capture_id on agent_sessions (W5.1)",
             statements: v4_statements,
+        },
+        SchemaMigration {
+            version: 5,
+            description: "episodic-v5: Durable capture inbox table and indexes (W5.3)",
+            statements: v5_statements,
         },
     ]
 }

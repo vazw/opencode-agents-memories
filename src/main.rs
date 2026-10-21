@@ -210,6 +210,16 @@ fn main() {
         }
     }
 
-    let exit = engine_run(config.mode, config, Box::new(RootWebLauncher));
+    let exit = engine_run(
+        config.mode,
+        config,
+        mem_core::config::Config::load_default(&mem_core::env::ProcessEnv).unwrap_or_else(
+            |error| {
+                eprintln!("config load failed: {error}");
+                std::process::exit(70);
+            },
+        ),
+        Box::new(RootWebLauncher),
+    );
     std::process::exit(exit);
 }

@@ -89,6 +89,64 @@ pub const EPISODIC_V3_INDEXES: [&str; 1] = [
 /// bridge carry NULL, and W5.1 inserts no value (W5.3 owns the write path).
 pub const EPISODIC_V4_ALTERS: [&str; 1] = ["ALTER TABLE agent_sessions ADD COLUMN capture_id TEXT"];
 
+/// v5 DDL: the W5.3 durable capture inbox (`episodic.db`). `payload` is the
+/// raw request JSON as received; `status` is `queued`/`dead` (`done` rows
+/// never persist — `mark_done` purges in the same write).
+pub const CAPTURE_INBOX_DDL: &str = "CREATE TABLE IF NOT EXISTS capture_inbox (\n\
+ \x20 capture_id TEXT PRIMARY KEY,\n\
+ \x20 project_id TEXT NOT NULL,\n\
+ \x20 session_id TEXT NOT NULL,\n\
+ \x20 agent_id TEXT NOT NULL,\n\
+ \x20 payload TEXT NOT NULL,\n\
+ \x20 created_at INTEGER NOT NULL,\n\
+ \x20 attempts INTEGER NOT NULL DEFAULT 0,\n\
+ \x20 last_attempt_at INTEGER,\n\
+ \x20 status TEXT NOT NULL DEFAULT 'queued'\n\
+ \x20)";
+
+/// v5 indexes: FIFO dequeue order and the project scan.
+pub const CAPTURE_INBOX_V5_INDEXES: [&str; 2] = [
+    "CREATE INDEX IF NOT EXISTS idx_capture_inbox_status_created ON capture_inbox(status, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_capture_inbox_project ON capture_inbox(project_id)",
+];
+
+/// Idempotent, capacity-checked enqueue in ONE conditional statement:
+/// inserts only when no row with the same `capture_id` exists AND fewer
+/// than the capacity bound of rows are queued. `changes == 0` means
+/// "duplicate or full" and the caller disambiguates with `SELECT_CAPTURE_INBOX_COUNT_FOR_ID`
+/// (no count-then-insert race: the predicate is evaluated inside the
+/// statement's own write transaction).
+pub const INSERT_CAPTURE_INBOX_CONDITIONAL: &str = "INSERT INTO capture_inbox (capture_id, project_id, session_id, agent_id, payload, created_at, attempts, last_attempt_at, status) SELECT ?, ?, ?, ?, ?, ?, 0, NULL, 'queued' WHERE NOT EXISTS (SELECT 1 FROM capture_inbox WHERE capture_id = ?) AND (SELECT COUNT(*) FROM capture_inbox WHERE status = 'queued') < ?";
+
+/// FIFO dequeue: oldest queued first, capture_id tie-break.
+pub const SELECT_CAPTURE_INBOX_BATCH: &str = "SELECT capture_id, project_id, session_id, agent_id, payload, created_at, attempts, last_attempt_at, status FROM capture_inbox WHERE status = 'queued' ORDER BY created_at ASC, capture_id ASC LIMIT ?";
+
+/// D-48 done path: the done/delete statements in one statement — the row
+/// is purged (the inbox never stores terminal rows; the status column
+/// exists for the dead-letter state).
+pub const DELETE_CAPTURE_INBOX_BY_ID: &str = "DELETE FROM capture_inbox WHERE capture_id = ?";
+
+/// Consume one attempt on a retryable failure.
+pub const BUMP_CAPTURE_INBOX_ATTEMPTS: &str =
+    "UPDATE capture_inbox SET attempts = attempts + 1, last_attempt_at = ? WHERE capture_id = ?";
+
+/// Dead-letter: the terminal episodic-only state.
+pub const DEADLETTER_CAPTURE_INBOX: &str =
+    "UPDATE capture_inbox SET status = 'dead', last_attempt_at = ? WHERE capture_id = ?";
+
+/// Queued-row count (capacity accounting + tests).
+pub const COUNT_CAPTURE_INBOX_QUEUED: &str =
+    "SELECT COUNT(*) AS count FROM capture_inbox WHERE status = 'queued'";
+
+/// Disambiguates a zero-change conditional insert: does the capture_id
+/// already exist?
+pub const SELECT_CAPTURE_INBOX_COUNT_FOR_ID: &str =
+    "SELECT COUNT(*) AS count FROM capture_inbox WHERE capture_id = ?";
+
+/// Distinct live project ids (the scheduler's bounded per-tick scan).
+/// `ORDER BY project_id` keeps scan order deterministic across ticks.
+pub const DISTINCT_LIVE_PROJECT_IDS: &str = "SELECT DISTINCT project_id FROM agent_sessions WHERE deleted_at IS NULL ORDER BY project_id LIMIT ?";
+
 // ---------------------------------------------------------------------------
 // Query statements (net-new, parameterized)
 // ---------------------------------------------------------------------------
@@ -96,7 +154,7 @@ pub const EPISODIC_V4_ALTERS: [&str; 1] = ["ALTER TABLE agent_sessions ADD COLUM
 /// Column projection shared by every read path; `vector_extract` turns the
 /// F32 blob back into JSON text for transport across the `Db` seam. The two
 /// v2 columns ride along on every projection (D-11 visibility).
-pub const SESSION_COLUMNS: &str = "id, project_id, session_id, agent_id, parent_session_id, summary, metadata, vector_extract(embedding) AS embedding, created_at, updated_at, deleted_at, orphaned";
+pub const SESSION_COLUMNS: &str = "id, capture_id, project_id, session_id, agent_id, parent_session_id, summary, metadata, vector_extract(embedding) AS embedding, created_at, updated_at, deleted_at, orphaned";
 
 /// SQL-side UUIDv7 minting (turso_core 0.8.3 registers `uuid7_str()`); no
 /// `uuid`/`rand` dependency edge.
@@ -105,24 +163,34 @@ pub const SELECT_UUID7: &str = "SELECT uuid7_str() AS id";
 /// Insert one session row. The embedding is bound as JSON text through
 /// `vector32(?)`; the two v2 columns are always bound explicitly (D-9
 /// defaults are for rows that bypass this path).
-pub const INSERT_SESSION: &str = "INSERT INTO agent_sessions (id, project_id, session_id, agent_id, parent_session_id, summary, metadata, embedding, created_at, updated_at, deleted_at, orphaned) VALUES (?, ?, ?, ?, ?, ?, ?, vector32(?), ?, ?, ?, ?)";
+pub const INSERT_SESSION: &str = "INSERT INTO agent_sessions (id, capture_id, project_id, session_id, agent_id, parent_session_id, summary, metadata, embedding, created_at, updated_at, deleted_at, orphaned) VALUES (?, ?, ?, ?, ?, ?, ?, ?, vector32(?), ?, ?, ?, ?)";
 
 /// Read-back by row id (the only id-only lookup; every other read path is
 /// project-scoped). Soft-deleted rows are invisible (D-11).
-pub const SELECT_SESSION_BY_ID: &str = "SELECT id, project_id, session_id, agent_id, parent_session_id, summary, metadata, vector_extract(embedding) AS embedding, created_at, updated_at, deleted_at, orphaned FROM agent_sessions WHERE id = ? AND deleted_at IS NULL";
+pub const SELECT_SESSION_BY_ID: &str = "SELECT id, capture_id, project_id, session_id, agent_id, parent_session_id, summary, metadata, vector_extract(embedding) AS embedding, created_at, updated_at, deleted_at, orphaned FROM agent_sessions WHERE id = ? AND deleted_at IS NULL";
 
 /// Project-scoped by-id detail read (soft-deleted rows invisible, D-11).
-pub const SELECT_SESSION_DETAIL: &str = "SELECT id, project_id, session_id, agent_id, parent_session_id, summary, metadata, vector_extract(embedding) AS embedding, created_at, updated_at, deleted_at, orphaned FROM agent_sessions WHERE id = ? AND project_id = ? AND deleted_at IS NULL";
+pub const SELECT_SESSION_DETAIL: &str = "SELECT id, capture_id, project_id, session_id, agent_id, parent_session_id, summary, metadata, vector_extract(embedding) AS embedding, created_at, updated_at, deleted_at, orphaned FROM agent_sessions WHERE id = ? AND project_id = ? AND deleted_at IS NULL";
 
 /// Project-scoped newest-first listing (`created_at DESC`, id tie-break).
-pub const LIST_SESSIONS: &str = "SELECT id, project_id, session_id, agent_id, parent_session_id, summary, metadata, vector_extract(embedding) AS embedding, created_at, updated_at, deleted_at, orphaned FROM agent_sessions WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ?";
+pub const LIST_SESSIONS: &str = "SELECT id, capture_id, project_id, session_id, agent_id, parent_session_id, summary, metadata, vector_extract(embedding) AS embedding, created_at, updated_at, deleted_at, orphaned FROM agent_sessions WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ?";
 
 /// Project-scoped cosine search, nearest first.
-pub const SEARCH_SESSIONS: &str = "SELECT id, project_id, session_id, agent_id, parent_session_id, summary, metadata, vector_extract(embedding) AS embedding, created_at, updated_at, deleted_at, orphaned, vector_distance_cos(embedding, vector32(?)) AS distance FROM agent_sessions WHERE project_id = ? AND deleted_at IS NULL ORDER BY distance ASC, id ASC LIMIT ?";
+pub const SEARCH_SESSIONS: &str = "SELECT id, capture_id, project_id, session_id, agent_id, parent_session_id, summary, metadata, vector_extract(embedding) AS embedding, created_at, updated_at, deleted_at, orphaned, vector_distance_cos(embedding, vector32(?)) AS distance FROM agent_sessions WHERE project_id = ? AND deleted_at IS NULL ORDER BY distance ASC, id ASC LIMIT ?";
 
 /// Delete by row id (the hard-delete purge path; `delete_session` prefixes
 /// it with `MARK_CHILDREN_ORPHANED` in one write batch).
 pub const DELETE_SESSION: &str = "DELETE FROM agent_sessions WHERE id = ?";
+
+/// The raw lookup by the upsert key `(project_id, session_id, agent_id)`,
+/// WITH soft-deleted rows: the tombstone branch must find the row to
+/// refuse mutating it.
+pub const SELECT_SESSION_BY_TRIPLE: &str = "SELECT id, capture_id, project_id, session_id, agent_id, parent_session_id, summary, metadata, vector_extract(embedding) AS embedding, created_at, updated_at, deleted_at, orphaned FROM agent_sessions WHERE project_id = ? AND session_id = ? AND agent_id = ?";
+
+/// W5.3 recapture update: rewrites the live row's content in place
+/// (summary, metadata, embedding, updated_at, capture_id). The guard keeps
+/// the row live and its project scope; the unique triple is unchanged.
+pub const UPDATE_SESSION_RECAPTURE: &str = "UPDATE agent_sessions SET summary = ?, metadata = ?, embedding = vector32(?), updated_at = ?, capture_id = ? WHERE id = ? AND project_id = ? AND deleted_at IS NULL";
 
 /// Diagnostic read-back of one embedding.
 pub const SELECT_EMBEDDING_BY_ID: &str =

@@ -445,6 +445,11 @@ function extractText(node) {
   try {
     if (node === null || node === undefined) return null;
     if (typeof node === "string") return node;
+    if (Array.isArray(node)) {
+      const parts = node.map(extractText).filter((part) => part !== null);
+      if (parts.length > 0) return parts.join("\n");
+      return null;
+    }
     if (typeof node.text === "string") return node.text;
     if (typeof node.content === "string") return node.content;
     if (Array.isArray(node.parts ?? node.content)) {
@@ -544,7 +549,17 @@ async function runShutdown(sig) {
 export const server = async function server(input) {
   // No engine is spawned and no host-visible state is touched here: hooks
   // exist even with no engine, so the plugin always loads (fail-open minimum).
-  void input;
+  // Issue 34 (D-W5.3-7): the host `input.directory` is captured ONCE as the
+  // immutable `project_id` and passed on every capture and inject — never a
+  // per-hook override, never from the transcript or event payload.
+  const hostProjectId =
+    input && typeof input.directory === "string" && input.directory.length > 0
+      ? input.directory
+      : null;
+  const hostInputRef = () => input;
+  // Prompt id → capture_id: one UUIDv7 per prompt; a replayed idle delivery
+  // of the same prompt reuses the SAME capture_id (idempotent upsert key).
+  const captureIdByPrompt = new Map();
 
   const hooks = {
     "chat.message": async (hookInput, output) => {
@@ -552,7 +567,24 @@ export const server = async function server(input) {
         if (hookInput && typeof hookInput.sessionID === "string" && hookInput.sessionID.length > 0) {
           capturedSessionId = hookInput.sessionID;
         }
-        effectiveCaptureTranscript(extractText(output?.message) ?? extractText(output), null, null);
+        // W5.3: injection happens through the eligible chat.message hook —
+        // the per-message TRANSCRIPT capture is gone (the idle capture owns
+        // the transcript); an inject error fails open (no block, no error).
+        let block = null;
+        try {
+          const result = await sendRequest("inject", injectParams());
+          if (result && typeof result.block === "string" && result.block.length > 0) {
+            block = result.block;
+          }
+        } catch (err) {
+          logWarn("inject.failed", { message: shortError(err) });
+        }
+        if (
+          block !== null &&
+          output && output.message && Array.isArray(output.message.parts)
+        ) {
+          output.message.parts.push({ type: "text", text: block, synthetic: true });
+        }
       } catch (err) {
         logWarn("chat.message.failed", { message: shortError(err) });
       }
@@ -574,6 +606,11 @@ export const server = async function server(input) {
           }
         }
         if (sessionId !== null) capturedSessionId = sessionId;
+        // W5.3: the idle event owns the capture (fire-and-forget; never on
+        // the message path).
+        if (sessionId !== null && properties !== null && properties.type === "session.idle") {
+          void fireIdleCapture(sessionId);
+        }
       } catch (err) {
         logWarn("event.failed", { message: shortError(err) });
       }
@@ -581,17 +618,133 @@ export const server = async function server(input) {
   };
 
   return { hooks };
+
+  // ── local closures (kept per-server for the frozen input) ──
+
+  function injectParams() {
+    const params = { session_id: currentSessionId() };
+    if (hostProjectId !== null) params.project_id = hostProjectId;
+    return params;
+  }
+
+  function reuseCaptureId(promptId) {
+    if (typeof promptId === "string" && promptId.length > 0) {
+      const known = captureIdByPrompt.get(promptId);
+      if (typeof known === "string" && known.length > 0) return known;
+      const minted = newCaptureId();
+      captureIdByPrompt.set(promptId, minted);
+      return minted;
+    }
+    return newCaptureId();
+  }
+
+  async function fireIdleCapture(sessionID) {
+    try {
+      const started = await ensureStarted();
+      if (!started) return;
+      const client = hostInputRef()?.client;
+
+      let userPrompt = null;
+      let promptId = null;
+      let textResponses = [];
+      let toolCalls = [];
+      try {
+        if (client && typeof client.session?.messages === "function") {
+          const response = await client.session.messages({ path: { id: sessionID } });
+          const messages = Array.isArray(response?.data)
+            ? response.data
+            : Array.isArray(response)
+              ? response
+              : null;
+          if (messages !== null) {
+            const parsed = parseIdleTranscript(messages);
+            ({ userPrompt, promptId, textResponses, toolCalls } = parsed);
+          }
+        }
+      } catch (err) {
+        logWarn("session.idle.messages_failed", { message: shortError(err) });
+      }
+      if (userPrompt === null) return;
+      if (textResponses.length === 0 && toolCalls.length === 0) return;
+
+      // The raw transcript rides INSIDE metadata.autoCaptureContext (the
+      // engine removes the envelope before persisting):
+      const metadata = { autoCaptureContext: { userPrompt, textResponses, toolCalls } };
+      if (promptId !== null) metadata.promptId = promptId;
+
+      const payload = {
+        session_id: currentSessionId(),
+        capture_id: reuseCaptureId(promptId),
+        transcript: userPrompt,
+        metadata,
+      };
+      if (hostProjectId !== null) payload.project_id = hostProjectId;
+      fireCapture(payload);
+    } catch (err) {
+      logWarn("session.idle.capture_failed", { message: shortError(err) });
+    }
+  }
 };
 
-function effectiveCaptureTranscript(transcript, summary, metadata) {
-  const payload = {
-    session_id: currentSessionId(),
-    capture_id: newCaptureId(),
-    transcript,
-  };
-  if (summary !== null) payload.summary = summary;
-  if (metadata !== null) payload.metadata = metadata;
-  fireCapture(payload);
+/** Inject params of an idle capture (issue 34: project_id is the host dir). */
+/** Port of upstream's tail-start extraction (getAIResponseMessages +
+ * extractAIContent, simplified to the LAST user prompt). */
+function parseIdleTranscript(messages) {
+  const MAX_TOOL_INPUT_LENGTH = 100;
+  let lastUserIndex = -1;
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    const role = message && message.info && message.info.role ? message.info.role : null;
+    if (role === "user") lastUserIndex = index;
+  }
+  if (lastUserIndex === -1) {
+    return { userPrompt: null, promptId: null, textResponses: [], toolCalls: [] };
+  }
+  const promptMessage = messages[lastUserIndex];
+  const userPrompt = extractText(promptMessage?.parts ?? promptMessage) ?? "";
+  const promptId =
+    promptMessage && promptMessage.info && typeof promptMessage.info.id === "string"
+      ? promptMessage.info.id
+      : null;
+
+  const textResponses = [];
+  const toolCalls = [];
+  for (let index = lastUserIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index];
+    const role = message && message.info && message.info.role ? message.info.role : null;
+    if (role === "user") break;
+    if (role !== "assistant" || !message.parts || !Array.isArray(message.parts)) continue;
+    const textParts = message.parts
+      .filter((part) => part && part.type === "text" && typeof part.text === "string")
+      .map((part) => part.text);
+    if (textParts.length > 0 && textParts.join("\n").trim().length > 0) {
+      textResponses.push(textParts.join("\n").trim());
+    }
+    for (const part of message.parts) {
+      if (!part || part.type !== "tool") continue;
+      const name = part.tool || "unknown";
+      let input = "";
+      try {
+        const toolInput = part.state && part.state.input ? part.state.input : null;
+        if (typeof toolInput === "string") {
+          input = toolInput;
+        } else if (toolInput && typeof toolInput === "object") {
+          const params = [];
+          for (const [key, value] of Object.entries(toolInput)) {
+            params.push(String(key) + ": " + JSON.stringify(value));
+          }
+          input = params.join(", ");
+        }
+      } catch {
+        input = "";
+      }
+      if (input.length > MAX_TOOL_INPUT_LENGTH) {
+        input = input.slice(0, MAX_TOOL_INPUT_LENGTH) + "...";
+      }
+      toolCalls.push({ name, input });
+    }
+  }
+  return { userPrompt, promptId, textResponses, toolCalls };
 }
 
 // ── entry module (loader contract) ─────────────────────────────────────

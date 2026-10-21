@@ -121,12 +121,12 @@ async fn test_fresh_db_creates_agent_sessions_v2() {
 
     let db = store.ready().await.expect("ready");
 
-    // user_version == 4 after the v1 + v2 + v3 + v4 migration set.
+    // user_version == 5 after the v1 + v2 + v3 + v4 + v5 migration set.
     let row = query_one(db.as_ref(), "PRAGMA user_version", Vec::new())
         .await
         .expect("pragma user_version")
         .expect("user_version row");
-    assert_eq!(row.i64("user_version"), Some(4));
+    assert_eq!(row.i64("user_version"), Some(5));
 
     // All thirteen columns, in declaration order.
     let columns = table_columns(db.as_ref()).await;
@@ -184,7 +184,7 @@ async fn test_fresh_db_is_idempotent() {
     )
     .await
     .expect("re-apply");
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
 
     let tables: Vec<String> = second
         .query(
@@ -236,7 +236,7 @@ async fn test_upgrade_does_not_touch_existing_migrations() {
         .await
         .expect("pragma")
         .expect("row");
-    assert_eq!(version.i64("user_version"), Some(4));
+    assert_eq!(version.i64("user_version"), Some(5));
 
     // No other migration set is applied to the dedicated episodic database.
     let foreign_tables: Vec<String> = db
@@ -441,7 +441,7 @@ async fn test_upgrade_v1_to_v2_adds_soft_delete_columns() {
         .await
         .expect("pragma")
         .expect("row");
-    assert_eq!(version.i64("user_version"), Some(4));
+    assert_eq!(version.i64("user_version"), Some(5));
 
     let columns = table_columns(db.as_ref()).await;
     assert_eq!(
@@ -563,7 +563,7 @@ async fn test_v3_migration_creates_episodic_milestones_table_and_index() {
         .await
         .expect("pragma user_version")
         .expect("user_version row");
-    assert_eq!(version.i64("user_version"), Some(4));
+    assert_eq!(version.i64("user_version"), Some(5));
 
     let columns = milestone_columns(db.as_ref()).await;
     assert_eq!(
@@ -660,7 +660,7 @@ async fn test_v2_migration_is_idempotent() {
     )
     .await
     .expect("re-apply");
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
 
     // Re-applying never duplicates columns or the v2 index.
     let columns = table_columns(db.as_ref()).await;

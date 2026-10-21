@@ -555,3 +555,28 @@ pub async fn unpin_memory(db: &dyn Db, memory_id: &str) -> Result<(), StoreError
     .await?;
     Ok(())
 }
+/// Upstream `listMemories` (L359–381): an empty tag selects every row, a
+/// non-empty one the rows of exactly that container tag. Both branches order
+/// `is_pinned DESC, created_at DESC` and take the limit as a bound integer.
+pub async fn list_memories_by_container_tag(
+    db: &dyn Db,
+    container_tag: &str,
+    limit: usize,
+) -> Result<Vec<Row>, StoreError> {
+    if container_tag.is_empty() {
+        db.query(
+            crate::sql::LIST_MEMORIES_ALL,
+            vec![Value::Integer(limit as i64)],
+        )
+        .await
+    } else {
+        db.query(
+            crate::sql::LIST_MEMORIES_BY_CONTAINER_TAG,
+            vec![
+                Value::Text(container_tag.to_string()),
+                Value::Integer(limit as i64),
+            ],
+        )
+        .await
+    }
+}
