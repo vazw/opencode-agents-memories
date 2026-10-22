@@ -20,9 +20,7 @@ use mem_store::db::{
     turso_connect_factory,
 };
 use mem_store::platform::Platform;
-use mem_store::schema_migrations::{
-    MigrationOptions, apply_schema_migrations, episodic_migrations,
-};
+use mem_store::schema_migrations::{MigrationOptions, apply_episodic_schema};
 use mem_store::tokio::sync::OnceCell;
 use mem_store::tracing::warn;
 use mem_store::vector::vector_to_text;
@@ -30,7 +28,9 @@ use mem_store::vector_utils::parse_extracted_vector;
 
 use crate::error::EpisodicError;
 use crate::ids::now_millis;
+use crate::raw_context::{RawContext, RawContextWrite};
 use crate::record::{AgentSession, NewAgentSession};
+use crate::segments::{MAX_SEGMENT_BYTES, RawSegment, split_segments};
 use crate::timeline::{
     SessionSummary, TimelineFilter, summary_matches, timeline_limit, timeline_predicate_params,
     timeline_predicates,
@@ -200,8 +200,10 @@ impl EpisodicStore {
             db_path: Some(self.db_path.clone()),
             label: EPISODIC_MIGRATION_LABEL,
         };
-        apply_schema_migrations(db.as_ref(), &episodic_migrations(self.dimensions), &options)
-            .await?;
+        // W7.1: v1..v5 through the shared runner, then the convergent v6
+        // retention schema. `episodic_migrations()` deliberately stays
+        // v1..v5; v6 is applied ONLY here.
+        apply_episodic_schema(db.as_ref(), self.dimensions, &options).await?;
         Ok(db)
     }
 
@@ -1084,6 +1086,190 @@ impl EpisodicStore {
     ) -> Result<Vec<ExecResult>, EpisodicError> {
         let db = self.ready().await?;
         Ok(db.batch(statements, BatchMode::Write).await?)
+    }
+
+    // -----------------------------------------------------------------------
+    // W7.1 — raw context, segments and the agent role
+    // -----------------------------------------------------------------------
+
+    /// Stores the authoritative raw context for a triple and its derived
+    /// segments in ONE write batch.
+    ///
+    /// First write wins: when the triple already has raw context the call
+    /// returns [`RawContextWrite::AlreadyPresent`] and writes nothing — a
+    /// recapture with different bytes is never an overwrite.
+    ///
+    /// **Single writer.** The read-then-write is safe because the only
+    /// production writer is the capture drain, which is serialized by its own
+    /// mutex and idempotent on `capture_id`; a second concurrent writer for
+    /// the same triple would surface as a primary-key conflict rather than a
+    /// silent overwrite.
+    pub async fn insert_raw_context(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        agent_id: &str,
+        raw_context: &str,
+    ) -> Result<RawContextWrite, EpisodicError> {
+        crate::raw_context::validate_raw_context(raw_context)?;
+        let db = self.ready().await?;
+        let triple = vec![
+            Value::Text(project_id.to_string()),
+            Value::Text(session_id.to_string()),
+            Value::Text(agent_id.to_string()),
+        ];
+        if query_one(db.as_ref(), sql::SELECT_RAW_CONTEXT_BY_TRIPLE, triple)
+            .await?
+            .is_some()
+        {
+            return Ok(RawContextWrite::AlreadyPresent);
+        }
+
+        let now = self.now();
+        let segments = split_segments(raw_context, MAX_SEGMENT_BYTES);
+        let mut statements = vec![Statement::new(
+            sql::INSERT_RAW_CONTEXT,
+            vec![
+                Value::Text(project_id.to_string()),
+                Value::Text(session_id.to_string()),
+                Value::Text(agent_id.to_string()),
+                Value::Text(raw_context.to_string()),
+                Value::Integer(raw_context.len() as i64),
+                Value::Integer(now),
+            ],
+        )];
+        for segment in &segments {
+            statements.push(Statement::new(
+                sql::INSERT_SEGMENT,
+                vec![
+                    Value::Text(project_id.to_string()),
+                    Value::Text(session_id.to_string()),
+                    Value::Text(agent_id.to_string()),
+                    Value::Integer(segment.segment_index),
+                    Value::Text(segment.raw_content.clone()),
+                    Value::Integer(segment.byte_offset),
+                    Value::Integer(segment.byte_len),
+                    Value::Integer(now),
+                ],
+            ));
+        }
+        db.batch(statements, BatchMode::Write).await?;
+        Ok(RawContextWrite::Inserted {
+            segments: segments.len(),
+        })
+    }
+
+    /// The stored raw context of one triple (`None` when absent).
+    pub async fn raw_context_for_session(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        agent_id: &str,
+    ) -> Result<Option<RawContext>, EpisodicError> {
+        let db = self.ready().await?;
+        let row = query_one(
+            db.as_ref(),
+            sql::SELECT_RAW_CONTEXT_BY_TRIPLE,
+            vec![
+                Value::Text(project_id.to_string()),
+                Value::Text(session_id.to_string()),
+                Value::Text(agent_id.to_string()),
+            ],
+        )
+        .await?;
+        Ok(row.map(|row| RawContext {
+            project_id: row.text("project_id").unwrap_or_default(),
+            session_id: row.text("session_id").unwrap_or_default(),
+            agent_id: row.text("agent_id").unwrap_or_default(),
+            raw_context: row.text("raw_context").unwrap_or_default(),
+            byte_len: row.i64("byte_len").unwrap_or(0),
+            captured_at: row.i64("captured_at").unwrap_or(0),
+        }))
+    }
+
+    /// One triple's segments, ordered by `segment_index` ascending.
+    pub async fn segments_for_session(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        agent_id: &str,
+    ) -> Result<Vec<RawSegment>, EpisodicError> {
+        let db = self.ready().await?;
+        let rows = db
+            .query(
+                sql::SELECT_SEGMENTS_BY_TRIPLE,
+                vec![
+                    Value::Text(project_id.to_string()),
+                    Value::Text(session_id.to_string()),
+                    Value::Text(agent_id.to_string()),
+                ],
+            )
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| RawSegment {
+                segment_index: row.i64("segment_index").unwrap_or(0),
+                raw_content: row.text("raw_content").unwrap_or_default(),
+                byte_offset: row.i64("byte_offset").unwrap_or(0),
+                byte_len: row.i64("byte_len").unwrap_or(0),
+            })
+            .collect())
+    }
+
+    /// The stored agent role of one triple (`None` when no session row
+    /// exists). The v6 column defaults to `main`.
+    pub async fn agent_role_for(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        agent_id: &str,
+    ) -> Result<Option<String>, EpisodicError> {
+        let db = self.ready().await?;
+        let row = query_one(
+            db.as_ref(),
+            sql::SELECT_AGENT_ROLE_BY_TRIPLE,
+            vec![
+                Value::Text(project_id.to_string()),
+                Value::Text(session_id.to_string()),
+                Value::Text(agent_id.to_string()),
+            ],
+        )
+        .await?;
+        Ok(row.and_then(|row| row.text("agent_role")))
+    }
+
+    /// Sets the agent role of one triple with a targeted `UPDATE`
+    /// (no constructor/field churn).
+    ///
+    /// The role is validated against the closed ADR-0009 set BEFORE the
+    /// write; the error never echoes the value. Returns `false` when no
+    /// session row matched.
+    pub async fn set_session_agent_role(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        agent_id: &str,
+        agent_role: &str,
+    ) -> Result<bool, EpisodicError> {
+        let role = mem_core::agent::AgentRole::parse(agent_role).map_err(|_| {
+            EpisodicError::validation(
+                "agent_role",
+                "must be one of: main, explorer, reviewer, worker",
+            )
+        })?;
+        let db = self.ready().await?;
+        let result = db
+            .execute(
+                sql::UPDATE_SESSION_AGENT_ROLE,
+                vec![
+                    Value::Text(role.as_str().to_string()),
+                    Value::Text(project_id.to_string()),
+                    Value::Text(session_id.to_string()),
+                    Value::Text(agent_id.to_string()),
+                ],
+            )
+            .await?;
+        Ok(result.changes > 0)
     }
 }
 

@@ -14,6 +14,23 @@
 
 use crate::utils::math::cosine_similarity;
 
+/// The ONE dedup-key normalization in the workspace (W7.1): trim, collapse
+/// whitespace runs to a single space, then lowercase.
+///
+/// `mem-episodic`'s promotion selection, `mem-facts`' key derivation and the
+/// bridge's cross-tier task all call this function — a second copy would let
+/// the three tiers disagree about whether two facts are the same one.
+///
+/// The unit separator `\u{1f}` is NOT whitespace (`char::is_whitespace`), so
+/// the exact-match key separator survives untouched.
+pub fn normalize_key(input: &str) -> String {
+    input
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
 /// One grouping candidate.
 ///
 /// `key` is the exact-match identity (upstream's

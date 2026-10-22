@@ -445,8 +445,21 @@ fn test_stdout_protocol_only() {
     // No println!/print! anywhere in mem-bridge/src; main.rs's println! is
     // restricted to the version/help/print-crates SYNC paths. `eprintln!`
     // CONTAINS the substring, so the probe checks the character before it.
+    //
+    // W7.1 exemption: `crates/mem-bridge/src/purge.rs` is the `purge-session`
+    // CLI runner, a SEPARATE process mode that must print exactly one JSON
+    // result line (the engine's stdio protocol is not running in that mode).
+    // The exemption is narrow: the only permitted stdout call there is the
+    // single `println!("{line}")` in `print_completed`, and the count below
+    // pins it at exactly ONE. This is a blueprint gap being bridged (the wave
+    // adds a second stdout MODE), not a change to the product's stdout pin.
+    let mut allowed_stdout_calls = 0;
     for entry in walk_dir(Path::new("crates/mem-bridge/src")) {
         let source = std::fs::read_to_string(&entry).expect("read module");
+        let is_purge_cli = entry
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "purge.rs");
         for line in source.lines() {
             let violated = line.match_indices("print").any(|(index, _)| {
                 let before = line[..index].chars().last().unwrap_or(' ');
@@ -454,6 +467,16 @@ fn test_stdout_protocol_only() {
                 !before.is_alphabetic()
                     && (rest.starts_with("println!(") || rest.starts_with("print!("))
             });
+            if violated && is_purge_cli {
+                assert_eq!(
+                    line.trim(),
+                    "println!(\"{line}\");",
+                    "{}: the purge CLI's only stdout call is the single JSON line",
+                    entry.display()
+                );
+                allowed_stdout_calls += 1;
+                continue;
+            }
             assert!(
                 !violated,
                 "{} writes to stdout (protocol-only violation, M23): {line:?}",
@@ -461,6 +484,10 @@ fn test_stdout_protocol_only() {
             );
         }
     }
+    assert_eq!(
+        allowed_stdout_calls, 1,
+        "exactly one stdout call is permitted in the crate (the purge CLI's single JSON line)"
+    );
     let main = std::fs::read_to_string("src/main.rs").expect("read main.rs");
     for line in main.lines() {
         let is_stdout_print = line.match_indices("print").any(|(index, _)| {

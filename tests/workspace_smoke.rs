@@ -1,4 +1,4 @@
-//! Composition smoke tests: the root binary must print all 10 workspace
+//! Composition smoke tests: the root binary must print all 11 workspace
 //! crate names via `--mode=print-crates` (M31) AND answer `--version` with
 //! the pinned string (E4: `opencode-agents-memory 0.1.0 (bridge 1.0.0)`).
 //! The r8 wave keeps both assertions (add, never replace).
@@ -25,7 +25,7 @@ fn test_binary_prints_all_workspace_crate_names() {
     assert_eq!(code, 0, "binary exited {code}: {stderr}");
     assert_eq!(
         stdout,
-        "mem-core\nmem-store\nmem-embed\nmem-ai\nmem-profile\nmem-episodic\nmem-skills\nmem-portability\nmem-web\nmem-bridge\n"
+        "mem-core\nmem-store\nmem-embed\nmem-ai\nmem-profile\nmem-episodic\nmem-facts\nmem-skills\nmem-portability\nmem-web\nmem-bridge\n"
     );
 }
 
@@ -41,4 +41,61 @@ fn test_binary_reports_version_string() {
         ),
         "the pinned version line (E4)"
     );
+}
+
+/// W7.1/M12 — the MCP refusal must happen BEFORE `Config::load_default`.
+///
+/// The child gets `env_clear()` plus a scratch `HOME` whose
+/// `opencode-mem.jsonc` is deliberately BROKEN: if the binary loaded config
+/// first it would exit 70 with a config error. Exit 78 with
+/// `mcp.mode_unavailable` is the proof the refusal precedes the config read.
+fn run_mcp_mode(mode: &str) -> (String, i32) {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.subsec_nanos())
+        .unwrap_or(0);
+    let home = std::env::temp_dir().join(format!(
+        "opencode-mem-smoke-mcp-{}-{nanos}",
+        std::process::id()
+    ));
+    let config_dir = home.join(".config").join("opencode");
+    std::fs::create_dir_all(&config_dir).expect("create config dir");
+    std::fs::write(
+        config_dir.join("opencode-mem.jsonc"),
+        "{ this is not valid json",
+    )
+    .expect("write broken config");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_opencode-agents-memory"))
+        .arg(format!("--mode={mode}"))
+        .env_clear()
+        .env("HOME", &home)
+        .stdin(Stdio::null())
+        .output()
+        .expect("spawn the binary");
+    let _ = std::fs::remove_dir_all(&home);
+    (
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+#[test]
+fn test_binary_refuses_mcp_modes_before_loading_config() {
+    for mode in ["mcp-stdio", "mcp-http"] {
+        let (stderr, code) = run_mcp_mode(mode);
+        assert_eq!(code, 78, "{mode} must exit 78, stderr: {stderr}");
+        assert!(
+            stderr.contains(r#""event":"mcp.mode_unavailable""#),
+            "{mode}: {stderr}"
+        );
+        assert!(
+            stderr.contains(&format!(r#""mode":"{mode}""#)),
+            "{mode}: {stderr}"
+        );
+        assert!(
+            !stderr.contains("config load failed"),
+            "{mode} must refuse BEFORE config load: {stderr}"
+        );
+    }
 }

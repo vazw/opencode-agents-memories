@@ -457,6 +457,12 @@ pub enum LaunchMode {
     /// so the wrapper's SIGTERM fallback path has something real to fire on.
     /// Gated on the `OPENCODE_MEM_HANG_ON_SHUTDOWN` env var.
     HangOnShutdown,
+    /// W7.1: the MCP transport over stdio — PARSED but not implemented. The
+    /// binary refuses with exit 78 before it reads any config (M12); the
+    /// protocol lands in W7.6.
+    McpStdio,
+    /// W7.1: the MCP transport over HTTP — parsed, refused with exit 78.
+    McpHttp,
 }
 
 impl LaunchMode {
@@ -465,22 +471,34 @@ impl LaunchMode {
             Self::Stdio => "stdio",
             Self::Standalone => "standalone",
             Self::HangOnShutdown => "hang-on-shutdown",
+            Self::McpStdio => "mcp-stdio",
+            Self::McpHttp => "mcp-http",
         }
     }
 
     /// Accepts the mode literal; `hang-on-shutdown` is valid only when the
-    /// env gate is set (test-only, debug/env gated).
+    /// env gate is set (test-only, debug/env gated). The MCP modes parse so
+    /// the refusal is a typed, testable outcome rather than an unknown-mode
+    /// parse error.
     pub fn parse(text: &str) -> Result<Self, String> {
         match text {
             "stdio" => Ok(Self::Stdio),
             "standalone" => Ok(Self::Standalone),
+            "mcp-stdio" => Ok(Self::McpStdio),
+            "mcp-http" => Ok(Self::McpHttp),
             "hang-on-shutdown" if std::env::var("OPENCODE_MEM_HANG_ON_SHUTDOWN").is_ok() => {
                 Ok(Self::HangOnShutdown)
             }
             other => Err(format!(
-                "unknown mode {other:?} (stdio | standalone | hang-on-shutdown, env-gated)"
+                "unknown mode {other:?} (stdio | standalone | hang-on-shutdown | mcp-stdio | mcp-http, env-gated)"
             )),
         }
+    }
+
+    /// Whether this process can actually serve the mode. The two MCP modes
+    /// are recognised spellings that are REFUSED (exit 78) until W7.6.
+    pub fn is_implemented(self) -> bool {
+        !matches!(self, Self::McpStdio | Self::McpHttp)
     }
 
     /// Only standalone installs the graceful handlers (E3 guarantee). The
@@ -699,12 +717,47 @@ pub async fn shutdown_pipeline(
 ///
 /// Order (B3): engine lock → `launch` (axum in-process) → stdio/standalone
 /// loop → ordered shutdown → exit code.
+/// Refuses an unimplemented launch mode BEFORE any config is read (W7.1/M12).
+///
+/// Exits the process with 78 and one structured stderr event. Kept here (not
+/// in `src/main.rs`) so the refusal payload and the `run` guard share one
+/// implementation and one message.
+pub fn refuse_unimplemented_mode(mode: LaunchMode) {
+    if mode.is_implemented() {
+        return;
+    }
+    structured_stderr(
+        "mcp.mode_unavailable",
+        "error",
+        "engine",
+        serde_json::json!({
+            "mode": mode.as_str(),
+            "detail": "MCP transport lands in W7.6",
+        }),
+    );
+    std::process::exit(78);
+}
+
 pub fn run(
     mode: LaunchMode,
     config: HostConfig,
     core_config: mem_core::config::Config,
     launcher: Box<dyn WebLauncher>,
 ) -> i32 {
+    // W7.1/M12 — the MCP refusal is the FIRST statement: a direct caller can
+    // never fall through to a runtime, a lock or a config read.
+    if !mode.is_implemented() {
+        structured_stderr(
+            "mcp.mode_unavailable",
+            "error",
+            "engine",
+            serde_json::json!({
+                "mode": mode.as_str(),
+                "detail": "MCP transport lands in W7.6",
+            }),
+        );
+        return 78;
+    }
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -937,6 +990,11 @@ pub async fn run_in_runtime(
         }
         LaunchMode::Standalone => {
             shutdown_signal.await;
+        }
+        // The sync dispatch refuses these first; a direct `run_in_runtime`
+        // caller gets a typed error, never an accidental serve.
+        LaunchMode::McpStdio | LaunchMode::McpHttp => {
+            return Err("MCP transport lands in W7.6".to_string());
         }
     }
 

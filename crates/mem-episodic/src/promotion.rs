@@ -68,12 +68,12 @@ struct Candidate {
 
 /// Normalizes a decision into its dedup key: lowercased with whitespace runs
 /// collapsed to a single space.
+///
+/// W7.1: ONE definition (`mem_core::dedup::normalize_key`) serves promotion,
+/// the facts tier and the cross-tier task — a local copy would let the tiers
+/// disagree about identity.
 fn normalize_key(content: &str) -> String {
-    content
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase()
+    mem_core::dedup::normalize_key(content)
 }
 
 /// The deterministic id of a promoted fact.

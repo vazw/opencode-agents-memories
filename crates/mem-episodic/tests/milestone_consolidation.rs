@@ -616,6 +616,7 @@ async fn test_soft_delete_between_claim_and_batch_yields_zero_changes_and_keeps_
         prefix_options: mem_embed::prefix::PrefixOptions::default(),
         batch_limit: 200,
         probe: Arc::new(mem_store::platform::SystemProcessProbe),
+        cross_tier: Arc::new(mem_episodic::cross_tier::NoopCrossTierTask),
     };
     let consolidator = mem_episodic::consolidation::Consolidator::new(
         fixture.store.clone(),
@@ -676,6 +677,7 @@ async fn test_promotion_precedes_the_episodic_write_batch() {
         prefix_options: mem_embed::prefix::PrefixOptions::default(),
         batch_limit: 200,
         probe: Arc::new(mem_store::platform::SystemProcessProbe),
+        cross_tier: Arc::new(mem_episodic::cross_tier::NoopCrossTierTask),
     };
     let consolidator = mem_episodic::consolidation::Consolidator::new(
         fixture.store.clone(),

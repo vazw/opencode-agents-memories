@@ -174,6 +174,20 @@ pub fn normalize_episodic_consolidation_age_days(value: f64) -> Result<u32, Conf
     }
 }
 
+/// W7.1 — `promotion.ttlFallbackDays`: an integer in `1..=3650`, rejected
+/// (never coerced) otherwise. The error names the camelCase JSONC path.
+pub fn normalize_ttl_fallback_days(value: f64) -> Result<u32, ConfigError> {
+    if value.is_finite() && value.fract() == 0.0 && (1.0..=3650.0).contains(&value) {
+        Ok(value as u32)
+    } else {
+        Err(ConfigError::InvalidValueExpected {
+            key: "promotion.ttlFallbackDays",
+            value: render_number(value),
+            expected: "an integer between 1 and 3650",
+        })
+    }
+}
+
 // -------------------------------------------------------------------------
 // Loose raw-value normalizers
 // -------------------------------------------------------------------------

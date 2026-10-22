@@ -22,7 +22,7 @@ const DIMS: u32 = 8;
 
 /// The column order, declaration order preserved (v1's ten + the two v2
 /// `ALTER TABLE ADD COLUMN` appends, then v4's additive `capture_id`).
-const V2_COLUMNS: [&str; 13] = [
+const V2_COLUMNS: [&str; 14] = [
     "id",
     "project_id",
     "session_id",
@@ -36,6 +36,7 @@ const V2_COLUMNS: [&str; 13] = [
     "deleted_at",
     "orphaned",
     "capture_id",
+    "agent_role",
 ];
 
 fn migration_options(store: &EpisodicStore) -> MigrationOptions {
@@ -121,14 +122,14 @@ async fn test_fresh_db_creates_agent_sessions_v2() {
 
     let db = store.ready().await.expect("ready");
 
-    // user_version == 5 after the v1 + v2 + v3 + v4 + v5 migration set.
+    // user_version == 6 after the v1..v5 set plus the convergent v6 retention schema.
     let row = query_one(db.as_ref(), "PRAGMA user_version", Vec::new())
         .await
         .expect("pragma user_version")
         .expect("user_version row");
-    assert_eq!(row.i64("user_version"), Some(5));
+    assert_eq!(row.i64("user_version"), Some(6));
 
-    // All thirteen columns, in declaration order.
+    // All fourteen columns, in declaration order (v6 appends agent_role).
     let columns = table_columns(db.as_ref()).await;
     assert_eq!(
         columns,
@@ -184,7 +185,7 @@ async fn test_fresh_db_is_idempotent() {
     )
     .await
     .expect("re-apply");
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
 
     let tables: Vec<String> = second
         .query(
@@ -236,7 +237,7 @@ async fn test_upgrade_does_not_touch_existing_migrations() {
         .await
         .expect("pragma")
         .expect("row");
-    assert_eq!(version.i64("user_version"), Some(5));
+    assert_eq!(version.i64("user_version"), Some(6));
 
     // No other migration set is applied to the dedicated episodic database.
     let foreign_tables: Vec<String> = db
@@ -433,7 +434,7 @@ async fn test_upgrade_v1_to_v2_adds_soft_delete_columns() {
     assert!(!v1_columns.contains(&"orphaned".to_string()));
     drop(raw);
 
-    // The store upgrades it in place to v4 (v2 columns, the v3 milestone table, v4 capture_id).
+    // The store upgrades it in place: v2 columns, the v3 milestone table, v4 capture_id, the v6 retention schema.
     let store = EpisodicStore::new(dir.to_path_buf(), dir.store_config());
     let db = store.ready().await.expect("ready");
 
@@ -441,7 +442,7 @@ async fn test_upgrade_v1_to_v2_adds_soft_delete_columns() {
         .await
         .expect("pragma")
         .expect("row");
-    assert_eq!(version.i64("user_version"), Some(5));
+    assert_eq!(version.i64("user_version"), Some(6));
 
     let columns = table_columns(db.as_ref()).await;
     assert_eq!(
@@ -563,7 +564,7 @@ async fn test_v3_migration_creates_episodic_milestones_table_and_index() {
         .await
         .expect("pragma user_version")
         .expect("user_version row");
-    assert_eq!(version.i64("user_version"), Some(5));
+    assert_eq!(version.i64("user_version"), Some(6));
 
     let columns = milestone_columns(db.as_ref()).await;
     assert_eq!(
@@ -660,7 +661,7 @@ async fn test_v2_migration_is_idempotent() {
     )
     .await
     .expect("re-apply");
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
 
     // Re-applying never duplicates columns or the v2 index.
     let columns = table_columns(db.as_ref()).await;

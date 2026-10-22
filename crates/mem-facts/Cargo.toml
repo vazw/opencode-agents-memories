@@ -1,0 +1,10 @@
+[package]
+name = "mem-facts"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mem-core = { workspace = true }
+mem-store = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

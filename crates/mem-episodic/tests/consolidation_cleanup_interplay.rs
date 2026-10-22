@@ -130,6 +130,7 @@ async fn test_operation_lock_migration_locked_error_maps_to_busy() {
         prefix_options: mem_embed::prefix::PrefixOptions::default(),
         batch_limit: 200,
         probe,
+        cross_tier: Arc::new(mem_episodic::cross_tier::NoopCrossTierTask),
     };
     let consolidator = mem_episodic::consolidation::Consolidator::new(
         fixture.store.clone(),

@@ -35,6 +35,7 @@ use mem_core::CRATE_NAME as MEM_CORE;
 use mem_embed::CRATE_NAME as MEM_EMBED;
 use mem_embed::{EmbeddingService, EmbeddingServiceOptions};
 use mem_episodic::CRATE_NAME as MEM_EPISODIC;
+use mem_facts::CRATE_NAME as MEM_FACTS;
 use mem_portability::CRATE_NAME as MEM_PORTABILITY;
 use mem_profile::CRATE_NAME as MEM_PROFILE;
 use mem_skills::CRATE_NAME as MEM_SKILLS;
@@ -48,7 +49,7 @@ use opencode_agents_memory::web_dist::{self, ResolvedDist};
 /// The workspace crates in composition order — printed by
 /// `--mode=print-crates` (M31); asserted byte-exactly by
 /// `tests/workspace_smoke.rs`.
-fn workspace_crates() -> [&'static str; 10] {
+fn workspace_crates() -> [&'static str; 11] {
     [
         MEM_CORE,
         MEM_STORE,
@@ -56,6 +57,7 @@ fn workspace_crates() -> [&'static str; 10] {
         MEM_AI,
         MEM_PROFILE,
         MEM_EPISODIC,
+        MEM_FACTS,
         MEM_SKILLS,
         MEM_PORTABILITY,
         MEM_WEB,
@@ -197,42 +199,47 @@ impl WebLauncher for RootWebLauncher {
     }
 }
 
-/// The parsed argv surface: mode, storage root, web host, web port and the
-/// explicit web-dist directory.
-type ParsedArgs = (
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<u16>,
-    Option<String>,
-);
+/// The parsed argv surface: mode, storage root, web host/port, the explicit
+/// web-dist directory, and the `purge-session` scope/confirmation flags.
+#[derive(Debug, Default)]
+struct ParsedArgs {
+    mode: Option<String>,
+    storage_root: Option<String>,
+    web_host: Option<String>,
+    web_port: Option<u16>,
+    web_dist: Option<String>,
+    project: Option<String>,
+    session: Option<String>,
+    agent: Option<String>,
+    confirm: Option<String>,
+}
 
-/// The sync arg-parse (M1): mode, storage root, web host/port overrides and
-/// the explicit web-dist directory over the env-resolved defaults
-/// (bridge-schema.md §9).
+/// The sync arg-parse (M1): mode, storage root, web host/port overrides, the
+/// explicit web-dist directory and the purge-session flags over the
+/// env-resolved defaults (bridge-schema.md §9).
 fn parse_args<I: Iterator<Item = (String, Option<String>)>>(args: I) -> ParsedArgs {
-    let mut mode_text: Option<String> = None;
-    let mut storage_root: Option<String> = None;
-    let mut web_host: Option<String> = None;
-    let mut web_port: Option<u16> = None;
-    let mut web_dist: Option<String> = None;
+    let mut parsed = ParsedArgs::default();
     for (name, inline) in args {
         match name.as_str() {
-            "--mode" | "mode" => mode_text = inline,
-            "--mode=print-crates" => mode_text = Some("print-crates".to_owned()),
-            "--mode=stdio" => mode_text = Some("stdio".to_owned()),
-            "--mode=standalone" => mode_text = Some("standalone".to_owned()),
-            "--mode=hang-on-shutdown" => mode_text = Some("hang-on-shutdown".to_owned()),
-            "--storage-root" | "storage-root" => storage_root = inline,
-            "--web-host" | "web-host" => web_host = inline,
+            "--mode" | "mode" => parsed.mode = inline,
+            "--mode=print-crates" => parsed.mode = Some("print-crates".to_owned()),
+            "--mode=stdio" => parsed.mode = Some("stdio".to_owned()),
+            "--mode=standalone" => parsed.mode = Some("standalone".to_owned()),
+            "--mode=hang-on-shutdown" => parsed.mode = Some("hang-on-shutdown".to_owned()),
+            "--storage-root" | "storage-root" => parsed.storage_root = inline,
+            "--web-host" | "web-host" => parsed.web_host = inline,
             "--web-port" | "web-port" => {
-                web_port = inline.and_then(|port| port.trim().parse::<u16>().ok())
+                parsed.web_port = inline.and_then(|port| port.trim().parse::<u16>().ok())
             }
-            "--web-dist" | "web-dist" => web_dist = inline,
+            "--web-dist" | "web-dist" => parsed.web_dist = inline,
+            "--project" | "project" => parsed.project = inline,
+            "--session" | "session" => parsed.session = inline,
+            "--agent" | "agent" => parsed.agent = inline,
+            "--confirm" | "confirm" => parsed.confirm = inline,
             other => eprintln!("ignoring argument {other:?}"),
         }
     }
-    (mode_text, storage_root, web_host, web_port, web_dist)
+    parsed
 }
 
 /// The iterator/path: positional pairs (`--mode stdio`) become `Some` inline
@@ -250,7 +257,11 @@ fn main() {
                 || arg == "--storage-root"
                 || arg == "--web-host"
                 || arg == "--web-port"
-                || arg == "--web-dist")
+                || arg == "--web-dist"
+                || arg == "--project"
+                || arg == "--session"
+                || arg == "--agent"
+                || arg == "--confirm")
         {
             let value = raw.get(index + 1).cloned();
             let has_value = value.is_some();
@@ -274,20 +285,27 @@ fn main() {
 
     // Compose the host config from env + argv, then dispatch.
     let mut config = HostConfig::from_env();
-    let (mode_text, storage_root, web_host, web_port, web_dist_arg) = parse_args(
+    let args = parse_args(
         argv.iter()
             .map(|(name, inline)| (name.clone(), inline.clone())),
     );
-    if let Some(root) = storage_root.filter(|root| !root.trim().is_empty()) {
+    if let Some(root) = args
+        .storage_root
+        .clone()
+        .filter(|root| !root.trim().is_empty())
+    {
         config.storage_root = PathBuf::from(root);
     }
-    if let Some(host) = web_host.filter(|host| !host.trim().is_empty()) {
+    if let Some(host) = args.web_host.clone().filter(|host| !host.trim().is_empty()) {
         config.web_host = host;
     }
-    if let Some(port) = web_port {
+    if let Some(port) = args.web_port {
         config.web_port = port;
     }
-    if let Some(mode) = mode_text {
+    // The purge request, built and confirmed at parse time. `None` for every
+    // other mode.
+    let mut purge_request: Option<mem_bridge::purge::PurgeRequest> = None;
+    if let Some(mode) = args.mode.clone() {
         let mode = mode.trim().to_owned();
         if mode == "print-crates" {
             // print-crates is the sync side-effecting composition mode
@@ -297,11 +315,36 @@ fn main() {
             }
             return;
         }
-        match LaunchMode::parse(&mode) {
-            Ok(mode) => config.mode = mode,
-            Err(message) => {
-                eprintln!("{message}");
-                std::process::exit(64);
+        if mode == "purge-session" {
+            // W7.1/M19: the confirmation is validated HERE, before
+            // `Config::load_default` and before any store is opened.
+            let request = mem_bridge::purge::PurgeRequest {
+                project_id: args.project.clone().unwrap_or_default(),
+                session_id: args.session.clone().unwrap_or_default(),
+                agent_id: args.agent.clone().unwrap_or_default(),
+            };
+            let expected = request.confirmation();
+            match args.confirm.as_deref() {
+                None => mem_bridge::purge::refuse_missing_confirmation(&expected),
+                Some(value) if value != expected => {
+                    mem_bridge::purge::refuse_mismatched_confirmation(&expected)
+                }
+                Some(_) => {}
+            }
+            purge_request = Some(request);
+        } else {
+            match LaunchMode::parse(&mode) {
+                Ok(parsed) => {
+                    // W7.1/M12: refuse the MCP modes BEFORE
+                    // `Config::load_default` (the next statements would read
+                    // the config home).
+                    mem_bridge::engine::refuse_unimplemented_mode(parsed);
+                    config.mode = parsed;
+                }
+                Err(message) => {
+                    eprintln!("{message}");
+                    std::process::exit(64);
+                }
             }
         }
     }
@@ -311,7 +354,9 @@ fn main() {
     // `mem_core::Config` field — see `web_dist`'s module docs. Blank values
     // fall through exactly like unset ones, and the default is derived from
     // the running binary, never from a hard-coded repo path.
-    let cli_dist = web_dist_arg
+    let cli_dist = args
+        .web_dist
+        .clone()
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from);
     let env_dist = std::env::var_os(web_dist::ENV_VAR).map(PathBuf::from);
@@ -332,6 +377,18 @@ fn main() {
             eprintln!("config load failed: {error}");
             std::process::exit(70);
         });
+
+    // W7.1 — the purge dispatch sits BEFORE the engine runtime. The root is
+    // the HostConfig value (`--storage-root` → `OPENCODE_MEM_STORAGE_ROOT` →
+    // `$HOME/.opencode-mem/data`); the JSONC `storagePath` is not the engine
+    // root and is never consulted here.
+    if let Some(request) = purge_request {
+        std::process::exit(mem_bridge::purge::run(
+            &core_config,
+            &config.storage_root,
+            &request,
+        ));
+    }
 
     let exit = engine_run(
         config.mode,

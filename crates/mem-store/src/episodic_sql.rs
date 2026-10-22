@@ -84,6 +84,111 @@ pub const EPISODIC_V3_INDEXES: [&str; 1] = [
     "CREATE INDEX IF NOT EXISTS idx_episodic_milestones_project_agent_created ON episodic_milestones(project_id, agent_id, created_at)",
 ];
 
+// ---------------------------------------------------------------------------
+// v6 — the retention schema (W7.1). Net-new; no upstream oracle.
+// ---------------------------------------------------------------------------
+//
+// EVERY omission below is the contract:
+//
+// - no `raw_context` column on `agent_sessions`: the retention table is the
+//   ONE authoritative representation (M1);
+// - no `FOREIGN KEY` / `ON DELETE` / trigger: consolidation deletes a session
+//   ROW and must never destroy the raw context. There is no schema feature
+//   whose job is to destroy it (ADR-0010 D-1);
+// - no `CHECK` on `agent_role`: `AgentRole::parse` already enforces the
+//   closed set, and a `CHECK` would cost a table rebuild to extend (Q6).
+
+/// v6 additive column: the agent role on the session row. Existing rows
+/// default to `main`; the capture path sets it with one targeted `UPDATE`.
+pub const EPISODIC_V6_ALTERS: [&str; 1] =
+    ["ALTER TABLE agent_sessions ADD COLUMN agent_role TEXT NOT NULL DEFAULT 'main'"];
+
+/// v6 DDL: the authoritative raw-context table, keyed by the session's
+/// logical identity — the same triple `agent_sessions` declares UNIQUE.
+///
+/// No FK: consolidation deletes a row, not an identity, so the triple
+/// survives it and the raw bytes stay readable.
+pub const RAW_CONTEXT_DDL: &str = "CREATE TABLE IF NOT EXISTS episodic_raw_context (\n\
+ \x20 project_id TEXT NOT NULL,\n\
+ \x20 session_id TEXT NOT NULL,\n\
+ \x20 agent_id TEXT NOT NULL,\n\
+ \x20 raw_context TEXT NOT NULL,\n\
+ \x20 byte_len INTEGER NOT NULL,\n\
+ \x20 captured_at INTEGER NOT NULL,\n\
+ \x20 PRIMARY KEY (project_id, session_id, agent_id)\n\
+ \x20)";
+
+/// v6 DDL: the derived segment table. Regenerable from the raw context, so
+/// it is safe to purge and safe to rebuild; offsets are contiguous and
+/// `concat(raw_content) == raw_context` byte for byte.
+pub const SEGMENTS_DDL: &str = "CREATE TABLE IF NOT EXISTS episodic_segments (\n\
+ \x20 project_id TEXT NOT NULL,\n\
+ \x20 session_id TEXT NOT NULL,\n\
+ \x20 agent_id TEXT NOT NULL,\n\
+ \x20 segment_index INTEGER NOT NULL,\n\
+ \x20 raw_content TEXT NOT NULL,\n\
+ \x20 byte_offset INTEGER NOT NULL,\n\
+ \x20 byte_len INTEGER NOT NULL,\n\
+ \x20 created_at INTEGER NOT NULL,\n\
+ \x20 PRIMARY KEY (project_id, session_id, agent_id, segment_index)\n\
+ \x20)";
+
+/// The v6 segment index (ordered reads per session).
+pub const SEGMENTS_INDEX: &str = "CREATE INDEX IF NOT EXISTS idx_episodic_segments_session ON episodic_segments(project_id, session_id, agent_id, segment_index)";
+
+// ---------------------------------------------------------------------------
+// v6 statements — raw context, segments, agent role (W7.1)
+// ---------------------------------------------------------------------------
+
+/// Insert the authoritative raw-context row (one per logical triple).
+pub const INSERT_RAW_CONTEXT: &str = "INSERT INTO episodic_raw_context (project_id, session_id, agent_id, raw_context, byte_len, captured_at) VALUES (?, ?, ?, ?, ?, ?)";
+
+/// Insert one derived segment.
+pub const INSERT_SEGMENT: &str = "INSERT INTO episodic_segments (project_id, session_id, agent_id, segment_index, raw_content, byte_offset, byte_len, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+
+/// Read the authoritative raw context of one triple.
+pub const SELECT_RAW_CONTEXT_BY_TRIPLE: &str = "SELECT project_id, session_id, agent_id, raw_context, byte_len, captured_at FROM episodic_raw_context WHERE project_id = ? AND session_id = ? AND agent_id = ?";
+
+/// Read one triple's segments, ordered by `segment_index`.
+pub const SELECT_SEGMENTS_BY_TRIPLE: &str = "SELECT project_id, session_id, agent_id, segment_index, raw_content, byte_offset, byte_len, created_at FROM episodic_segments WHERE project_id = ? AND session_id = ? AND agent_id = ? ORDER BY segment_index ASC";
+
+/// The stored role of one triple (the v6 column; `main` by default).
+pub const SELECT_AGENT_ROLE_BY_TRIPLE: &str = "SELECT agent_role FROM agent_sessions WHERE project_id = ? AND session_id = ? AND agent_id = ?";
+
+/// The targeted role write (never a constructor change, never 29 literals).
+pub const UPDATE_SESSION_AGENT_ROLE: &str = "UPDATE agent_sessions SET agent_role = ? WHERE project_id = ? AND session_id = ? AND agent_id = ?";
+
+// ---------------------------------------------------------------------------
+// W7.1 purge statements (D6). Every predicate is the BOUND triple or a bound
+// row/milestone id — no interpolation, no FK, no cascade, no trigger.
+// ---------------------------------------------------------------------------
+
+/// The row ids of a triple, INCLUDING soft-deleted rows (the purge deletes
+/// live and soft-deleted alike).
+pub const SELECT_SESSION_IDS_BY_TRIPLE: &str =
+    "SELECT id FROM agent_sessions WHERE project_id = ? AND session_id = ? AND agent_id = ?";
+
+/// Delete every session row of the triple.
+pub const PURGE_SESSIONS_BY_TRIPLE: &str =
+    "DELETE FROM agent_sessions WHERE project_id = ? AND session_id = ? AND agent_id = ?";
+
+/// Delete the authoritative raw context of the triple.
+pub const PURGE_RAW_CONTEXT_BY_TRIPLE: &str =
+    "DELETE FROM episodic_raw_context WHERE project_id = ? AND session_id = ? AND agent_id = ?";
+
+/// Delete the derived segments of the triple.
+pub const PURGE_SEGMENTS_BY_TRIPLE: &str =
+    "DELETE FROM episodic_segments WHERE project_id = ? AND session_id = ? AND agent_id = ?";
+
+/// Delete every inbox row of the triple (a queued payload IS raw content).
+pub const PURGE_INBOX_BY_TRIPLE: &str =
+    "DELETE FROM capture_inbox WHERE project_id = ? AND session_id = ? AND agent_id = ?";
+
+/// The milestones a pre-scan must inspect: the project's milestones of the
+/// scope's agent (the contributor JSON is decoded in Rust, no JSON SQL).
+pub const LIST_MILESTONES_FOR_PURGE: &str =
+    "SELECT id, contributors FROM episodic_milestones WHERE project_id = ? AND agent_id = ?";
+
 /// v4 additive column (D-36): the client-minted `capture_id` on
 /// `agent_sessions`. Nullable, no default — rows written before the W5.1
 /// bridge carry NULL, and W5.1 inserts no value (W5.3 owns the write path).

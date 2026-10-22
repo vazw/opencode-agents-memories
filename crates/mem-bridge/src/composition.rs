@@ -99,6 +99,23 @@ pub async fn build_composed_runtime(
     ));
 
     let probe: Arc<dyn mem_store::platform::ProcessProbe> = Arc::new(SystemProcessProbe);
+    // W7.1 — the facts store is constructed ONLY when the promotion pipeline
+    // flag is on. `FactsStore::new` touches no disk until `ready`, so a
+    // flags-off composition creates no `facts.db`.
+    let facts_store: Option<Arc<mem_facts::store::FactsStore>> =
+        if config.feature_flags.promotion_pipeline {
+            Some(Arc::new(mem_facts::store::FactsStore::new(
+                store_config.clone(),
+            )))
+        } else {
+            None
+        };
+    let cross_tier = crate::cross_tier::cross_tier_task(
+        config.feature_flags.promotion_pipeline,
+        facts_store,
+        config.promotion.ttl_fallback_days,
+    )
+    .map_err(|error| format!("cross-tier task wiring failed: {error}"))?;
     let connections = Arc::new(ConnectionManager::new(
         storage_root.to_path_buf(),
         store_config.clone(),
@@ -175,7 +192,11 @@ pub async fn build_composed_runtime(
         summarizer,
         resolver.clone(),
         config.auto_capture_max_context_bytes.max(1) as usize,
-    );
+    )
+    .with_sound_memory(crate::capture::SoundMemorySettings {
+        enabled: config.feature_flags.sound_memory,
+        raw_context_required: config.sound_memory.raw_context_required,
+    });
 
     let consolidation_active = Arc::new(AtomicBool::new(false));
     let inject = InjectService::new(
@@ -217,6 +238,7 @@ pub async fn build_composed_runtime(
         prefix_options: mem_embed::prefix::PrefixOptions::default(),
         batch_limit: mem_episodic::consolidation::DEFAULT_BATCH_LIMIT,
         probe: probe.clone(),
+        cross_tier,
     };
     let consolidator = mem_episodic::consolidation::Consolidator::new(store.clone(), policy, deps);
     let consolidation_runner: Arc<dyn crate::engine::ConsolidationRunner> =

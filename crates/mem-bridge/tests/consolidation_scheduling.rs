@@ -408,6 +408,7 @@ async fn test_consolidation_promotion_record_tag_equals_inject_read_tag() {
         prefix_options: mem_embed::prefix::PrefixOptions::default(),
         batch_limit: mem_episodic::consolidation::DEFAULT_BATCH_LIMIT,
         probe: Arc::new(mem_store::platform::SystemProcessProbe),
+        cross_tier: Arc::new(mem_episodic::cross_tier::NoopCrossTierTask),
     };
     let policy = mem_episodic::consolidation::ConsolidationPolicy::new(1).expect("policy");
     let consolidator = mem_episodic::consolidation::Consolidator::new(store.clone(), policy, deps);

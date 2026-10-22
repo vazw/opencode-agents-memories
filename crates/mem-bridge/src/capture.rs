@@ -11,6 +11,7 @@ use mem_core::sha256;
 use mem_embed::embedder::BoxFuture;
 use mem_episodic::error::EpisodicError;
 use mem_episodic::inbox::{CaptureInbox, DRAIN_BATCH_LIMIT, InboxNewEntry};
+use mem_episodic::raw_context::MAX_RAW_CONTEXT_BYTES;
 use mem_episodic::record::NewAgentSession;
 use mem_episodic::record::{Decision, WorkItem};
 
@@ -374,6 +375,65 @@ pub struct CaptureParams {
     /// The incoming raw `metadata` object (includes `promptId` and — per
     /// Step 8 — `autoCaptureContext`).
     pub metadata: Option<Json>,
+    /// W7.1 additive: the session's raw context. Persisted (privacy-stripped)
+    /// only when `featureFlags.soundMemory` is on; a V1 payload without it
+    /// keeps deserializing and behaving exactly as before.
+    #[serde(default)]
+    pub raw_context: Option<String>,
+    /// W7.1 additive: the ADR-0009 agent role. Persisted with one targeted
+    /// `UPDATE` on the session row; an unknown value dead-letters the entry
+    /// with a fixed message that never echoes the value.
+    #[serde(default)]
+    pub agent_role: Option<String>,
+}
+
+/// The `featureFlags.soundMemory` + `soundMemory.rawContextRequired` slice
+/// the capture service reads (W7.1).
+///
+/// Default OFF: with these defaults the capture path writes NO retention
+/// rows (no raw context, no segments) — the flag-off proof.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SoundMemorySettings {
+    /// `featureFlags.soundMemory`.
+    pub enabled: bool,
+    /// `soundMemory.rawContextRequired`: a payload with no raw text is
+    /// dead-lettered instead of falling back to the transcript.
+    pub raw_context_required: bool,
+}
+
+/// The fixed dead-letter reason when `rawContextRequired` is on and the
+/// payload carries no raw text.
+pub const RAW_CONTEXT_REQUIRED_MESSAGE: &str =
+    "capture payload has no raw context (soundMemory.rawContextRequired)";
+
+/// The fixed dead-letter reason for an invalid raw context (NUL/oversize).
+pub const RAW_CONTEXT_INVALID_MESSAGE: &str = "capture payload has an invalid raw context";
+
+/// The fixed dead-letter reason for an unknown agent role. It never echoes
+/// the rejected value.
+pub const AGENT_ROLE_INVALID_MESSAGE: &str =
+    "agent role must be one of: main, explorer, reviewer, worker";
+
+/// Parses the payload's agent role: absent is `None`, a known role is
+/// accepted case-insensitively, anything else is the fixed message.
+pub fn parse_capture_agent_role(
+    value: Option<&str>,
+) -> Result<Option<mem_core::agent::AgentRole>, &'static str> {
+    match value {
+        None => Ok(None),
+        Some(value) => mem_core::agent::AgentRole::parse(value)
+            .map(Some)
+            .map_err(|_| AGENT_ROLE_INVALID_MESSAGE),
+    }
+}
+
+/// The resolved retention payload for one capture entry.
+struct RetentionWrite {
+    /// The privacy-stripped raw context, when `soundMemory` is on and one
+    /// was resolvable.
+    raw_context: Option<String>,
+    /// The validated agent role, when the payload supplied one.
+    agent_role: Option<mem_core::agent::AgentRole>,
 }
 
 /// The summarizer's episodic extension (blueprint Step 7): the four fields
@@ -472,6 +532,8 @@ pub struct CaptureService {
     /// hold this mutex; the LLM work happens OFF the serial lane.
     drain_lock: Arc<tokio::sync::Mutex<()>>,
     drains: std::sync::atomic::AtomicU64,
+    /// W7.1: the sound-memory flags (default OFF).
+    sound_memory: SoundMemorySettings,
 }
 
 impl CaptureService {
@@ -495,7 +557,21 @@ impl CaptureService {
             max_context_bytes,
             drain_lock: Arc::new(tokio::sync::Mutex::new(())),
             drains: std::sync::atomic::AtomicU64::new(0),
+            sound_memory: SoundMemorySettings::default(),
         }
+    }
+
+    /// W7.1 — sets the sound-memory flags. A builder setter, deliberately:
+    /// the ten existing `CaptureService::new` call sites keep their exact
+    /// argument list, and the default remains OFF.
+    pub fn with_sound_memory(mut self, settings: SoundMemorySettings) -> Self {
+        self.sound_memory = settings;
+        self
+    }
+
+    /// The sound-memory settings in force (composition diagnostics/tests).
+    pub fn sound_memory_settings(&self) -> SoundMemorySettings {
+        self.sound_memory
     }
 
     /// The store root (the scheduler and diagnostics reuse it).
@@ -593,8 +669,12 @@ impl CaptureService {
         // extension (the provider path supplies both via `assemble_summary`).
         let memory_type = "memory".to_string();
         let extension = CaptureExtension::default();
+        let retention = match self.resolve_retention(&params, params.transcript.as_deref()) {
+            Ok(retention) => retention,
+            Err(reason) => return self.dead_letter_now(entry, reason).await,
+        };
         if self
-            .commit_episodic(&params, &summary, &tags, &extension)
+            .commit_episodic(&params, &summary, &tags, &extension, &retention)
             .await
             .is_err()
         {
@@ -635,6 +715,14 @@ impl CaptureService {
             .as_deref()
             .map(mem_ai::privacy::strip_private_content);
 
+        // 2b. W7.1 — validate the retention payload BEFORE the summarizer:
+        // a rejected raw context or agent role dead-letters the entry and
+        // writes neither tier (no session row).
+        let retention = match self.resolve_retention(&params, transcript.as_deref()) {
+            Ok(retention) => retention,
+            Err(reason) => return self.dead_letter_now(entry, reason).await,
+        };
+
         // 3. Context + summary construction — OFF the serial DB lane.
         let output = match self.assemble_summary(&params, transcript.as_deref()).await {
             Ok(output) => output,
@@ -655,7 +743,7 @@ impl CaptureService {
 
         // 4. Commit 1: the episodic staging row (capture_id-aware upsert).
         if self
-            .commit_episodic(&params, &summary, &tags, &extension)
+            .commit_episodic(&params, &summary, &tags, &extension, &retention)
             .await
             .is_err()
         {
@@ -697,14 +785,96 @@ impl CaptureService {
         }
     }
 
+    /// Dead-letters an entry IMMEDIATELY for a payload the retry ladder could
+    /// never fix (an invalid raw context or an unknown agent role).
+    ///
+    /// `reason` is one of the fixed message constants — never content, never
+    /// the rejected value.
+    async fn dead_letter_now(
+        &self,
+        entry: &mem_episodic::inbox::InboxEntry,
+        reason: &'static str,
+    ) -> EntryOutcome {
+        let _ = self.inbox.dead_letter(&entry.capture_id).await;
+        crate::engine::structured_stderr(
+            "capture.dead_lettered",
+            "warn",
+            "capture",
+            serde_json::json!({
+                "capture_id": entry.capture_id,
+                "project_id": entry.project_id,
+                "reason": reason,
+            }),
+        );
+        EntryOutcome::Dead
+    }
+
+    /// Resolves the W7.1 retention payload BEFORE the summarizer runs.
+    ///
+    /// Rules:
+    /// - the agent role (when supplied) is validated against the closed
+    ///   ADR-0009 set and persisted regardless of `soundMemory` (the v6
+    ///   column exists either way);
+    /// - with `soundMemory` OFF nothing raw is retained;
+    /// - with it ON, the supplied `raw_context` wins, else the transcript is
+    ///   the fallback; a payload with no raw text is dead-lettered when
+    ///   `rawContextRequired`, and skipped otherwise;
+    /// - the bytes are privacy-stripped before they can reach the store.
+    fn resolve_retention(
+        &self,
+        params: &CaptureParams,
+        transcript: Option<&str>,
+    ) -> Result<RetentionWrite, &'static str> {
+        let agent_role = parse_capture_agent_role(params.agent_role.as_deref())?;
+        if !self.sound_memory.enabled {
+            return Ok(RetentionWrite {
+                raw_context: None,
+                agent_role,
+            });
+        }
+        let supplied = params
+            .raw_context
+            .as_deref()
+            .filter(|raw| !raw.trim().is_empty());
+        let candidate = supplied.or(transcript).filter(|raw| !raw.trim().is_empty());
+        let Some(raw) = candidate else {
+            if self.sound_memory.raw_context_required {
+                return Err(RAW_CONTEXT_REQUIRED_MESSAGE);
+            }
+            return Ok(RetentionWrite {
+                raw_context: None,
+                agent_role,
+            });
+        };
+        if raw.len() > MAX_RAW_CONTEXT_BYTES || raw.contains('\u{0}') {
+            return Err(RAW_CONTEXT_INVALID_MESSAGE);
+        }
+        let stripped = mem_ai::privacy::strip_private_content(raw);
+        if stripped.trim().is_empty() {
+            if self.sound_memory.raw_context_required {
+                return Err(RAW_CONTEXT_REQUIRED_MESSAGE);
+            }
+            return Ok(RetentionWrite {
+                raw_context: None,
+                agent_role,
+            });
+        }
+        Ok(RetentionWrite {
+            raw_context: Some(stripped),
+            agent_role,
+        })
+    }
+
     /// Commit 1 of the two-tier drain: resolve the parent (WIRE session id →
-    /// project-visible ROW id) and upsert the staging row.
+    /// project-visible ROW id) and upsert the staging row, then write the
+    /// W7.1 retention rows (raw context + segments) and the agent role.
     async fn commit_episodic(
         &self,
         params: &CaptureParams,
         summary: &str,
         tags: &[String],
         extension: &CaptureExtension,
+        retention: &RetentionWrite,
     ) -> Result<(), EpisodicError> {
         let parent_row_id = match params.parent_session_id.as_deref() {
             Some(wire) if !wire.trim().is_empty() => {
@@ -717,8 +887,32 @@ impl CaptureService {
                 episodic_record(params, summary, tags, extension, parent_row_id),
                 self.embedder.as_ref(),
             )
-            .await
-            .map(|_| ())
+            .await?;
+
+        // Retention after the durable upsert: a failed upsert writes no
+        // retention rows, and a retention failure consumes an attempt while
+        // the retry's `AlreadyPresent` converges instead of duplicating.
+        if let Some(raw_context) = &retention.raw_context {
+            self.store
+                .insert_raw_context(
+                    &params.project_id,
+                    &params.session_id,
+                    &params.agent_id,
+                    raw_context,
+                )
+                .await?;
+        }
+        if let Some(role) = retention.agent_role {
+            self.store
+                .set_session_agent_role(
+                    &params.project_id,
+                    &params.session_id,
+                    &params.agent_id,
+                    role.as_str(),
+                )
+                .await?;
+        }
+        Ok(())
     }
 
     /// Resolves a WIRE parent session id to the project-visible ROW id (the

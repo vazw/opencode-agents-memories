@@ -410,6 +410,9 @@ pub struct FileConfig {
     pub compaction: Option<FileCompactionConfig>,
     pub chat_message: Option<FileChatMessageConfig>,
     pub episodic: Option<FileEpisodicConfig>,
+    pub feature_flags: Option<FileFeatureFlags>,
+    pub sound_memory: Option<FileSoundMemory>,
+    pub promotion: Option<FilePromotion>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -445,6 +448,32 @@ pub struct FileChatMessageConfig {
 #[serde(rename_all = "camelCase")]
 pub struct FileEpisodicConfig {
     pub consolidation_age_days: Option<f64>,
+}
+
+/// W7.1 — the feature-flag section. Only the two flags with a consumer in
+/// this wave are read; every other flag mentioned in the draft stays absent
+/// (dead config is a defect, not forward compatibility).
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileFeatureFlags {
+    pub sound_memory: Option<bool>,
+    pub promotion_pipeline: Option<bool>,
+}
+
+/// W7.1 — the sound-memory section.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileSoundMemory {
+    pub raw_context_required: Option<bool>,
+}
+
+/// W7.1 — the promotion section. `ttlFallbackDays` arrives as `f64` so
+/// out-of-range/fractional values reach the key-naming normalizer instead of
+/// becoming a serde shape error.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilePromotion {
+    pub ttl_fallback_days: Option<f64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -515,6 +544,10 @@ pub struct Defaults {
     pub chat_message_filter_injected_prompts: bool,
     pub chat_message_capture_child_sessions: bool,
     pub episodic_consolidation_age_days: f64,
+    pub feature_flags_sound_memory: bool,
+    pub feature_flags_promotion_pipeline: bool,
+    pub sound_memory_raw_context_required: bool,
+    pub promotion_ttl_fallback_days: u32,
 }
 
 pub static DEFAULTS: Defaults = Defaults {
@@ -579,6 +612,10 @@ pub static DEFAULTS: Defaults = Defaults {
     chat_message_filter_injected_prompts: true,
     chat_message_capture_child_sessions: false,
     episodic_consolidation_age_days: 30.0,
+    feature_flags_sound_memory: false,
+    feature_flags_promotion_pipeline: false,
+    sound_memory_raw_context_required: false,
+    promotion_ttl_fallback_days: 7,
 };
 
 // ---------------------------------------------------------------------------
@@ -684,6 +721,9 @@ pub struct Config {
     pub compaction: Compaction,
     pub chat_message: ChatMessage,
     pub episodic: Episodic,
+    pub feature_flags: FeatureFlags,
+    pub sound_memory: SoundMemory,
+    pub promotion: Promotion,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -713,4 +753,59 @@ pub struct ChatMessage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Episodic {
     pub consolidation_age_days: u32,
+}
+
+/// W7.1 — the two feature flags this wave consumes.
+///
+/// Both default OFF, and OFF provably writes nothing (no retention rows, no
+/// `facts.db`). A flag gates BEHAVIOUR only; schema migrations are never
+/// flag-gated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FeatureFlags {
+    /// Capture persists raw context + segments (`featureFlags.soundMemory`).
+    pub sound_memory: bool,
+    /// Composition wires the production cross-tier task
+    /// (`featureFlags.promotionPipeline`).
+    pub promotion_pipeline: bool,
+}
+
+impl Default for FeatureFlags {
+    fn default() -> Self {
+        Self {
+            sound_memory: DEFAULTS.feature_flags_sound_memory,
+            promotion_pipeline: DEFAULTS.feature_flags_promotion_pipeline,
+        }
+    }
+}
+
+/// W7.1 — the sound-memory section.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SoundMemory {
+    /// A capture payload with no raw text is dead-lettered instead of
+    /// falling back to the transcript.
+    pub raw_context_required: bool,
+}
+
+impl Default for SoundMemory {
+    fn default() -> Self {
+        Self {
+            raw_context_required: DEFAULTS.sound_memory_raw_context_required,
+        }
+    }
+}
+
+/// W7.1 — the promotion section.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Promotion {
+    /// The Q7 TTL anchor: a session is due when its last write is older
+    /// than this many days (default 7).
+    pub ttl_fallback_days: u32,
+}
+
+impl Default for Promotion {
+    fn default() -> Self {
+        Self {
+            ttl_fallback_days: DEFAULTS.promotion_ttl_fallback_days,
+        }
+    }
 }

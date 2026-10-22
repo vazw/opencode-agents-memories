@@ -13,15 +13,16 @@ pub use normalize::{
     normalize_embedding_dimensions, normalize_embedding_dtype,
     normalize_episodic_consolidation_age_days, normalize_injection_markers,
     normalize_memory_temperature, normalize_opencode_timeout_ms, normalize_opencode_variant,
-    normalize_user_profile_auto_cleanup_interval, outer_structured_output_timeout_ms,
-    render_json_value, render_number, resolve_secret_value,
+    normalize_ttl_fallback_days, normalize_user_profile_auto_cleanup_interval,
+    outer_structured_output_timeout_ms, render_json_value, render_number, resolve_secret_value,
 };
 pub use schema::{
     AutoCaptureProviderMode, AutoCaptureProviderSettings, AutoCaptureProviderStatus, ChatMessage,
     Compaction, Config, DEFAULTS, DatabaseEncryptionCipher, Defaults, EmbeddingModelPreset,
-    EmbeddingPooling, Episodic, FileChatMessageConfig, FileCompactionConfig, FileConfig,
-    FileEpisodicConfig, FileMemoryConfig, InjectOn, LOCAL_ONNX_DTYPES, LocalOnnxDtype,
-    MemoryDefaultScope, MemoryProvider, MemoryScope, MemoryTemperature,
+    EmbeddingPooling, Episodic, FeatureFlags, FileChatMessageConfig, FileCompactionConfig,
+    FileConfig, FileEpisodicConfig, FileFeatureFlags, FileMemoryConfig, FilePromotion,
+    FileSoundMemory, InjectOn, LOCAL_ONNX_DTYPES, LocalOnnxDtype, MemoryDefaultScope,
+    MemoryProvider, MemoryScope, MemoryTemperature, Promotion, SoundMemory,
 };
 
 use std::fs;
@@ -285,6 +286,31 @@ impl Config {
                 .and_then(|episodic| episodic.consolidation_age_days)
                 .unwrap_or(DEFAULTS.episodic_consolidation_age_days),
         )?;
+        let promotion_ttl_fallback_days = normalize_ttl_fallback_days(
+            file.promotion
+                .as_ref()
+                .and_then(|promotion| promotion.ttl_fallback_days)
+                .unwrap_or(DEFAULTS.promotion_ttl_fallback_days as f64),
+        )?;
+        let feature_flags = schema::FeatureFlags {
+            sound_memory: file
+                .feature_flags
+                .as_ref()
+                .and_then(|flags| flags.sound_memory)
+                .unwrap_or(DEFAULTS.feature_flags_sound_memory),
+            promotion_pipeline: file
+                .feature_flags
+                .as_ref()
+                .and_then(|flags| flags.promotion_pipeline)
+                .unwrap_or(DEFAULTS.feature_flags_promotion_pipeline),
+        };
+        let sound_memory = schema::SoundMemory {
+            raw_context_required: file
+                .sound_memory
+                .as_ref()
+                .and_then(|sound| sound.raw_context_required)
+                .unwrap_or(DEFAULTS.sound_memory_raw_context_required),
+        };
 
         // Only when the transport URL is set: resolve the file key ?? env
         // `OPENAI_API_KEY` (an explicit nullish chain, so "" blocks the env
@@ -545,6 +571,11 @@ impl Config {
             chat_message,
             episodic: schema::Episodic {
                 consolidation_age_days: episodic_consolidation_age_days,
+            },
+            feature_flags,
+            sound_memory,
+            promotion: schema::Promotion {
+                ttl_fallback_days: promotion_ttl_fallback_days,
             },
         })
     }

@@ -1950,6 +1950,7 @@ dependencies = [
  "mem-core",
  "mem-embed",
  "mem-episodic",
+ "mem-facts",
  "mem-profile",
  "mem-store",
  "serde",
@@ -1996,6 +1997,16 @@ dependencies = [
  "mem-core",
  "mem-embed",
  "mem-store",
+]
+
+[[package]]
+name = "mem-facts"
+version = "0.1.0"
+dependencies = [
+ "mem-core",
+ "mem-store",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -2320,6 +2331,7 @@ dependencies = [
  "mem-core",
  "mem-embed",
  "mem-episodic",
+ "mem-facts",
  "mem-portability",
  "mem-profile",
  "mem-skills",

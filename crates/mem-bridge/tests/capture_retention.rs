@@ -26,6 +26,7 @@ fn params(capture_id: &str, summary: &str) -> CaptureParams {
         transcript: Some("t".to_string()),
         summary: Some(summary.to_string()),
         metadata: Some(json!({ "promptId": "p-1" })),
+        ..Default::default()
     }
 }
 
@@ -195,6 +196,7 @@ async fn test_shutdown_bounded_with_pending_entry() {
             transcript: Some("needs an LLM".to_string()),
             summary: None,
             metadata: None,
+            ..Default::default()
         })
         .await
         .expect("enqueue");

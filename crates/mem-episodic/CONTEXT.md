@@ -34,3 +34,20 @@
 | **In-process consolidation gate** | A process-wide, std-only registry keyed by the CANONICAL storage path (`OnceLock` + `Mutex<HashMap<PathBuf, Arc<AtomicBool>>>>` + `compare_exchange`). A second consolidation run in the SAME process is BUSY (zero reads, zero writes); the cross-process case belongs to mem-store's operation lock. |
 | **SkipReason** | Why one agent was skipped (the run continues, nothing is written for that agent): `SummarizerError`, `EmptySummary`, `OversizeSummary`, `NoFittingTranscriptRows`, `DimensionMismatch`, `MetadataDecodeError`, `ContributorsTooLarge`. Store, sink and batch errors are NOT skips — they abort the run. |
 | **Agent attribution** | Which agent a session belonged to — the identity compaction must preserve. The pinned precedence (upstream `resolveSessionAgent`): the session agent wins outright (trimmed, no message scanned); otherwise ONE newest→oldest scan, where a user message contributes its `agent`, an assistant message is SKIPPED when `summary === true` or `mode == "compaction"` and otherwise contributes `agent ?? mode` (an assistant with neither a non-blank `agent` nor a non-blank `mode` keeps the scan going), and every other role is skipped; otherwise none. |
+
+**W7.1 additions (raw context, cross-tier, erasure):**
+
+> Raw context is never destroyed by consolidation or by any lifecycle stage;
+> it is destroyed only by an explicit, owner-initiated purge
+> (`purge_session`).
+
+| Term | Meaning |
+|---|---|
+| **RawContext** | The authoritative per-session bytes, stored in the `episodic_raw_context` TABLE keyed by the logical triple `(project_id, session_id, agent_id)`. There is deliberately NO `agent_sessions.raw_context` column (one representation only). First write wins; it is validated (non-empty after trim, NUL-free, ≤ 256 KiB) and privacy-stripped before persistence. |
+| **RawSegment** | A derived, regenerable slice of the raw context (`episodic_segments`), cut at `\n\n`, else the last `\n`, else a UTF-8 char boundary. `concat(raw_content) == raw_context`, offsets are contiguous, and `segment_index` orders reads. |
+| **v6 retention schema** | `agent_sessions.agent_role TEXT NOT NULL DEFAULT 'main'`, `episodic_raw_context`, `episodic_segments`, `idx_episodic_segments_session`. NO foreign key, NO cascade, NO trigger — the absence is the invariant. `episodic_migrations()` stays v1..v5; `apply_episodic_schema` applies v6 convergently (pre-flight `PRAGMA table_info`, measured `PragmaOutcome::{InBatch, Fallback, NotAttempted}`). |
+| **CrossTierTask** | The phase AFTER the durable consolidation batch: `SessionRef { row_id, session_id, agent_id }`, `CrossTierContext`, `CrossTierReport { promoted, already_present, skipped }`. Distinct from `promotion.rs` (the legacy tier-1 shard sink). `promotion_due` is PURE and keys on `updated_at` versus `promotion.ttlFallbackDays`; a not-due agent is skipped (`PromotionNotDue`) before any write or delete. |
+| **SessionScope** | The erasure scope: the visited/trimmed triple. `SessionScope::new` rejects empty/blank/NUL components BEFORE anything is opened. |
+| **purge_session** | Erases ONE triple: session rows (live and soft-deleted), raw context, segments, inbox payloads, and every milestone whose decoded contributors name the triple. One write batch; children are ORPHANED, never deleted. Idempotent. |
+| **Erasure boundary** | A purge never erases the legacy tier-1 `memories` shard (upstream-golden SQL, no per-session provenance). Every purge success names that surviving tier via `not_erased`. A purge of a contributor also deletes the shared milestone, so the surviving contributor's milestone summary is lost permanently; recovery is an explicit re-capture of the surviving session (its raw context survives). |
+| **No tombstone** | Purge writes no tombstone: a later capture of the same triple is a normal write. Consolidation behavior itself is unchanged. |

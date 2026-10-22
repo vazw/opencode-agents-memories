@@ -695,6 +695,7 @@ impl ConsolidationFixture {
             prefix_options: mem_embed::prefix::PrefixOptions::default(),
             batch_limit,
             probe: Arc::new(mem_store::platform::SystemProcessProbe),
+            cross_tier: Arc::new(mem_episodic::cross_tier::NoopCrossTierTask),
         };
         mem_episodic::consolidation::Consolidator::new(
             self.store.clone(),
@@ -728,6 +729,7 @@ impl ConsolidationFixture {
             prefix_options: mem_embed::prefix::PrefixOptions::default(),
             batch_limit: 200,
             probe: Arc::new(mem_store::platform::SystemProcessProbe),
+            cross_tier: Arc::new(mem_episodic::cross_tier::NoopCrossTierTask),
         };
         mem_episodic::consolidation::Consolidator::new(
             self.store.clone(),

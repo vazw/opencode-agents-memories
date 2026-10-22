@@ -134,6 +134,9 @@ pub enum SkipReason {
     MetadataDecodeError,
     /// The assembled contributors JSON exceeded its bound.
     ContributorsTooLarge,
+    /// The agent's last write is younger than `promotion.ttlFallbackDays`;
+    /// nothing was written or deleted (Q7).
+    PromotionNotDue,
 }
 
 /// One skipped agent.
@@ -162,6 +165,8 @@ pub struct ConsolidationReport {
     pub facts_promoted: u64,
     /// How many facts were already present.
     pub facts_already_present: u64,
+    /// The cross-tier phase's report (all three counters).
+    pub cross_tier: crate::cross_tier::CrossTierReport,
 }
 
 impl ConsolidationReport {
@@ -221,6 +226,11 @@ pub struct ConsolidationDeps {
     pub batch_limit: usize,
     /// The process probe for the cross-process operation lock.
     pub probe: Arc<dyn ProcessProbe>,
+    /// The cross-tier promotion phase, called AFTER the durable batch.
+    ///
+    /// `NoopCrossTierTask` when `featureFlags.promotionPipeline` is off; the
+    /// production `FactsCrossTierTask` in `mem-bridge` otherwise.
+    pub cross_tier: Arc<dyn crate::cross_tier::CrossTierTask>,
 }
 
 /// The consolidator.
@@ -411,6 +421,14 @@ impl Consolidator {
             return Ok(());
         }
 
+        // W7.1/Q7 — the pure due-gate runs BEFORE the promotion phase and
+        // BEFORE the write batch: a not-due agent writes nothing and deletes
+        // nothing, so its session rows stay claimed for a later run.
+        if !self.deps.cross_tier.promotion_due(consolidated, now) {
+            skip(report, agent_id, SkipReason::PromotionNotDue);
+            return Ok(());
+        }
+
         // (e) existence-checked promotions.
         for (fact, vector) in facts.iter().zip(fact_vectors.iter()) {
             let record = PromotionRecord {
@@ -442,6 +460,28 @@ impl Consolidator {
         let results = self.deps.batch_writer.write_batch(statements).await?;
         report.milestones_written += 1;
         report.sessions_consolidated += deleted_rows(&results, consolidated.len());
+
+        // W7.1 — the cross-tier phase runs AFTER the durable batch, so the
+        // milestone it names is already queryable. Its error propagates (the
+        // batch stays committed; a retry recollects the same ids).
+        let sessions: Vec<crate::cross_tier::SessionRef> = consolidated
+            .iter()
+            .map(|row| crate::cross_tier::SessionRef {
+                row_id: row.id.clone(),
+                session_id: row.session_id.clone(),
+                agent_id: row.agent_id.clone(),
+            })
+            .collect();
+        let context = crate::cross_tier::CrossTierContext {
+            project_id,
+            agent_id,
+            milestone_id: &milestone.id,
+            sessions: &sessions,
+            facts: &facts,
+            now,
+        };
+        let cross_tier = self.deps.cross_tier.run(&context).await?;
+        report.cross_tier = cross_tier;
         Ok(())
     }
 

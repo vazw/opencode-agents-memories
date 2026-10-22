@@ -58,6 +58,7 @@ fn params(index: usize) -> CaptureParams {
         transcript: Some("t".to_string()),
         summary: Some(format!("summary {index}")),
         metadata: None,
+        ..Default::default()
     }
 }
 

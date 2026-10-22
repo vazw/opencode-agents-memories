@@ -233,3 +233,35 @@ fn test_conflict_groups_are_ordered_by_score_descending_and_are_deterministic() 
         "grouping is deterministic across runs (no HashMap iteration order)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// W7.1 — the ONE shared key normalization (AC-36)
+// ---------------------------------------------------------------------------
+
+/// One definition serves promotion, `mem-facts` and the cross-tier task.
+/// The table pins the exact semantics the delegation must preserve.
+#[test]
+fn test_normalize_key_table() {
+    use mem_core::dedup::normalize_key;
+
+    let table: [(&str, &str); 6] = [
+        ("  The Build   Uses F32_BLOB  ", "the build uses f32_blob"),
+        ("already  collapsed", "already collapsed"),
+        ("\ttabs\nand\r\nnewlines ", "tabs and newlines"),
+        ("", ""),
+        ("   ", ""),
+        ("Über  Café", "über café"),
+    ];
+    for (input, expected) in table {
+        assert_eq!(normalize_key(input), expected, "normalize_key({input:?})");
+    }
+    // The unit separator is not whitespace and must never be touched: it is
+    // the exact-match key separator two callers already use.
+    assert_eq!(normalize_key("a\u{1f}b"), "a\u{1f}b");
+    assert_eq!(normalize_key(" A \u{1f} B "), "a \u{1f} b");
+    // Idempotent.
+    for input in ["  A  B  ", "", "Über  Café"] {
+        let once = normalize_key(input);
+        assert_eq!(normalize_key(&once), once);
+    }
+}

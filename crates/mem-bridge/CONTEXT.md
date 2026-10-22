@@ -43,3 +43,36 @@ the `-32002` code row, the exit-code-75 row, the status-file-format row.
 
 **Open questions (user's, ADR-0007):** (a) second-instance lock policy; (b) the
 `darwin/x64` engine target matrix. Nothing in this crate answers either.
+
+**W7.1 additions (sound-memory capture, cross-tier promotion, purge CLI):**
+
+- **SoundMemorySettings** — `featureFlags.soundMemory` +
+  `soundMemory.rawContextRequired`, set with the builder setter
+  `CaptureService::with_sound_memory` (default OFF). With it on, the capture
+  drain persists the privacy-stripped raw context and its derived segments
+  after the durable upsert, falling back to the transcript when no
+  `raw_context` was supplied; `rawContextRequired` dead-letters a payload
+  with no raw text before the summarizer. An invalid raw context or an
+  unknown `agent_role` is dead-lettered with a fixed message that never
+  echoes the value. The supplied `agent_role` is persisted with one targeted
+  `UPDATE` (no session constructor changes).
+- **FactsCrossTierTask** — the production `CrossTierTask`: classifies each
+  promotable fact (`mem_core::tier::classify_fact_tier`), writes `facts.db`
+  rows with `source_ref` = the milestone id, records one provenance row per
+  contributing `SessionRef`, skips candidates over 8192 bytes, and is
+  idempotent for the same milestone. `cross_tier_task(enabled, facts,
+  ttl_days)` wires `NoopCrossTierTask` when `featureFlags.promotionPipeline`
+  is off or no store is composed.
+- **`--mode=purge-session`** — the one sanctioned erasure path. Flags:
+  `--project`, `--session`, `--agent` (all three: the triple is the key) and
+  `--confirm="{project}:{session}:{agent}"` (verbatim). Root:
+  `--storage-root`, else `OPENCODE_MEM_STORAGE_ROOT`, else
+  `$HOME/.opencode-mem/data` (the JSONC `storagePath` is NOT the engine
+  root). It takes the same in-process gate and cross-process operation lock
+  as consolidation, BEFORE the milestone pre-scan; the facts leg runs first
+  and the episodic leg second. It skips the facts leg entirely when
+  `{root}/facts.db` is absent (`facts_leg = "skipped_no_database"`, never
+  creates the file). Exit codes: **0** erased, **64** usage/confirmation/
+  scope, **74** store-or-IO, **75** busy. Success prints exactly one JSON
+  line with counts and a mandatory, non-empty `not_erased` array naming the
+  surviving legacy `memories` shard.

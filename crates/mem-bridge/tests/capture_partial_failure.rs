@@ -64,6 +64,7 @@ fn params(capture_id: &str, summary: &str) -> CaptureParams {
         transcript: Some("transcript text".to_string()),
         summary: Some(summary.to_string()),
         metadata: Some(json!({ "promptId": "p-1" })),
+        ..Default::default()
     }
 }
 
@@ -196,6 +197,7 @@ async fn test_capture_skip_writes_neither_tier() {
         transcript: Some("hi, how are you? casual chat".to_string()),
         summary: None,
         metadata: None,
+        ..Default::default()
     };
     service.enqueue(&entry).await.expect("enqueue");
 
@@ -312,6 +314,7 @@ async fn test_capture_provider_failure_retries_then_dead_letters() {
         transcript: Some("some transcript".to_string()),
         summary: None,
         metadata: None,
+        ..Default::default()
     };
     service.enqueue(&entry).await.expect("enqueue");
 

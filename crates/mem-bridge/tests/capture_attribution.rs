@@ -26,6 +26,7 @@ fn params(capture_id: &str, session_id: &str, agent_id: &str) -> CaptureParams {
         transcript: Some("t".to_string()),
         summary: Some(format!("summary {capture_id}")),
         metadata: None,
+        ..Default::default()
     }
 }
 

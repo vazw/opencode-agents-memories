@@ -58,6 +58,12 @@ pub enum EpisodicError {
         /// Human-readable reason.
         message: String,
     },
+    /// The cross-tier phase failed after the consolidation batch committed.
+    /// The message never carries content.
+    CrossTier {
+        /// Human-readable reason.
+        message: String,
+    },
 }
 
 impl EpisodicError {
@@ -93,6 +99,9 @@ impl fmt::Display for EpisodicError {
             Self::Io { message } => formatter.write_str(message),
             Self::Summary { message } => {
                 write!(formatter, "summarizer failed: {message}")
+            }
+            Self::CrossTier { message } => {
+                write!(formatter, "cross-tier promotion failed: {message}")
             }
         }
     }

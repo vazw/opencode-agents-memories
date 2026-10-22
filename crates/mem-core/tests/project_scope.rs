@@ -136,6 +136,13 @@ fn test_worktrees_of_one_repo_share_a_project_tag() {
 fn test_unrelated_non_git_directories_get_distinct_tags() {
     let a = scratch("nongit-a");
     let b = scratch("nongit-b");
+    // Under the owner-mandated `TMPDIR=$PWD/.tmp/test-tmp` both directories
+    // live INSIDE this repository's worktree, so git discovery would map
+    // both onto the same repo identity. A project marker pins each directory
+    // as its own non-git project root, which is the scenario this test
+    // describes (identity comes from the path, not from an enclosing repo).
+    fs::write(a.join(".opencode-mem-project"), "").unwrap();
+    fs::write(b.join(".opencode-mem-project"), "").unwrap();
 
     let env = scan_env();
     let probe = SystemGitProbe::new(&env);
@@ -145,6 +152,53 @@ fn test_unrelated_non_git_directories_get_distinct_tags() {
     assert_ne!(t_a.tag, t_b.tag);
 
     cleanup(&[&a, &b]);
+}
+
+/// The original unmarked scenario, restored in a tree where git discovery
+/// genuinely finds nothing.
+///
+/// The owner-mandated `TMPDIR` (`.tmp/test-tmp`) lives INSIDE this
+/// repository, so a plain scratch directory inherits the repository's git
+/// identity. This test builds a root whose `.git` is an unusable gitdir
+/// pointer — every `rev-parse` below it fails — and then proves two unrelated
+/// directories under it still get DISTINCT tags from their paths alone.
+#[test]
+fn test_unmarked_directories_outside_any_repo_get_distinct_tags() {
+    let root = scratch("nongit-root");
+    fs::write(
+        root.join(".git"),
+        "gitdir: /nonexistent/opencode-mem-test\n",
+    )
+    .unwrap();
+    let a = root.join("a");
+    let b = root.join("b");
+    fs::create_dir_all(&a).unwrap();
+    fs::create_dir_all(&b).unwrap();
+
+    let env = scan_env();
+    let probe = SystemGitProbe::new(&env);
+    // Assert the construction, so the scenario cannot pass vacuously: git
+    // discovery really returns nothing for both directories.
+    assert!(
+        probe.common_dir(&a).is_none() && probe.common_dir(&b).is_none(),
+        "git discovery must find no repository below the unusable gitdir root"
+    );
+    assert!(
+        probe.top_level(&a).is_none(),
+        "git discovery must find no top level for an unmarked non-git directory"
+    );
+
+    let r = resolver(&env, &probe);
+    let t_a = r.project_tag_info(&a);
+    let t_b = r.project_tag_info(&b);
+    assert_ne!(
+        t_a.tag, t_b.tag,
+        "two unrelated non-git directories need distinct project tags"
+    );
+    assert_eq!(t_a.project_path.as_deref(), Some(a.as_path()));
+    assert_eq!(t_b.project_path.as_deref(), Some(b.as_path()));
+
+    cleanup(&[&root]);
 }
 
 #[test]

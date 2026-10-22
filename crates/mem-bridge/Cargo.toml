@@ -10,6 +10,7 @@ mem-embed = { workspace = true }
 mem-ai = { workspace = true }
 mem-profile = { workspace = true }
 mem-episodic = { workspace = true }
+mem-facts = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
