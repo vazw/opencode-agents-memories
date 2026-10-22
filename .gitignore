@@ -3,3 +3,4 @@
 # Local-only reference clone of upstream opencode-mem (see AGENTS.md)
 /example/
 /tmp/
+/.tmp/
