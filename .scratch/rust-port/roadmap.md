@@ -204,6 +204,14 @@ These rulings supersede OVERVIEW.md's vaguer "`libsql`/`turso` crate" recommenda
 
 **Goal:** make the Rust engine a drop-in OpenCode plugin: bridge, lifecycle hooks, capture, context injection, tools. The only phase that needs the OpenCode host to verify end-to-end.
 
+### W4.4 — Hard delete & milestone scrub (new)
+- **Delivers:** deletion that means what it says — a hard delete removes the session row's text and embedding, **and** scrubs the retained summary text from any milestone's `contributors` JSON while keeping the attribution (who/when); plus an age-based purge of staging rows that never purges an unconsolidated row; **US 1.5**.
+- **Why this wave exists:** the user ruling of 2026-10-21 — the episodic tier is **staging**, so "I deleted it, it is gone" must be true and staging rows must be able to age out. Today it is not: `Contributor.summary` retains the source session's summary verbatim (D-27, `crates/mem-episodic/src/milestone.rs`), so a deleted session's text survives inside a consolidated milestone, and the only delete path is W4.2's tombstone (`soft_delete_session` + `MARK_CHILDREN_ORPHANED`), which keeps text and embedding on disk.
+- **Open residuals for the wave to settle or record:** the milestone's own merged `summary` + embedding can still carry the deleted content; tier-1 facts promoted from that session are independent copies; the age threshold and its interaction with consolidation (no purge before consolidation, or content is lost rather than promoted); the stale-vector interaction (compaction strips text, nothing re-embeds episodic rows).
+- **Entry prerequisites:** W4.1, W4.2, W4.3 (all closed).
+- **Verification:** the W4.2 orphan guarantee re-proved under a hard delete (children stay visible, `orphaned: true`, parent link severed per `ON DELETE SET NULL`); a direct store query proving the row's text and embedding are gone; milestone scrub assertions; a purge-threshold test.
+- **Not in this wave:** the tier-1/tier-2 retention policy (W3.3); the W6.2 REST contract; the W5.3 injection.
+
 ### W5.0 (entry decision) — Bridge strategy
 - **Decision (ADR required, `docs/adr/`):** JS wrapper plugin that spawns the Rust binary and speaks **JSON-RPC over stdio** vs. **N-API native addon**. Default stance: JSON-RPC stdio first (reversible, host-agnostic, matches the V1→V2 adapter's server/client split), N-API only if stdio latency on per-turn hooks proves unacceptable. This is the single most strategy-laden decision in the plan — grilling it with the user is mandatory. **DECIDED 2026-10-20 — see `docs/adr/0007-bridge-strategy.md` (D-30 … D-39): JSON-RPC over stdio; one engine
   process per host with session-scoped logical instances; the axum web server inside the engine process; one
@@ -219,6 +227,7 @@ These rulings supersede OVERVIEW.md's vaguer "`libsql`/`turso` crate" recommenda
 - **Verification:** `tests/plugin-loader-contract.test.ts`, `plugin-host-config`, `plugin-root-entrypoint`, `plugin-bundle-boundary`, **`plugin-shutdown.test.ts`**.
 - **Parallelism:** JS wrapper lane vs. Rust stdio-server lane (against a frozen message schema).
 - **Tracer-bullet slices:** (a) stdio JSON-RPC message schema + framing; (b) Rust sidecar lifecycle (spawn, handshake, shutdown); (c) JS wrapper passing loader-contract tests.
+- **Sequenced follow-up (issue 34):** the wrapper must send the host `input.directory` as `project_id` instead of discarding it — the user-authorized (2026-10-21) cross-lane change, carried by W5.3's Step 8 behind its W5.1 fence and recorded in ADR-0008 as D-W5.3-7.
 
 ### W5.2 — V2 adapter, toast-rpc & TUI companion
 - **Delivers:** V2 plugin contract, adapter bridging V2 context → V1 initializer (as upstream does), toast RPC + TUI companion; **US 5.2**.
@@ -240,6 +249,16 @@ These rulings supersede OVERVIEW.md's vaguer "`libsql`/`turso` crate" recommenda
 - **Verification:** `tests/tool-scope.test.ts`, `memory-timeline-orphan`, `memory-portability-tool.test.ts`, `profile-tool-runtime` (carries the W3.2-deferred cases: query rejection, blank content, private-content block, missing email, lock acquire/release, fail-closed contention).
 - **Parallelism:** tool-by-tool slices.
 - **Tracer-bullet slices:** (a) tool registration plumbing; (b) recall_project_sessions; (c) remaining tools port; (d) portability tool.
+
+
+### W5.5 — Compaction hook: ingest before, restore after (new)
+- **Delivers:** a plugin **compaction hook** — ingest the session's durable context *before* the host compacts, restore it *after*: `experimental.session.compacting` appends the durable memory to the compaction prompt, and `event` → `session.compacted` re-injects the tier-1 facts for that `session_id` (upstream-exact format); **US 1.2**.
+- **Why this wave exists:** a **parity gap** — upstream opencode-mem ships the post-compaction restore (index.ts:1301) and the port does not. Upstream's restore is keyed on tier-1 memories' `session_id`; the port has the schema (`MEMORY_SHARD_V2_ALTER`) and the query (`GET_MEMORIES_BY_SESSION_ID`) but **no writer sets it** (the promotion path writes `session_id: None`, promotion.rs:361), so a naive port would silently restore nothing.
+- **User rulings (2026-10-21):** *both halves* — the pre-compaction ingest uses the OpenCode hook upstream ignores (`experimental.session.compacting`), and the post-compaction restore mirrors upstream; *the tier-1 facts get a `session_id`* — capture-created tier-1 rows carry the producing session's id (upstream's mechanism), while **promoted facts stay session-less and agent-anonymous** (the 2026-10-21 ruling that durable agent attribution lives only on milestones' `contributors` stands); and the behaviour is **agent-only**, by the capture gate — a child/subagent session restores nothing, matching upstream's emergent behaviour (upstream's `isChildSession` gate on the prompt-save path + `captureChildSessions: false`); and *capture writes both tiers* — the tier-1 row carrying the producing `session_id` is written by **W5.3's capture path** (issue 21), **not** by this lane. Upstream's auto-capture wrote tier-1 *only* because upstream had no episodic tier; the port has both, so the port's capture writes the episodic staging row **and** the tier-1 row (upstream's `addMemory({sessionID})` → `metadata.sessionID` → `session_id` mechanism). This lane **consumes** that write and adds no writer of `memories.session_id`.
+- **Upstream subtleties to preserve:** after compaction the host resets the session to the stock "general-purpose" agent, so the pre-compaction agent and model must be resolved explicitly (upstream issue #236) or the restore lands in the wrong agent.
+- **Entry prerequisites:** W5.1 (the plugin adapter + `event` hook surface), W5.3 (the capture path that writes the tier-1 `session_id` this lane keys on).
+- **Verification:** the pre-compaction context append; the post-compaction re-injection in upstream's exact format; the agent/model resolution; the agent-only property pinned by a test; that the restore **finds** the capture-created tier-1 rows W5.3 wrote (the write itself is W5.3's acceptance criterion, this lane consumes it) and that promoted facts remain session-less and agent-anonymous; fail-open when the engine is absent, the config is disabled, or no rows carry the id.
+- **Not in this wave:** upstream's `session.idle` auto-capture and profile learning (W5.3); the port's own **episodic** consolidation/compaction (W4.3 — a different meaning of the word: that one ages episodic rows into milestones, this one is about the host's context window); any change to the promotion path's agent-anonymity; `experimental.compaction.autocontinue` (noted, not required — upstream does not use it).
 
 ---
 
@@ -269,7 +288,7 @@ These rulings supersede OVERVIEW.md's vaguer "`libsql`/`turso` crate" recommenda
 - **Tracer-bullet slices:** (a) list/timeline endpoint; (b) delete endpoint + orphan-safe cascade.
 
 ### W6.4 — Portability & skills manager
-- **Delivers:** export/import of all tiers (project, global, profiles, **session histories** — the new tier ships in the bundle from day one); skills manager + bridging; **US 4.3**.
+- **Delivers:** export/import of the **durable** tiers (project, global, profiles, **milestones with their contributors** — the durable session history, which upstream has no equivalent of) plus the **opt-in** raw staging tier (agent-session rows, behind an explicit export flag), and the skills manager + bridging; **US 4.3**. The bundle's shape follows the user ruling of 2026-10-21: the epic-1 tier is **staging**, so the default bundle is the durable part (a milestone is self-contained — its contributors embed the attribution and each contributor's retained summary inline, so an imported milestone restores the full recap even when the staging rows were not exported).
 - **Entry prerequisites:** W6.2; W4.1 (episodic must be in the export).
 - **Verification:** `tests/memory-portability.test.ts`, `shared-api-types`, `v2-skills-bridge.test.ts`, `skills-manager.test.ts`.
 - **Parallelism:** portability lane vs. skills lane.
@@ -282,6 +301,29 @@ These rulings supersede OVERVIEW.md's vaguer "`libsql`/`turso` crate" recommenda
 - **Parallelism:** shell lane (first), then per-screen lanes (each tied to its endpoint group).
 - **Tracer-bullet slices:** (a) crate init + Trunk + ConfigProvider theme + client router; (b) REST fetch client helper (new-siamstr `helper.rs` pattern: one `request<T>` fn + typed wrappers + the single `Authorization` seam); (c) memories browse/search screen; (d) tags/profile screens; (e) session-history tab.
 - **Research note (D5):** pins — `leptos = "0.7"` (caret, `^0.7.7` floor via thaw), `thaw = "^0.4.8"` (stable line), `trunk` + `wasm32-unknown-unknown` target, `leptosfmt` for view-macro formatting. No `nightly` leptos features (stable toolchain everywhere; revisit only if wasm perf ever matters).
+
+### W6.6 — Agent contribution view (new)
+- **Delivers:** an `Agents` view in `web-ui` — **who contributed to this project's durable memory**: the distinct contributing agents of a project scope, with their milestone counts and last contribution, and a drill-down into the milestones (time window, source count, promoted facts) they contributed to; **US 5.1**.
+- **Why this wave exists:** a **product** gap, not a parity gap — upstream opencode-mem has no agents screen and no agents endpoint (its SPA has exactly three client routes; `agent` is only a per-message attribute in the v2 adapter). The port's differentiator is the third tier, and under the thesis adopted on 2026-10-21 (*the episodic tier is **staging**, not a permanent tier: raw session rows age into milestones and promote into durable facts, while agents survive as **attribution** on milestones*) the only durable agent attribution in the system is the `contributors` list on a milestone.
+- **Backend requirement:** a **new** milestone REST route + port seam over `EpisodicStore::list_milestones(project_id, limit)` (no milestone route exists in W6.2's `ROUTE_TABLE`). This grows the route table, whose row count is pinned by W6.2's approved blueprint and its contract test — the wave must re-baseline both explicitly.
+- **Entry prerequisites:** W6.3 (the session endpoints and the screen seam this view sits beside), W6.5 (the shell + route/nav/fetch seams it renders in), W4.3 (closed — the consolidation that produces milestones and their contributors).
+- **Verification:** wasm-bindgen tests for the roster grouping over milestones' contributors + the route/nav entry; REST contract tests for the new milestone route; manual smoke against the Rust server.
+- **Not in this wave:** raw-session browsing as the Agents view (raw rows are staging; W6.3's session-history screen is the transient-activity view); agent attribution on tier-1 `memories` (promoted facts are agent-anonymous by construction — `PermanentMemorySink::promote` derives the fact id from `sha256(project_id + "\x1f" + key)`); a cross-project / global Agents view.
+
+### W6.7 — Core memory screens (new)
+- **Delivers:** the explorer's four core screens — **Memories** (browse/search tier-1 project memories), **Tags**, **Profile** (the user-profile tier) and **Settings** — built against the landed W6.2 REST surface, plus the re-homing of the four stale `Owner::W6_2` route labels to this wave's owner; **US 5.1**.
+- **Why this wave exists:** a **tracker gap**, not a product gap — all four routes exist in `web-ui/src/routes.rs` with the owner label `Owner::W6_2`, and all four render the planned-notice, because W6.2's approved blueprint explicitly created no UI file. The label names a wave that closed without building them.
+- **Entry prerequisites:** W6.2 (closed — the REST surface), W6.5 (closed — the shell, route table, nav model, fetch seam). **Ordered after W5.3** by the user's ruling of 2026-10-21: the screens are buildable without the capture loop, but the explorer shows almost nothing until W5.3 puts host-driven rows into the episodic tier.
+- **Verification:** per-screen pure (wasm-bindgen) tests for the request built and the shape rendered; the browser smoke against the Rust server (existing Chrome at `127.0.0.1:9222`); manual smoke per screen.
+- **Not in this wave:** `ExportImport` / `SkillLibrary` (W6.4), `SessionHistory` (W6.3), the Agents contribution view (W6.6); any change to the W6.2 REST contract.
+
+### W6.8 — Composition-root wiring for the built web UI (new)
+
+- **Delivers:** the one derivation of "where is the built UI", resolved at the composition root (`src/main.rs`, W5.x-owned) and handed to mem-web's `AppState.dist_dir` (`crates/mem-web/src/server.rs:34`), so the live server actually serves `web-ui/dist`; **US 5.1**.
+- **Why this wave exists:** a **tracker gap**, not a product gap — the engine's composition root sets `dist_dir: storage_root.join("web-ui")` (`src/main.rs:89`), a path the Trunk build never writes to, so mem-web's static hosting (`crates/mem-web/src/static_hosting.rs:106`, `:154`, `:171`) finds no `index.html` and every live-server smoke that needs a rendered screen is blocked. Both W6.2's AC2 and W6.5's AC3/AC4 name this wire as their precondition, and before this wave no wave owned it.
+- **Entry prerequisites:** W6.1 (server skeleton + static hosting), W6.5's Trunk build (the shell slice, already landed).
+- **Verification:** the location is resolved from an explicit documented setting with a stated default — never a hard-coded repo-relative absolute path, since the binary must work outside a checkout; a missing build degrades loudly through the existing structured `web.launch_failed` path; live smoke: with the UI built the server answers `GET /` with the app shell, without it the failure is loud and diagnosable; `web-ui/dist` stays gitignored build output.
+- **Not in this wave:** any change to the W6.2 REST contract, the route table, or mem-web's static-hosting implementation — this wave changes only which directory the composition root hands it.
 
 ---
 
