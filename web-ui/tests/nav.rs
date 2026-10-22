@@ -27,23 +27,23 @@ fn test_nav_marks_the_shell_route_as_ready() {
 }
 
 #[wasm_bindgen_test]
-fn test_nav_marks_a_planned_screen_with_its_owning_wave() {
-    // The portability screens stay planned with W6.4 while the four core
-    // screens are live (W6.7).
-    assert_eq!(
-        entry_for(RouteId::ExportImport).state,
-        ScreenState::Planned {
-            owner: Owner::W6_4,
-            endpoints: web_ui::paths::endpoints_for(RouteId::ExportImport),
-        }
-    );
-    assert_eq!(
-        entry_for(RouteId::SkillLibrary).state,
-        ScreenState::Planned {
-            owner: Owner::W6_4,
-            endpoints: web_ui::paths::endpoints_for(RouteId::SkillLibrary),
-        }
-    );
+fn test_nav_marks_the_portability_screens_live() {
+    // W6.5 re-homed the two portability screens from W6.4: both are Live.
+    for id in [RouteId::ExportImport, RouteId::SkillLibrary] {
+        assert_eq!(
+            entry_for(id).state,
+            ScreenState::Live {
+                owner: Owner::W6_5,
+                endpoints: web_ui::paths::endpoints_for(id),
+            },
+            "{id:?} is live under W6.5"
+        );
+        assert_eq!(entry_for(id).owner, Owner::W6_5, "{id:?} owner");
+        assert!(
+            !matches!(entry_for(id).state, ScreenState::Planned { .. }),
+            "{id:?} must not render the planned notice"
+        );
+    }
 }
 
 #[wasm_bindgen_test]
@@ -104,10 +104,26 @@ fn test_nav_only_marks_the_landed_routes_ready_or_live() {
             RouteId::Tags,
             RouteId::Profile,
             RouteId::Settings,
+            // W6.5: the two portability screens re-homed this wave.
+            RouteId::ExportImport,
+            RouteId::SkillLibrary,
             // W6.3: the session timeline.
             RouteId::SessionHistory,
         ]
     );
+}
+
+#[wasm_bindgen_test]
+fn test_every_declared_route_is_ready_or_live() {
+    for id in RouteId::ALL {
+        assert!(
+            matches!(
+                entry_for(id).state,
+                ScreenState::Ready | ScreenState::Live { .. }
+            ),
+            "{id:?} must not be Planned"
+        );
+    }
 }
 
 #[wasm_bindgen_test]

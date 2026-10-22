@@ -12,8 +12,8 @@ use wasm_bindgen_test::wasm_bindgen_test;
 use web_ui::api::envelope::ApiError;
 use web_ui::paths::{ENDPOINTS, EndpointId, encode_component};
 use web_ui::screens::{
-    SessionRow, delete_outcome, delete_session_spec, format_created_at, list_sessions_spec,
-    session_path,
+    SessionRow, delete_outcome, delete_session_spec, format_created_at, initial_project,
+    list_sessions_spec, session_path,
 };
 
 /// The pinned template for `id`.
@@ -136,4 +136,20 @@ fn test_format_created_at_formats_utc() {
         format_created_at(1_788_220_800_999),
         "2026-09-01 00:00:00 UTC"
     );
+}
+
+#[wasm_bindgen_test]
+fn test_initial_project_reads_the_query_parameter() {
+    assert_eq!(
+        initial_project("?project=demo-project"),
+        Some("demo-project".to_string())
+    );
+    assert_eq!(initial_project("?a=1&project=x&b=2"), Some("x".to_string()));
+}
+
+#[wasm_bindgen_test]
+fn test_initial_project_ignores_absent_or_empty_values() {
+    assert_eq!(initial_project(""), None);
+    assert_eq!(initial_project("?project="), None);
+    assert_eq!(initial_project("?otherproject=x"), None);
 }

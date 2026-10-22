@@ -3,8 +3,10 @@
 //! This is the single source of truth for which paths the SPA resolves
 //! client-side (`mem-web`'s SPA fallback serves the shell for exactly these
 //! paths). `Home` is the shell's own landing route; every other entry is a
-//! declared-but-unimplemented screen that renders the placeholder naming the
-//! wave that owns it.
+//! landed screen (`nav::state_for` answers `Live` for all of them), so no route
+//! renders the placeholder. The `Planned` screen state and its notice remain
+//! constructible for synthetic tests and for a future screen lane, but no
+//! route-table row produces one.
 //!
 //! Upstream-parity paths are transcribed from upstream's
 //! `example/opencode-mem/web/src/lib/routes.ts`; the port-local paths are
@@ -16,7 +18,7 @@ pub enum Owner {
     ThisWave,
     W6_7,
     W6_3,
-    W6_4,
+    W6_5,
 }
 
 impl Owner {
@@ -26,7 +28,7 @@ impl Owner {
             Self::ThisWave => "this wave",
             Self::W6_7 => "W6.7",
             Self::W6_3 => "W6.3",
-            Self::W6_4 => "W6.4",
+            Self::W6_5 => "W6.5",
         }
     }
 }
@@ -117,13 +119,13 @@ pub const ROUTES: &[RouteSpec] = &[
         id: RouteId::ExportImport,
         path: "/export-import",
         label: "Export / Import",
-        owner: Owner::W6_4,
+        owner: Owner::W6_5,
     },
     RouteSpec {
         id: RouteId::SkillLibrary,
         path: "/skill-library",
         label: "Skills",
-        owner: Owner::W6_4,
+        owner: Owner::W6_5,
     },
     RouteSpec {
         id: RouteId::SessionHistory,

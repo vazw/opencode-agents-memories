@@ -109,7 +109,8 @@ fn test_home_is_the_shell_landing_route() {
 #[wasm_bindgen_test]
 fn test_core_route_owners_are_w6_7() {
     // W6.7 re-homes the four core screens from the closed `Owner::W6_2` to
-    // this wave. The other owners stay put: `W6_3` sessions, `W6_4` portability.
+    // this wave. W6.3 keeps the sessions screen. W6.5 re-homes the two
+    // portability screens; the retired W6.4 owner no longer exists at all.
     for id in [
         RouteId::ProjectMemories,
         RouteId::Tags,
@@ -121,6 +122,6 @@ fn test_core_route_owners_are_w6_7() {
         assert_eq!(spec.owner.label(), "W6.7", "{id:?} renders the W6.7 label");
     }
     assert_eq!(route(RouteId::SessionHistory).owner, Owner::W6_3);
-    assert_eq!(route(RouteId::ExportImport).owner, Owner::W6_4);
-    assert_eq!(route(RouteId::SkillLibrary).owner, Owner::W6_4);
+    assert_eq!(route(RouteId::ExportImport).owner, Owner::W6_5);
+    assert_eq!(route(RouteId::SkillLibrary).owner, Owner::W6_5);
 }

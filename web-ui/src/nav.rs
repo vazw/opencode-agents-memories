@@ -37,9 +37,7 @@ pub struct NavEntry {
 
 /// The state of a route today.
 ///
-/// `Home` is the shell's own landing screen, the four core screens landed with
-/// W6.7 (they fetch and render real endpoint data), `SessionHistory` landed with
-/// W6.3, and the two portability screens are still owned by W6.4.
+/// `Home` is the shell's own landing screen; every other route is `Live`.
 pub fn state_for(id: RouteId) -> ScreenState {
     let spec = route(id);
     match id {
@@ -54,7 +52,11 @@ pub fn state_for(id: RouteId) -> ScreenState {
             owner: spec.owner,
             endpoints: endpoints_for(id),
         },
-        _ => ScreenState::Planned {
+        RouteId::ExportImport => ScreenState::Live {
+            owner: spec.owner,
+            endpoints: endpoints_for(id),
+        },
+        RouteId::SkillLibrary => ScreenState::Live {
             owner: spec.owner,
             endpoints: endpoints_for(id),
         },

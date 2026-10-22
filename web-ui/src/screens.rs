@@ -4,7 +4,7 @@
 //! placeholder notice. `Ready` renders the shell landing panel, `Planned`
 //! renders a documented "not yet implemented" notice naming the owning wave and
 //! listing the endpoints the screen will consume, and `Live` renders the real
-//! screen — today that is the W6.3 session-history timeline.
+//! screen — today that is the W6.3 session-history timeline plus W6.5.
 //!
 //! Security: the notice interpolates only compile-time constants from the route
 //! table and the path table. The session screen builds its two paths from the
@@ -21,9 +21,11 @@ use crate::api::auth::{AuthContext, read_marker_token};
 use crate::api::envelope::{ApiEnvelope, ApiError};
 use crate::api_request::{self, RequestSpec};
 use crate::core_screens::{MemoriesPanel, ProfilePanel, SettingsPanel, TagsPanel};
+use crate::export_import::ExportImportPanel;
 use crate::nav::ScreenState;
 use crate::paths::{ENDPOINTS, EndpointId, EndpointSpec, encode_component};
 use crate::routes::{Owner, RouteId};
+use crate::skill_library::SkillLibraryPanel;
 
 /// The pure placeholder description for a screen state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,22 +45,12 @@ pub fn notice_for(state: &ScreenState) -> Option<Notice> {
 /// Render the screen body for a resolved route.
 ///
 /// The route is needed in addition to the state because several routes are
-/// `Live`: each one dispatches to its own panel (W6.7's four core screens plus
-/// W6.3's session timeline). A `Planned` route renders the notice, and `Ready`
-/// renders the shell landing panel.
+/// `Live`: each one dispatches to its own panel. A `Planned` route renders
+/// the notice, and `Ready` renders the shell landing panel.
 #[component]
 pub fn ScreenBody(route: RouteId, state: ScreenState) -> impl IntoView {
     match state {
-        ScreenState::Ready => view! {
-            <section class="home-panel" data-testid="home-panel">
-                <h2>"OpenCode Memory Explorer"</h2>
-                <p>
-                    "This is the app shell. The navigation lists every planned screen; \
-                     each one is owned by a later wave and says so on its own panel."
-                </p>
-            </section>
-        }
-        .into_any(),
+        ScreenState::Ready => view! { <HomePanel/> }.into_any(),
         ScreenState::Planned { owner, endpoints } => {
             let owner_label = owner.label();
             view! {
@@ -79,14 +71,32 @@ pub fn ScreenBody(route: RouteId, state: ScreenState) -> impl IntoView {
             .into_any()
         }
         ScreenState::Live { .. } => match route {
+            RouteId::Home => view! { <HomePanel/> }.into_any(),
             RouteId::ProjectMemories => view! { <MemoriesPanel/> }.into_any(),
             RouteId::Tags => view! { <TagsPanel/> }.into_any(),
             RouteId::Profile => view! { <ProfilePanel/> }.into_any(),
             RouteId::Settings => view! { <SettingsPanel/> }.into_any(),
-            // `Live` + any other route is today only the W6.3 timeline; `Home`
-            // never reaches here (`state_for` answers `Ready`).
-            _ => view! { <SessionHistoryPanel/> }.into_any(),
+            RouteId::SessionHistory => view! { <SessionHistoryPanel/> }.into_any(),
+            RouteId::SkillLibrary => view! { <SkillLibraryPanel/> }.into_any(),
+            RouteId::ExportImport => view! { <ExportImportPanel/> }.into_any(),
         },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Home panel (extracted from the Ready arm)
+// ---------------------------------------------------------------------------
+
+#[component]
+pub fn HomePanel() -> impl IntoView {
+    view! {
+        <section class="home-panel" data-testid="home-panel">
+            <h2>"OpenCode Memory Explorer"</h2>
+            <p>
+                "This is the app shell. The navigation lists every screen; \
+                 each one is owned by a wave and says so on its own panel."
+            </p>
+        </section>
     }
 }
 
@@ -259,6 +269,23 @@ pub fn format_created_at(millis: i64) -> String {
     )
 }
 
+/// Extract the `project` query parameter from a URL search string.
+pub fn initial_project(search: &str) -> Option<String> {
+    let search = search.strip_prefix('?').unwrap_or(search);
+    for pair in search.split(['&', ';']) {
+        let mut parts = pair.splitn(2, '=');
+        let key = parts.next().unwrap_or("");
+        let value = parts.next().unwrap_or("");
+        if key == "project" {
+            let value = value.trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// The W6.3 session-history screen.
 ///
 /// The shell has no project context, so the screen takes the project id from
@@ -300,6 +327,17 @@ pub fn SessionHistoryPanel() -> impl IntoView {
                 Err(failure) => error.set(Some(failure.to_string())),
             }
         });
+    });
+
+    Effect::new(move |_| {
+        if let Some(id) = initial_project(
+            &web_sys::window()
+                .and_then(|w| w.location().search().ok())
+                .unwrap_or_default(),
+        ) {
+            project_id.set(id);
+            reload.run(());
+        }
     });
 
     view! {

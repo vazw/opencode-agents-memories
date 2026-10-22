@@ -51,27 +51,15 @@ fn test_ready_screen_state_has_no_placeholder_notice() {
 #[wasm_bindgen_test]
 fn test_planned_screen_state_names_the_owning_wave() {
     let state = ScreenState::Planned {
-        owner: Owner::W6_4,
+        owner: Owner::W6_5,
         endpoints: &["/api/skills"],
     };
     let notice = notice_for(&state).expect("a planned screen renders a notice");
-    assert_eq!(notice.owner, Owner::W6_4);
-    assert_eq!(notice.owner.label(), "W6.4");
-    assert_eq!(
-        notice_for(&state_for(RouteId::SkillLibrary))
-            .expect("the skill library is still planned")
-            .owner,
-        Owner::W6_4
-    );
-    // The four core screens are NOT planned any more (W6.7).
-    for id in [
-        RouteId::ProjectMemories,
-        RouteId::Tags,
-        RouteId::Profile,
-        RouteId::Settings,
-    ] {
-        assert_eq!(notice_for(&state_for(id)), None, "{id:?} renders data");
-    }
+    assert_eq!(notice.owner, Owner::W6_5);
+    assert_eq!(notice.owner.label(), "W6.5");
+    // The state is synthetic: the "no route is planned" invariant belongs to
+    // `test_every_declared_route_is_ready_or_live` in `tests/nav.rs`, which
+    // walks the route table directly. This test only proves the mapping.
 }
 
 #[wasm_bindgen_test]
@@ -89,7 +77,11 @@ fn test_live_screen_state_has_no_placeholder_notice() {
 
 #[wasm_bindgen_test]
 fn test_planned_screen_state_lists_the_endpoints_it_will_consume() {
-    let notice = notice_for(&state_for(RouteId::SkillLibrary)).expect("planned");
+    let notice = notice_for(&ScreenState::Planned {
+        owner: Owner::W6_5,
+        endpoints: endpoints_for(RouteId::SkillLibrary),
+    })
+    .expect("planned");
     assert_eq!(notice.endpoints, endpoints_for(RouteId::SkillLibrary));
     assert!(!notice.endpoints.is_empty());
     assert!(notice.endpoints.contains(&"/api/skills"));
