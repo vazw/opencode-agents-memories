@@ -15,6 +15,7 @@ mem-ai = { path = "crates/mem-ai" }
 mem-profile = { path = "crates/mem-profile" }
 mem-episodic = { path = "crates/mem-episodic" }
 mem-facts = { path = "crates/mem-facts" }
+mem-vault = { path = "crates/mem-vault" }
 mem-skills = { path = "crates/mem-skills" }
 mem-portability = { path = "crates/mem-portability" }
 mem-web = { path = "crates/mem-web" }
@@ -58,6 +59,7 @@ mem-core = { workspace = true }
 mem-embed = { workspace = true }
 mem-episodic = { workspace = true }
 mem-facts = { workspace = true }
+mem-vault = { workspace = true }
 mem-profile = { workspace = true }
 mem-store = { workspace = true }
 mem-skills = { workspace = true }

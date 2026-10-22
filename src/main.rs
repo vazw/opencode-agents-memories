@@ -41,6 +41,7 @@ use mem_profile::CRATE_NAME as MEM_PROFILE;
 use mem_skills::CRATE_NAME as MEM_SKILLS;
 use mem_skills::SkillsManager;
 use mem_store::CRATE_NAME as MEM_STORE;
+use mem_vault::CRATE_NAME as MEM_VAULT;
 use mem_web::CRATE_NAME as MEM_WEB;
 use mem_web::api::ports::ApiServices;
 use mem_web::api::store_adapter::{ProductionDeps, ProductionEmbed, production_skill_port};
@@ -49,7 +50,7 @@ use opencode_agents_memory::web_dist::{self, ResolvedDist};
 /// The workspace crates in composition order — printed by
 /// `--mode=print-crates` (M31); asserted byte-exactly by
 /// `tests/workspace_smoke.rs`.
-fn workspace_crates() -> [&'static str; 11] {
+fn workspace_crates() -> [&'static str; 12] {
     [
         MEM_CORE,
         MEM_STORE,
@@ -58,6 +59,7 @@ fn workspace_crates() -> [&'static str; 11] {
         MEM_PROFILE,
         MEM_EPISODIC,
         MEM_FACTS,
+        MEM_VAULT,
         MEM_SKILLS,
         MEM_PORTABILITY,
         MEM_WEB,

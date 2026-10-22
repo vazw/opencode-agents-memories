@@ -11,8 +11,12 @@
 //! `&hex(...)[..16]` for byte-exact upstream parity.
 //!
 //! Inputs are public identity strings (project paths, emails, origin URLs);
-//! this is a compatibility hash for identifier stability, NOT a security
-//! primitive — no keyed/secret use, no side-channel surface.
+//! the digest is a compatibility hash for identifier stability, not an
+//! authentication primitive of its own. It is now also the compression core of
+//! `mem-vault`'s HMAC-SHA-256 (RFC 2104, pinned to the RFC 4231 vectors), so
+//! this module sits on a keyed path: HMAC's security rests on SHA-256's
+//! correctness plus that construction, and nothing here authenticates anything
+//! by itself.
 //!
 //! Implemented in safe Rust: no `unsafe`, no panicking indexing. The K/H₀
 //! constants are NOT transcribed from a printed table — they are derived at

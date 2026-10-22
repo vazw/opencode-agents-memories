@@ -1068,3 +1068,73 @@ async fn test_purge_session_reports_busy_with_exit_75() {
     );
     held.release();
 }
+
+/// ADR-0012 D-11, option (b): the vault holds nothing for any session because
+/// it has **no writer**, so `not_erased` stays complete and true without a
+/// vault entry — and the purge must be proved unable to reach the vault's
+/// directories. The fixture is plain bytes on purpose: `mem-bridge` declares
+/// no edge to `mem-vault` (normal or dev), so it cannot construct a real one.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_purge_does_not_touch_the_vault_directories() {
+    let seeded = seed(TestDir::new("w72-purge-vault"), true).await;
+    let scope = "0123456789abcdef";
+    let vault_dir = seeded.dir.path().join("vault").join(scope);
+    std::fs::create_dir_all(&vault_dir).expect("create the vault-shaped directory");
+    let db_bytes = b"\x00\x01synthetic encrypted vault page\xff\xfe".to_vec();
+    std::fs::write(vault_dir.join("vault.db"), &db_bytes).expect("write the vault-shaped database");
+    std::fs::write(vault_dir.join(".vault-encrypted-v1"), "cipher=aes256gcm\n")
+        .expect("write the marker");
+
+    let listing = |dir: &Path| -> Vec<(String, Vec<u8>)> {
+        let mut entries: Vec<(String, Vec<u8>)> = std::fs::read_dir(dir)
+            .expect("list the vault-shaped directory")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| {
+                (
+                    entry.file_name().to_string_lossy().into_owned(),
+                    std::fs::read(entry.path()).unwrap_or_default(),
+                )
+            })
+            .collect();
+        entries.sort();
+        entries
+    };
+    let before = listing(&vault_dir);
+
+    let home = scratch_home("vault-untouched");
+    let args = purge_args(seeded.dir.path(), PROJECT, SESSION, AGENT);
+    let output = run_child(&home, &args);
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 1, "exactly one stdout line: {stdout}");
+    assert!(
+        !stdout.contains("vault"),
+        "the report must not name a tier that holds nothing: {stdout}"
+    );
+    let event: serde_json::Value = serde_json::from_str(lines[0]).expect("JSON line");
+    assert_eq!(event["event"], "purge.completed");
+    assert_eq!(event["outcome"], "erased");
+    assert_eq!(
+        event["counts"]["session_rows"], 1,
+        "the purge really ran: {stdout}"
+    );
+    let not_erased = event["not_erased"]
+        .as_array()
+        .expect("not_erased is an array");
+    assert_eq!(not_erased.len(), 1, "exactly one surviving tier");
+    assert_eq!(not_erased[0]["tier"], "memories-shard");
+
+    assert_eq!(
+        std::fs::read(vault_dir.join("vault.db")).expect("read back the vault-shaped file"),
+        db_bytes,
+        "the purge leaves the vault's bytes byte-identical"
+    );
+    assert_eq!(
+        listing(&vault_dir),
+        before,
+        "the purge leaves the vault's directory listing unchanged"
+    );
+}

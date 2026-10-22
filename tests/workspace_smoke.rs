@@ -1,4 +1,4 @@
-//! Composition smoke tests: the root binary must print all 11 workspace
+//! Composition smoke tests: the root binary must print all 12 workspace
 //! crate names via `--mode=print-crates` (M31) AND answer `--version` with
 //! the pinned string (E4: `opencode-agents-memory 0.1.0 (bridge 1.0.0)`).
 //! The r8 wave keeps both assertions (add, never replace).
@@ -25,7 +25,7 @@ fn test_binary_prints_all_workspace_crate_names() {
     assert_eq!(code, 0, "binary exited {code}: {stderr}");
     assert_eq!(
         stdout,
-        "mem-core\nmem-store\nmem-embed\nmem-ai\nmem-profile\nmem-episodic\nmem-facts\nmem-skills\nmem-portability\nmem-web\nmem-bridge\n"
+        "mem-core\nmem-store\nmem-embed\nmem-ai\nmem-profile\nmem-episodic\nmem-facts\nmem-vault\nmem-skills\nmem-portability\nmem-web\nmem-bridge\n"
     );
 }
 

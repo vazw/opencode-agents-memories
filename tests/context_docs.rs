@@ -11,6 +11,7 @@ fn test_context_map_lists_every_crate_and_stub_docs_exist() {
         "mem-profile",
         "mem-episodic",
         "mem-facts",
+        "mem-vault",
         "mem-skills",
         "mem-portability",
         "mem-web",
