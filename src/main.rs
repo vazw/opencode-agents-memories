@@ -35,17 +35,20 @@ use mem_core::CRATE_NAME as MEM_CORE;
 use mem_embed::CRATE_NAME as MEM_EMBED;
 use mem_embed::{EmbeddingService, EmbeddingServiceOptions};
 use mem_episodic::CRATE_NAME as MEM_EPISODIC;
+use mem_portability::CRATE_NAME as MEM_PORTABILITY;
 use mem_profile::CRATE_NAME as MEM_PROFILE;
+use mem_skills::CRATE_NAME as MEM_SKILLS;
+use mem_skills::SkillsManager;
 use mem_store::CRATE_NAME as MEM_STORE;
 use mem_web::CRATE_NAME as MEM_WEB;
 use mem_web::api::ports::ApiServices;
-use mem_web::api::store_adapter::{ProductionDeps, ProductionEmbed};
+use mem_web::api::store_adapter::{ProductionDeps, ProductionEmbed, production_skill_port};
 use opencode_agents_memory::web_dist::{self, ResolvedDist};
 
 /// The workspace crates in composition order — printed by
 /// `--mode=print-crates` (M31); asserted byte-exactly by
 /// `tests/workspace_smoke.rs`.
-fn workspace_crates() -> [&'static str; 8] {
+fn workspace_crates() -> [&'static str; 10] {
     [
         MEM_CORE,
         MEM_STORE,
@@ -53,6 +56,8 @@ fn workspace_crates() -> [&'static str; 8] {
         MEM_AI,
         MEM_PROFILE,
         MEM_EPISODIC,
+        MEM_SKILLS,
+        MEM_PORTABILITY,
         MEM_WEB,
         MEM_BRIDGE,
     ]
@@ -123,23 +128,40 @@ impl WebLauncher for RootWebLauncher {
             };
             // The mem-web production wiring lives HERE, in the root crate,
             // because mem-bridge must not take a mem-web edge.
+            // W6.4: the skills manager is wired in BOTH branches — it needs
+            // only the storage root, so `/api/skills` answers 200 even when
+            // the tier-1 composition failed and the other ports degrade.
+            let skills_port = {
+                // The store config is DERIVED from the resolved config (the
+                // same rule the bridge's composition root follows): only the
+                // storage path is owned here.
+                let mut store_config = mem_store::config::from_core(&core_config);
+                store_config.storage_path = storage_root.clone();
+                production_skill_port(Arc::new(SkillsManager::new(
+                    storage_root.clone(),
+                    store_config,
+                )))
+            };
             let api = match deps {
                 Some(deps) => {
                     let service = EmbeddingService::new(
                         EmbeddingServiceOptions::from_config(&core_config),
                         deps.embedder.clone(),
                     );
-                    Arc::new(ApiServices::production(ProductionDeps {
-                        shards: deps.shards.clone(),
-                        prompts: deps.prompts.clone(),
-                        profile: deps.profile.clone(),
-                        embed: Arc::new(ProductionEmbed::new(Arc::new(service))),
-                    }))
+                    Arc::new(
+                        ApiServices::production(ProductionDeps {
+                            shards: deps.shards.clone(),
+                            prompts: deps.prompts.clone(),
+                            profile: deps.profile.clone(),
+                            embed: Arc::new(ProductionEmbed::new(Arc::new(service))),
+                        })
+                        .with_skills(skills_port),
+                    )
                 }
                 // The documented degrade path: no composed stores means the
                 // endpoints answer `PortError::Unavailable`, exactly as before
-                // W6.7.
-                None => Arc::new(ApiServices::unavailable()),
+                // W6.7. The skills port is still live.
+                None => Arc::new(ApiServices::unavailable().with_skills(skills_port)),
             };
             let state = mem_web::server::AppState {
                 basic_auth: mem_web::web_auth::WebAuth::new(None, None, "engine"),

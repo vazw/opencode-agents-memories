@@ -14,6 +14,8 @@ mem-embed = { path = "crates/mem-embed" }
 mem-ai = { path = "crates/mem-ai" }
 mem-profile = { path = "crates/mem-profile" }
 mem-episodic = { path = "crates/mem-episodic" }
+mem-skills = { path = "crates/mem-skills" }
+mem-portability = { path = "crates/mem-portability" }
 mem-web = { path = "crates/mem-web" }
 mem-bridge = { path = "crates/mem-bridge" }
 turso = "0.8.3"
@@ -56,4 +58,6 @@ mem-embed = { workspace = true }
 mem-episodic = { workspace = true }
 mem-profile = { workspace = true }
 mem-store = { workspace = true }
+mem-skills = { workspace = true }
+mem-portability = { workspace = true }
 mem-web = { workspace = true }

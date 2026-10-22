@@ -19,6 +19,17 @@ const ALLOWED: &[(&str, &[&str])] = &[
         "mem-episodic",
         &["mem-core", "mem-store", "mem-embed", "mem-ai"],
     ),
+    ("mem-skills", &["mem-core", "mem-store"]),
+    (
+        "mem-portability",
+        &[
+            "mem-core",
+            "mem-store",
+            "mem-embed",
+            "mem-profile",
+            "mem-episodic",
+        ],
+    ),
     (
         "mem-web",
         &[
@@ -28,6 +39,8 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "mem-ai",
             "mem-profile",
             "mem-episodic",
+            "mem-skills",
+            "mem-portability",
         ],
     ),
     (
@@ -84,8 +97,8 @@ fn allowed_keys() -> BTreeSet<String> {
 fn test_workspace_crate_dependencies_stay_within_allowed_edges() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
 
-    // (a) crates/ contains exactly the 8 allowed packages: no missing crate,
-    // and no unlisted ninth crate.
+    // (a) crates/ contains exactly the 10 allowed packages: no missing
+    // crate, and no unlisted eleventh crate.
     let mut found: BTreeSet<String> = std::fs::read_dir(format!("{manifest_dir}/crates"))
         .unwrap_or_else(|e| panic!("cannot list crates/ under {manifest_dir}: {e}"))
         .filter_map(|entry| entry.ok())

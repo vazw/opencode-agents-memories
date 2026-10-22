@@ -299,6 +299,27 @@ pub fn semantic_timeline_sessions_sql(predicates: TimelinePredicates) -> String 
 /// JSON text through `vector32(?)`.
 pub const INSERT_MILESTONE: &str = "INSERT INTO episodic_milestones (id, project_id, agent_id, summary, contributors, source_count, window_start, window_end, embedding, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, vector32(?), ?)";
 
+/// W6.4 — the milestone delete used by the portability import's replace
+/// mode (the DELETE that precedes the re-INSERT in the SAME atomic batch).
+///
+/// The delete is keyed by the milestone **id** alone: the import rewrites
+/// the milestone's `project_id` to the TARGET's project, so a
+/// project-scoped predicate would leave the source row behind (and a
+/// milestone imported into a different project would never be replaced).
+/// The milestone id is the row's primary key and is preserved across the
+/// export/import round trip, so the id is the only stable handle.
+pub const DELETE_MILESTONE: &str = "DELETE FROM episodic_milestones WHERE id = ?";
+
+/// W6.4 — the milestone id existence probe used by the portability
+/// import's pre-scan.
+///
+/// The milestone id is the row's **primary key**, so the collision probe
+/// is GLOBAL and not project-scoped: a milestone of another project
+/// collides just the same, so a project-scoped predicate would let the
+/// import fail at the INSERT (after the fact tiers were already written).
+/// The probe lets the import abort BEFORE the first write.
+pub const SELECT_MILESTONE_ID_BY_ID: &str = "SELECT id FROM episodic_milestones WHERE id = ?";
+
 /// Project-scoped milestone listing (newest first).
 ///
 /// The projection deliberately EXCLUDES the embedding column: the read path

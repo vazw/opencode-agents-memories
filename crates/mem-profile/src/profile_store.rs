@@ -687,6 +687,90 @@ impl ProfileStore {
         Ok(true)
     }
 
+    /// W6.4 — the portability import seam: write a profile **verbatim**.
+    ///
+    /// The id, the version and every timestamp are the SOURCE's, so a
+    /// profile survives an export/import round trip unchanged; the write is
+    /// an upsert, so importing into a store that already holds the profile
+    /// replaces it instead of failing on the primary key. A changelog row
+    /// records the import.
+    ///
+    /// `true` means the row was written, `false` means the store refused
+    /// the write (the caller decides what to report).
+    pub async fn import_profile(&self, profile: Profile) -> Result<bool, ProfileError> {
+        let db = self.ready().await?;
+        let result = db
+            .execute(
+                "
+      INSERT INTO user_profiles (
+        id, user_id, display_name, user_name, user_email,
+        profile_data, version, created_at, last_analyzed_at,
+        total_prompts_analyzed, is_active
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        user_id = excluded.user_id,
+        display_name = excluded.display_name,
+        user_name = excluded.user_name,
+        user_email = excluded.user_email,
+        profile_data = excluded.profile_data,
+        version = excluded.version,
+        created_at = excluded.created_at,
+        last_analyzed_at = excluded.last_analyzed_at,
+        total_prompts_analyzed = excluded.total_prompts_analyzed,
+        is_active = excluded.is_active
+    ",
+                vec![
+                    Value::Text(profile.id.clone()),
+                    Value::Text(profile.user_id.clone()),
+                    Value::Text(profile.display_name.clone()),
+                    Value::Text(profile.user_name.clone()),
+                    Value::Text(profile.user_email.clone()),
+                    Value::Text(profile.profile_data.clone()),
+                    Value::Integer(profile.version),
+                    Value::Integer(profile.created_at),
+                    Value::Integer(profile.last_analyzed_at),
+                    Value::Integer(profile.total_prompts_analyzed),
+                    Value::Integer(i64::from(profile.is_active)),
+                ],
+            )
+            .await?;
+        if result.changes == 0 {
+            return Ok(false);
+        }
+        // The changelog records the import; the snapshot is the imported
+        // payload itself (the import preserves the source's data).
+        let snapshot = profile.profile_data.clone();
+        let id = next_changelog_id();
+        let now = now_millis();
+        db.execute(
+            "
+      INSERT INTO user_profile_changelogs (
+        id, profile_id, version, change_type, change_summary,
+        profile_data_snapshot, created_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    ",
+            vec![
+                Value::Text(id),
+                Value::Text(profile.id.clone()),
+                Value::Integer(profile.version),
+                Value::Text("import".to_string()),
+                Value::Text("Imported from a portability bundle".to_string()),
+                Value::Text(snapshot),
+                Value::Integer(now),
+            ],
+        )
+        .await?;
+        Ok(true)
+    }
+
+    /// The alias of [`Self::import_profile`] (the blueprint names the seam
+    /// `import_profile` / `upsert_profile`).
+    pub async fn upsert_profile(&self, profile: Profile) -> Result<bool, ProfileError> {
+        self.import_profile(profile).await
+    }
+
     /// Upstream `addChangelog`.
     async fn add_changelog(
         &self,

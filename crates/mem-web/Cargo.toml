@@ -10,6 +10,8 @@ mem-embed = { workspace = true }
 mem-ai = { workspace = true }
 mem-profile = { workspace = true }
 mem-episodic = { workspace = true }
+mem-skills = { workspace = true }
+mem-portability = { workspace = true }
 axum = { workspace = true }
 tower-http = { workspace = true }
 tower = { workspace = true }

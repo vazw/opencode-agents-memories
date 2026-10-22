@@ -10,6 +10,8 @@ fn test_context_map_lists_every_crate_and_stub_docs_exist() {
         "mem-ai",
         "mem-profile",
         "mem-episodic",
+        "mem-skills",
+        "mem-portability",
         "mem-web",
         "mem-bridge",
     ];

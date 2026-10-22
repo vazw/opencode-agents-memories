@@ -8,15 +8,15 @@
 //! [`UserPromptManager`] and [`EmbeddingService`].
 //!
 //! **What is wired here.** `MemoryPort`, `PromptPort`, `ProfilePort`,
-//! `SessionPort` ([`EpisodicSessionPort`], W6.3) and `EmbedPort`. The embedder
+//! `SessionPort` ([`EpisodicSessionPort`], W6.3), `SkillPort`
+//! ([`ProductionSkills`], W6.4) and `EmbedPort`. The embedder
 //! is injected (`Arc<dyn EmbedPort>`): production wraps the real
 //! [`EmbeddingService`] ([`ProductionEmbed`]), while the tests inject a
 //! fixed-vector fake — exactly what upstream's
 //! `turso-api-scope.test.ts` does when it monkey-patches
 //! `embeddingService.embedWithTimeout`.
 //!
-//! **What is not.** `SkillPort` (W6.4) stays `unavailable()`.
-//! `MaintenancePort` stays `unavailable()` too: the
+//! **What is not.** `MaintenancePort` stays `unavailable()`: the
 //! handlers, the D-B bridge and the sync `TagMigrator` wiring already exist
 //! (Step 11), but a production `MigrationService` needs the W5.x readiness
 //! gate and a provider for `generate_tags`; `ApiServices::with_maintenance`
@@ -25,16 +25,25 @@
 //! [`NO_PROVIDER_MESSAGE`] at HTTP 200, and `apply_cleanup` answers the
 //! documented "no pending cleanup" message (the pending-cleanup session is
 //! in-memory state that only a provider-backed cleanup can populate).
+//!
+//! W6.4 also adds [`ProductionFacts`], the `mem_portability::facts::FactStore`
+//! adapter over the same shard manager. It is why `mem-web` depends on
+//! `mem-portability` (and the dependency is one-way: `mem-portability`
+//! never depends on `mem-web`).
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use mem_ai::privacy::{is_fully_private, strip_private_content};
 use mem_core::scope::Scope;
 use mem_embed::embedder::EmbedTask;
 use mem_embed::service::EmbeddingService;
 use mem_episodic::EpisodicError;
 use mem_episodic::store::EpisodicStore;
 use mem_episodic::timeline::{SessionSummary, TimelineFilter};
+use mem_portability::PortabilityError;
+use mem_portability::bundle::ExportedMemory;
+use mem_portability::facts::FactStore;
 use mem_profile::ai_cleanup::{
     ProfileCleanupGateway, ai_cleanup_profile_from_indexed, filter_profile_for_cleanup,
     index_profile,
@@ -42,6 +51,10 @@ use mem_profile::ai_cleanup::{
 use mem_profile::error::ProfileError;
 use mem_profile::profile_store::{ProfileChangelog, ProfileData, ProfileStore};
 use mem_profile::prompt::{UserPrompt, UserPromptManager};
+use mem_skills::SkillsManager;
+use mem_skills::schema::{
+    Skill as MemSkill, SkillInput as MemSkillInput, SkillPatch as MemSkillPatch,
+};
 use mem_store::db::{BatchMode, DbHandle, Row, Statement, Value, query_one};
 use mem_store::error::StoreError;
 use mem_store::shard_manager::ShardManager;
@@ -49,9 +62,9 @@ use mem_store::vector::{self, MemoryInsert, SearchResult};
 use serde_json::{Value as JsonValue, json};
 
 use super::ports::{
-    CleanupApplied, CleanupPreview, EmbedPort, MemoryPort, MemoryRow, MemoryUpdate, NewMemory,
-    PortError, ProfileChangelog as ChangelogDto, ProfilePort, ProfileRecord, PromptPort, PromptRow,
-    SearchHit, SessionPort, ShardRef, TagRow,
+    CatalogEntry, CleanupApplied, CleanupPreview, EmbedPort, MemoryPort, MemoryRow, MemoryUpdate,
+    NewMemory, NewSkill, PortError, ProfileChangelog as ChangelogDto, ProfilePort, ProfileRecord,
+    PromptPort, PromptRow, SearchHit, SessionPort, ShardRef, Skill, SkillPatch, TagRow,
 };
 
 /// The dependencies the production wiring needs (the W5.x composition root
@@ -759,5 +772,469 @@ impl SessionPort for EpisodicSessionPort {
             // handler's fixed `404 "Session not found"` (no existence leak).
             false => Err(PortError::NotFound),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SkillPort — SkillsManager (W6.4)
+// ---------------------------------------------------------------------------
+
+/// Maps a `mem-skills` failure onto the port surface.
+///
+/// The manager's business rejections (an invalid id, a missing name or
+/// content, a duplicate) are upstream messages and are surfaced verbatim
+/// as a `400`; a missing row is the port's "no such visible row" answer;
+/// everything else is an internal fault whose detail is logged, never
+/// returned (D-9).
+fn skills_failure(error: mem_skills::schema::SkillsError) -> PortError {
+    use mem_skills::schema::SkillsError;
+    match error {
+        SkillsError::InvalidId
+        | SkillsError::NameRequired
+        | SkillsError::ContentRequired
+        | SkillsError::AlreadyExists(_) => PortError::Invalid(error.to_string()),
+        SkillsError::NotFound(_) => PortError::NotFound,
+        other => PortError::Store(other.to_string()),
+    }
+}
+
+/// The production skills seam over the W6.4 [`SkillsManager`].
+///
+/// The adapter only translates: the manager owns the validation, the
+/// `SKILL.md` content file and the change notification.
+pub struct ProductionSkills {
+    manager: Arc<SkillsManager>,
+}
+
+impl ProductionSkills {
+    /// Wraps one skills manager.
+    pub fn new(manager: Arc<SkillsManager>) -> Self {
+        Self { manager }
+    }
+}
+
+/// Builds the production skills port over `manager` (the W5.x composition
+/// root's `.with_skills(...)` argument).
+pub fn production_skill_port(manager: Arc<SkillsManager>) -> Arc<dyn super::ports::SkillPort> {
+    Arc::new(ProductionSkills::new(manager))
+}
+
+/// One `mem-skills` record as the port's DTO.
+fn skill_row(skill: MemSkill) -> Skill {
+    Skill {
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        content: skill.content,
+        autoinvoke: skill.autoinvoke,
+        enabled: skill.enabled,
+        container_tag: skill.container_tag,
+        created_at: skill.created_at,
+        updated_at: skill.updated_at,
+    }
+}
+
+#[async_trait]
+impl super::ports::SkillPort for ProductionSkills {
+    async fn list(
+        &self,
+        container_tag: Option<&str>,
+        enabled_only: bool,
+    ) -> Result<Vec<Skill>, PortError> {
+        let skills = self
+            .manager
+            .list(container_tag, enabled_only)
+            .await
+            .map_err(skills_failure)?;
+        Ok(skills.into_iter().map(skill_row).collect())
+    }
+
+    async fn get(&self, id: &str) -> Result<Option<Skill>, PortError> {
+        let skill = self.manager.get(id).await.map_err(skills_failure)?;
+        Ok(skill.map(skill_row))
+    }
+
+    async fn create(&self, skill: NewSkill) -> Result<Skill, PortError> {
+        let created = self
+            .manager
+            .create(MemSkillInput {
+                id: skill.id,
+                name: skill.name,
+                description: skill.description,
+                content: skill.content,
+                autoinvoke: skill.autoinvoke,
+                enabled: skill.enabled,
+                container_tag: skill.container_tag,
+            })
+            .await
+            .map_err(skills_failure)?;
+        Ok(skill_row(created))
+    }
+
+    async fn update(&self, id: &str, patch: SkillPatch) -> Result<Skill, PortError> {
+        let updated = self
+            .manager
+            .update(
+                id,
+                MemSkillPatch {
+                    name: patch.name,
+                    description: patch.description,
+                    content: patch.content,
+                    autoinvoke: patch.autoinvoke,
+                    enabled: patch.enabled,
+                    container_tag: patch.container_tag,
+                },
+            )
+            .await
+            .map_err(skills_failure)?;
+        Ok(skill_row(updated))
+    }
+
+    async fn delete(&self, id: &str) -> Result<bool, PortError> {
+        self.manager.delete(id).await.map_err(skills_failure)
+    }
+
+    async fn catalog_index(&self) -> Result<Vec<CatalogEntry>, PortError> {
+        let entries = self.manager.catalog_index().await.map_err(skills_failure)?;
+        Ok(entries
+            .into_iter()
+            .map(|entry| CatalogEntry {
+                name: entry.name,
+                version: entry.version,
+                files: entry.files,
+            })
+            .collect())
+    }
+
+    async fn catalog_markdown(&self, id: &str) -> Result<Option<String>, PortError> {
+        self.manager
+            .catalog_markdown(id)
+            .await
+            .map_err(skills_failure)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FactStore — mem_portability's durable-fact seam (W6.4)
+// ---------------------------------------------------------------------------
+
+/// Maps a store fault onto the portability surface.
+fn portability_store_failure(error: StoreError) -> PortabilityError {
+    PortabilityError::Store(error.message().to_string())
+}
+
+/// The production durable-fact adapter over the shard manager.
+///
+/// It is the `mem_portability::facts::FactStore` implementation behind
+/// `PortabilityService::new`'s `facts` argument. The scope of a container
+/// tag is derived from the tag itself (the tag's own scope segment and
+/// hash), so the adapter never re-hashes a path.
+pub struct ProductionFacts {
+    manager: Arc<ShardManager>,
+}
+
+impl ProductionFacts {
+    /// Wraps one shard manager.
+    pub fn new(manager: Arc<ShardManager>) -> Self {
+        Self { manager }
+    }
+
+    /// The shards of one container tag's scope.
+    async fn shards_for(&self, container_tag: &str) -> Result<Vec<ShardRef>, PortabilityError> {
+        let scope_ref = mem_core::scope::extract_scope_from_container_tag(container_tag)
+            .map_err(|error| PortabilityError::InvalidScope(error.to_string()))?;
+        let scope = scope_ref.scope;
+        let hash = scope_ref.hash.map(|hash| hash.as_str().to_string());
+        let shards = self
+            .manager
+            .get_all_shards(scope, hash.as_deref())
+            .await
+            .map_err(portability_store_failure)?;
+        Ok(shards
+            .into_iter()
+            .map(|shard| ShardRef {
+                scope: shard.scope,
+                scope_hash: shard.scope_hash,
+                shard_index: shard.shard_index,
+                db_path: shard.db_path,
+            })
+            .collect())
+    }
+
+    /// Opens one shard's database.
+    async fn open(&self, shard: &ShardRef) -> Result<DbHandle, PortabilityError> {
+        self.manager
+            .open_shard(&shard.db_path)
+            .await
+            .map_err(portability_store_failure)
+    }
+}
+
+/// The comma-separated `tags` column as a list.
+fn split_tags(tags: Option<&str>) -> Option<Vec<String>> {
+    let tags = tags?;
+    let list: Vec<String> = tags
+        .split(',')
+        .map(|tag| tag.trim().to_string())
+        .filter(|tag| !tag.is_empty())
+        .collect();
+    if list.is_empty() { None } else { Some(list) }
+}
+
+/// The `metadata` JSON column as a map.
+fn parse_metadata(metadata: Option<&str>) -> Option<std::collections::BTreeMap<String, JsonValue>> {
+    let text = metadata?;
+    serde_json::from_str(text).ok()
+}
+
+/// One `memories` row as the bundle's memory shape.
+///
+/// **Privacy by design (Mandate 6).** The `<private>` regions are STRIPPED
+/// (upstream's `stripPrivateContent`) and a fully private row is DROPPED
+/// (upstream's `isFullyPrivate`): a portable bundle is a file on disk, so
+/// it must never carry a private region — and a row that is private
+/// through and through is dropped instead of being exported as a
+/// redacted husk.
+fn exported_memory(row: &Row) -> Option<ExportedMemory> {
+    let content = strip_private_content(&row.text("content").unwrap_or_default());
+    if is_fully_private(&content) {
+        return None;
+    }
+    Some(ExportedMemory {
+        id: row.text("id").unwrap_or_default(),
+        content,
+        memory_type: row.text("type"),
+        tags: split_tags(row.text("tags").as_deref()),
+        created_at: row.i64("created_at").unwrap_or(0),
+        updated_at: row.i64("updated_at"),
+        is_pinned: Some(row.i64("is_pinned").unwrap_or(0) != 0),
+        metadata: parse_metadata(row.text("metadata").as_deref()),
+        display_name: row.text("display_name"),
+        user_name: row.text("user_name"),
+        user_email: row.text("user_email"),
+        project_path: row.text("project_path"),
+        project_name: row.text("project_name"),
+        git_repo_url: row.text("git_repo_url"),
+    })
+}
+
+#[async_trait]
+impl FactStore for ProductionFacts {
+    async fn list_memories(
+        &self,
+        container_tag: &str,
+    ) -> Result<Vec<ExportedMemory>, PortabilityError> {
+        let mut memories = Vec::new();
+        for shard in self.shards_for(container_tag).await? {
+            let db = self.open(&shard).await?;
+            let rows = vector::list_memories_by_container_tag(db.as_ref(), container_tag, 100_000)
+                .await
+                .map_err(portability_store_failure)?;
+            if rows.len() >= 100_000 {
+                tracing::warn!(
+                    container_tag,
+                    limit = 100_000,
+                    "portability export truncated the facts tier at the listing bound"
+                );
+            }
+            memories.extend(rows.iter().filter_map(exported_memory));
+        }
+        Ok(memories)
+    }
+
+    async fn memory_exists(&self, id: &str, container_tag: &str) -> Result<bool, PortabilityError> {
+        for shard in self.shards_for(container_tag).await? {
+            let db = self.open(&shard).await?;
+            let row = vector::get_memory_by_id(db.as_ref(), id)
+                .await
+                .map_err(portability_store_failure)?;
+            if let Some(row) = row
+                && row.text("container_tag").as_deref() == Some(container_tag)
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    async fn insert_memory(
+        &self,
+        target_tag: &str,
+        memory: ExportedMemory,
+        embedding: Vec<f32>,
+        tags_embedding: Option<Vec<f32>>,
+        metadata_json: String,
+    ) -> Result<(), PortabilityError> {
+        let scope_ref = mem_core::scope::extract_scope_from_container_tag(target_tag)
+            .map_err(|error| PortabilityError::InvalidScope(error.to_string()))?;
+        let scope = scope_ref.scope;
+        let hash = scope_ref
+            .hash
+            .map(|hash| hash.as_str().to_string())
+            .ok_or_else(|| {
+                PortabilityError::InvalidScope(format!(
+                    "Invalid containerTag hash: expected 16 lowercase hex characters in \"{target_tag}\""
+                ))
+            })?;
+        let manager = self.manager.clone();
+        let lock_manager = manager.clone();
+        // Captured BEFORE the move into the insert: the frozen INSERT has no
+        // pin column, so the flag is applied with a follow-up statement.
+        let pinned = memory.is_pinned.unwrap_or(false);
+        let memory_id = memory.id.clone();
+
+        let insert = MemoryInsert {
+            id: memory.id,
+            content: memory.content,
+            vector: embedding,
+            tags_vector: tags_embedding,
+            container_tag: target_tag.to_string(),
+            tags: memory
+                .tags
+                .as_ref()
+                .filter(|tags| !tags.is_empty())
+                .map(|tags| tags.join(",")),
+            memory_type: memory.memory_type,
+            created_at: memory.created_at,
+            updated_at: memory.updated_at.unwrap_or(memory.created_at),
+            metadata: Some(metadata_json),
+            session_id: None,
+            display_name: memory.display_name,
+            user_name: memory.user_name,
+            user_email: memory.user_email,
+            project_path: memory.project_path,
+            project_name: memory.project_name,
+            git_repo_url: memory.git_repo_url,
+        };
+        let lock_hash = hash.clone();
+        let arg_hash = hash.clone();
+        let outcome: Result<(), StoreError> = manager
+            .with_scope_write_lock(scope, arg_hash.as_str(), move || {
+                let manager = lock_manager;
+                let hash = lock_hash.clone();
+                Box::pin(async move {
+                    let shard = manager.get_write_shard(scope, hash.as_str()).await?;
+                    let db = manager.open_shard(&shard.db_path).await?;
+                    vector::insert_vector(db.as_ref(), &insert).await?;
+                    // The pin flag is NOT part of the INSERT (the frozen
+                    // statement has no such column): upstream sets it with a
+                    // follow-up UPDATE, and the port does the same through
+                    // the store's own pin primitive.
+                    if pinned {
+                        vector::pin_memory(db.as_ref(), &memory_id).await?;
+                    }
+                    manager.increment_vector_count(shard.id).await
+                })
+            })
+            .await;
+        outcome.map_err(portability_store_failure)
+    }
+
+    async fn delete_memory(&self, id: &str, container_tag: &str) -> Result<(), PortabilityError> {
+        for shard in self.shards_for(container_tag).await? {
+            let db = self.open(&shard).await?;
+            let row = vector::get_memory_by_id(db.as_ref(), id)
+                .await
+                .map_err(portability_store_failure)?;
+            if let Some(row) = row
+                && row.text("container_tag").as_deref() == Some(container_tag)
+            {
+                vector::delete_memory_by_id(db.as_ref(), id)
+                    .await
+                    .map_err(portability_store_failure)?;
+                if let Some(info) = self
+                    .manager
+                    .get_shard_by_path(&shard.db_path)
+                    .await
+                    .map_err(portability_store_failure)?
+                {
+                    self.manager
+                        .decrement_vector_count(info.id)
+                        .await
+                        .map_err(portability_store_failure)?;
+                }
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use mem_store::db::{Row, Value};
+
+    use super::exported_memory;
+
+    /// One `memories` row carrying the given content.
+    fn row_with_content(content: &str) -> Row {
+        let columns = [
+            "id",
+            "content",
+            "type",
+            "tags",
+            "created_at",
+            "updated_at",
+            "is_pinned",
+            "metadata",
+            "display_name",
+            "user_name",
+            "user_email",
+            "project_path",
+            "project_name",
+            "git_repo_url",
+        ]
+        .map(str::to_string);
+        let values = vec![
+            Value::Text("m-1".to_string()),
+            Value::Text(content.to_string()),
+            Value::Text("note".to_string()),
+            Value::Null,
+            Value::Integer(1),
+            Value::Null,
+            Value::Integer(0),
+            Value::Null,
+            Value::Null,
+            Value::Null,
+            Value::Null,
+            Value::Null,
+            Value::Null,
+            Value::Null,
+        ];
+        Row::new(Arc::new(columns.to_vec()), values)
+    }
+
+    /// Mandate 6 — the export path strips the `<private>` regions.
+    #[test]
+    fn the_export_strips_the_private_regions() {
+        let memory = exported_memory(&row_with_content("visible <private>secret</private> text"))
+            .expect("the row is exported");
+        assert_eq!(memory.content, "visible [REDACTED] text");
+        assert!(!memory.content.contains("secret"));
+    }
+
+    /// Mandate 6 — a fully private row is dropped, not exported.
+    #[test]
+    fn the_export_drops_a_fully_private_row() {
+        assert!(
+            exported_memory(&row_with_content("<private>secret</private>")).is_none(),
+            "a fully private row must not be exported"
+        );
+        assert!(
+            exported_memory(&row_with_content("   ")).is_none(),
+            "an empty row must not be exported"
+        );
+    }
+
+    /// A row without a private region is exported verbatim.
+    #[test]
+    fn the_export_keeps_an_ordinary_row() {
+        let memory =
+            exported_memory(&row_with_content("the plain content")).expect("the row is exported");
+        assert_eq!(memory.content, "the plain content");
+        assert_eq!(memory.id, "m-1");
+        assert_eq!(memory.memory_type.as_deref(), Some("note"));
     }
 }
