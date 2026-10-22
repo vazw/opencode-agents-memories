@@ -46,7 +46,17 @@ Extend the three-tier model to five tiers:
 | 2b | **Facts (Procedural)** | Skills, workflows, tool patterns | Durable, versioned | Shared within project |
 | 2c | **Facts (Resource)** | Code snippets, file refs, diagrams | Durable, content-addressed | Shared within project |
 | 3 | **Episodic** | Session trajectories, raw interactions | Raw, segment-preserving | Per-session, promoted to Facts |
-| 4 | **Vault** | Verbatim critical data (configs, exact code) | Immutable, content-addressed | Per-user, encrypted |
+| 4 | **Vault** | Verbatim critical data (configs, exact code) | Immutable, content-addressed | Per-project scope, encrypted (W7.2; see ADR-0012) |
+
+**W7.2 amendment (2026-10-23; UTC 2026-10-22) — vault sharing is per project.**
+The Tier-4 cell read `Per-user, encrypted`; it now reads `Per-project scope,
+encrypted`. The owner's vault-key ruling (one key per memory scope, at
+`{storage_root}/vault-keys/{scope_hash}.key`) makes the per-user reading
+unbuildable: libSQL's encryption is a whole-file codec with one key per file, so
+a per-user vault shared across projects could not be opened by the per-scope
+key, and per-project containment is the property the key scheme was chosen for.
+Key custody, keyed content ids and rotation are decided in **ADR-0012
+(Proposed)**; nothing else in this ADR changes.
 
 **Rationale:** MIRIX's 6-type taxonomy provides finer granularity than 3 tiers.
 The port's "Facts" tier splits into Semantic/Procedural/Resource to support
