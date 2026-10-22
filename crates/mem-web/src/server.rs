@@ -34,6 +34,14 @@ pub struct AppState {
     pub dist_dir: PathBuf,
     /// The D-8 Host allowlist — derived from the bound host by `start`.
     pub host_allowlist: HostAllowlist,
+    /// The seven port seams behind the REST surface (W6.2).
+    pub api: Arc<crate::api::ports::ApiServices>,
+    /// The resolved user identity for the profile endpoints (upstream
+    /// `getTags(process.cwd()).user.userEmail || "unknown"`).
+    pub user_id: String,
+    /// The **configured** bind host (D-11's loopback rule reads it). `start`
+    /// fills it from `settings.host`.
+    pub bind_host: String,
 }
 
 /// Builds the router: routes, SPA fallback and the request gate.
@@ -49,6 +57,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/index.html", get(index_handler).head(not_found_handler))
         .fallback(static_fallback)
         .method_not_allowed_fallback(not_found_handler)
+        // W6.2: the REST surface. `api_router()` carries its own 1 MiB body
+        // cap (G1/D-21) and registers every non-health API path.
+        .merge(crate::api::api_router())
         .with_state(state.clone())
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
@@ -83,6 +94,8 @@ pub async fn start(
 
     let mut state = state;
     state.host_allowlist = HostAllowlist::for_bind_host(&settings.host);
+    // D-11 reads the configured bind host from the state.
+    state.bind_host = settings.host.clone();
 
     let listener = tokio::net::TcpListener::bind((settings.host.as_str(), settings.port))
         .await

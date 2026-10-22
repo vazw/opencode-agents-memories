@@ -1,29 +1,31 @@
 # 37 — W6.2 follow-up · Wire the production API services into the composition root
 
-Status: open — re-scoped to AC4 only (2026-10-21)
+Status: open — re-scoped to AC4 + AC6 (2026-10-21)
 
 **Scheduling:** ABSORBED into W6.7 (issue 31), by user decision of 2026-10-21. The W6.7 Plan Gate
 accepted the absorption in principle, conditioned on ten corrections, and the user confirmed it
 directly (decision record `mem_1792565360736_79j2b80y6`).
 
-**RE-SCOPED BY W6.7's DECISION 10 — this issue now carries AC4 ONLY.** W6.7's absorption satisfies
-AC1, AC2, AC3 and AC5 of this issue (the composition root calls `ApiServices::production(...)`, the
-endpoints answer 200 against the live binary, the no-edge guard holds, and the oracle runs the
-binary's own wiring path). What remains is **AC4**: the `docs/bridge-schema.md` statement of the
-local-token header shape (`x-opencode-mem-token`, not `Basic`, not `Bearer`) and the 500-vs-501
-distinction. W6.7's verification sweep stays a PURE gate and does NOT fold that doc edit in — so
-AC4 lands here, in its own small lane, once W6.7 closes.
+**RE-SCOPED BY W6.7's DECISION 10 — this issue now carries AC4 and AC6.** W6.7's absorption
+landed AC1, AC2, AC3 and the oracle criterion (listed as AC5) of this issue (the composition root
+calls `ApiServices::production(...)`, the endpoints answer 200 against the live binary, the no-edge
+guard holds, and the oracle runs the binary's own wiring path). What remains is **AC4**: the
+`docs/bridge-schema.md` statement of the local-token header shape (`x-opencode-mem-token`, not
+`Basic`, not `Bearer`) and the 500-vs-501 distinction, and the new **AC6**: the sessions and
+maintenance port wiring. W6.7's verification sweep stays a PURE gate and does NOT fold the doc edit
+in; both land here.
 
-**W6.7 CLOSED 2026-10-21 — AC1, AC2, AC3 and AC5 are LANDED and ticked below.** W6.7 (issue 31)
-went through the fleet pipeline — two Plan Gate rounds (r0 rejected on ten modifications, r1
-approved), then a coder, then a reviewer who re-executed the whole test plan independently and
-approved it. The live binary now serves the four store-backed endpoints 200 through the production
-wiring. **This issue therefore stays open for AC4 alone, and it is now the only thing standing
-between it and closure.** Close it when the `docs/bridge-schema.md` sentence exists — do not close
-it on W6.7's commit, and do not close it with AC4 still unticked.
+**W6.7 CLOSED 2026-10-21 — AC1, AC2, AC3 and the oracle criterion (listed as AC5) are LANDED and
+ticked below.** W6.7 (issue 31) went through the fleet pipeline — two Plan Gate rounds (r0 rejected
+on ten modifications, r1 approved), then a coder, then a reviewer who re-executed the whole test
+plan independently and approved it. The live binary now serves the four store-backed endpoints 200
+through the production wiring. **This issue stays open for AC4 and AC6.** Close it when the
+`docs/bridge-schema.md` sentence exists **and** AC6 is ticked — do not close it on W6.7's commit, and
+do not close it with AC4 or AC6 unticked.
 
-**The re-scope is why this issue stays open rather than closing with W6.7.** Do not close it on
-W6.7's commit; close it when the `docs/bridge-schema.md` sentence exists.
+**This issue stays open rather than closing with W6.7 for two reasons — AC4 and AC6.** Do not close
+it on W6.7's commit; close it when the `docs/bridge-schema.md` sentence exists **and** AC6 is
+ticked.
 
 Named here because the W6.7 planner's live probe found it on 2026-10-21, and at the time it was
 owned by nobody: issue 24 is marked closed, and issue 31 lists it as a closed dependency.
@@ -141,10 +143,31 @@ Bearer authenticates the CONFIGURED `api_token`, which is `None` in standalone m
       500-vs-501 distinction — **with the skills case stated as measured above, not as the old
       "skills/maintenance/sessions are all 501" claim.** The W6.7 blueprint's Finding 4 and the
       W6.7 Plan Gate's "verified sound" list both carried that wrong claim; it was measured, not
-      inferred, and it is the reason this AC is the last thing standing. **This is the whole of
-      what remains in issue 37.** The sentence must also say which endpoints answer 501 by design
+      inferred, and it is the reason this AC is the last thing standing. **This is the whole of the
+      documentation work; AC6 is the plumbing work.** The sentence must also say which endpoints
+      answer 501 by design
       (`sessions`, `maintenance`) and which answer 500 (`skills`), and either name the skills
       handler's conflation as a mem-web defect to fix or record the exception explicitly.
+
+- [ ] AC6 · Wire the sessions and maintenance ports at the composition root. Sessions: add
+      `episodic: Arc<EpisodicStore>` to `WebStoreDeps` (`crates/mem-bridge/src/engine.rs:563-575`,
+      filled from `ComposedRuntime.store` at `:853-863`), call
+      `.with_sessions(episodic_session_port(deps.episodic))` at `src/main.rs:132-137`, and add an
+      oracle in `tests/production_api_wiring.rs` asserting the two session routes answer 200 after
+      seeding a row (nothing asserts the 501 today, so the change would otherwise land unproven).
+      Maintenance: surface **only** `Arc<ConnectionManager>` (a local at
+      `crates/mem-bridge/src/composition.rs:101-106`, moved into `ShardManager::new` at `:107-112`)
+      and build the `ReadyGate` with `mem_store::ready::build_ready_gate_with_encryption`
+      (`crates/mem-store/src/ready.rs:236`) — its registry argument is the `ShardManager` itself
+      (`impl ShardRegistry for ShardManager`, `crates/mem-store/src/shard_manager.rs:1047`) and the
+      `StoreConfig` comes from `ShardManager::config()` (`:162`), so **no `StoreConfig` field is to
+      be added** — then add a `ReEmbedder` adapter
+      (`crates/mem-store/src/migration_service.rs:39-46`), a `ProductionMaintenance` port in
+      `crates/mem-web/src/api/store_adapter.rs`, and `.with_maintenance(...)` at `src/main.rs:132`;
+      `MigrationService` itself already exists (`migration_service.rs:133`, tested by
+      `crates/mem-store/tests/turso_reembed_migration.rs`). Finally delete the two stale doc
+      comments that still await "the W5.x readiness gate" (`crates/mem-web/src/api/ports.rs:561`,
+      `store_adapter.rs:21`).
 
 ## Blocked by
 

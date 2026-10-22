@@ -17,7 +17,10 @@ base64 = { workspace = true }
 subtle = { workspace = true }
 url = { workspace = true }
 getrandom = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true, features = ["net"] }

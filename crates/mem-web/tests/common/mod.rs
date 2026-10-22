@@ -17,6 +17,8 @@
 //!   `tokio::task::spawn_blocking` (a blocking read on the runtime thread
 //!   would starve the spawned server task).
 
+pub mod fakes;
+
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
@@ -115,13 +117,67 @@ pub fn app_state(
     local_token: Option<&str>,
     dist_dir: PathBuf,
 ) -> AppState {
+    app_state_with_api(
+        basic_auth,
+        api_token,
+        local_token,
+        dist_dir,
+        mem_web::api::ports::ApiServices::unavailable(),
+        "unknown",
+        "127.0.0.1",
+    )
+}
+
+/// Builds an [`AppState`] with an explicit port bundle, user identity and
+/// bind host (the W6.2 tests need all three).
+pub fn app_state_with_api(
+    basic_auth: WebAuth,
+    api_token: Option<&str>,
+    local_token: Option<&str>,
+    dist_dir: PathBuf,
+    api: mem_web::api::ports::ApiServices,
+    user_id: &str,
+    bind_host: &str,
+) -> AppState {
     AppState {
         basic_auth,
         api_token: api_token.map(str::to_owned),
         local_token: Arc::new(FixedLocalToken(local_token.map(str::to_owned))),
         dist_dir,
-        host_allowlist: HostAllowlist::for_bind_host("127.0.0.1"),
+        host_allowlist: HostAllowlist::for_bind_host(bind_host),
+        api: Arc::new(api),
+        user_id: user_id.to_owned(),
+        bind_host: bind_host.to_owned(),
     }
+}
+
+/// The router seam for the REST surface: a request carrying the default
+/// `Host`, an optional API token and an optional JSON body.
+pub async fn api_request(
+    router: axum::Router,
+    method: &str,
+    path: &str,
+    token: Option<&str>,
+    body: Option<&str>,
+) -> RawResponse {
+    let mut builder = axum::http::Request::builder()
+        .method(method)
+        .uri(path)
+        .header("host", DEFAULT_HOST_HEADER);
+    if let Some(token) = token {
+        builder = builder.header(mem_web::AUTH_HEADER, token);
+    }
+    let body = match body {
+        Some(payload) => {
+            builder = builder.header("content-type", "application/json");
+            axum::body::Body::from(payload.to_owned())
+        }
+        None => axum::body::Body::empty(),
+    };
+    let request = builder
+        .body(body)
+        .expect("the test request is a valid HTTP request");
+    oneshot_response(router, request).await
 }
 
 /// The router seam: drives `router` with one request and collects the

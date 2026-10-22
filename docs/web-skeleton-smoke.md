@@ -6,9 +6,10 @@ Host-header allowlist, plus the W6.2 REST surface (memories, tags, stats,
 search, bulk operations, profile, skills + the OpenCode catalog, maintenance)
 and the W6.3 session-history surface.
 
-The server is started by the composition root (W5.x wires `mem_web::server::start`
-into the plugin). Until then the recipe can be reproduced against any host
-that exposes the same routes.
+The server is started by the composition root: `mem_web::server::start` was
+wired into the plugin by W5.1 (issue 19, commit `c2b22b8`), and the production
+API services in that same root were completed by W6.7 (issue 31, commit
+`457528b`).
 
 ## Defaults
 
@@ -300,16 +301,20 @@ curl -i http://127.0.0.1:4747/api/migration/detect
 # {"success":false,"error":"Unauthorized"}
 ```
 
+The migration service **exists** — `crates/mem-store/src/migration_service.rs`
+(exported at `crates/mem-store/src/lib.rs:22`, tested by
+`crates/mem-store/tests/turso_reembed_migration.rs`) — but it is **unwired**.
 The migration routes read `ApiServices::maintenance`, which the production
-wiring also leaves `unavailable()` until the composition root (W5.x) supplies
-a `MaintenancePort`; the same 500/`Internal Server Error` note as the skills
-block applies. The envelopes above are the handler contract, exercised by
+wiring still leaves `unavailable()` until the composition root (issue 37)
+supplies the `ProductionMaintenance` adapter and the `.with_maintenance(...)`
+call; the same 500/`Internal Server Error` note as the skills block applies.
+The envelopes above are the handler contract, exercised by
 `api_endpoint_contract.rs` over the fake port.
 
 ### F. Sessions (W6.3 — issue #25)
 
 `ApiServices::production()` keeps the `SessionPort` on `UnavailablePort` until
-the W5.x composition root calls `.with_sessions(episodic_session_port(store))`,
+the issue-37 composition root calls `.with_sessions(episodic_session_port(store))`,
 so the production wiring answers the documented `501` **by design** today. The
 block below is the contract once that call exists — and it is exactly what the
 dev harness serves, over a real `EpisodicStore` and the real
@@ -404,7 +409,7 @@ curl -i http://127.0.0.1:<port>/api/projects/demo-project/sessions
 | **D-10** | The container-tag rejection echoes the offending tag in the message and answers `200` (`success:false`). | The fixed `"Invalid container tag"` with **400**; the log records the reason and the tag's length, never the tag text. | Untrusted input is never echoed into a response or a log (reflection / log injection), and a client error is a client error. |
 | **D-11** | The two OpenCode catalog paths are **always public** (upstream's token gate is `path.startsWith("/api/")`, so `/skills/*` was never token-gated). | **Conditional**: public when the server binds a loopback address (the upstream-parity default), token-gated when the bind host is not loopback (the house `is_loopback_host` set, read from `AppState.bind_host`). The rule sits inside the token step; the D-8 Host check remains check 0. | The user's ruling (2026-10-20): **public on loopback, token elsewhere**. Upstream's own comment recommends exactly this posture. |
 | **D-12** | `parseInt` on a bad `page` yields `NaN` → an empty page and `totalPages: null`. | `page ≥ 1` and `1 ≤ pageSize ≤ 200`; a violation is `400` `{"success":false,"error":"Invalid pagination parameters"}`. | `NaN` pagination and an unbounded `pageSize` are a DoS and a contract hazard; the UI only sends valid numbers. |
-| **D-13** | (no upstream counterpart) | The session-history endpoints are registered from W6.2 on and answer the documented `501` (`"Session history endpoints land with W6.3"`) until the composition root injects the port. W6.3 supplies `EpisodicSessionPort`; `ApiServices::production()` still keeps `UnavailablePort` until the W5.x composition root calls `.with_sessions(episodic_session_port(store))`, so the production wiring answers the `501` **by design** until then. | The seam and the route shapes landed in W6.2; the W6.3 adapter makes the fill a one-builder change, and the 501 stays truthful until the composition root wires it. |
+| **D-13** | (no upstream counterpart) | The session-history endpoints are registered from W6.2 on and answer the documented `501` (`"Session history endpoints land with W6.3"`) until the composition root injects the port. W6.3 supplies `EpisodicSessionPort`; `ApiServices::production()` still keeps `UnavailablePort` until the issue-37 composition root calls `.with_sessions(episodic_session_port(store))`, so the production wiring answers the `501` **by design** until then. | The seam and the route shapes landed in W6.2; the W6.3 adapter makes the fill a one-builder change, and the 501 stays truthful until the composition root wires it. |
 | **D-14** | The stored `metadata` object keeps its insertion order. | A `serde_json::Value` object is key-sorted. | Free-form metadata; the UI reads by key. |
 | **D-15** | `POST /api/cleanup` and `POST /api/deduplicate` exist and answer real data (upstream ships `cleanup-service.ts` and `deduplication-service.ts`). | Both answer **501** with a fixed message (`"… is not available in this build"`). | The port has neither service; the `MaintenancePort` seam is pre-wired for the fill. (`mem_core::dedup` is the profile-conflict kernel, not upstream's memory-dedup service.) |
 | **D-16** | `GET /api/skills?tag=<malformed>` applies no validation — the malformed tag simply matches nothing and the answer is an empty list. | The `tag` filter goes through the container-tag guard; a malformed tag is rejected with `400` `"Invalid container tag"`. | A traversal attempt must be rejected at **every** scoped endpoint; an empty list would silently answer a hostile tag. |
@@ -431,3 +436,125 @@ curl -i http://127.0.0.1:<port>/api/projects/demo-project/sessions
   `:authority`, which hyper does not surface as a `Host` header — if TLS/h2
   is added later, the guard must fall back to `req.uri().authority()` or it
   will refuse every h2 request.
+
+## Close-out measurements (2026-10-21)
+
+The W6.2 REST surface (issue 24) was smoked **live** against the engine
+binary built from this workspace, on a throwaway store, one request per
+`ROUTE_TABLE` row. The 37 rows below are the whole table: the requests are
+pinned 1:1 to `crates/mem-web/src/api/mod.rs`, so a row added or dropped
+there shows up here as a count mismatch.
+
+Every verdict is **derived**, never asserted by hand. An **asserted** row
+passes when the live status is inside its status set *and* the response body
+carries the expected substring; a **measured** row passes on the status alone
+(the body is recorded, not asserted); a **blocked** row records the truth
+without a pass or a fail, because the port it needs is not wired yet. The
+class split is recomputed from the result sheet: **19 asserted + 4 measured +
+14 blocked = 37**, with 0 unprobed rows.
+
+Binary under test: sha256 prefix `9dcded5b953f` (12 hex).
+
+| route_row | request (method + route_path) | http_status | class | notes/unblocker |
+|---|---|---|---|---|
+| 1 | GET /api/health | 200 | ASSERTED | - |
+| 2 | GET /api/tags | 200 | ASSERTED | - |
+| 3 | GET /api/memories | 200 | ASSERTED | - |
+| 4 | POST /api/memories | 500 | MEASURED | the local embedder is not available - status set 200 or 500, body recorded not asserted |
+| 5 | DELETE /api/memories/{id} | 200 | ASSERTED | - |
+| 6 | PUT /api/memories/{id} | 200 | ASSERTED | - |
+| 7 | POST /api/memories/bulk-delete | 200 | ASSERTED | - |
+| 8 | PUT /api/memories/bulk-delete | 200 | ASSERTED | - |
+| 9 | GET /api/search | 500 | MEASURED | the local embedder is not available - status set 200 or 500, body recorded not asserted |
+| 10 | GET /api/stats | 200 | ASSERTED | - |
+| 11 | POST /api/memories/{id}/pin | 200 | ASSERTED | - |
+| 12 | POST /api/memories/{id}/unpin | 200 | ASSERTED | - |
+| 13 | POST /api/cleanup | 501 | ASSERTED | - |
+| 14 | POST /api/deduplicate | 501 | ASSERTED | - |
+| 15 | GET /api/migration/detect | 500 | BLOCKED | issue 37 (AC6): MaintenancePort adapter + .with_maintenance(...) not wired |
+| 16 | GET /api/migration/tags/detect | 500 | BLOCKED | issue 37 (AC6): MaintenancePort adapter + .with_maintenance(...) not wired |
+| 17 | POST /api/migration/tags/run-batch | 500 | BLOCKED | issue 37 (AC6): MaintenancePort adapter + .with_maintenance(...) not wired |
+| 18 | GET /api/migration/tags/progress | 500 | BLOCKED | issue 37 (AC6): MaintenancePort adapter + .with_maintenance(...) not wired |
+| 19 | POST /api/migration/run | 500 | BLOCKED | issue 37 (AC6): MaintenancePort adapter + .with_maintenance(...) not wired |
+| 20 | DELETE /api/prompts/{id} | 200 | ASSERTED | - |
+| 21 | POST /api/prompts/bulk-delete | 200 | ASSERTED | - |
+| 22 | GET /api/user-profile | 200 | ASSERTED | - |
+| 23 | GET /api/user-profile/changelog | 200 | ASSERTED | - |
+| 24 | GET /api/user-profile/snapshot | 200 | ASSERTED | - |
+| 25 | POST /api/user-profile/refresh | 200 | MEASURED | profile state recorded, body not asserted (status set 200) |
+| 26 | POST /api/user-profile/ai-cleanup | 200 | MEASURED | no profile - business error, body not asserted (status set 200) |
+| 27 | POST /api/user-profile/ai-cleanup/apply | 200 | ASSERTED | - |
+| 28 | PATCH /api/user-profile/item | 200 | ASSERTED | - |
+| 29 | GET /api/skills | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
+| 30 | POST /api/skills | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
+| 31 | GET /api/skills/{id} | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
+| 32 | PUT /api/skills/{id} | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
+| 33 | DELETE /api/skills/{id} | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
+| 34 | GET /skills/index.json | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
+| 35 | GET /skills/{id}/{file} | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
+| 36 | GET /api/projects/{project_id}/sessions | 501 | BLOCKED | issue 37 (AC6): .with_sessions(episodic_session_port(...)) not wired |
+| 37 | DELETE /api/projects/{project_id}/sessions/{session_id} | 501 | BLOCKED | issue 37 (AC6): .with_sessions(episodic_session_port(...)) not wired |
+
+### Reproduction recipe
+
+The four values are declared in prose: **BIN** is the engine binary built
+from this workspace, **ROOT** is a fresh empty directory on a local
+filesystem, **PORT** is a free loopback port, **DIST** is the built web UI
+dist.
+
+```bash
+# 1. Spawn the engine in standalone mode on a loopback port. The FIFO is an
+#    inert guard: in standalone mode the engine never reads stdin.
+mkfifo "$ROOT/stdin.fifo"
+exec 9<>"$ROOT/stdin.fifo"
+"$BIN" --mode=standalone --storage-root "$ROOT" --web-host 127.0.0.1 --web-port "$PORT" --web-dist "$DIST" < "$ROOT/stdin.fifo" > "$ROOT/server.stdout.log" 2> "$ROOT/server.stderr.log" &
+ENGINE=$!
+
+# 2. Wait for health. A connection refusal during the startup window is a
+#    retry, not a failure: up to 60 attempts, half a second apart.
+code=000
+for attempt in $(seq 1 60); do
+  code=$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/health" 2>/dev/null) || code=000
+  if [ "$code" = "200" ]; then break; fi
+  sleep 0.5
+done
+if [ "$code" != "200" ]; then
+  echo "engine did not answer 200 on /api/health after $attempt attempts (last code $code)" >&2
+  exit 1
+fi
+
+# 3. Materialise the token. /api/health is exempt from the token gate, so the
+#    health poll does NOT create the token file; one tokenless token-gated
+#    request does. It answers 401.
+code=$(curl --max-time 5 -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/stats" 2>/dev/null) || code=000
+TOKEN="$(tr -d '\r\n' < "$ROOT/.auth-token")"
+printf '%s' "$TOKEN" | grep -qE '^[0-9a-f]{64}$' && echo "token: 64 hex chars"
+
+# 4. Call the surface. The token travels in the header only.
+curl --max-time 5 -sS -H "x-opencode-mem-token: $TOKEN" "http://127.0.0.1:$PORT/api/memories"
+
+# 5. Teardown. The standalone engine never reads stdin, so the graceful stop
+#    is a signal, not EOF. The wait is BOUNDED by a watchdog: a wedged engine
+#    keeps the store lock, and every later run on that root then loses it
+#    (exit 75).
+exec 9>&-
+kill -TERM "$ENGINE"
+( sleep 30; kill -KILL "$ENGINE" 2>/dev/null ) & WD=$!
+RC=0; wait "$ENGINE" || RC=$?
+kill "$WD" 2>/dev/null || true
+if [ "$RC" -ge 137 ]; then
+  echo "engine needed SIGKILL (engine_rc=$RC) - the teardown failed" >&2
+fi
+```
+
+The request body is part of the contract: it decides the answer, so an
+incomplete one is refused with `400`. `POST /api/prompts/bulk-delete` needs
+`{"ids":[]}`, `POST /api/skills` needs `id`, `name` and `content`, and
+`POST /api/migration/run` needs a deliberately invalid strategy to reach the
+`200` `Invalid strategy` business error. The per-row bodies and the expected
+status sets live with the smoke harness, not in this recipe.
+
+The per-endpoint request shapes, statuses and bodies are the ones in the
+sections above: **A.** memories / tags / stats / search, **B.** bulk
+operations, **C.** profile, **D.** skills and the OpenCode catalog,
+**E.** maintenance, **F.** sessions.

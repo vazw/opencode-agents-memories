@@ -77,8 +77,15 @@ pub(crate) async fn gate(
 
     // 4. The API surface needs the local token (or the configured API
     //    token). `/api/health` is exempt — the liveness probe must work
-    //    without credentials.
-    if path.starts_with("/api/") && path != "/api/health" {
+    //    without credentials. The two OpenCode catalog paths follow D-11:
+    //    public on a loopback bind, token-gated on any other bind. The rule
+    //    sits *inside* this step — never before the Host check, the Origin
+    //    gate, the OPTIONS short-circuit or the Basic auth.
+    let catalog_public =
+        crate::api::is_catalog_path(&path) && crate::api_auth::is_loopback_host(&state.bind_host);
+    let needs_token = (path.starts_with("/api/") && path != "/api/health")
+        || (crate::api::is_catalog_path(&path) && !catalog_public);
+    if needs_token {
         let provided_local = request
             .headers()
             .get(AUTH_HEADER)

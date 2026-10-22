@@ -555,6 +555,32 @@ pub async fn unpin_memory(db: &dyn Db, memory_id: &str) -> Result<(), StoreError
     .await?;
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// W6.2 REST-surface primitives (vector-search.ts). Each one is a BOUND
+// statement; the container tag and the id never leave the parameter list.
+// ---------------------------------------------------------------------------
+
+/// Upstream `getMemoryById` (L403–405).
+pub async fn get_memory_by_id(db: &dyn Db, memory_id: &str) -> Result<Option<Row>, StoreError> {
+    crate::db::query_one(
+        db,
+        crate::sql::GET_MEMORY_BY_ID,
+        vec![Value::Text(memory_id.to_string())],
+    )
+    .await
+}
+
+/// Upstream `deleteVector` (L335–337).
+pub async fn delete_memory_by_id(db: &dyn Db, memory_id: &str) -> Result<(), StoreError> {
+    db.execute(
+        crate::sql::DELETE_MEMORY_BY_ID,
+        vec![Value::Text(memory_id.to_string())],
+    )
+    .await?;
+    Ok(())
+}
+
 /// Upstream `listMemories` (L359–381): an empty tag selects every row, a
 /// non-empty one the rows of exactly that container tag. Both branches order
 /// `is_pinned DESC, created_at DESC` and take the limit as a bound integer.
@@ -579,4 +605,36 @@ pub async fn list_memories_by_container_tag(
         )
         .await
     }
+}
+
+/// Upstream `updateVector` (L339–357): rewrites the content vector and either
+/// writes the tags vector or clears it (`NULL`).
+pub async fn update_memory_vectors(
+    db: &dyn Db,
+    memory_id: &str,
+    content_vector: &[f32],
+    tags_vector: Option<&[f32]>,
+) -> Result<(), StoreError> {
+    let content = vector_to_text(content_vector);
+    match tags_vector {
+        Some(tags_vector) => {
+            db.execute(
+                crate::sql::UPDATE_MEMORY_VECTORS,
+                vec![
+                    Value::Text(content),
+                    Value::Text(vector_to_text(tags_vector)),
+                    Value::Text(memory_id.to_string()),
+                ],
+            )
+            .await?;
+        }
+        None => {
+            db.execute(
+                crate::sql::UPDATE_MEMORY_VECTORS_NO_TAGS,
+                vec![Value::Text(content), Value::Text(memory_id.to_string())],
+            )
+            .await?;
+        }
+    }
+    Ok(())
 }

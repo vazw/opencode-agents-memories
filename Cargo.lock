@@ -1952,6 +1952,10 @@ dependencies = [
  "mem-episodic",
  "mem-profile",
  "mem-store",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -2028,8 +2032,10 @@ dependencies = [
 name = "mem-web"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "base64 0.22.1",
+ "chrono",
  "getrandom 0.3.4",
  "mem-ai",
  "mem-core",
@@ -2037,6 +2043,7 @@ dependencies = [
  "mem-episodic",
  "mem-profile",
  "mem-store",
+ "serde",
  "serde_json",
  "subtle",
  "thiserror",
@@ -3268,6 +3275,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-hook-registry"
+version = "1.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
+dependencies = [
+ "errno",
+ "libc",
+]
+
+[[package]]
 name = "simd_cesu8"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3791,6 +3808,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

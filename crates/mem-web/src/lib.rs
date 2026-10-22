@@ -6,6 +6,7 @@ pub const CRATE_NAME: &str = "mem-web";
 /// The header carrying the local API token (upstream `auth-token.ts`).
 pub const AUTH_HEADER: &str = "x-opencode-mem-token";
 
+pub mod api;
 pub mod api_auth;
 pub mod cors;
 pub mod host_allowlist;

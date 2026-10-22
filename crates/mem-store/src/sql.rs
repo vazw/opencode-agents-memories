@@ -474,6 +474,44 @@ pub const UPDATE_MEMORIES_PROJECT_ASSOCIATION: &str = r#"UPDATE memories SET
              container_tag = ?, project_path = ?, project_name = ?,
              display_name = ?, git_repo_url = ?
            WHERE container_tag != ?"#;
+
+// ---------------------------------------------------------------------------
+// W6.2 REST-surface primitives (blueprint §[FILE STRUCTURE]) — every
+// statement is BOUND (`?` placeholders only, `Value::Text`/`Value::Integer`
+// parameters). No user text is ever interpolated.
+// ---------------------------------------------------------------------------
+
+// vector-search.ts L403-405 (getMemoryById).
+pub const GET_MEMORY_BY_ID: &str = r#"SELECT * FROM memories WHERE id = ?"#;
+
+// vector-search.ts L335-337 (deleteVector).
+pub const DELETE_MEMORY_BY_ID: &str = r#"DELETE FROM memories WHERE id = ?"#;
+
+// vector-search.ts L373-380 (listMemories, container-tag branch).
+pub const LIST_MEMORIES_BY_CONTAINER_TAG: &str = r#"
+      SELECT * FROM memories
+      WHERE container_tag = ?
+      ORDER BY is_pinned DESC, created_at DESC
+      LIMIT ?
+    "#;
+
+// vector-search.ts L364-372 (listMemories, the empty-tag branch).
+pub const LIST_MEMORIES_ALL: &str = r#"
+      SELECT * FROM memories
+      ORDER BY is_pinned DESC, created_at DESC
+      LIMIT ?
+    "#;
+
+// vector-search.ts L346-350 (updateVector, with a tags vector).
+pub const UPDATE_MEMORY_VECTORS: &str = r#"
+      UPDATE memories SET vector = vector32(?), tags_vector = vector32(?) WHERE id = ?
+    "#;
+
+// vector-search.ts L352-355 (updateVector, clearing the tags vector).
+pub const UPDATE_MEMORY_VECTORS_NO_TAGS: &str = r#"
+      UPDATE memories SET vector = vector32(?), tags_vector = NULL WHERE id = ?
+    "#;
+
 // ---------------------------------------------------------------------------
 // PRAGMA helpers
 // ---------------------------------------------------------------------------
@@ -543,16 +581,3 @@ fn starts_with_keyword(text: &str, keyword: &str) -> bool {
             .map(|ch| !(ch.is_ascii_alphanumeric() || ch == '_'))
             .unwrap_or(true)
 }
-// vector-search.ts L373-380 (listMemories, container-tag branch).
-pub const LIST_MEMORIES_BY_CONTAINER_TAG: &str = r#"
-      SELECT * FROM memories
-      WHERE container_tag = ?
-      ORDER BY is_pinned DESC, created_at DESC
-      LIMIT ?
-    "#;
-// vector-search.ts L364-372 (listMemories, the empty-tag branch).
-pub const LIST_MEMORIES_ALL: &str = r#"
-      SELECT * FROM memories
-      ORDER BY is_pinned DESC, created_at DESC
-      LIMIT ?
-    "#;
