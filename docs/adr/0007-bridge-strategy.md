@@ -11,6 +11,9 @@
   "grilling complete: 12 decisions resolved").
 - **User rulings (2026-10-20):** "Accept the bounded guarantee" (the `capture_id` cardinality, USER RULING 1)
   and "Durable capture inbox before acking" (the durable capture inbox, USER RULING 2 → D-48).
+- **User ruling (2026-10-21, grilling session):** "Degrade, loudly" (a second OpenCode instance on the same
+  storage root, USER RULING 3) — see *Documented limitations* (ii) and D-38's fail-open path; and "Omit
+  `darwin/x64`" (the engine target matrix, USER RULING 4) — see *Documented limitations* (iv).
 - **Context source:** `.scratch/rust-port/roadmap.md` §W5.0, §0b D1/D2/D3, risks R3/R5; `.scratch/rust-port/issues/18-bridge-strategy-adr.md`;
   upstream `example/opencode-mem/tests/plugin-loader-contract.test.ts`, `example/opencode-mem/src/index.ts:491`,
   `example/opencode-mem/package.json`.
@@ -616,16 +619,40 @@ frozen here.
   ("W5.3 recapture/upsert: recapture needs an update path or an explicit conflict-resolution policy"); this ADR
   does not settle it. The cardinality question is **not** an open question in this ADR — USER RULING 1 settled
   it as the bounded guarantee above.
-- **(ii) A second OpenCode instance on the same storage root degrades.** With one engine per host (D-31) and an
-  exclusive lock (D-39), a **second** OpenCode instance on the same storage root degrades per D-38 while the
-  first owns the DB — that is the accepted consequence of D-31 + D-39 under the turso engine's single-process
-  constraint. Whether the second instance *should* instead be pointed at a separate storage root is an open
-  question for the user; this ADR records the behaviour, not a ruling.
+- **(ii) A second OpenCode instance on the same storage root degrades — SETTLED (USER RULING 3, 2026-10-21:
+  "Degrade, loudly").** With one engine per host (D-31) and an exclusive lock (D-39), a **second** OpenCode
+  instance on the same storage root degrades per D-38 while the first owns the DB — that is the accepted
+  consequence of D-31 + D-39 under the turso engine's single-process constraint.
+  **USER RULING 3 — "Degrade, loudly."** The lock loser does **not** wait for the lock and is **not** pointed at
+  a separate storage root: the plugin still loads, the engine does not start, the memory features are off for
+  that instance, and D-38's structured stderr warning plus the one-line status file record the loser. The
+  rationale is that a second store would mean **silent divergence** — one agent would learn what the other never
+  saw, and neither would know — which is a worse failure for a memory product than being unavailable. There is
+  exactly one memory store per storage root, and a second window simply has no memory of its own.
+  **Consequences:** D-38's fail-open path is the whole of the second-instance behaviour (no new wire error, no
+  new method); the `health` response's `mode: "degraded"` + `degraded_reason` is how the loser reports itself
+  (D-46); the storage root is **not** re-derived or relocated by the loser (no separate-root escape hatch);
+  and the W5.1 packaging work must ship the status-file rule that describes the loser. The separate-storage-root
+  alternative is **rejected**, not deferred.
 - **(iii) The reference-machine spec is not fixed here.** The reference machine for D-35's trigger is recorded
   in W5.1, not here.
-- **(iv) The `darwin/x64` target-matrix entry is W5.1's and remains an open question for the user.** Whether
-  `darwin/x64` is in the port's own engine target matrix is a support-matrix commitment the user rules on and a
-  W5.1 packaging decision; this ADR fixes only the D-38 consequence (the fail-open path).
+- **(iv) The `darwin/x64` target-matrix entry is W5.1's — SETTLED (USER RULING 4, 2026-10-21: "Omit
+  `darwin/x64`").** The port's own engine target matrix is **linux-x64 / linux-arm64 / darwin-arm64 /
+  windows-x64**; **`darwin/x64` (Intel Mac) is not in it.** An Intel-Mac host therefore takes D-38's
+  fail-open path (no engine binary for the platform → the plugin loads, the engine does not start, memory
+  features degrade; no download fallback, no wrong-architecture exec — see D-38(g)).
+  **Why:** upstream declares the same platform unsupported ("Intel Mac (darwin/x64) is unsupported" —
+  `example/opencode-mem/package.json:74` and `AGENTS.md:90`), because `@tursodatabase/database` and the
+  fixed `onnxruntime-node` releases ship no x64 binding. The port inherits the hole through a **different
+  door**: `turso` 0.8.3 is pure Rust and would build for `x86_64-apple-darwin` without trouble, but
+  `ort` 2.0.0-rc.14 ships **no prebuilt ONNX Runtime for that target at all** — its distribution table
+  (`ort-sys-2.0.0-rc.14/build/download/dist.tsv`) contains `aarch64-apple-darwin` and **zero**
+  `x86_64-apple-darwin` rows — so supporting Intel Mac would mean compiling ONNX Runtime from source as a
+  release-pipeline commitment. That is a packaging cost the port does not need to pay for parity.
+  **Consequences:** D-38(g) is the whole of the `darwin/x64` behaviour (fail-open, never improvise); W5.1's
+  packaging ships no `darwin/x64` engine artifact; the wrapper's runtime resolution finds no engine binary
+  and takes the degraded path. Revisiting this would mean a per-target `ort` feature gate (e.g. remote
+  embeddings only on Intel Mac) and is **not** part of this ADR.
 - **(v) The wire schema, not every field type's encoding.** This ADR fixes the wire schema; the JSON codec is
   W5.1's blueprint's.
 - **(vi) The post-consolidation replay boundary.** After ADR-0006 D-23's hard delete the row **and its
