@@ -21,8 +21,17 @@
 //! create and write leaves a zero-length `.key`, read validation rejects it,
 //! and the never-regenerate rule forbids repairing it — a self-inflicted
 //! permanent lockout. The mint therefore writes a temporary file, `sync_all`s
-//! it, and `hard_link`s it to the final name; the temporary file is always
-//! unlinked. Where hard links are unsupported the documented fallback is
+//! it, and `hard_link`s it to the final name; the temporary file is unlinked on every path where
+//! the process is alive to return. A `SIGKILL` or a power loss between
+//! `create_new` and `hard_link` can leave a `.tmp-{pid}` behind, and the
+//! unlink itself is best-effort (a failure is `tracing::warn!`ed, never
+//! returned as the caller's error). What keeps the lockout off the primary
+//! path is the link, not the unlink: the hard link publishes the already
+//! synced bytes under the final name in one step, so on the `HardLink` branch
+//! the final key file is never short. The `Fallback` branch's guarantee is
+//! weaker by construction (create + write + sync, with a best-effort unlink
+//! on error) and is reached only where `hard_link` is unsupported
+//! (`Unsupported`/`PermissionDenied`/`CrossesDevices`); the documented fallback is
 //! `create_new` + write + `sync_all`, and the branch the only mint site reports
 //! is pinned by a test (`MintPath`, `test_vault_mint_pins_the_shipped_link_path`).
 //!
@@ -219,7 +228,7 @@ pub(crate) fn ensure_key_material(
 
     match std::fs::hard_link(&temp_path, key_path) {
         Ok(()) => {
-            let _ = std::fs::remove_file(&temp_path);
+            remove_created_file(&temp_path);
             Ok(KeyMaterial {
                 hex: KeyHex::parse(&rendered, key_path)?,
                 path: MintPath::HardLink,
@@ -227,7 +236,7 @@ pub(crate) fn ensure_key_material(
         }
         Err(error) if error.kind() == ErrorKind::AlreadyExists => {
             // A racing winner exists: reuse and validate it, never clobber it.
-            let _ = std::fs::remove_file(&temp_path);
+            remove_created_file(&temp_path);
             Ok(KeyMaterial {
                 hex: read_key_file(key_path)?,
                 path: MintPath::Reused,
@@ -240,7 +249,7 @@ pub(crate) fn ensure_key_material(
             ) =>
         {
             // Documented fallback where hard links are unavailable.
-            let _ = std::fs::remove_file(&temp_path);
+            remove_created_file(&temp_path);
             match write_new_0600(key_path, &rendered) {
                 Ok(()) => Ok(KeyMaterial {
                     hex: KeyHex::parse(&rendered, key_path)?,
@@ -256,7 +265,7 @@ pub(crate) fn ensure_key_material(
             }
         }
         Err(source) => {
-            let _ = std::fs::remove_file(&temp_path);
+            remove_created_file(&temp_path);
             Err(VaultError::Io {
                 path: key_path.to_path_buf(),
                 source,
@@ -292,9 +301,11 @@ pub(crate) fn ensure_dir_0700(dir: &Path) -> Result<(), VaultError> {
 /// Creates a new file with mode `0600` and `sync_all`s it. `AlreadyExists` is
 /// reported through [`VaultError::Io`] so callers can distinguish the race.
 ///
-/// A write or sync failure after the file was created removes that file before
-/// returning, so no short or unsynced key file survives the error; a failed
-/// `create_new` created nothing and leaves the existing file untouched.
+/// A write or sync failure after the file was created unlinks that file before
+/// returning — best-effort: a failed unlink is `tracing::warn!`ed and a short or
+/// unsynced file can then survive the error, the D-4 lockout the unlink exists
+/// to prevent. A failed `create_new` created nothing and leaves the existing
+/// file untouched.
 fn write_new_0600(path: &Path, contents: &str) -> Result<(), VaultError> {
     use std::io::Write;
 
@@ -317,14 +328,33 @@ fn write_new_0600(path: &Path, contents: &str) -> Result<(), VaultError> {
         // survive the error, or a failed final-name write would strand a
         // key file that read validation rejects forever (ADR-0012 D-4).
         // The `AlreadyExists` case returns from `open` above, so this
-        // never unlinks a file another caller created.
-        let _ = std::fs::remove_file(path);
+        // never unlinks a file another caller created. The unlink is
+        // best-effort: a failure is `tracing::warn!`ed, never returned as
+        // the caller's error.
+        remove_created_file(path);
         return Err(VaultError::Io {
             path: path.to_path_buf(),
             source,
         });
     }
     Ok(())
+}
+
+/// Unlinks a file this call created, reporting — never returning — a failure.
+///
+/// A failed unlink (a read-only directory, `EROFS`, `EACCES`) is not the
+/// caller's error: the caller must still see the write or sync failure that
+/// caused the cleanup. But it can strand a short key file — exactly the
+/// permanent lockout ADR-0012 D-4's unlink exists to prevent — or a temporary
+/// file holding key material, so it is never silent.
+fn remove_created_file(path: &Path) {
+    if let Err(source) = std::fs::remove_file(path) {
+        tracing::warn!(
+            path = %path.display(),
+            error = %source,
+            "cleanup unlink failed; the file remains on disk (ADR-0012 D-4)"
+        );
+    }
 }
 
 /// Creates the encryption marker when it is absent, and on every later open

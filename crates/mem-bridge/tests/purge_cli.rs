@@ -1,10 +1,10 @@
 //! W7.1 — purge orchestration, the CLI contract and the erasure barriers.
 //!
 //! Covers: the two-store merge and leg order, the mandatory `not_erased`
-//! accessor, the M22 facts-leg skip, interruption convergence, the
-//! consolidation locks, the consolidator race invariant, the lexical
-//! call-site invariant (M21/M26), and the process-level exit codes
-//! (0/64/74/75).
+//! accessor, the M22 facts-leg skip, the same-root refusals, interruption
+//! convergence, the consolidation locks, the consolidator race invariant,
+//! the lexical call-site invariant (M21/M26), and the process-level exit
+//! codes (0/64/74/75).
 
 mod common;
 
@@ -360,6 +360,120 @@ async fn test_purge_takes_the_consolidation_locks_before_the_pre_scan() {
     assert_eq!(report.episodic.raw_context, 1);
 }
 
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_purge_refuses_a_facts_store_rooted_elsewhere() {
+    let seeded = seed(TestDir::new("w7-follow-f8-mismatch"), true).await;
+    let foreign_dir = TestDir::new("w7-follow-f8-foreign");
+    // Constructed, never readied: no facts.db exists in the other root.
+    let foreign = FactsStore::new(store_config(&foreign_dir));
+
+    let error = mem_bridge::purge::purge_session(&seeded.store, Some(&foreign), &request())
+        .await
+        .expect_err("a facts store rooted outside the episodic root must be refused");
+
+    assert!(
+        matches!(error, mem_bridge::purge::PurgeError::Failed(_)),
+        "{error:?}"
+    );
+    assert!(
+        error.to_string().contains("the same storage root"),
+        "{error}"
+    );
+    assert!(
+        !foreign_dir.path().join("facts.db").exists(),
+        "a refused purge never creates a database in the other root"
+    );
+    assert!(
+        seeded
+            .store
+            .raw_context_for_session(PROJECT, SESSION, AGENT)
+            .await
+            .expect("raw")
+            .is_some(),
+        "a refused purge erases nothing"
+    );
+    assert_eq!(
+        seeded
+            .store
+            .count_sessions(Some(PROJECT))
+            .await
+            .expect("count"),
+        1
+    );
+    assert_eq!(
+        seeded
+            .facts
+            .as_ref()
+            .expect("facts")
+            .count(PROJECT)
+            .await
+            .expect("facts count"),
+        1,
+        "the facts tier still holds its row"
+    );
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_purge_refuses_a_missing_facts_store_when_the_database_exists() {
+    let seeded = seed(TestDir::new("w7-follow-f8-none"), true).await;
+    let scope = SessionScope::new(PROJECT, SESSION, AGENT).expect("scope");
+
+    let error = mem_bridge::purge::purge_session(&seeded.store, None, &request())
+        .await
+        .expect_err("an existing facts.db with no FactsStore must be refused");
+
+    assert!(
+        matches!(error, mem_bridge::purge::PurgeError::Failed(_)),
+        "{error:?}"
+    );
+    assert!(
+        error.to_string().contains("the same storage root"),
+        "{error}"
+    );
+    assert!(
+        seeded.dir.path().join("facts.db").exists(),
+        "the refused call created and deleted nothing"
+    );
+    assert_eq!(
+        seeded
+            .facts
+            .as_ref()
+            .expect("facts")
+            .count(PROJECT)
+            .await
+            .expect("facts count"),
+        1,
+        "the facts tier still holds its row"
+    );
+    assert!(
+        seeded
+            .store
+            .raw_context_for_session(PROJECT, SESSION, AGENT)
+            .await
+            .expect("raw")
+            .is_some(),
+        "a refused purge erases nothing"
+    );
+    assert_eq!(
+        seeded
+            .store
+            .count_sessions(Some(PROJECT))
+            .await
+            .expect("count"),
+        1
+    );
+    assert_eq!(
+        seeded
+            .store
+            .milestone_ids_for_session(&scope)
+            .await
+            .expect("milestones")
+            .len(),
+        1,
+        "the pre-scan is read-only: the milestone survives the refusal"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The race invariant
 // ---------------------------------------------------------------------------
@@ -606,7 +720,21 @@ async fn test_purge_raced_against_a_consolidator_leaves_nothing_behind() {
         let scope = promotion_scope();
         tokio::spawn(async move { consolidator.run(PROJECT, &scope).await })
     };
-    summarizer.started.notified().await;
+    // Bounded on purpose: the signal fires from INSIDE the summarizer, so a
+    // fixture regression that makes the consolidator skip or fail before the
+    // summarization phase must FAIL here with a diagnosis, not hang the
+    // suite (docs/agents/testing.md: bounded waits, never unbounded ones).
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        summarizer.started.notified(),
+    )
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "the consolidator never signalled `summarizer.started` within 10s: it skipped \
+             or failed before the summarization phase, so the busy outcome is unreachable"
+        )
+    });
     let busy = mem_bridge::purge::purge_session(&store, Some(&facts), &request())
         .await
         .expect_err("the consolidator holds the gate");

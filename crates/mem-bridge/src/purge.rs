@@ -20,6 +20,16 @@
 //! hold the gate, so the leg cannot be skipped for a database that appeared
 //! after an unlocked pre-check.
 //!
+//! # The same-root contract
+//!
+//! The M22 probe is keyed on the EPISODIC root while the facts leg writes
+//! through the caller's `FactsStore`, so the two must share one root:
+//! `purge_session` refuses a `FactsStore` rooted elsewhere, and refuses
+//! `None` while `{storage_root}/facts.db` exists. Left unguarded, the probe
+//! and the leg disagree — the purge reports `skipped_no_database` (or
+//! `erased`) while the facts survive in the other root, or it opens the
+//! other root and creates a `facts.db` there, which a purge must never do.
+//!
 //! # Order and convergence
 //!
 //! Milestone ids are only knowable while the milestones exist, so the facts
@@ -137,7 +147,7 @@ pub enum PurgeError {
     InvalidScope(EpisodicError),
     /// Another consolidation/purge holds the locks (exit 75).
     Busy,
-    /// A store or IO failure (exit 74).
+    /// A store, IO or same-root-contract failure (exit 74).
     Failed(String),
 }
 
@@ -154,6 +164,17 @@ impl std::fmt::Display for PurgeError {
 impl std::error::Error for PurgeError {}
 
 /// Erases one scope under the consolidator's locks.
+///
+/// # The same-root contract
+///
+/// `facts` must be rooted where `store` is: the M22 facts-tier probe reads
+/// `store.storage_path()`, while the facts leg writes through `facts`. A
+/// `FactsStore` rooted elsewhere is refused with [`PurgeError::Failed`] —
+/// never silently skipped (an `erased` report while its rows survive) and
+/// never opened (which would create a `facts.db` in the other root: a purge
+/// never creates a database). `None` is accepted only while
+/// `{store root}/facts.db` is absent. `run` composes both stores from one
+/// `store_config`, so neither refusal is reachable through the CLI.
 pub async fn purge_session(
     store: &EpisodicStore,
     facts: Option<&FactsStore>,
@@ -174,6 +195,21 @@ pub async fn purge_session_observed(
     // 1. Validate BEFORE anything is opened, locked or read.
     let scope = SessionScope::new(&request.project_id, &request.session_id, &request.agent_id)
         .map_err(PurgeError::InvalidScope)?;
+
+    // 1b. The same-root contract (module header): the M22 probe is keyed on
+    // the episodic root, so a facts store rooted elsewhere would either be
+    // skipped while its rows survive, or create a `facts.db` in the other
+    // root. Refuse BEFORE any lock is taken or any file touched.
+    if let Some(facts) = facts
+        && facts.storage_path() != store.storage_path()
+    {
+        return Err(PurgeError::Failed(format!(
+            "purge_session requires facts.storage_path() == store.storage_path() \
+             (the same storage root): facts={} store={}",
+            facts.storage_path().display(),
+            store.storage_path().display()
+        )));
+    }
 
     // 2. Both locks, in the consolidator's order, before the pre-scan.
     let Some(_gate) = mem_episodic::gate::try_acquire(store.storage_path()) else {
@@ -216,13 +252,20 @@ async fn erase_locked(
     //
     // M22 decides the facts leg HERE, under both locks: a database that a
     // consolidation created after the caller asked for the purge is still
-    // erased. When the file is absent nothing opens or creates it.
-    let facts = facts.filter(|_| {
-        store
-            .storage_path()
-            .join(mem_facts::schema::FACTS_DB_NAME)
-            .exists()
-    });
+    // erased. When the file is absent nothing opens or creates it — and a
+    // caller who supplied NO FactsStore over an existing database is
+    // refused rather than reported as `skipped_no_database` (the same-root
+    // contract).
+    let facts_db = store.storage_path().join(mem_facts::schema::FACTS_DB_NAME);
+    let has_facts_db = facts_db.exists();
+    if facts.is_none() && has_facts_db {
+        return Err(PurgeError::Failed(format!(
+            "purge_session was given no FactsStore while the same storage root holds {}: \
+             refusing to report an erasure that skips the facts tier",
+            facts_db.display()
+        )));
+    }
+    let facts = facts.filter(|_| has_facts_db);
     let (facts_report, facts_leg) = match facts {
         Some(facts) => {
             on_leg("facts");
