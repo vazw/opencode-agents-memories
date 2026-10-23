@@ -144,6 +144,16 @@ Agent isolation applies to hot-cold tiers:
 - **Warm/Cold/Frozen:** Shared (with agent-scoped access control)
 - **Promotion:** Agent-scoped writes to warm, async promotion to cold/frozen
 
+### D-10 — Vault exclusion from hot/cold migration
+
+The vault (ADR-0012) is a self-contained encrypted file with its own per-scope key
+(ADR-0012 D-1) and must not be subjected to hot/cold migration, tiering, or archival
+movement. It is already outside the hot/warm/cold/frozen model: it is not an access-
+frequency tier, its bytes are not regenerable, and moving them across storage tiers
+would break the per-scope key/file pairing and the marker commit point (ADR-0012 D-8).
+Hot-cold migration applies to the episodic/facts/profile tiers only. This is recorded
+here because ADR-0011 was previously silent on the vault; silence is not an exclusion.
+
 ## Consequences
 
 ### Positive
@@ -200,5 +210,6 @@ Agent isolation applies to hot-cold tiers:
 - ADR-0005: Episodic storage model
 - ADR-0009: Multi-agent memory architecture
 - ADR-0010: Sound Memory context preservation
+- ADR-0012: Vault key custody and rotation (vault excluded from hot/cold migration; see D-10)
 - Open Problem #7: Context preservation vs compression
 - Open Problem #8: Memory portability

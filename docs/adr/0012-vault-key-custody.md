@@ -37,8 +37,8 @@ to own:
    ADR exists to make.
 
 W7.2 itself writes no vault content. Every rule below therefore protects the
-*contract* before the first secret byte exists; the API that exercises it belongs to
-the wave that first writes content (D-9).
+*contract* before the first secret byte exists; the API that exercises it (rotation,
+D-9) belongs to W8b, the wave immediately following the first content writer (W8a).
 
 ## Decision
 
@@ -227,7 +227,9 @@ new key. After the commit the old key is **destroyed**. A rekey is therefore:
   reference. References *into* the vault must be by `source_ref` (which points out of
   the vault at episodic/facts ids and is unaffected), or by a surrogate the writer wave
   adds if it needs one. `source_ref` is shipped and indexed in v1 precisely so that
-  this constraint costs nothing later.
+  this constraint costs nothing later. W8a ships the first producer (the session-end
+  feeder) and therefore the first opportunity for an external holder to appear; the
+  contract forbids it, and a repo-level test guards it.
 
 **Why not the alternative.** Keeping the old MAC key alive so ids survive would mean
 the rekey retains the very secret whose compromise motivated it — a rotation that keeps
@@ -251,21 +253,40 @@ rotation becomes tractable; deferring leaves a leaked key with no remedy but del
 ### D-8 — Rekey protocol invariant: the marker is the single commit point
 
 This ADR does not specify a byte-level procedure; it specifies the invariant a future
-implementation must satisfy, because the implementation belongs to the writer wave
-(D-9).
+implementation must satisfy, because the implementation belongs to W8b (D-9).
 
 1. A rekey produces **generation n+1** beside generation n: the new database is written
    under a temporary name, `sync_all`'d, and its new key file is written beside the old
    one (D-4's atomic mint). Nothing at the canonical paths changes yet.
-2. **The commit is a single marker replacement**, not a file swap: the marker names the
-   generation and cipher (D-5's extension), is written to a temporary file and renamed
-   over the old marker. Before the rename, generation n is authoritative; after it,
-   generation n+1 is.
+2. **The commit is a single marker replacement**, not a file swap: the marker (naming
+   generation and cipher, D-5's extension) is written to a temporary file, `sync_all`'d,
+   and **renamed** over the old marker; **then the parent directory is `fsync`'d.**
+   Before the rename, generation n is authoritative; after it, generation n+1 is.
 3. Only **after** the commit are the previous generation's key and database deleted. A
    residue (`.prev`) is therefore the only acceptable extra file, it is reported rather
    than silently trusted, and its existence means "a rekey was interrupted".
 4. Open reads the marker, then the generation it names. An interrupted rekey is
    recovered from the marker — never by guessing which file "looks newer".
+
+**Durability caveat (the correction this amendment makes).** POSIX `rename(2)` guarantees
+atomicity, not durability: POSIX makes no crash guarantee for `rename()` at all, and a
+rename is not durable until the parent directory is `fsync`'d (`fsync(file)` alone does
+not persist the directory entry). The portable minimum recipe is
+`write → fsync(file) → rename → fsync(parent dir)`
+(POSIX/kernel convention, not a Ferrite finding). It is not guaranteed on every
+filesystem: `data=writeback` mounts, network filesystems, volatile write caches, and
+OverlayFS in `volatile` mode give no crash safety (OverlayFS defaults to `fsync=auto`,
+not `strict`). Per Bornholt et al.,
+"Specifying and Checking File System Crash-Consistency Models" (Ferrite, ASPLOS 2016,
+§3.5), among the filesystems tested only btrfs provided the atomic replace-via-rename
+(ARVR) guarantee; ext4's `auto_da_alloc` (per the ext4 documentation the paper cites
+as ref [42]) forces out the new data blocks on rename but rename does not wait for that
+flush, so ext4 provides no atomicity guarantee and a crash can leave partial new
+content. Recovery is marker-driven, never mtime/name-driven: an interrupted rekey leaves
+generation n authoritative (or, at worst, a `.prev` residue reported rather than
+silently trusted) — **no moment in which the key on disk cannot open the database on
+disk and the old key is already gone.** `ready()` does not auto-recover; it returns
+`RekeyInterrupted` on residue, and recovery is an explicit `recover_rekey` call (W8b).
 
 The one thing this invariant exists to prevent: a moment in which the key on disk cannot
 open the database on disk and the old key is already gone. That is unrecoverable, and it
@@ -276,17 +297,21 @@ yet in place — the same window, mirrored); a journal file besides the marker (
 commit point is a second way to disagree); trusting filename ordering/mtime (not a
 commit protocol).
 
-### D-9 — Rotation API ownership: the first writer wave ships rekey, in the same wave
+### D-9 — Rotation API ownership: rekey ships in W8b, immediately after the first content writer
 
 W7.2 ships **no** rotation API, no rekey CLI, no export/import of key material. Rewriting
 `content_hash` is a content write path, and this wave's binding rule is that it has none.
 
-**The rotation API belongs to the wave that first writes vault content, and that wave
-must ship it in the same change.** Rationale: the first content-bearing vault is the
-first thing whose key can matter, and the only remediation for a leaked key without
-rekey is deleting data — the opposite of what the vault exists for. Shipping the first
-write path without rekey would create exactly one wave's worth of unrotatable secrets.
-This is a constraint on that wave, not a deferral of the design: the design is D-7/D-8.
+**The rotation API belongs to the wave that first writes vault content.** Under the
+owner's resequencing, the content write path ships in W8a and rekey ships in the
+immediately following wave W8b; no production deployment may occur between them, and
+W8b is a hard prerequisite of any production use of the vault. W8a ships no rotation
+API. Rationale: the first content-bearing vault is the first thing whose key can
+matter, and the only remediation for a leaked key without rekey is deleting data — the
+opposite of what the vault exists for. Shipping the first write path without rekey would
+create exactly one wave's worth of unrotatable secrets; the no-deployment-between-waves
+rule is what makes that window safe. This is a constraint on those waves, not a deferral
+of the design: the design is D-7/D-8.
 
 ### D-10 — A lost or corrupt key is unrecoverable, and is never regenerated
 
@@ -310,8 +335,12 @@ explicit, owner-initiated purge (`purge_session`).* The vault is a lifecycle **t
 not a lifecycle **stage** (ADR-0009 D-3 promotes "any tier → vault"), so it does not
 license destruction — and it does not exempt itself from erasure either.
 
-Decision: **a vault writer owes `purge_session` an erasure path, in the same wave that
-adds the writer.** `purge_session` promises that a session's content is erased; a vault
+Decision: **a vault writer owes `purge_session` an erasure path.** Under the owner's
+resequencing the erase path ships in W8b (the purge erasure leg), testable against real
+rows produced by W8a's feeder; W8a's feeder follows the `source_ref` contract (an opaque
+tagged string constructed at a single site in mem-bridge) so that W8b's leg is
+implementable without a rekey or row rewrite. `purge_session` promises that a session's
+content is erased; a vault
 copy that survives would make "erased" false for the most sensitive tier. The vault's
 immutability binds **overwrite** (an entry is never mutated in place) and **identity**
 (the id is the content's keyed digest), not **erasure**: because ids are not references
@@ -390,8 +419,8 @@ anything here.
 - A rekey is a full-table rewrite and is identity-breaking inside the vault (D-7).
 - `vault-keys/` enumerates projects and is a single point of access at the directory
   level (D-2).
-- Rotation code does not exist yet; D-9 makes it a hard requirement of the first writer
-  wave rather than an optional follow-up.
+- Rotation code does not exist yet; D-9 makes it a hard requirement of W8b (immediately
+  following W8a), not an optional follow-up.
 
 **Neutral / forward**
 
@@ -406,6 +435,7 @@ anything here.
 - ADR-0004: Database encryption at rest (Accepted; no rotation clause)
 - ADR-0009: Multi-agent memory architecture (Tier 4; amended 2026-10-23 to per-project scope)
 - ADR-0010: Sound Memory — D-1 (raw context lifetime), D-3 (Vault = L0), D-4 (`source_ref`), D-6 ("NOT vault")
-- ADR-0011: Hot-cold memory split (orthogonal to the vault; no tiering applies)
+- ADR-0011: Hot-cold memory split (orthogonal to the vault; no tiering applies — see
+  ADR-0011 D-10 for the explicit exclusion of the vault from hot/cold migration)
 - RFC 2104 (HMAC), RFC 4231 (HMAC-SHA-256 test vectors), FIPS 180-4 (SHA-256)
 - W7.1 blueprint r5, `[W7.2 FORWARD REFERENCE]` — the owner-ratified hand-off (option C, keyed ids, fail-closed, no write path)
