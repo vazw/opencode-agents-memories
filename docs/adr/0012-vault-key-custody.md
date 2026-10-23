@@ -1,6 +1,6 @@
 # 0012 — Vault Key Custody and Rotation
 
-- **Status:** Proposed (draft for review)
+- **Status:** Accepted (owner acceptance, 2026-10-23)
 - **Date:** 2026-10-23 (UTC 2026-10-22) — the decision records of this session are dated 2026-10-23 while the UTC clock reads 2026-10-22T20:4x with identical local time; both readings are stated so neither is a lie.
 - **Wave:** W7.2 — `mem-vault`. This ADR is the **design authority for that wave**: the crate ships key custody, the fail-closed open, keyed content ids and a v1 schema, with **no content write path** and **no rotation API**.
 - **Supersedes:** nothing. **Amends:** nothing in this file. ADR-0004 stays authoritative for global shard encryption and is untouched. ADR-0009's Tier-4 sharing cell was amended to per-project scope on the same date, by the same owner ruling, in ADR-0009's own W7.2 amendment note.
