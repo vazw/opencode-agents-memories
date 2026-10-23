@@ -65,6 +65,17 @@ of the global shards stays ADR-0004's, untouched (D-12).
 `test_vault_content_addressing_invariant` and checks the content-addressing
 rules; the compile-fail doctest on `VaultEntry` is the stronger guarantee.
 
+## Provenance (W8a r7)
+
+`source_ref` is **required** (a `String`, never `Option`). Absence would make
+a row permanently un-addressable — no purge constructs a ref matching `NULL`
+and the tier is precisely where a user's secrets would live. The API enforces
+presence, not truthfulness: a caller can pass `session:…` for content that
+never came from a session. Content with no external referent uses
+`VaultSourceKind::Manual` → `manual:<opaque>`, the honest escape hatch.
+`mime_type` stays optional. The column stays nullable at the schema level;
+a bypassed `NULL` degrades to `""` in `get`.
+
 ## Clock seam (W8a)
 
 `created_at` is stamped by the store via `ids::now_millis()` (store-owned,

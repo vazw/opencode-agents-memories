@@ -6,6 +6,8 @@
 //! its own cached `KeyHex`, so a caller can never name, forge or pre-compute
 //! an id (ADR-0012 D-6). `VaultRecord` is what `get` returns and *does*
 //! carry `content_hash`, because by then the store has authority over it.
+//!
+//! Provenance (`source_ref`) is required: absence is a compile error.
 
 /// The input to [`crate::VaultStore::put`].
 ///
@@ -14,16 +16,28 @@
 /// let _ = VaultEntry {
 ///     content: Vec::new(),
 ///     mime_type: None,
-///     source_ref: None,
+///     source_ref: "manual:doctest".to_string(),
 ///     created_by: String::new(),
 ///     content_hash: String::new(),
+/// };
+/// ```
+///
+/// Absence of provenance is not representable: `source_ref` is required.
+///
+/// ```compile_fail
+/// use mem_vault::VaultEntry;
+/// let _ = VaultEntry {
+///     content: Vec::new(),
+///     mime_type: None,
+///     source_ref: None,
+///     created_by: String::new(),
 /// };
 /// ```
 #[derive(Clone)]
 pub struct VaultEntry {
     pub content: Vec<u8>,
     pub mime_type: Option<String>,
-    pub source_ref: Option<String>,
+    pub source_ref: String,
     pub created_by: String,
 }
 
@@ -32,7 +46,7 @@ pub struct VaultRecord {
     pub content_hash: String,
     pub content: Vec<u8>,
     pub mime_type: Option<String>,
-    pub source_ref: Option<String>,
+    pub source_ref: String,
     pub created_at: i64,
     pub created_by: String,
 }

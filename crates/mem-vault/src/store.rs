@@ -181,14 +181,15 @@ impl VaultStore {
                 field: "created_by",
             });
         }
-        // Validate source_ref if Some.
-        if let Some(ref source_ref) = entry.source_ref {
-            let trimmed = source_ref.trim();
-            if trimmed.is_empty() || source_ref.contains('\u{0}') || source_ref.len() > 256 {
-                return Err(VaultError::InvalidEntry {
-                    field: "source_ref",
-                });
-            }
+        // Validate source_ref unconditionally.
+        let trimmed = entry.source_ref.trim();
+        if trimmed.is_empty()
+            || entry.source_ref.contains('\u{0}')
+            || entry.source_ref.len() > 256
+        {
+            return Err(VaultError::InvalidEntry {
+                field: "source_ref",
+            });
         }
 
         let db = self.ready(scope).await?;
@@ -250,7 +251,7 @@ impl VaultStore {
             content_hash: row.text("content_hash").unwrap_or_default(),
             content,
             mime_type: row.text("mime_type"),
-            source_ref: row.text("source_ref"),
+            source_ref: row.text("source_ref").unwrap_or_default(),
             created_at: row.i64("created_at").unwrap_or(0),
             created_by: row.text("created_by").unwrap_or_default(),
         };

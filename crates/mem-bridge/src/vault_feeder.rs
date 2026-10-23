@@ -184,7 +184,7 @@ impl VaultFeeder {
             let entry = VaultEntry {
                 content: candidate.into_bytes(),
                 mime_type: None,
-                source_ref: Some(source_ref.clone()),
+                source_ref: source_ref.clone(),
                 created_by: created_by.clone(),
             };
 

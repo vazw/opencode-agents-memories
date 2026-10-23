@@ -83,3 +83,9 @@ the `-32002` code row, the exit-code-75 row, the status-file-format row.
 - `VaultFeeder` (session-end feeder: user-marked verbatim content only).
 - `CaptureParams.vault` flag and `CaptureService.with_vault_feeder` builder.
 - `mem-bridge → mem-vault` dependency edge (ADR-0001 W8a amendment).
+
+- Provenance is mandatory: `VaultEntry.source_ref` / `VaultRecord.source_ref`
+  are `String`, never `Option`. The feeder always supplies a ref via
+  `vault_source_ref(Session, …)`; content with no external referent uses
+  `VaultSourceKind::Manual` → `manual:<opaque>`. The API enforces presence,
+  not truthfulness.

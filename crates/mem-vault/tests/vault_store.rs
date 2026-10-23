@@ -372,7 +372,7 @@ async fn test_vault_put_returns_keyed_content_hash() {
     let entry = VaultEntry {
         content: b"hello vault".to_vec(),
         mime_type: Some("text/plain".to_string()),
-        source_ref: Some("session:abc".to_string()),
+        source_ref: "session:abc".to_string(),
         created_by: "agent".to_string(),
     };
     let hash = store.put(SCOPE, entry.clone()).await.expect("put");
@@ -391,21 +391,21 @@ async fn test_vault_put_is_idempotent() {
     let entry = VaultEntry {
         content: b"idempotent".to_vec(),
         mime_type: Some("text/plain".to_string()),
-        source_ref: Some("session:x".to_string()),
+        source_ref: "session:x".to_string(),
         created_by: "agent".to_string(),
     };
     let h1 = store.put(SCOPE, entry.clone()).await.expect("put1");
     let entry2 = VaultEntry {
         content: b"idempotent".to_vec(),
         mime_type: Some("application/json".to_string()),
-        source_ref: Some("session:y".to_string()),
+        source_ref: "session:y".to_string(),
         created_by: "other".to_string(),
     };
     let h2 = store.put(SCOPE, entry2).await.expect("put2");
     assert_eq!(h1, h2);
     let rec = store.get(SCOPE, &h1).await.expect("get").expect("some");
     assert_eq!(rec.mime_type.as_deref(), Some("text/plain"));
-    assert_eq!(rec.source_ref.as_deref(), Some("session:x"));
+    assert_eq!(rec.source_ref, "session:x");
     assert_eq!(rec.created_by, "agent");
 }
 
@@ -418,7 +418,7 @@ async fn test_vault_put_validates_created_by() {
         let entry = VaultEntry {
             content: b"x".to_vec(),
             mime_type: None,
-            source_ref: None,
+            source_ref: "".to_string(),
             created_by: cb.to_string(),
         };
         let err = store.put(SCOPE, entry).await.unwrap_err();
@@ -439,11 +439,11 @@ async fn test_vault_put_validates_source_ref() {
     let dir = scratch_root("put-sr");
     let store = VaultStore::new(store_config(&dir, true, None));
     store.ready(SCOPE).await.expect("ready");
-    let cases: Vec<Option<String>> = vec![
-        Some(String::new()),
-        Some("   ".to_string()),
-        Some("a\0b".to_string()),
-        Some("a".repeat(257)),
+    let cases: Vec<String> = vec![
+        String::new(),
+        "   ".to_string(),
+        "a\0b".to_string(),
+        "a".repeat(257),
     ];
     for sr in cases {
         let entry = VaultEntry {
@@ -473,7 +473,7 @@ async fn test_vault_get_returns_stored_record() {
     let entry = VaultEntry {
         content: b"round trip".to_vec(),
         mime_type: Some("text/plain".to_string()),
-        source_ref: Some("session:abc".to_string()),
+        source_ref: "session:abc".to_string(),
         created_by: "agent".to_string(),
     };
     let hash = store.put(SCOPE, entry.clone()).await.expect("put");
@@ -481,7 +481,7 @@ async fn test_vault_get_returns_stored_record() {
     assert_eq!(rec.content_hash, hash);
     assert_eq!(rec.content, entry.content);
     assert_eq!(rec.mime_type, Some("text/plain".to_string()));
-    assert_eq!(rec.source_ref, Some("session:abc".to_string()));
+    assert_eq!(rec.source_ref, "session:abc");
     assert_eq!(rec.created_by, "agent");
     assert!(rec.created_at > 0);
 }
@@ -496,7 +496,7 @@ async fn test_vault_get_returns_none_for_missing() {
     let entry = VaultEntry {
         content: Vec::new(),
         mime_type: None,
-        source_ref: None,
+        source_ref: "manual:test".to_string(),
         created_by: "agent".to_string(),
     };
     let hash = store.put(SCOPE, entry).await.expect("put");
@@ -512,7 +512,7 @@ async fn test_vault_cached_key_populated_after_ready() {
     let entry = VaultEntry {
         content: b"cached".to_vec(),
         mime_type: None,
-        source_ref: None,
+        source_ref: "manual:test".to_string(),
         created_by: "agent".to_string(),
     };
     assert!(store.put(SCOPE, entry).await.is_ok());
@@ -526,7 +526,7 @@ async fn test_vault_put_stamps_created_at() {
     let entry = VaultEntry {
         content: b"stamp".to_vec(),
         mime_type: None,
-        source_ref: None,
+        source_ref: "manual:test".to_string(),
         created_by: "agent".to_string(),
     };
     let hash = store.put(SCOPE, entry).await.expect("put");
