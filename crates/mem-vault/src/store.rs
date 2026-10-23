@@ -183,9 +183,7 @@ impl VaultStore {
         }
         // Validate source_ref unconditionally.
         let trimmed = entry.source_ref.trim();
-        if trimmed.is_empty()
-            || entry.source_ref.contains('\u{0}')
-            || entry.source_ref.len() > 256
+        if trimmed.is_empty() || entry.source_ref.contains('\u{0}') || entry.source_ref.len() > 256
         {
             return Err(VaultError::InvalidEntry {
                 field: "source_ref",
