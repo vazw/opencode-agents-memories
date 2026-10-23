@@ -21,7 +21,7 @@ The repository is a Cargo **workspace** of twelve library crates plus the existi
 | `mem-profile` | passive user-profile learning: prompt cold buffer, extraction, confidence/decay, AI cleanup |
 | `mem-episodic` | per-project agent session (episodic) memory: session summaries, timelines, consolidation |
 | `mem-facts` | the durable five-tier facts DB (`facts.db`): atomic facts, per-project/tier dedup, per-session provenance, explicit purge |
-| `mem-vault` | the verbatim, encrypted, per-project vault tier (`vault/{scope}/vault.db`): per-scope key custody under `vault-keys/`, keyed content ids, v1 schema, no content write path |
+| `mem-vault` | the verbatim, encrypted, per-project vault tier (`vault/{scope}/vault.db`): per-scope key custody under `vault-keys/`, keyed content ids, v1 schema, and the W8a content write/read path (`put`/`get`) |
 | `mem-skills` | the skills manager: the `skills.db` table, the per-skill `SKILL.md` content tree, the change-notification seam |
 | `mem-portability` | the portable, versioned memory bundle: the durable tiers, the opt-in staging tier, the export/import round trip |
 | `mem-web` | axum web explorer backend: upstream REST contract + new session-history endpoints |
@@ -44,7 +44,7 @@ The table is a **ceiling**: a crate's actual `mem-*` dependencies (direct) must 
 | `mem-skills` | `mem-core`, `mem-store` |
 | `mem-portability` | `mem-core`, `mem-store`, `mem-embed`, `mem-profile`, `mem-episodic` |
 | `mem-web` | `mem-core`, `mem-store`, `mem-embed`, `mem-ai`, `mem-profile`, `mem-episodic`, `mem-skills`, `mem-portability` |
-| `mem-bridge` | `mem-core`, `mem-store`, `mem-embed`, `mem-ai`, `mem-profile`, `mem-episodic`, `mem-facts` |
+| `mem-bridge` | `mem-core`, `mem-store`, `mem-embed`, `mem-ai`, `mem-profile`, `mem-episodic`, `mem-facts`, `mem-vault` |
 
 **Sibling rule:** `mem-web` and `mem-bridge` must **not** depend on each other — they are independent integration surfaces (HTTP explorer vs. OpenCode host plugin) composed only by the root binary. Reopening this rule requires amending this ADR.
 
@@ -56,6 +56,8 @@ The table is a **ceiling**: a crate's actual `mem-*` dependencies (direct) must 
 **W7.1 amendment (one crate, one edge).** `mem-facts` owns the durable five-tier facts DB (`facts.db`), and the bridge's production cross-tier task plus the purge orchestrator both live in `mem-bridge`, so one new edge follows: `mem-bridge → mem-facts`. The rule for future phases is normative here: **a row lists only an edge the crate declares today; a ceiling for a future phase is recorded in prose here and becomes a row in the phase that first declares it** — the `mem-facts → mem-embed` ceiling (Phase 2 fact embeddings) is prose, not a row. `mem-vault` and its per-project key scheme landed in W7.2 (see the W7.2 amendment below).
 
 **W7.2 amendment (one crate, one edge).** `mem-vault` owns the verbatim, per-project encrypted vault tier (ADR-0012): key custody under `{storage_root}/vault-keys/`, one encrypted `vault.db` per scope hash, keyed content ids, and **no content write path** in this wave. It declares exactly `mem-core` and `mem-store`. Its `mem-ai` ceiling (privacy filtering before a vault write, ADR-0009 D-7) and every consumer edge stay prose under the W7.1 rule and become rows in the phase that first declares them.
+
+**W8a amendment (one crate, one edge).** W8a opens the `mem-vault` content surface (the first producer for the tier) and ships the session-end feeder in `mem-bridge`, so one new edge follows: `mem-bridge → mem-vault`. `mem-vault` itself still declares only `mem-core` and `mem-store`; its `mem-ai` ceiling remains prose. Rekey, `recover_rekey`, the purge erasure leg, `VaultPurgeReport`, `VaultLeg` and `PurgeRequest.vault_scopes` stay in W8b.
 
 **Front-end package exception (Rev: web stack — see ADR-0003):** the web explorer UI is a standalone package at `web-ui/` (leptos CSR, Trunk-built; §0b D5). It is **not** a workspace member and **not** a `mem-*` crate: it contains no `mem-*` code and nothing may depend on it — its only contract with the port is HTTP (the ADR-0003 REST surface). The workspace root Cargo.toml gains `exclude = ["web-ui"]` because a nested package directory would otherwise be workspace-resolved from the root. The crates-exactness assertion (`crates/` contains exactly the `mem-*` packages the table lists) is unchanged in kind; W7.1 raised the count, and W7.2 raises it to twelve.
 

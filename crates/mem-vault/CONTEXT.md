@@ -1,8 +1,9 @@
 # mem-vault — domain context
 
 **Purpose:** the verbatim, encrypted, per-project vault tier: one key per scope
-hash, one encrypted `vault.db` per scope, keyed content ids (`content_hash`) and
-a v1 schema — shipped as a contract, with no content write path.
+hash, one encrypted `vault.db` per scope, keyed content ids (`content_hash`),
+a v1 schema, and a content write/read path (`put`/`get`) whose identity is
+derived from the store's cached `KeyHex`.
 
 Design authority: `docs/adr/0012-vault-key-custody.md` (D-1 … D-12). Encryption
 of the global shards stays ADR-0004's, untouched (D-12).
@@ -56,13 +57,18 @@ of the global shards stays ADR-0004's, untouched (D-12).
 - **`content_hash` is byte-exact** over the content: no normalization, no
   whitespace collapsing, no case folding. The vault is L0.
 
-## No content path (this wave)
+## Content path (W8a)
 
-`src/` holds DDL and custody only: no DML of any kind (insert/update/delete), no
-row type, no reader, no CLI mode, no REST route. `tests/no_write_path.rs` is a
-lexical tripwire over `src/**` (not a proof — macro-generated SQL, `#[path]`
-modules outside `src/`, a statement split across `concat!`, and bare method
-references all evade it).
+`src/` now ships `put`/`get` over `vault_entries`. `VaultEntry` carries no
+`content_hash` field; the store derives the id from its cached `KeyHex`
+(ADR-0012 D-6). `tests/no_write_path.rs` is amended to
+`test_vault_content_addressing_invariant` and checks the content-addressing
+rules; the compile-fail doctest on `VaultEntry` is the stronger guarantee.
+
+## Clock seam (W8a)
+
+`created_at` is stamped by the store via `ids::now_millis()` (store-owned,
+not injectable). Vault tests assert the store sets it, not a specific value.
 
 ## Rotation stance
 

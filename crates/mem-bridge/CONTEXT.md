@@ -76,3 +76,10 @@ the `-32002` code row, the exit-code-75 row, the status-file-format row.
   scope, **74** store-or-IO, **75** busy. Success prints exactly one JSON
   line with counts and a mandatory, non-empty `not_erased` array naming the
   surviving legacy `memories` shard.
+
+## W8a additions
+
+- `vault_source_ref` (single construction site for vault `source_ref` strings).
+- `VaultFeeder` (session-end feeder: user-marked verbatim content only).
+- `CaptureParams.vault` flag and `CaptureService.with_vault_feeder` builder.
+- `mem-bridge → mem-vault` dependency edge (ADR-0001 W8a amendment).

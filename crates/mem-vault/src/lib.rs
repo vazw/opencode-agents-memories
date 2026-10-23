@@ -4,11 +4,14 @@
 //!
 //! The tier that holds bytes whose exact wording matters (ADR-0010 D-3: the
 //! vault is **L0** — no compression, no normalization, no derived
-//! representation). W7.2 ships the *contract* before the first secret byte
-//! exists: per-scope key custody, a fail-closed open, keyed content ids and a
-//! v1 schema — and **no content write path, no read path and no rotation
-//! API**. The absence is deliberate and is enforced by
-//! `tests/no_write_path.rs`.
+//! representation). W8a opens the content surface: writes go through
+//! [`VaultStore::put`] only, and reads through [`VaultStore::get`].
+//! `VaultEntry` carries no `content_hash` field — the store derives the
+//! identity from its own cached `KeyHex` (ADR-0012 D-6) — so a caller can
+//! never name, forge or pre-compute an id. Rekey, `recover_rekey`, the purge
+//! erasure leg and `VaultStore::erase` remain in W8b. The structural
+//! invariant is enforced by the compile-fail doctest on `VaultEntry` (AC-1)
+//! and the lexical tripwire in `tests/no_write_path.rs` (AC-7).
 //!
 //! # Design authority
 //!
@@ -53,23 +56,29 @@
 //! permissions are the directory-level barrier. The scope hash is a 64-bit
 //! prefix, not a secret, and provides no confidentiality of its own.
 //!
-//! # No content path
+//! # Content write path
 //!
-//! `src/` contains DDL plus custody only: no DML of any kind
-//! (insert/update/delete), no row type, no CLI mode, no HTTP route. Read it as
-//! an executable refusal, not as a placeholder.
+//! W8a opens the content surface: writes go through [`VaultStore::put`] only,
+//! and reads through [`VaultStore::get`]. `VaultEntry` carries no
+//! `content_hash` field — the store derives the identity from its own cached
+//! `KeyHex` (ADR-0012 D-6) — so a caller can never name, forge or
+//! pre-compute an id. Rekey, `recover_rekey`, the purge erasure leg and
+//! `VaultStore::erase` remain in W8b.
 
 use std::path::PathBuf;
 
 /// Stable crate identifier for composition checks.
 pub const CRATE_NAME: &str = "mem-vault";
 
+pub mod entry;
 pub mod hmac;
 pub mod schema;
 pub mod store;
 
+pub(crate) mod ids;
 pub(crate) mod key;
 
+pub use entry::{VaultEntry, VaultRecord};
 pub use store::VaultStore;
 
 /// The vault-tier error surface.
@@ -88,6 +97,14 @@ pub enum VaultError {
     /// message: the rejected value may be arbitrarily long.
     #[error("invalid scope hash: expected exactly 16 lowercase hex characters")]
     InvalidScope,
+
+    /// A vault entry failed validation. `field` names the offending field
+    /// only; no input value is ever interpolated.
+    #[error("invalid vault entry field: {field}")]
+    InvalidEntry {
+        /// The field that failed validation.
+        field: &'static str,
+    },
 
     /// Database encryption is disabled in the store configuration. The open
     /// refuses **before** any directory, key read or connection exists.

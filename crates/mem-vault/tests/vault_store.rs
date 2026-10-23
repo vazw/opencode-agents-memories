@@ -1,9 +1,10 @@
-//! W7.2 — the fail-closed open, key custody, the v1 schema and encryption at
-//! rest (ADR-0012 D-3, D-4, D-5, D-10).
+//! W7.2 + W8a — the fail-closed open, key custody, the v1 schema and
+//! encryption at rest (ADR-0012 D-3, D-4, D-5, D-10), plus the W8a content
+//! write/read path (`put`/`get`, validation, idempotency, cached key).
 //!
-//! `mem-vault` ships no content path: these tests prove the *contract* — the
-//! open order, the key's shape, the schema, and that the file on disk is not
-//! readable without its key.
+//! These tests prove the *contract* — the open order, the key's shape, the
+//! schema, that the file on disk is not readable without its key, and the
+//! content-addressed put/get behaviour.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use mem_store::config::StoreConfig;
 use mem_store::db::{ConnectFactory, ConnectOptions, EncryptionOptions, turso_connect_factory};
 use mem_store::platform::Platform;
-use mem_vault::{VaultError, VaultStore};
+use mem_vault::{VaultEntry, VaultError, VaultStore};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -345,4 +346,190 @@ async fn test_vault_db_is_not_readable_as_a_plaintext_database() {
         "a plaintext open must not read the vault table — a success here is a \
          finding about the encryption claim, not a test to relax"
     );
+}
+
+// ---------------------------------------------------------------------------
+// W8a content write path (AC-2..AC-6, AC-16)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_vault_error_invalid_entry_display() {
+    let err = VaultError::InvalidEntry {
+        field: "created_by",
+    };
+    assert_eq!(err.to_string(), "invalid vault entry field: created_by");
+    let err2 = VaultError::InvalidEntry {
+        field: "source_ref",
+    };
+    assert_eq!(err2.to_string(), "invalid vault entry field: source_ref");
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_vault_put_returns_keyed_content_hash() {
+    let dir = scratch_root("put-hash");
+    let store = VaultStore::new(store_config(&dir, true, None));
+    store.ready(SCOPE).await.expect("ready");
+    let entry = VaultEntry {
+        content: b"hello vault".to_vec(),
+        mime_type: Some("text/plain".to_string()),
+        source_ref: Some("session:abc".to_string()),
+        created_by: "agent".to_string(),
+    };
+    let hash = store.put(SCOPE, entry.clone()).await.expect("put");
+    assert_eq!(hash.len(), 64);
+    assert!(hash.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')));
+    let key_bytes = std::fs::read_to_string(store.key_path(SCOPE).expect("kp")).expect("read");
+    let expected = mem_vault::hmac::keyed_content_hash(&key_bytes, &entry.content).expect("hash");
+    assert_eq!(hash, expected);
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_vault_put_is_idempotent() {
+    let dir = scratch_root("put-idempotent");
+    let store = VaultStore::new(store_config(&dir, true, None));
+    store.ready(SCOPE).await.expect("ready");
+    let entry = VaultEntry {
+        content: b"idempotent".to_vec(),
+        mime_type: Some("text/plain".to_string()),
+        source_ref: Some("session:x".to_string()),
+        created_by: "agent".to_string(),
+    };
+    let h1 = store.put(SCOPE, entry.clone()).await.expect("put1");
+    let entry2 = VaultEntry {
+        content: b"idempotent".to_vec(),
+        mime_type: Some("application/json".to_string()),
+        source_ref: Some("session:y".to_string()),
+        created_by: "other".to_string(),
+    };
+    let h2 = store.put(SCOPE, entry2).await.expect("put2");
+    assert_eq!(h1, h2);
+    let rec = store.get(SCOPE, &h1).await.expect("get").expect("some");
+    assert_eq!(rec.mime_type.as_deref(), Some("text/plain"));
+    assert_eq!(rec.source_ref.as_deref(), Some("session:x"));
+    assert_eq!(rec.created_by, "agent");
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_vault_put_validates_created_by() {
+    let dir = scratch_root("put-cb");
+    let store = VaultStore::new(store_config(&dir, true, None));
+    store.ready(SCOPE).await.expect("ready");
+    for cb in ["", "   "] {
+        let entry = VaultEntry {
+            content: b"x".to_vec(),
+            mime_type: None,
+            source_ref: None,
+            created_by: cb.to_string(),
+        };
+        let err = store.put(SCOPE, entry).await.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                VaultError::InvalidEntry {
+                    field: "created_by"
+                }
+            ),
+            "{err:?}"
+        );
+    }
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_vault_put_validates_source_ref() {
+    let dir = scratch_root("put-sr");
+    let store = VaultStore::new(store_config(&dir, true, None));
+    store.ready(SCOPE).await.expect("ready");
+    let cases: Vec<Option<String>> = vec![
+        Some(String::new()),
+        Some("   ".to_string()),
+        Some("a\0b".to_string()),
+        Some("a".repeat(257)),
+    ];
+    for sr in cases {
+        let entry = VaultEntry {
+            content: b"x".to_vec(),
+            mime_type: None,
+            source_ref: sr,
+            created_by: "a".to_string(),
+        };
+        let err = store.put(SCOPE, entry).await.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                VaultError::InvalidEntry {
+                    field: "source_ref"
+                }
+            ),
+            "{err:?}"
+        );
+    }
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_vault_get_returns_stored_record() {
+    let dir = scratch_root("get-record");
+    let store = VaultStore::new(store_config(&dir, true, None));
+    store.ready(SCOPE).await.expect("ready");
+    let entry = VaultEntry {
+        content: b"round trip".to_vec(),
+        mime_type: Some("text/plain".to_string()),
+        source_ref: Some("session:abc".to_string()),
+        created_by: "agent".to_string(),
+    };
+    let hash = store.put(SCOPE, entry.clone()).await.expect("put");
+    let rec = store.get(SCOPE, &hash).await.expect("get").expect("some");
+    assert_eq!(rec.content_hash, hash);
+    assert_eq!(rec.content, entry.content);
+    assert_eq!(rec.mime_type, Some("text/plain".to_string()));
+    assert_eq!(rec.source_ref, Some("session:abc".to_string()));
+    assert_eq!(rec.created_by, "agent");
+    assert!(rec.created_at > 0);
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_vault_get_returns_none_for_missing() {
+    let dir = scratch_root("get-missing");
+    let store = VaultStore::new(store_config(&dir, true, None));
+    store.ready(SCOPE).await.expect("ready");
+    let missing = "0".repeat(64);
+    assert!(store.get(SCOPE, &missing).await.expect("get").is_none());
+    let entry = VaultEntry {
+        content: Vec::new(),
+        mime_type: None,
+        source_ref: None,
+        created_by: "agent".to_string(),
+    };
+    let hash = store.put(SCOPE, entry).await.expect("put");
+    let rec = store.get(SCOPE, &hash).await.expect("get").expect("some");
+    assert!(rec.content.is_empty());
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_vault_cached_key_populated_after_ready() {
+    let dir = scratch_root("cached-key");
+    let store = VaultStore::new(store_config(&dir, true, None));
+    store.ready(SCOPE).await.expect("ready");
+    let entry = VaultEntry {
+        content: b"cached".to_vec(),
+        mime_type: None,
+        source_ref: None,
+        created_by: "agent".to_string(),
+    };
+    assert!(store.put(SCOPE, entry).await.is_ok());
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_vault_put_stamps_created_at() {
+    let dir = scratch_root("stamps");
+    let store = VaultStore::new(store_config(&dir, true, None));
+    store.ready(SCOPE).await.expect("ready");
+    let entry = VaultEntry {
+        content: b"stamp".to_vec(),
+        mime_type: None,
+        source_ref: None,
+        created_by: "agent".to_string(),
+    };
+    let hash = store.put(SCOPE, entry).await.expect("put");
+    let rec = store.get(SCOPE, &hash).await.expect("get").expect("some");
+    assert!(rec.created_at > 0);
 }

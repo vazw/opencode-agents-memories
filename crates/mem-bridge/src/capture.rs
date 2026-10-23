@@ -21,6 +21,7 @@ use mem_store::shard_manager::ShardManager;
 use mem_store::vector::{MemoryInsert, insert_vector_statement};
 
 use crate::project_scope::ResolvedProjectScope;
+use crate::vault_feeder::{VaultFeeder, VaultFeederJob};
 
 /// The deterministic capture-summary row id prefix.
 pub const CAPTURE_SUMMARY_ID_PREFIX: &str = "auto-capture-";
@@ -385,6 +386,10 @@ pub struct CaptureParams {
     /// with a fixed message that never echoes the value.
     #[serde(default)]
     pub agent_role: Option<String>,
+    /// W8a additive: when true, the whole retained raw context is promoted
+    /// verbatim into the vault tier by the session-end feeder.
+    #[serde(default)]
+    pub vault: bool,
 }
 
 /// The `featureFlags.soundMemory` + `soundMemory.rawContextRequired` slice
@@ -534,6 +539,8 @@ pub struct CaptureService {
     drains: std::sync::atomic::AtomicU64,
     /// W7.1: the sound-memory flags (default OFF).
     sound_memory: SoundMemorySettings,
+    /// W8a: optional session-end vault feeder.
+    vault_feeder: Option<Arc<VaultFeeder>>,
 }
 
 impl CaptureService {
@@ -558,6 +565,7 @@ impl CaptureService {
             drain_lock: Arc::new(tokio::sync::Mutex::new(())),
             drains: std::sync::atomic::AtomicU64::new(0),
             sound_memory: SoundMemorySettings::default(),
+            vault_feeder: None,
         }
     }
 
@@ -569,9 +577,21 @@ impl CaptureService {
         self
     }
 
+    /// W8a — attach a vault feeder. Builder setter, default None, mirroring
+    /// `with_sound_memory`.
+    pub fn with_vault_feeder(mut self, feeder: Option<Arc<VaultFeeder>>) -> Self {
+        self.vault_feeder = feeder;
+        self
+    }
+
     /// The sound-memory settings in force (composition diagnostics/tests).
     pub fn sound_memory_settings(&self) -> SoundMemorySettings {
         self.sound_memory
+    }
+
+    /// The attached vault feeder, if any (composition diagnostics/tests).
+    pub fn vault_feeder(&self) -> Option<Arc<VaultFeeder>> {
+        self.vault_feeder.clone()
     }
 
     /// The store root (the scheduler and diagnostics reuse it).
@@ -680,6 +700,16 @@ impl CaptureService {
         {
             return self.retryable_or_dead(entry).await;
         }
+
+        // W8a: enqueue the vault feeder (fire-and-forget) after a successful
+        // episodic commit when a raw context was retained.
+        if let (Some(feeder), Some(raw)) = (&self.vault_feeder, &retention.raw_context) {
+            feeder.enqueue(VaultFeederJob {
+                scope: scope.clone(),
+                raw_context: raw.clone(),
+                params: params.clone(),
+            });
+        }
         let tier_input = capture_summary_input(entry, &summary, &memory_type, &tags, &params);
         match self.writer.write(&scope, &tier_input).await {
             Ok(Tier1WriteOutcome::Written | Tier1WriteOutcome::Replayed) => {
@@ -748,6 +778,16 @@ impl CaptureService {
             .is_err()
         {
             return self.retryable_or_dead(entry).await;
+        }
+
+        // W8a: enqueue the vault feeder (fire-and-forget) after a successful
+        // episodic commit when a raw context was retained.
+        if let (Some(feeder), Some(raw)) = (&self.vault_feeder, &retention.raw_context) {
+            feeder.enqueue(VaultFeederJob {
+                scope: scope.clone(),
+                raw_context: raw.clone(),
+                params: params.clone(),
+            });
         }
 
         // 5. Commit 2: the tier-1 capture summary. A superseded staging

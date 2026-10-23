@@ -555,6 +555,7 @@ fn capture_params(
         metadata: Some(mem_store::serde_json::json!({ "promptId": "p-e2e" })),
         raw_context: raw_context.map(str::to_string),
         agent_role: None,
+        vault: false,
     }
 }
 

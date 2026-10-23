@@ -55,6 +55,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "mem-profile",
             "mem-episodic",
             "mem-facts",
+            "mem-vault",
         ],
     ),
 ];

@@ -23,7 +23,7 @@
 //! permanent lockout. The mint therefore writes a temporary file, `sync_all`s
 //! it, and `hard_link`s it to the final name; the temporary file is unlinked on every path where
 //! the process is alive to return. A `SIGKILL` or a power loss between
-//! `create_new` and `hard_link` can leave a `.tmp-{pid}` behind, and the
+//! `create_new` and `hard_link` can leave a `.tmp-{pid}-{counter}` behind, and the
 //! unlink itself is best-effort (a failure is `tracing::warn!`ed, never
 //! returned as the caller's error). What keeps the lockout off the primary
 //! path is the link, not the unlink: the hard link publishes the already
@@ -44,6 +44,9 @@
 //! is deliberately stricter (exactly 64 lowercase hex).
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static MINT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 use mem_store::db::assert_path_inside_storage;
 
@@ -120,6 +123,9 @@ pub(crate) struct KeyMaterial {
 /// empty or malformed key string **cannot be constructed** — and therefore
 /// cannot reach `mem-store`'s key resolver, whose enabled-without-a-key branch
 /// would otherwise read or create `$HOME/.config/opencode/opencode-mem-db.key`.
+/// Derives `Clone` only, never `Copy`: key material must not be trivially
+/// copied (secret-copy hygiene). Clones are explicit.
+#[derive(Clone)]
 pub(crate) struct KeyHex(String);
 
 impl KeyHex {
@@ -186,8 +192,6 @@ pub(crate) fn ensure_key_material(
     db_path: &Path,
     marker_path: &Path,
 ) -> Result<KeyMaterial, VaultError> {
-    use std::io::ErrorKind;
-
     // Branch 1 — an existing key is read and validated, never regenerated.
     if key_path.exists() {
         let hex = read_key_file(key_path)?;
@@ -205,7 +209,19 @@ pub(crate) fn ensure_key_material(
         });
     }
 
-    // Branch 3 — nothing exists: mint atomically.
+    // Branch 3 — nothing exists: mint atomically (delegated to mint_key_file).
+    let (hex, path) = mint_key_file(key_path)?;
+    Ok(KeyMaterial { hex, path })
+}
+
+/// Extracted mint site (W8a Step 6): atomically mints key material for a
+/// scope that has no key file and no existing data. Reused by branch 3 of
+/// [`ensure_key_material`]. The temp file name carries the pid AND a process-
+/// wide counter so concurrent mints in one process cannot collide on the
+/// same `{scope}.key.tmp-{pid}` name.
+pub(crate) fn mint_key_file(key_path: &Path) -> Result<(KeyHex, MintPath), VaultError> {
+    use std::io::ErrorKind;
+
     let keys_dir = key_path.parent().ok_or_else(|| VaultError::Io {
         path: key_path.to_path_buf(),
         source: std::io::Error::other("the key path has no parent directory"),
@@ -223,24 +239,22 @@ pub(crate) fn ensure_key_material(
             path: key_path.to_path_buf(),
             source: std::io::Error::other("the key path has no file name"),
         })?;
-    let temp_path = key_path.with_file_name(format!("{file_name}.tmp-{}", std::process::id()));
+    let counter = MINT_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let temp_path = key_path.with_file_name(format!(
+        "{file_name}.tmp-{}-{}",
+        std::process::id(),
+        counter
+    ));
     write_new_0600(&temp_path, &rendered)?;
 
     match std::fs::hard_link(&temp_path, key_path) {
         Ok(()) => {
             remove_created_file(&temp_path);
-            Ok(KeyMaterial {
-                hex: KeyHex::parse(&rendered, key_path)?,
-                path: MintPath::HardLink,
-            })
+            Ok((KeyHex::parse(&rendered, key_path)?, MintPath::HardLink))
         }
         Err(error) if error.kind() == ErrorKind::AlreadyExists => {
-            // A racing winner exists: reuse and validate it, never clobber it.
             remove_created_file(&temp_path);
-            Ok(KeyMaterial {
-                hex: read_key_file(key_path)?,
-                path: MintPath::Reused,
-            })
+            Ok((read_key_file(key_path)?, MintPath::Reused))
         }
         Err(error)
             if matches!(
@@ -248,18 +262,11 @@ pub(crate) fn ensure_key_material(
                 ErrorKind::Unsupported | ErrorKind::PermissionDenied | ErrorKind::CrossesDevices
             ) =>
         {
-            // Documented fallback where hard links are unavailable.
             remove_created_file(&temp_path);
             match write_new_0600(key_path, &rendered) {
-                Ok(()) => Ok(KeyMaterial {
-                    hex: KeyHex::parse(&rendered, key_path)?,
-                    path: MintPath::Fallback,
-                }),
+                Ok(()) => Ok((KeyHex::parse(&rendered, key_path)?, MintPath::Fallback)),
                 Err(VaultError::Io { source, .. }) if source.kind() == ErrorKind::AlreadyExists => {
-                    Ok(KeyMaterial {
-                        hex: read_key_file(key_path)?,
-                        path: MintPath::Reused,
-                    })
+                    Ok((read_key_file(key_path)?, MintPath::Reused))
                 }
                 Err(other) => Err(other),
             }
@@ -510,5 +517,43 @@ mod tests {
             second.hex == first.hex,
             "the reused key must be byte-identical"
         );
+    }
+
+    #[test]
+    fn test_key_hex_is_clone_not_copy() {
+        let path = std::path::Path::new("dummy");
+        let hex = KeyHex::parse(&"0".repeat(64), path).expect("valid");
+        let cloned = hex.clone();
+        assert_eq!(hex, cloned);
+        // KeyHex derives Clone only, never Copy: see the `#[derive(Clone)]`
+        // attribute (no `Copy`). Copy absence is a compile-time property;
+        // it cannot be asserted at runtime without a compile-fail doctest,
+        // which cannot name this pub(crate) type (see item K).
+    }
+
+    #[test]
+    fn test_vault_mint_temp_name_includes_pid_and_counter() {
+        use std::sync::atomic::Ordering;
+        let dir = scratch("mint-temp-name");
+        let scope_a = "0123456789abcdef";
+        let scope_b = "fedcba9876543210";
+        let key_path_a = dir.join(VAULT_KEYS_DIR).join(format!("{scope_a}.key"));
+        let key_path_b = dir.join(VAULT_KEYS_DIR).join(format!("{scope_b}.key"));
+        let before = MINT_COUNTER.load(Ordering::SeqCst);
+        let (hex_a, _path_a) = mint_key_file(&key_path_a).expect("mint a");
+        let (hex_b, _path_b) = mint_key_file(&key_path_b).expect("mint b");
+        let after = MINT_COUNTER.load(Ordering::SeqCst);
+        assert!(after > before, "MINT_COUNTER advanced");
+        let keys_dir = dir.join(VAULT_KEYS_DIR);
+        for entry in std::fs::read_dir(&keys_dir).expect("read keys dir") {
+            let name = entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .to_string();
+            assert!(!name.contains(".tmp-"), "no temp residue: {name}");
+        }
+        assert_eq!(hex_a.as_str().len(), 64);
+        assert_eq!(hex_b.as_str().len(), 64);
     }
 }

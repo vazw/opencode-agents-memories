@@ -1,8 +1,11 @@
 //! `VaultStore` — the owner of one per-scope encrypted `vault.db`.
 //!
-//! W7.2 ships the store's open path only: this is the fail-closed open, the
-//! per-scope key custody and the v1 schema. It ships **no content path** — no
-//! row type, no DML of any kind (insert/update/delete), no reader.
+//! W8a opens the content surface on top of the W7.2 open path: the fail-closed
+//! open, per-scope key custody and v1 schema remain, and the crate now also
+//! ships the content write/read path — `VaultStore::put` and
+//! `VaultStore::get` — with a cached `KeyHex` per scope, content-addressed ids
+//! derived from that key, and `VaultEntry`/`VaultRecord`. Rekey,
+//! `recover_rekey`, the purge erasure leg and `VaultStore::erase` stay in W8b.
 //!
 //! The store takes **one** [`StoreConfig`] and every derived path descends
 //! from its `storage_path`; there is no second root that could disagree
@@ -20,6 +23,7 @@ use mem_store::schema_migrations::{MigrationOptions, apply_schema_migrations};
 use mem_store::tokio::sync::OnceCell;
 
 use crate::VaultError;
+use crate::entry::{VaultEntry, VaultRecord};
 use crate::key;
 
 /// The migration label (tracing only).
@@ -34,6 +38,7 @@ pub(crate) const VAULT_MIGRATION_LABEL: &str = "vault";
 struct ScopeState {
     manager: OnceCell<ConnectionManager>,
     handle: OnceCell<DbHandle>,
+    key: std::sync::OnceLock<key::KeyHex>,
 }
 
 /// The vault store over one storage root.
@@ -122,13 +127,23 @@ impl VaultStore {
             )
         };
 
+        // Resolve key material first, cache it in the scope state (ignore a
+        // set failure = already populated), then build the manager from the
+        // cached hex. `ensure_key_material` is idempotent on an existing file
+        // (Reused), so re-running it on a retry is safe.
+        let material = key::ensure_key_material(&key_path, &db_path, &marker_path)?;
+        let _ = state.key.set(material.hex.clone());
+        tracing::debug!(mint_path = ?material.path, "vault key material resolved");
+
         let manager = state
             .manager
             .get_or_try_init(|| async {
-                let material = key::ensure_key_material(&key_path, &db_path, &marker_path)?;
-                // Only the branch is ever logged; the hex never is.
-                tracing::debug!(mint_path = ?material.path, "vault key material resolved");
-                Ok::<ConnectionManager, VaultError>(self.build_manager(&material.hex))
+                let cached = state
+                    .key
+                    .get()
+                    .cloned()
+                    .ok_or_else(|| VaultError::InvalidKeyHex)?;
+                Ok::<ConnectionManager, VaultError>(self.build_manager(&cached))
             })
             .await?;
 
@@ -157,6 +172,89 @@ impl VaultStore {
         let db = self.ready(scope).await?;
         let row = query_one(db.as_ref(), "PRAGMA user_version", Vec::new()).await?;
         Ok(row.and_then(|row| row.i64("user_version")).unwrap_or(0))
+    }
+
+    pub async fn put(&self, scope: &str, entry: VaultEntry) -> Result<String, VaultError> {
+        // Validate created_by (non-empty after trim).
+        if entry.created_by.trim().is_empty() {
+            return Err(VaultError::InvalidEntry {
+                field: "created_by",
+            });
+        }
+        // Validate source_ref if Some.
+        if let Some(ref source_ref) = entry.source_ref {
+            let trimmed = source_ref.trim();
+            if trimmed.is_empty() || source_ref.contains('\u{0}') || source_ref.len() > 256 {
+                return Err(VaultError::InvalidEntry {
+                    field: "source_ref",
+                });
+            }
+        }
+
+        let db = self.ready(scope).await?;
+
+        // Read the cached KeyHex populated by ready().
+        let state = {
+            let scopes = self.scopes.lock().expect("vault scope map");
+            scopes.get(scope).cloned()
+        };
+        let key = state
+            .and_then(|state| state.key.get().cloned())
+            .ok_or(VaultError::InvalidKeyHex)?;
+        let content_hash = crate::hmac::keyed_content_hash(key.as_str(), &entry.content)?;
+
+        // Normalize empty mime_type to NULL.
+        let mime_type = match entry.mime_type {
+            Some(value) if value.trim().is_empty() => None,
+            other => other,
+        };
+
+        let created_at = crate::ids::now_millis();
+
+        db.execute(
+            "INSERT OR IGNORE INTO vault_entries (content_hash, content, mime_type, source_ref, created_at, created_by) VALUES (?,?,?,?,?,?)",
+            vec![
+                mem_store::db::Value::Text(content_hash.clone()),
+                mem_store::db::Value::Blob(entry.content),
+                mem_store::db::Value::from(mime_type),
+                mem_store::db::Value::from(entry.source_ref),
+                mem_store::db::Value::Integer(created_at),
+                mem_store::db::Value::Text(entry.created_by),
+            ],
+        )
+        .await?;
+
+        Ok(content_hash)
+    }
+
+    pub async fn get(
+        &self,
+        scope: &str,
+        content_hash: &str,
+    ) -> Result<Option<VaultRecord>, VaultError> {
+        let db = self.ready(scope).await?;
+        let rows = db
+            .query(
+                "SELECT content_hash, content, mime_type, source_ref, created_at, created_by FROM vault_entries WHERE content_hash = ?",
+                vec![mem_store::db::Value::Text(content_hash.to_string())],
+            )
+            .await?;
+        let Some(row) = rows.into_iter().next() else {
+            return Ok(None);
+        };
+        let content = match row.get("content") {
+            Some(mem_store::db::Value::Blob(bytes)) => bytes.clone(),
+            _ => Vec::new(),
+        };
+        let record = VaultRecord {
+            content_hash: row.text("content_hash").unwrap_or_default(),
+            content,
+            mime_type: row.text("mime_type"),
+            source_ref: row.text("source_ref"),
+            created_at: row.i64("created_at").unwrap_or(0),
+            created_by: row.text("created_by").unwrap_or_default(),
+        };
+        Ok(Some(record))
     }
 
     /// Builds the per-scope manager.

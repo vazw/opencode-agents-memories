@@ -60,6 +60,7 @@ fn params(
         metadata: Some(json!({ "promptId": "p-1" })),
         raw_context: raw_context.map(str::to_string),
         agent_role: agent_role.map(str::to_string),
+        vault: false,
     }
 }
 

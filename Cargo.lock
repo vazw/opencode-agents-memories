@@ -1953,6 +1953,7 @@ dependencies = [
  "mem-facts",
  "mem-profile",
  "mem-store",
+ "mem-vault",
  "serde",
  "serde_json",
  "tokio",

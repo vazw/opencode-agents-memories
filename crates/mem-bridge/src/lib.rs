@@ -18,3 +18,5 @@ pub mod jsonrpc;
 pub mod project_scope;
 pub mod purge;
 pub mod scope_resolver;
+pub mod vault_feeder;
+pub mod vault_source_ref;

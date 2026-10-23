@@ -122,6 +122,10 @@ pub async fn build_composed_runtime(
         Platform::current(),
         Arc::new(mem_store::db::turso_connect_factory()),
     ));
+    // W8a: vault store + feeder. VaultStore opens lazily via ready; construction
+    // touches no disk.
+    let vault_store = Arc::new(mem_vault::VaultStore::new(store_config.clone()));
+    let vault_feeder = Arc::new(crate::vault_feeder::VaultFeeder::new(vault_store));
     let shards = Arc::new(ShardManager::new(
         storage_root.to_path_buf(),
         store_config,
@@ -196,7 +200,8 @@ pub async fn build_composed_runtime(
     .with_sound_memory(crate::capture::SoundMemorySettings {
         enabled: config.feature_flags.sound_memory,
         raw_context_required: config.sound_memory.raw_context_required,
-    });
+    })
+    .with_vault_feeder(Some(vault_feeder));
 
     let consolidation_active = Arc::new(AtomicBool::new(false));
     let inject = InjectService::new(
