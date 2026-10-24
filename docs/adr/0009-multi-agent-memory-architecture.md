@@ -56,7 +56,7 @@ unbuildable: libSQL's encryption is a whole-file codec with one key per file, so
 a per-user vault shared across projects could not be opened by the per-scope
 key, and per-project containment is the property the key scheme was chosen for.
 Key custody, keyed content ids and rotation are decided in **ADR-0012
-(Proposed)**; nothing else in this ADR changes.
+(Accepted)**; nothing else in this ADR changes.
 
 **Rationale:** MIRIX's 6-type taxonomy provides finer granularity than 3 tiers.
 The port's "Facts" tier splits into Semantic/Procedural/Resource to support
