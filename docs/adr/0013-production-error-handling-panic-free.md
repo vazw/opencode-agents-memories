@@ -282,11 +282,29 @@ Two further limits, stated rather than implied:
 
 - the gate covers `.unwrap()`/`.expect()` only; it says nothing about `panic!`, `todo!`,
   `unreachable!` or `assert!` (D-3's ban is review-enforced), and nothing about the `?` rule (D-4);
-- `docs/agents/testing.md` documents the battery line
-  `cargo clippy --workspace --all-targets -- -D warnings`, which cannot pass on this tree: the 14
-  `await_holding_lock` and 1 `unnecessary_lazy_evaluations` warnings measured above become errors
-  under `-D warnings`. This ADR does not repair that baseline and does not silently redefine the
-  battery; it defines a narrower gate that can be green.
+- The battery's clippy line, taken as one `cargo clippy --workspace --all-targets -- -D warnings`
+  command, cannot pass on this tree: the excluded lints fire on pre-existing code and become errors
+  under `-D warnings` (17 sites; see the amendment below). This ADR does not repair that baseline and
+  does not silently redefine the battery; it defines a narrower gate that can be green. How the
+  testing document states the battery is recorded in the amendment below.
+
+**Amendments (2026-10-24, ADR-0016).**
+
+- **Lint baseline re-measured.** Re-measured at HEAD `1f66f08`, the unexcluded form is exit 101
+  with 17 errors across three lints: 14 `clippy::await_holding_lock` in
+  `crates/mem-skills/tests/skills_manager.rs`, 1 `clippy::doc_lazy_continuation` in
+  `crates/mem-bridge/src/vault_feeder.rs:15:5`, and 2 `clippy::assertions_on_constants` in
+  `crates/mem-vault/tests/no_write_path.rs:124:21` and `:133:21`. All three exclusions are
+  load-bearing. `docs/agents/testing.md` now documents this ADR's two gate commands instead of the
+  single red line, so Edit 1's bullet records the state this amendment replaced, not the current
+  text of that file. The dated per-crate table earlier in this ADR is left as measured at `9a523b5`.
+- **The hook.** The rejected alternative "a pre-commit hook" now exists as the tracked
+  `.githooks/pre-commit`, installed per clone with `git config core.hooksPath .githooks`. It runs
+  **this ADR's D-5 command unchanged** and adds no gate of its own beyond a staged-file
+  `rustfmt --check`. Installation remains voluntary, so D-5 stays review-enforced for anyone who has
+  not installed the hook; where it is installed, the hook runs the identical command and a failing
+  commit is refused. The rejection bullet's other grounds (a repository write outside this decision's
+  scope) are supplied by ADR-0016, not withdrawn here.
 
 **Rejected:** `--all-targets` (lints the exempt test surface and inherits the red baseline);
 `RUSTFLAGS="-D clippy::unwrap_used"` (applies to dependencies too, and is invisible in the command);
@@ -345,4 +363,5 @@ outside this decision's scope, and still not a gate anyone is obliged to install
   sources. This ADR propagates through those types and adds nothing to them.
 - ADR-0012 D-3 — the vault's fail-closed open order, the reason `mem-vault`'s poisoned scope map
   propagates rather than recovers.
-- `docs/agents/testing.md` — the documented battery, whose clippy line is red today (D-5).
+- `docs/agents/testing.md` — the documented battery, whose clippy line is D-5's two gate commands
+  (both green as measured; ADR-0016).

@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# Tracked pre-commit gate.
+#
+# Install once per clone:
+#   git config core.hooksPath .githooks
+#
+# It rustfmt-checks exactly the staged `.rs` files and then runs both clippy
+# gates this repository treats as law. It runs no tests. A commit whose staged
+# set touches no Rust file exits before cargo is invoked. This is a lint and
+# format gate, not a quality gate: see docs/adr/0016-pre-commit-gate.md.
+#
+# The hook never mutates the repository: it only reads the index (`git show`)
+# and runs `rustfmt --check` on copies plus read-only clippy.
+set -euo pipefail
+
+bypass_note() {
+    printf 'pre-commit: bypass: git commit --no-verify — legitimate only when the failure is pre-existing and\n' >&2
+    printf 'pre-commit:   unrelated to what you staged (record it in the wave ledger); otherwise fix it.\n' >&2
+}
+
+# P1 — repository root. Without the `||`, `set -e` would exit 128 before the message.
+toplevel="$(git rev-parse --show-toplevel)" || {
+    printf 'pre-commit: cannot resolve the repository root\n' >&2
+    exit 1
+}
+cd "$toplevel" || exit 1
+
+# P2 — toolchain presence, checked before the fast path (a silent no-op is worse).
+for tool in cargo rustfmt; do
+    if ! command -v "$tool" > /dev/null 2>&1; then
+        printf 'pre-commit: FAIL environment — %s not found on PATH (this repository requires the Rust toolchain)\n' "$tool" >&2
+        bypass_note
+        exit 1
+    fi
+done
+
+# P3 — the staged set: added/copied/modified/renamed, NUL-delimited so spaces and
+# quotes survive. Deleted/unmerged entries never reach the fmt phase.
+staged=()
+while IFS= read -r -d '' p; do
+    staged+=("$p")
+done < <(git diff --cached --name-only -z --diff-filter=ACMR)
+
+# P4 — fast path: no Rust-related path staged means no cargo work at all.
+rust_related=0
+for p in "${staged[@]}"; do
+    case "$p" in
+        *.rs | Cargo.toml | Cargo.lock | */Cargo.toml | */Cargo.lock) rust_related=1 ;;
+    esac
+done
+if [ "$rust_related" -eq 0 ]; then
+    exit 0
+fi
+
+# P5 — one scratch root, created on first use. `.tmp/` is gitignored, so a fresh
+# clone has no `.tmp/scratch`; `mktemp -d` against a missing parent would fail.
+export CARGO_TARGET_DIR="$toplevel/.tmp/scratch/cargo-target"
+export TMPDIR="$toplevel/.tmp/scratch"
+if ! mkdir -p "$TMPDIR"; then
+    printf 'pre-commit: FAIL environment — cannot create the scratch directory %s\n' "$TMPDIR" >&2
+    bypass_note
+    exit 1
+fi
+tmp="$(mktemp -d "$TMPDIR/precommit.XXXXXX")"
+trap 'rm -rf "$tmp"' EXIT
+# A signal must not leave the per-run dir behind, and must not let a half-run
+# hook resume as if it had checked anything: clean up, then stop.
+trap 'exit 1' INT TERM HUP
+
+# P6 — rustfmt judges the index blob of each staged `.rs` file, not the worktree.
+# `skip_children=true` is required for a materialised blob (a copied lib.rs
+# otherwise fails to resolve its modules); each staged file is still checked on
+# its own, so a staged unformatted child is caught by its own entry.
+fmt_paths=()
+for p in "${staged[@]}"; do
+    case "$p" in
+        *.rs) fmt_paths+=("$p") ;;
+    esac
+done
+if [ "${#fmt_paths[@]}" -gt 0 ]; then
+    n=0
+    for p in "${fmt_paths[@]}"; do
+        n=$((n + 1))
+        blob="$tmp/$n.rs"
+        if ! git show ":0:$p" > "$blob"; then
+            printf "pre-commit: FAIL fmt — cannot read the staged blob for '%s' (the index changed during the hook run); re-run the commit\n" "$p" >&2
+            bypass_note
+            exit 1
+        fi
+        if ! fmt_out="$(rustfmt --check --color never --edition 2024 --config skip_children=true "$blob" 2>&1)"; then
+            printf 'pre-commit: FAIL fmt — %s is not rustfmt-clean (staged content)\n' "$p" >&2
+            # Rewrite the blob path in the diff header to the repo-relative path
+            # with awk (sed replacement would mangle paths containing | or &).
+            printf '%s\n' "$fmt_out" |
+                awk -v p="$p" '{ if ($0 ~ /^Diff in /) { i = index($0, ":"); print "Diff in " p substr($0, i) } else print }' |
+                sed -e 's/\x1B\[[0-9;]*m//g' -e 's/\x1B(B//g' |
+                sed -n '1,60p' >&2
+            bypass_note
+            exit 1
+        fi
+    done
+fi
+
+# Index/worktree divergence: clippy can only judge the worktree copy. Warn, never block.
+for p in "${staged[@]}"; do
+    if ! git diff --quiet -- "$p"; then
+        printf 'pre-commit: WARN — %s differs between the index and the worktree; clippy judges the worktree copy\n' "$p" >&2
+    fi
+done
+
+# P7 — the clippy gates. Gate 1 is ADR-0013 D-5's `--lib` command verbatim; gate 2
+# is the all-targets form recorded in AGENTS.md §Gates, docs/agents/testing.md and
+# ADR-0016 (D-5 carries the `--lib` command only).
+clip_log="$tmp/clippy.log"
+clippy_gate() {
+    local label="$1" dir="$2" target="$3"
+    shift 3
+    if ! (cd "$dir" && CARGO_TARGET_DIR="$target" "$@") > "$clip_log" 2>&1; then
+        printf 'pre-commit: FAIL clippy [%s]\n' "$label" >&2
+        tail -n 40 "$clip_log" >&2 || true
+        printf 'pre-commit: reproduce: cd %s && CARGO_TARGET_DIR=%s %s\n' "$dir" "$target" "$*" >&2
+        bypass_note
+        exit 1
+    fi
+}
+
+webui=0
+for p in "${staged[@]}"; do
+    case "$p" in
+        web-ui/*) webui=1 ;;
+    esac
+done
+
+clippy_scope="root"
+clippy_gate "gate 1/2: panic families — root workspace" "$toplevel" "$CARGO_TARGET_DIR" \
+    cargo clippy --workspace --lib -- -A clippy::all -D clippy::unwrap_used -D clippy::expect_used
+clippy_gate "gate 2/2: all-targets warnings — root workspace" "$toplevel" "$CARGO_TARGET_DIR" \
+    cargo clippy --workspace --all-targets -- -D warnings -A clippy::await_holding_lock -A clippy::assertions_on_constants -A clippy::doc_lazy_continuation
+
+# web-ui is a separate workspace (root Cargo.toml: `exclude = ["web-ui"]`) with
+# its own ≈7.2G cache; the root target dir must not absorb a second workspace.
+# Only the measured-green all-targets gate runs here. The panic-family gate does
+# not cover web-ui yet: it is red on 7 pre-existing sites the root workspace has
+# never linted (ADR-0016 D-3, recorded follow-up).
+if [ "$webui" -eq 1 ] && [ -f "$toplevel/web-ui/Cargo.toml" ]; then
+    clippy_scope="root+web-ui"
+    clippy_gate "gate 1/1: all-targets warnings — web-ui" "$toplevel/web-ui" "$toplevel/web-ui/target" \
+        cargo clippy --workspace --all-targets -- -D warnings
+fi
+
+if [ "${PRECOMMIT_VERBOSE:-0}" = "1" ]; then
+    printf 'pre-commit: fmt %d file(s), clippy %s, %ss\n' "${#fmt_paths[@]}" "$clippy_scope" "$SECONDS"
+fi
+
+exit 0
