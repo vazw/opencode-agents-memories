@@ -248,21 +248,23 @@ Both lines are expected on stderr when no build resolves, and the port stays clo
 `web.dist_missing` line exists because `web.launch_failed` carries no detail and the run path
 installs no tracing subscriber, so the detail would otherwise be dropped.
 
-**Lane limitation (issue 36):** a plugin-launched engine receives neither
-`OPENCODE_MEM_WEB_DIST` nor `--web-dist`, and the packaging script stages no UI bundle, so until
-**issue 36** lands every plugin-launched engine refuses its web launch and the **ENTIRE axum
-surface** — REST API **AND** `/api/health`, not merely the UI — is unavailable for it. The W6.7
-browser smoke and the W7.2 "web UI functional" rehearsal cannot pass before issue 36 closes.
+**Landed (issue 36, W6.9):** the packaging script now stages the built UI at
+`engine/<platform>-<arch>/web-ui/dist` beside the engine binary, so a plugin-launched engine
+resolves the packaged default candidate with no setting and no flag, while an explicit
+`OPENCODE_MEM_WEB_DIST` / `--web-dist <dir>` still wins and the wrapper forwards the env name and
+appends the flag. Staging refuses with exit 5 (no built bundle) or exit 7 (a bundle is already
+staged: replaced, never merged — remove it and re-run), so a refused rework stages nothing. A
+bundle-less package keeps the loud `web.dist_missing` + `web.launch_failed` degradation. The W6.7
+browser smoke and the W7.2 "web UI functional" rehearsal now pass over the plugin path.
 
 ## 9. Environment and defaults
 
-Both lanes read the **same names** and the **same default**, with ONE
+Both lanes read the **same names** and the **same default**, with no
 engine-direct exception: `OPENCODE_MEM_WEB_DIST` (and its CLI twin
-`--web-dist`) is read by the **engine lane only**. The wrapper's minimal child
-environment does not forward the name and its argv builder has no
-`--web-dist`; forwarding the setting from the wrapper is tracked as **issue
-36** (`W6.8 follow-up · Package the web UI beside the engine and forward the
-dist setting`).
+`--web-dist`) is read by the engine, and the wrapper forwards it — the name via
+its child-environment whitelist and the flag as `--web-dist <dir>` appended when
+the host sets it (issue 36). When the host sets nothing, the wrapper forwards
+nothing and the engine's exe-relative default is the single source of truth.
 
 | variable | default | meaning |
 |---|---|---|
@@ -270,7 +272,7 @@ dist setting`).
 | `OPENCODE_MEM_MODE` | `stdio` | engine launch mode |
 | `OPENCODE_MEM_WEB_HOST` | loopback (`127.0.0.1`) | axum bind host (standalone mode) |
 | `OPENCODE_MEM_WEB_PORT` | `3742` | axum bind port (standalone mode) |
-| `OPENCODE_MEM_WEB_DIST` | first READY exe-relative candidate: `<exe_dir>/web-ui/dist`, then `<exe_dir>/../../web-ui/dist` | directory holding the built web UI that mem-web serves (engine-direct only) |
+| `OPENCODE_MEM_WEB_DIST` | first READY exe-relative candidate: `<exe_dir>/web-ui/dist`, then `<exe_dir>/../../web-ui/dist` | directory holding the built web UI that mem-web serves; a plugin-launched engine receives it from the wrapper, which forwards the name and appends --web-dist (issue 36) |
 
 The wrapper needs the storage root to write the status file **before any engine exists**,
 which is why the default is shared rather than engine-only.
@@ -297,15 +299,15 @@ which is why the default is shared rather than engine-only.
   bind-and-404): the launcher emits `web.dist_missing` (see §8) and returns an
   error, so the engine's existing `web.launch_failed` degradation fires and the
   stdio purpose survives.
-- **Lane limitation (issue 36):** because the wrapper forwards neither the env
-  name nor the flag, a **plugin-launched** engine resolves only the
-  exe-relative default — and `plugin/scripts/stage-engine.sh` stages no UI
-  bundle. **Until issue 36 lands, every plugin-launched engine emits
-  `web.dist_missing` + `web.launch_failed` at every start and runs with the
-  ENTIRE axum surface — the REST API AND `/api/health`, not merely the UI —
-  unavailable.** The W6.7 browser smoke and the W7.2 "web UI functional"
-  rehearsal cannot pass before issue 36 closes. That regression is owned by
-  issue 36, not by this composition contract.
+- **Packaged default (issue 36):** candidate 1 (the bundle staged beside the
+  engine binary) is produced by `plugin/scripts/stage-engine.sh`, which stages
+  `web-ui/dist` into `plugin/engine/<platform>-<arch>/web-ui/dist`. A staged
+  bundle is replaced only by the operator: the script never merges a new bundle
+  into an old one and never deletes one, so reworking a stage is the operator's
+  act. The wrapper forwards the setting (the env name and `--web-dist`), so a
+  plugin-launched engine resolves candidate 1 with no setting or flag of its
+  own. A bundle-less package still refuses the web launch loudly — no socket is
+  bound, the stdio purpose survives, and it is never a bind-and-404.
 
 ## 10. Secrets (security posture (a)–(j), mandates 1–2, 9)
 

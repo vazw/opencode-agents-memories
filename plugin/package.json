@@ -15,7 +15,7 @@
     }
   },
   "scripts": {
-    "test": "node --test tests/dist-sync.test.mjs tests/loader-contract.test.mjs tests/root-entrypoint.test.mjs tests/bundle-boundary.test.mjs tests/wrapper-glue.test.mjs tests/host-config.test.mjs tests/shutdown.test.mjs tests/fixtures.test.mjs"
+    "test": "node --test tests/dist-sync.test.mjs tests/loader-contract.test.mjs tests/root-entrypoint.test.mjs tests/bundle-boundary.test.mjs tests/wrapper-glue.test.mjs tests/host-config.test.mjs tests/shutdown.test.mjs tests/fixtures.test.mjs tests/stage-engine.test.mjs"
   },
   "keywords": [
     "opencode",

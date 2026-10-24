@@ -21,15 +21,20 @@ API services in that same root were completed by W6.7 (issue 31, commit
 | `webServerAuthUsername` | *(OS user)* | the Basic-auth username |
 | `webServerAuthPassword` | *(unset)* | the Basic-auth password; unset ⇒ Basic auth is off |
 | `webServerApiToken` | *(unset)* | the API token; unset ⇒ the local token is the only way into `/api/*` |
-| `OPENCODE_MEM_WEB_DIST` / `--web-dist` | first READY exe-relative candidate (`<exe_dir>/web-ui/dist`, then `<exe_dir>/../../web-ui/dist`) | the built web UI (`web-ui/dist`) that mem-web serves. **Env/CLI only** — there is no `opencode-mem.json` key; the CLI flag wins over the env var (W6.8) |
+| `OPENCODE_MEM_WEB_DIST` / `--web-dist` | first READY exe-relative candidate (`<exe_dir>/web-ui/dist`, then `<exe_dir>/../../web-ui/dist`) | the built web UI (`web-ui/dist`) that mem-web serves. **Env/CLI only** — there is no `opencode-mem.json` key; the CLI flag wins over the env var (W6.8). The wrapper forwards the name and the flag (issue 36), and `stage-engine.sh` stages the bundle at the packaged candidate |
 
 ## Smoke transcript
 
-**Prerequisite (W6.8):** a dist must resolve — build it (`web-ui/dist`, e.g.
-`trunk build`) or pass `--web-dist <dir>` / set `OPENCODE_MEM_WEB_DIST` — or
-the web server **refuses to launch**, and every step below is refused
-(connection refused, plus `web.dist_missing` + `web.launch_failed` on stderr).
-Steps 1–5 are `curl: (7) Failed to connect` without a resolvable dist.
+**Prerequisite (W6.8, extended by issue 36):** a dist must resolve — build it
+(`web-ui/dist`, e.g. `trunk build`) or pass `--web-dist <dir>` / set
+`OPENCODE_MEM_WEB_DIST` — or the web server **refuses to launch**, and every step
+below is refused (connection refused, plus `web.dist_missing` +
+`web.launch_failed` on stderr). A plugin-launched engine resolves
+`plugin/engine/<platform>-<arch>/web-ui/dist` (staged beside the binary by
+`plugin/scripts/stage-engine.sh`), and staging itself refuses with exit 5 (no
+built bundle) or exit 7 (a bundle is already staged — replaced, never merged;
+remove it and re-run). Steps 1–5 are `curl: (7) Failed to connect` without a
+resolvable dist.
 
 ```bash
 # 1. The health endpoint — always reachable, no credentials.
@@ -403,7 +408,7 @@ curl -i http://127.0.0.1:<port>/api/projects/demo-project/sessions
 | **D-4** | `Buffer.from(payload, "base64")` decodes leniently. | A Basic payload that does not decode, or that decodes to non-UTF-8 bytes, is refused (401). | Only malformed credentials are affected — they fail either way. |
 | **D-5** | The upstream suite drives the Bun server. | The tests drive the port through two seams: the **router seam** (`build_router(..)` + `tower::ServiceExt::oneshot`) and the **socket seam** (raw HTTP/1.1 over `std::net::TcpStream` against a real server on `127.0.0.1:0`). No dev-dependencies. | `docs/agents/testing.md` forbids dev-dependencies; the seams keep the tests hermetic and drive the public interface. |
 | **D-6** | The local token file lives at `~/.opencode-mem/.auth-token`. | `FileLocalToken` takes an explicit path; the composition root supplies the upstream location. | mem-web tests must never touch the user home. |
-| **D-7** | Upstream answers `File not found` (404) when no web directory exists. | **Two layers (W6.8).** The composition root REFUSES the web launch when no dist resolves: `web.dist_missing` + `web.launch_failed` on stderr and **no socket bound**, so `GET /` is connection-refused, never a quiet 404. mem-web itself still answers 404 `File not found` when driven directly — its router-seam test `test_missing_dist_dir_returns_404_and_api_still_healthy` stays untouched and green. | AC3 (loud, diagnosable degradation) wins at the composition layer; D-7 yields there only. **Packaging follow-up: issue 36** stages `web-ui/dist` beside the engine binary and forwards `OPENCODE_MEM_WEB_DIST` / `--web-dist` from the wrapper. **Until issue 36 lands**, a plugin-launched engine resolves no dist, so the **ENTIRE axum surface — the REST API AND `/api/health`, not merely the UI — is unavailable** for plugin users; the W6.7 browser smoke and the W7.2 "web UI functional" rehearsal cannot pass before issue 36 closes. |
+| **D-7** | Upstream answers `File not found` (404) when no web directory exists. | **Two layers (W6.8).** The composition root REFUSES the web launch when no dist resolves: `web.dist_missing` + `web.launch_failed` on stderr and **no socket bound**, so `GET /` is connection-refused, never a quiet 404. mem-web itself still answers 404 `File not found` when driven directly — its router-seam test `test_missing_dist_dir_returns_404_and_api_still_healthy` stays untouched and green. | AC3 (loud, diagnosable degradation) wins at the composition layer; D-7 yields there only. **Packaging follow-up: issue 36 (landed).** `plugin/scripts/stage-engine.sh` stages `web-ui/dist` beside the engine binary at `plugin/engine/<platform>-<arch>/web-ui/dist` and the wrapper forwards `OPENCODE_MEM_WEB_DIST` / `--web-dist`, so a plugin-launched engine now serves the packaged bundle (the W6.7 browser smoke and the W7.2 "web UI functional" rehearsal pass over the plugin path). A bundle-less package still degrades through the same loud path — the composition root refuses the launch with `web.dist_missing` + `web.launch_failed` and binds no socket, while mem-web still answers 404 `File not found` when driven directly. |
 | **D-8** | Upstream has no Host check: after a DNS rebind the attacker's page is *same-origin* with the local server, so the CORS gate cannot stop it, and the local token injected into the shell could be exfiltrated. | **Host allowlist** at the gate: `localhost`, `127.0.0.1`, `::1` and the configured bind host (each with an optional `:port`); everything else is refused with `403` **before** the token can be embedded in any response. A missing or empty `Host` is refused too. A wildcard bind (`0.0.0.0` / `::`) disables the allowlist. | The user chose the mitigation over recording the risk as accepted. |
 | **D-9** | A store failure answers `200` with the raw error string in the body. | `500` + the fixed `{"success":false,"error":"Internal Server Error"}`; the detail goes to the log. | An internal error string must never reach a client (the D-3 philosophy). The UI reads `success`, so client behaviour is unchanged. |
 | **D-10** | The container-tag rejection echoes the offending tag in the message and answers `200` (`success:false`). | The fixed `"Invalid container tag"` with **400**; the log records the reason and the tag's length, never the tag text. | Untrusted input is never echoed into a response or a log (reflection / log injection), and a client error is a client error. |

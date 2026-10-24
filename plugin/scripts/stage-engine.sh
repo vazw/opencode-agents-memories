@@ -6,11 +6,25 @@
 #   is honored only when that toolchain exists (fails loudly otherwise).
 # - Fails loudly when the binary is missing after the build.
 # - chmod +x and smoke `--version`.
-# - Output: plugin/engine/<platform>-<arch>/opencode-agents-memory — a
-#   GITIGNORED build artifact (plugin/.gitignore, M29); never committed.
+# - Output: plugin/engine/<platform>-<arch>/opencode-agents-memory PLUS the
+#   packaged default candidate plugin/engine/<platform>-<arch>/web-ui/dist (the
+#   built UI staged beside the binary) — GITIGNORED build artifacts
+#   (plugin/.gitignore, M29); never committed.
+# - Refuses (exit 5) when ../web-ui/dist/index.html is absent: an engine whose
+#   packaged default cannot resolve must not be staged, and a missing bundle must
+#   not spend a release build. Refuses (exit 7) when a bundle is already staged at
+#   the destination — bundles are replaced, never merged (trunk hashes asset
+#   names); the operator removes the stale one and re-runs. This script never
+#   deletes anything.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."   # plugin/
+
+WEB_UI_SRC="../web-ui/dist"
+if [ ! -f "$WEB_UI_SRC/index.html" ]; then
+  echo "stage-engine: '$WEB_UI_SRC' has no index.html — build the web UI first (cd web-ui && trunk build); refusing to stage an engine whose packaged default cannot resolve (issue 36)" >&2
+  exit 5
+fi
 
 declare -a CARGO_ARGS=()
 TARGET=""
@@ -52,11 +66,27 @@ case "$(uname -m)" in
 esac
 
 OUT_DIR="engine/$PLATFORM-$ARCH"
+WEB_UI_DEST="$OUT_DIR/web-ui/dist"
+# Replace, never merge: trunk hashes asset names, so merging a new bundle into an
+# old one leaves orphaned hashed assets. A staged bundle is the operator's to remove;
+# this script never deletes. `-f …/index.html` (not `ls -A`) keeps shellcheck clean and
+# is exact: the exit-6 check below guarantees every staged bundle has index.html.
+if [ -f "$WEB_UI_DEST/index.html" ]; then
+  echo "stage-engine: '$WEB_UI_DEST' already holds a staged bundle; bundles are replaced, never merged (trunk hashes asset names). Remove it yourself and re-run: rm -rf '$WEB_UI_DEST'" >&2
+  exit 7
+fi
 mkdir -p "$OUT_DIR"
 cp "$BIN" "$OUT_DIR/opencode-agents-memory"
 chmod +x "$OUT_DIR/opencode-agents-memory"
+mkdir -p "$WEB_UI_DEST"
+cp -R "$WEB_UI_SRC/." "$WEB_UI_DEST/"
+if [ ! -f "$WEB_UI_DEST/index.html" ]; then
+  echo "stage-engine: staged bundle '$WEB_UI_DEST' has no index.html after copy — refusing to ship an unresolvable package" >&2
+  exit 6
+fi
 
 # Smoke: the staged binary answers --version (M26).
 "$OUT_DIR/opencode-agents-memory" --version >/dev/null
 
 echo "staged: $OUT_DIR/opencode-agents-memory ($TARGET)"
+echo "staged: $WEB_UI_DEST ($(find "$WEB_UI_DEST" -type f | wc -l) files)"

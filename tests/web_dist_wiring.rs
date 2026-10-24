@@ -685,17 +685,37 @@ fn test_non_utf8_path_does_not_panic_in_lossy_diagnostics() {
 /// `web-ui/dist` is BUILD OUTPUT: the wiring consumes it and never commits it,
 /// and the build never requires it to exist (W6.8/AC4).
 ///
-/// The guard presumes W6.5's `web-ui/` tree is present but uncommitted — that
-/// is the state of this checkout, and the whole point of the wave. On a
-/// checkout where the tree is absent (a future clean clone before W6.5's
-/// commit is recreated) the guard SKIPS with a printed reason naming W6.5: it
-/// must never pass silently and must never fail a clean checkout.
+/// `web-ui/` is tracked at HEAD, so the first guard is only a cheap precondition
+/// and does not fire on a normal checkout. The load-bearing guard is the one
+/// below: `web-ui/dist` is ignored build output (`web-ui/.gitignore:2` — `/dist/`,
+/// a directory-only rule), so it is absent until the UI is built.
+///
+/// A present-but-unbuilt tree (`web-ui/` present, `web-ui/dist` absent — the
+/// normal state of a clean checkout) SKIPS only the ignore-EFFECT check with a
+/// printed reason; the `.gitignore` rule text is asserted before that skip.
 #[test]
 fn test_web_dist_is_gitignored_build_output() {
     if !Path::new("web-ui").exists() {
         println!(
             "SKIP test_web_dist_is_gitignored_build_output: web-ui/ is absent — \
              this guard presumes W6.5's untracked web-ui/ tree (W6.8/AC4, M6)"
+        );
+        return;
+    }
+
+    // Rule text first: it needs no build output, so it runs on an unbuilt tree too.
+    let ignore_body =
+        std::fs::read_to_string("web-ui/.gitignore").expect("web-ui/.gitignore readable");
+    assert!(
+        ignore_body.lines().any(|line| line.trim() == "/dist/"),
+        "web-ui/.gitignore must keep its `/dist/` line: {ignore_body:?}"
+    );
+
+    if !Path::new("web-ui/dist").is_dir() {
+        println!(
+            "SKIP test_web_dist_is_gitignored_build_output: web-ui/dist is absent — \
+             no build output exists to ignore, so the ignore EFFECT is unverifiable \
+             here (clean/unbuilt checkout) (W6.8/AC4, M6)"
         );
         return;
     }
@@ -718,13 +738,5 @@ fn test_web_dist_is_gitignored_build_output() {
         !tracked.status.success(),
         "web-ui/dist must NOT be tracked: {}",
         String::from_utf8_lossy(&tracked.stdout)
-    );
-
-    // SECONDARY check: the ignore rule is stated where a reader looks for it.
-    let ignore_body =
-        std::fs::read_to_string("web-ui/.gitignore").expect("web-ui/.gitignore readable");
-    assert!(
-        ignore_body.lines().any(|line| line.trim() == "/dist/"),
-        "web-ui/.gitignore must keep its `/dist/` line: {ignore_body:?}"
     );
 }

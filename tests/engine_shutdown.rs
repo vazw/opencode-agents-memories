@@ -14,8 +14,10 @@
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -554,61 +556,364 @@ fn test_capture_stderr_has_no_transcript_canary() {
 // Packaging (M26; step 17's tarball oracle)
 // ---------------------------------------------------------------------------
 
+/// The synthetic bundle the scratch package stages (an `index.html` the script
+/// requires and one asset proving the copy is recursive).
+const STAGE_FIXTURE_INDEX: &str = "<!doctype html>\n<title>STAGE-ENGINE-FIXTURE</title>\n";
+
+/// A second file in the synthetic bundle, so the `cp -R` leg is exercised.
+const STAGE_FIXTURE_ASSET: &str = "// stage-engine fixture asset\n";
+
+/// The bound on one `stage-engine.sh` run.
+const STAGE_BOUND: Duration = Duration::from_secs(120);
+
+/// The bound on `npm pack --dry-run`.
+const PACK_BOUND: Duration = Duration::from_secs(120);
+
+/// One bounded child run: its exit status and its captured output.
+struct BoundedRun {
+    status: std::process::ExitStatus,
+    stdout: String,
+    stderr: String,
+}
+
+/// A unique, gitignored scratch root under `<repo>/.tmp/scratch/engine-stage`
+/// (never `/tmp`). Unique by pid + nanos + atomic counter so two concurrent
+/// copies of this test binary cannot stage into the same tree — a second stage
+/// into one tree is exit 7 by contract, and this file has already been polluted
+/// once by concurrent copies of the binary.
+fn stage_scratch_root(prefix: &str) -> PathBuf {
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let serial = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(".tmp")
+        .join("scratch")
+        .join("engine-stage")
+        .join(format!("{prefix}-{}-{nanos}-{serial}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create the engine-stage scratch root");
+    dir
+}
+
+/// The repository root, so no fixture source path depends on the runner's cwd.
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+/// Writes an executable file (parents created, mode 0o755).
+fn write_exec(path: &Path, body: &str) {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("create the executable's parent dir");
+    }
+    std::fs::write(path, body).unwrap_or_else(|error| panic!("write {}: {error}", path.display()));
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+        .unwrap_or_else(|error| panic!("chmod {}: {error}", path.display()));
+}
+
+/// `<platform>-<arch>`, mirroring the script's `uname` arms exactly
+/// (`plugin/scripts/stage-engine.sh:57-66`). Anything else makes the script
+/// exit 4, which the staging assertion reports with that code — it never
+/// silently passes.
+fn platform_dir_name() -> String {
+    let platform = match std::env::consts::OS {
+        "macos" => "darwin",
+        _ => "linux",
+    };
+    let arch = match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        _ => "x64",
+    };
+    format!("{platform}-{arch}")
+}
+
+/// Runs `command` with its stdout/stderr redirected to files under `log_dir`
+/// (never pipes: a chatty child must not deadlock the parent) and waits at most
+/// `bound`, polling every 20 ms.
+///
+/// Residual, documented rather than hidden: `kill()` + `wait()` reaps the
+/// `bash` child only and does **not** reap grandchildren. Today the `cargo`
+/// stub exits instantly and `npm pack` finishes on its own, but a future real
+/// `npm` would spawn `node` that could outlive the bound; a process-group kill
+/// needs a `libc`/`unsafe` edge this wave forbids.
+fn run_bounded(command: &mut Command, bound: Duration, label: &str, log_dir: &Path) -> BoundedRun {
+    std::fs::create_dir_all(log_dir).expect("create the stage log dir");
+    let stdout_path = log_dir.join(format!("{label}.stdout"));
+    let stderr_path = log_dir.join(format!("{label}.stderr"));
+    let stdout_file = std::fs::File::create(&stdout_path)
+        .unwrap_or_else(|error| panic!("{label}: create {}: {error}", stdout_path.display()));
+    let stderr_file = std::fs::File::create(&stderr_path)
+        .unwrap_or_else(|error| panic!("{label}: create {}: {error}", stderr_path.display()));
+    let mut child = command
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file))
+        .spawn()
+        .unwrap_or_else(|error| panic!("{label}: cannot spawn — environment fault: {error}"));
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("try_wait") {
+            break status;
+        }
+        if started.elapsed() >= bound {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "{label} did not finish within {bound:?} — killed; this is an environment fault, not a pass"
+            );
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let stdout = String::from_utf8_lossy(
+        &std::fs::read(&stdout_path)
+            .unwrap_or_else(|error| panic!("{label}: read {}: {error}", stdout_path.display())),
+    )
+    .into_owned();
+    let stderr = String::from_utf8_lossy(
+        &std::fs::read(&stderr_path)
+            .unwrap_or_else(|error| panic!("{label}: read {}: {error}", stderr_path.display())),
+    )
+    .into_owned();
+    BoundedRun {
+        status,
+        stdout,
+        stderr,
+    }
+}
+
+/// The packaged tarball carries the real engine binary and the bundle staged
+/// beside it.
+///
+/// # Why the scratch package tree
+///
+/// The old body ran `plugin/scripts/stage-engine.sh` in the ambient tree, whose
+/// verdict therefore depended on ambient state: with a bundle already staged it
+/// exits 7 (`already holds a staged bundle`), and on a clean checkout it exits 5
+/// (no `../web-ui/dist/index.html`, since `web-ui/dist` is gitignored). Neither
+/// says anything about the engine. This body builds a hermetic package tree
+/// under `<repo>/.tmp/scratch/engine-stage/…`, stages into it, and packs it, so
+/// both ambient states are irrelevant to the verdict.
+///
+/// The scratch root is under `<repo>/.tmp/scratch` because this wave forbids
+/// writes under `/tmp` — a deliberate, documented deviation from
+/// `docs/agents/testing.md`'s `temp_dir()` rule, matching
+/// `tests/web_dist_packaging.rs:31-43`. The root is gitignored (`.gitignore:6`)
+/// and left in place: this wave deletes nothing.
+///
+/// # What is real, and what is stubbed
+///
+/// Only `cargo` is stubbed, and only for that child (via `Command::env`, never
+/// `std::env::set_var`, which would race other tests). The real script, its
+/// bundle guards, the `cp`, the post-copy integrity check and the `--version`
+/// smoke all run. A mis-shadowed `cargo` fails loudly: the real build would then
+/// run under `set -e` in a directory with no `Cargo.toml`.
+///
+/// `hard_link(env!("CARGO_BIN_EXE_opencode-agents-memory"))` is correct here
+/// because this oracle lives in the integration test of the package that
+/// declares the binary — the same variable the file header (`:3-5`) and the
+/// spawn oracles (lines 87/322/403) already use. The artifact under test is the
+/// real engine; only the release build is elided, the hermeticity choice already
+/// recorded at `plugin/tests/stage-engine.test.mjs:9-11`.
+///
+/// What the harness stopped proving, in these words: **no release build is
+/// performed; the staged binary is the debug build of the same bin target,
+/// planted at the release path; exit 3 is not exercised**.
 #[test]
 fn test_package_tarball_contains_engine() {
     let _lock = serial();
-    // Stage the REAL engine (the script cd's to plugin/ itself).
-    let staged = Command::new("bash")
-        .arg("plugin/scripts/stage-engine.sh")
-        .output()
-        .expect("stage-engine runs");
-    assert!(
-        staged.status.success(),
-        "stage-engine must succeed: {}",
-        String::from_utf8_lossy(&staged.stderr)
-    );
-    let platform_dir = std::fs::read_dir("plugin/engine")
-        .expect("staged engine dir")
-        .flatten()
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .find(|name| {
-            name.contains('-')
-                && Path::new("plugin/engine")
-                    .join(name)
-                    .join("opencode-agents-memory")
-                    .exists()
-        })
-        .expect("a staged <platform>-<arch> dir with the binary");
+    let repo = repo_root();
+    let scratch = stage_scratch_root("tarball");
+    let logs = scratch.join("logs");
+    std::fs::create_dir_all(&logs).expect("create the stage log dir");
 
-    // TEMP copy of the package (green on a clean checkout; engine is
-    // gitignored, M29) — copy the just-staged engine in.
-    let pack_dir = temp_dir("pack");
-    std::fs::create_dir_all(pack_dir.join("src")).expect("src dir");
-    std::fs::create_dir_all(pack_dir.join("dist")).expect("dist dir");
+    // The synthetic built bundle the script stages (`../web-ui/dist` from the
+    // scratch package), so no ambient `web-ui/dist` is read.
+    let bundle = scratch.join("web-ui/dist");
+    std::fs::create_dir_all(&bundle).expect("create the synthetic bundle dir");
+    std::fs::write(bundle.join("index.html"), STAGE_FIXTURE_INDEX)
+        .expect("write the synthetic bundle index.html");
+    std::fs::write(bundle.join("web-ui-fixture.js"), STAGE_FIXTURE_ASSET)
+        .expect("write the synthetic bundle asset");
+
+    // The scratch package: the package's non-engine surface plus the REAL
+    // script, copied in. The copy is what is invoked — never the repo copy,
+    // which `cd`s to its own `..` and would mutate `plugin/engine/`.
+    let pkg = scratch.join("plugin");
+    std::fs::create_dir_all(pkg.join("src")).expect("create the scratch src dir");
+    std::fs::create_dir_all(pkg.join("dist")).expect("create the scratch dist dir");
+    std::fs::create_dir_all(pkg.join("scripts")).expect("create the scratch scripts dir");
     for entry in ["package.json", "index.js", ".gitignore"] {
-        std::fs::copy(format!("plugin/{entry}"), pack_dir.join(entry))
-            .unwrap_or_else(|error| panic!("{entry} unreadable: {error}"));
+        std::fs::copy(repo.join("plugin").join(entry), pkg.join(entry))
+            .unwrap_or_else(|error| panic!("plugin/{entry} unreadable: {error}"));
     }
-    std::fs::copy("plugin/src/plugin.js", pack_dir.join("src/plugin.js")).expect("src copy");
-    std::fs::copy("plugin/dist/plugin.js", pack_dir.join("dist/plugin.js")).expect("dist copy");
-    copy_dir(Path::new("plugin/engine"), &pack_dir.join("engine"));
+    std::fs::copy(repo.join("plugin/src/plugin.js"), pkg.join("src/plugin.js")).expect("src copy");
+    std::fs::copy(
+        repo.join("plugin/dist/plugin.js"),
+        pkg.join("dist/plugin.js"),
+    )
+    .expect("dist copy");
+    let script = pkg.join("scripts/stage-engine.sh");
+    std::fs::copy(repo.join("plugin/scripts/stage-engine.sh"), &script).expect("script copy");
 
-    let pack = Command::new("npm")
-        .current_dir(&pack_dir)
-        .args(["pack", "--dry-run", "--json"])
-        .output()
-        .expect("npm pack runs");
-    assert!(
-        pack.status.success(),
-        "npm pack --dry-run must succeed: {} {}",
-        String::from_utf8_lossy(&pack.stderr),
-        String::from_utf8_lossy(&pack.stdout)
+    // Toolchain: only `cargo` is stubbed; the real engine binary is planted at
+    // the release path the script looks for (hard link first — the debug engine
+    // is ~484 MB — with a copy + chmod fallback across filesystems).
+    let bin_dir = scratch.join("bin");
+    write_exec(&bin_dir.join("cargo"), "#!/usr/bin/env bash\nexit 0\n");
+    let engine_bin = PathBuf::from(env!("CARGO_BIN_EXE_opencode-agents-memory"));
+    let engine_len = std::fs::metadata(&engine_bin)
+        .unwrap_or_else(|error| panic!("engine binary metadata: {error}"))
+        .len();
+    let planted_dir = scratch.join("cargo-target/release");
+    // `logs` was the only directory created so far; `hard_link`/`copy` do not
+    // create parents, so the literal implementation would panic with ENOENT.
+    std::fs::create_dir_all(&planted_dir).expect("create the planted release dir");
+    let planted = planted_dir.join("opencode-agents-memory");
+    if std::fs::hard_link(&engine_bin, &planted).is_err() {
+        std::fs::copy(&engine_bin, &planted).expect("copy the engine binary to the release path");
+        std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod the planted engine binary");
+    }
+    // A failed or truncated plant would otherwise surface as the script's exit
+    // 3 ("built binary is missing/not executable") and be misread as a
+    // mis-built tree; diagnose it here as a harness fault instead.
+    assert_eq!(
+        std::fs::metadata(&planted)
+            .expect("planted binary metadata")
+            .len(),
+        engine_len,
+        "the planted engine binary must be the whole debug engine, not a truncated plant"
     );
-    let json: serde_json::Value = serde_json::from_slice(&pack.stdout).expect("pack json");
+
+    let path_env = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    // First stage: the real script, into the hermetic tree.
+    let mut stage = Command::new("bash");
+    stage
+        .arg(&script)
+        .current_dir(&scratch)
+        .env("PATH", &path_env)
+        .env("CARGO_TARGET_DIR", scratch.join("cargo-target"));
+    let first = run_bounded(&mut stage, STAGE_BOUND, "stage-1", &logs);
+    assert!(
+        first.status.success(),
+        "stage-engine must succeed in the scratch tree (exit {:?}); exits 5/6/7 here mean the harness built the wrong tree — an environment fault, not a broken engine; stderr: {}",
+        first.status.code(),
+        first.stderr
+    );
+
+    // The staged artifact IS the engine binary, executable, with the real len.
+    let platform = platform_dir_name();
+    let staged_dir = pkg.join("engine").join(&platform);
+    let staged_bin = staged_dir.join("opencode-agents-memory");
+    assert!(
+        staged_bin.is_file(),
+        "the script must stage the engine binary at {} (exit was {:?}); stderr: {}",
+        staged_bin.display(),
+        first.status.code(),
+        first.stderr
+    );
+    let staged_meta = std::fs::metadata(&staged_bin).expect("staged binary metadata");
+    assert_ne!(
+        staged_meta.permissions().mode() & 0o111,
+        0,
+        "the staged engine must be executable"
+    );
+    assert_eq!(
+        staged_meta.len(),
+        engine_len,
+        "the staged binary must be the engine binary (same length as CARGO_BIN_EXE_opencode-agents-memory)"
+    );
+
+    // The script discards the test binary's stdout, so run it here: "ran and
+    // printed the version line" must be distinguishable from "ran and printed
+    // garbage".
+    let mut version = Command::new(&staged_bin);
+    version.arg("--version");
+    let run = run_bounded(
+        &mut version,
+        Duration::from_secs(20),
+        "staged-version",
+        &logs,
+    );
+    assert!(
+        run.status.success(),
+        "the staged engine's --version must succeed (exit {:?}); stderr: {}",
+        run.status.code(),
+        run.stderr
+    );
+    assert_eq!(
+        run.stdout.trim(),
+        VERSION_LINE,
+        "the staged engine must print the version line, not arbitrary output"
+    );
+
+    let staged_index = staged_dir.join("web-ui/dist/index.html");
+    assert_eq!(
+        std::fs::read_to_string(&staged_index).expect("read the staged bundle index.html"),
+        STAGE_FIXTURE_INDEX,
+        "the staged bundle must be the synthetic fixture, byte for byte"
+    );
+
+    // The wave's exit-7 contract, exercised in the same hermetic tree: a second
+    // stage refuses (replace-never-merge) and rewrites nothing.
+    let mut stage_again = Command::new("bash");
+    stage_again
+        .arg(&script)
+        .current_dir(&scratch)
+        .env("PATH", &path_env)
+        .env("CARGO_TARGET_DIR", scratch.join("cargo-target"));
+    let second = run_bounded(&mut stage_again, STAGE_BOUND, "stage-2", &logs);
+    assert_eq!(
+        second.status.code(),
+        Some(7),
+        "a second stage into the same tree must refuse as already-staged (exit Some(7)); stderr: {}",
+        second.stderr
+    );
+    let staged_bundle_rel = format!("engine/{platform}/web-ui/dist");
+    assert!(
+        second.stderr.contains(&staged_bundle_rel),
+        "the exit-7 message must name the already-staged bundle `{staged_bundle_rel}`; stderr: {}",
+        second.stderr
+    );
+    assert_eq!(
+        std::fs::read_to_string(&staged_index).expect("re-read the staged bundle index.html"),
+        STAGE_FIXTURE_INDEX,
+        "replace-never-merge: the refused second stage must leave the staged bundle untouched"
+    );
+
+    // Pack the hermetic package. `--ignore-scripts` keeps a future `prepare`
+    // script out of the test; the cache stays inside the scratch tree.
+    let npm_cache = scratch.join("npm-cache");
+    let mut pack = Command::new("npm");
+    pack.current_dir(&pkg)
+        .args([
+            "pack",
+            "--dry-run",
+            "--json",
+            "--ignore-scripts",
+            "--no-audit",
+            "--no-fund",
+            "--no-update-notifier",
+            "--cache",
+        ])
+        .arg(&npm_cache);
+    let packed = run_bounded(&mut pack, PACK_BOUND, "npm-pack", &logs);
+    assert!(
+        packed.status.success(),
+        "npm pack --dry-run must succeed (exit {:?}); stderr: {}",
+        packed.status.code(),
+        packed.stderr
+    );
+    let json: serde_json::Value = serde_json::from_str(&packed.stdout).expect("pack json");
     // `npm pack --json` emits a top-level ARRAY of package objects.
     let package = if json.is_array() {
         json.as_array()
-            .and_then(|v| v.first())
+            .and_then(|value| value.first())
             .expect("npm pack emits one package")
     } else {
         &json
@@ -619,10 +924,15 @@ fn test_package_tarball_contains_engine() {
         .iter()
         .filter_map(|entry| entry["path"].as_str().map(str::to_owned))
         .collect();
-    let staged_rel = format!("engine/{platform_dir}/opencode-agents-memory");
+    let staged_rel = format!("engine/{platform}/opencode-agents-memory");
     assert!(
         files.iter().any(|path| path.ends_with(&staged_rel)),
         "the tarball's file list must contain the staged engine: {files:?}"
+    );
+    let index_rel = format!("engine/{platform}/web-ui/dist/index.html");
+    assert!(
+        files.iter().any(|path| path.ends_with(&index_rel)),
+        "the tarball must carry the staged bundle beside the engine: {files:?}"
     );
     assert_eq!(
         package["name"].as_str(),
@@ -634,18 +944,4 @@ fn test_package_tarball_contains_engine() {
         Some("0.1.0"),
         "the version mirrors [workspace.package] (N7)"
     );
-}
-
-fn copy_dir(from: &Path, to: &Path) {
-    std::fs::create_dir_all(to).expect("target dir");
-    let entries = std::fs::read_dir(from).expect("source dir");
-    for entry in entries.flatten() {
-        let source = entry.path();
-        let dest = to.join(entry.file_name());
-        if source.is_dir() {
-            copy_dir(&source, &dest);
-        } else {
-            std::fs::copy(&source, &dest).expect("copy file");
-        }
-    }
 }

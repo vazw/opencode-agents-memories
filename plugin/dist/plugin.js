@@ -114,8 +114,9 @@ function storageRoot() {
 }
 
 // The wrapper always knows the storage root (it must write the status file
-// there before any engine exists); --mode/--web-host/--web-port are forwarded
-// only when explicitly configured, the engine carries the same defaults.
+// there before any engine exists); --mode/--web-host/--web-port/--web-dist are
+// forwarded only when explicitly configured. The wrapper adds no default of its
+// own: the engine resolves the web bundle staged beside its executable.
 function engineArguments() {
   const args = ["--storage-root", storageRoot()];
   const mode = rawEnv("OPENCODE_MEM_MODE");
@@ -124,6 +125,8 @@ function engineArguments() {
   if (host !== null) args.push("--web-host", host);
   const port = rawEnv("OPENCODE_MEM_WEB_PORT");
   if (port !== null) args.push("--web-port", port);
+  const dist = rawEnv("OPENCODE_MEM_WEB_DIST");
+  if (dist !== null) args.push("--web-dist", dist);
   return args;
 }
 
@@ -137,13 +140,16 @@ function engineExecutablePath() {
 }
 
 // ── secrets (§10) ───────────────────────────────────────────────────────
-// The child's environment is a fixed minimal whitelist. Host credentials (an
-// Basic password header, tokens, passwords, secret-bearing env vars) never
-// reach the child: not in argv, not in this environment, not on stderr.
+// The child's environment is a fixed minimal whitelist, which also carries the
+// wrapper's forwarded --web-dist setting (OPENCODE_MEM_WEB_DIST). The wrapper
+// adds no default of its own: the engine resolves the web bundle staged beside
+// its executable. Host credentials (an Basic password header, tokens,
+// passwords, secret-bearing env vars) never reach the child: not in argv, not
+// in this environment, not on stderr.
 
 function childEnvironment() {
   const env = {};
-  for (const name of ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL"]) {
+  for (const name of ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "OPENCODE_MEM_WEB_DIST"]) {
     const value = process.env[name];
     if (typeof value === "string" && value.length > 0) env[name] = value;
   }

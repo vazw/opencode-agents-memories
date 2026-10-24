@@ -25,8 +25,8 @@ use std::path::{Path, PathBuf};
 
 use mem_store::serde_json::{Value, json};
 
-/// The env var naming an explicit dist directory (engine-direct surface only;
-/// forwarding it from the plugin wrapper is issue 36).
+/// The env var naming an explicit dist directory; the plugin wrapper forwards it
+/// (issue 36) in the child environment and as `--web-dist`.
 pub const ENV_VAR: &str = "OPENCODE_MEM_WEB_DIST";
 
 /// The CLI flag naming an explicit dist directory (`--web-dist <path>` or

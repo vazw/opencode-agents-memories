@@ -133,6 +133,7 @@ const pkgDir = process.argv[2];
 process.env.OPENCODE_MEM_STORAGE_ROOT = process.env.DRIVER_STORAGE_ROOT;
 if (process.env.DRIVER_WEB_HOST !== undefined) process.env.OPENCODE_MEM_WEB_HOST = process.env.DRIVER_WEB_HOST;
 if (process.env.DRIVER_WEB_PORT !== undefined) process.env.OPENCODE_MEM_WEB_PORT = process.env.DRIVER_WEB_PORT;
+if (process.env.DRIVER_WEB_DIST !== undefined) process.env.OPENCODE_MEM_WEB_DIST = process.env.DRIVER_WEB_DIST;
 if (process.env.DRIVER_MODE_OVERRIDE !== undefined) process.env.OPENCODE_MEM_MODE = process.env.DRIVER_MODE_OVERRIDE;
 
 const mod = await import(pathToFileURL(path.join(pkgDir, "dist", "plugin.js")));
@@ -275,6 +276,37 @@ function idleEvent(sessionID, properties) {
   };
 }
 
+// W6.9 / issue 36: stage the package + stub engine, run the driver with ONE
+// chat.message and DRIVER_WEB_DIST as the host's dist setting, then return the
+// stub's wire log plus the manifest the stub wrote for its own process
+// (pid, argv, env) — the only place the child's argv/env are observable.
+async function runWebDistCase(distEnvValue) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-glue-webdist-"));
+  const pkgDir = stagePackage(tmp);
+  const requestLogPath = path.join(tmp, "stub-requests.ndjson");
+  const manifestPath = path.join(tmp, "stub-manifest.json");
+  stageEngine(pkgDir, { linger: true, requestLogPath, manifestPath });
+  const driverPath = path.join(tmp, "driver.mjs");
+  fs.writeFileSync(driverPath, DRIVER_SOURCE);
+  const driverResult = await runDriver(driverPath, [pkgDir], {
+    STUB_LOG: requestLogPath,
+    DRIVER_CTX_PATH: writeCtxFile(tmp, { client: null, project: null }),
+    DRIVER_STORAGE_ROOT: path.join(tmp, "storage"),
+    DRIVER_DONE_PATH: path.join(tmp, "driver-done.txt"),
+    DRIVER_EVENTS_PATH: writeEventsFile(tmp, [chatMessage()]),
+    DRIVER_WAIT_METHOD: "inject",
+    DRIVER_WEB_DIST: distEnvValue,
+  });
+  assert.equal(driverResult.code, 0, `engine driver failed: stderr=${driverResult.stderr}`);
+  const wire = fs
+    .readFileSync(requestLogPath, "utf8")
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line).got);
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  return { wire, manifest };
+}
+
 test("test_wrapper_does_not_capture_on_every_chat_message", { timeout: 60000 }, async () => {
   const wire = await runGlueTest("om-glue-dc-", {
     events: [chatMessage(), chatMessage(), chatMessage()],
@@ -399,6 +431,54 @@ test("test_wrapper_injects_on_chat_message_not_session_start", { timeout: 60000 
   const captures = wire.filter((message) => message.method === "capture");
   assert.equal(captures.length, 1, "the idle event captured once");
   assert.ok(wire[0]?.method === "hello", "hello precedes everything");
+});
+
+// W6.9 / issue 36 — the wrapper forwards the dist setting two ways: the env
+// name (whitelisted, verbatim) and the two-token `--web-dist <dir>` argv pair.
+test("test_wrapper_forwards_web_dist_env_and_flag_to_child_engine", { timeout: 60000 }, async () => {
+  // A space-bearing path pins argv safety: it must survive as ONE argv element
+  // (never `=`-joined, never a shell fragment). It need not exist.
+  const dist = "/opt/opencode mem/web ui/dist";
+  const { manifest } = await runWebDistCase(dist);
+  assert.equal(
+    manifest.env.OPENCODE_MEM_WEB_DIST,
+    dist,
+    "the env whitelist forwards OPENCODE_MEM_WEB_DIST byte-for-byte"
+  );
+  const index = manifest.argv.indexOf("--web-dist");
+  assert.ok(index >= 0, "--web-dist is present in the child argv");
+  assert.equal(
+    manifest.argv[index + 1],
+    dist,
+    "--web-dist and its value are two ADJACENT argv elements, unmodified"
+  );
+  assert.equal(
+    manifest.argv.filter((argument) => argument === "--web-dist").length,
+    1,
+    "exactly one --web-dist occurrence"
+  );
+  const rootIndex = manifest.argv.indexOf("--storage-root");
+  assert.ok(
+    rootIndex >= 0 && typeof manifest.argv[rootIndex + 1] === "string" && manifest.argv[rootIndex + 1].length > 0,
+    "the frozen --storage-root pair is still present"
+  );
+});
+
+// Paired guard (passes before and after by design): the wrapper invents no
+// default of its own — an empty host setting forwards nothing, so the engine's
+// exe-relative default stays the single source of truth.
+test("test_wrapper_omits_web_dist_when_host_sets_nothing", { timeout: 60000 }, async () => {
+  const { manifest } = await runWebDistCase("");
+  assert.equal(
+    manifest.env.OPENCODE_MEM_WEB_DIST,
+    undefined,
+    "an empty host setting is not forwarded into the child environment"
+  );
+  assert.equal(
+    manifest.argv.indexOf("--web-dist"),
+    -1,
+    "no --web-dist is appended when the host sets nothing"
+  );
 });
 
 test("test_capture_id_is_uuidv7_shaped_and_bounded", { timeout: 10000 }, async () => {
