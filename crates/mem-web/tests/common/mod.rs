@@ -122,6 +122,7 @@ pub fn app_state(
         api_token,
         local_token,
         dist_dir,
+        throwaway_log_dir(),
         mem_web::api::ports::ApiServices::unavailable(),
         "unknown",
         "127.0.0.1",
@@ -130,11 +131,16 @@ pub fn app_state(
 
 /// Builds an [`AppState`] with an explicit port bundle, user identity and
 /// bind host (the W6.2 tests need all three).
+///
+/// `log_dir` is the directory the stats handler scans for the daily series;
+/// tests that never exercise the scan pass [`throwaway_log_dir`].
+#[allow(clippy::too_many_arguments)]
 pub fn app_state_with_api(
     basic_auth: WebAuth,
     api_token: Option<&str>,
     local_token: Option<&str>,
     dist_dir: PathBuf,
+    log_dir: PathBuf,
     api: mem_web::api::ports::ApiServices,
     user_id: &str,
     bind_host: &str,
@@ -144,11 +150,19 @@ pub fn app_state_with_api(
         api_token: api_token.map(str::to_owned),
         local_token: Arc::new(FixedLocalToken(local_token.map(str::to_owned))),
         dist_dir,
+        log_dir,
         host_allowlist: HostAllowlist::for_bind_host(bind_host),
         api: Arc::new(api),
         user_id: user_id.to_owned(),
         bind_host: bind_host.to_owned(),
     }
+}
+
+/// A unique log directory for [`AppState`] ctors that never exercise the
+/// daily-stats scan (created empty under `std::env::temp_dir()`, never
+/// written).
+pub fn throwaway_log_dir() -> PathBuf {
+    temp_dir_unique("stats-logs")
 }
 
 /// The router seam for the REST surface: a request carrying the default

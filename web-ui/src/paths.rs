@@ -281,6 +281,8 @@ const SESSION_PATHS: &[&str] = &[
     "/api/projects/{project_id}/sessions/{session_id}",
 ];
 
+const STATS_PATHS: &[&str] = &["/api/stats"];
+
 /// The path templates a planned screen will consume, in a stable order.
 pub fn endpoints_for(route: RouteId) -> &'static [&'static str] {
     match route {
@@ -292,6 +294,7 @@ pub fn endpoints_for(route: RouteId) -> &'static [&'static str] {
         RouteId::ExportImport => EXPORT_IMPORT_PATHS,
         RouteId::SkillLibrary => SKILL_PATHS,
         RouteId::SessionHistory => SESSION_PATHS,
+        RouteId::Stats => STATS_PATHS,
     }
 }
 

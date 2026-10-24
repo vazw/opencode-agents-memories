@@ -28,6 +28,14 @@ pub fn now_iso_string() -> String {
         .to_string()
 }
 
+/// Upstream `toISOStringOrNull(value)`: unlike [`safe_to_iso_string`] there is
+/// no "now" fallback — a finite (including negative) timestamp formats, an
+/// out-of-range one maps to `null`.
+pub fn iso_string_or_null(timestamp: i64) -> Option<String> {
+    chrono::DateTime::from_timestamp_millis(timestamp)
+        .map(|instant| instant.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
+}
+
 /// Upstream `r.tags ? r.tags.split(",").map(trim) : []`.
 pub fn split_tags(tags: Option<&str>) -> Vec<String> {
     tags.map(|raw| raw.split(',').map(|tag| tag.trim().to_string()).collect())
@@ -176,13 +184,95 @@ pub struct PaginatedDto<T> {
     pub total_pages: usize,
 }
 
-/// `GET /api/stats` data.
+/// `GET /api/stats` data — the upstream v2.33 shape, field order pinned to
+/// `api-handlers.ts` `handleStats` (`total, byScope, byType, generatedAt,
+/// shards, profile, daily, dailyError?`).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StatsDto {
     pub total: u64,
     pub by_scope: ByScopeDto,
     pub by_type: std::collections::BTreeMap<String, u64>,
+    pub generated_at: String,
+    pub shards: Vec<ShardStatsDto>,
+    pub profile: ProfileStatsDto,
+    pub daily: Vec<DailyStatsDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub daily_error: Option<String>,
+}
+
+/// One shard's health row (upstream `ShardStats`, field order pinned).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShardStatsDto {
+    pub shard_id: Option<i64>,
+    pub scope: String,
+    pub scope_hash: String,
+    pub shard_index: u32,
+    pub file_name: String,
+    pub file_exists: bool,
+    pub is_active: bool,
+    pub registered_vector_count: u64,
+    pub memory_count: u64,
+    pub oldest_created_at: Option<String>,
+    pub newest_created_at: Option<String>,
+    pub duplicate_tag_count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// The profile summary of `GET /api/stats` (upstream `ProfileStats`) — counts
+/// only, never the profile contents.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileStatsDto {
+    pub exists: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counts: Option<ProfileCountsDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_analyzed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_prompts_analyzed: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl ProfileStatsDto {
+    /// The `{exists:false}` answer (missing profile or a store fault).
+    pub fn missing() -> Self {
+        Self {
+            exists: false,
+            version: None,
+            counts: None,
+            last_analyzed_at: None,
+            total_prompts_analyzed: None,
+            error: None,
+        }
+    }
+}
+
+/// The profile array counts (upstream `ProfileStats.counts`).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ProfileCountsDto {
+    pub preferences: u64,
+    pub patterns: u64,
+    pub workflows: u64,
+}
+
+/// One day of `GET /api/stats`'s 14-day series (upstream `DailyStats`).
+///
+/// `errors` is a `BTreeMap`, so the JSON key order is stable (determinism).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DailyStatsDto {
+    pub date: String,
+    pub captures: u64,
+    pub capture_skipped: u64,
+    pub profile_injections: u64,
+    pub compaction_injections: u64,
+    pub errors: std::collections::BTreeMap<String, u64>,
 }
 
 /// The `byScope` object.

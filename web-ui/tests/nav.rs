@@ -89,6 +89,24 @@ fn test_nav_marks_session_history_live() {
 }
 
 #[wasm_bindgen_test]
+fn test_nav_stats_entry_is_live_with_stats_endpoint() {
+    // The stats screen lands with this wave: Live, consuming only /api/stats.
+    assert_eq!(
+        entry_for(RouteId::Stats).state,
+        ScreenState::Live {
+            owner: Owner::ThisWave,
+            endpoints: &["/api/stats"],
+        }
+    );
+    assert_eq!(entry_for(RouteId::Stats).owner, Owner::ThisWave);
+    assert_eq!(entry_for(RouteId::Stats).label, "Stats");
+    assert!(!matches!(
+        entry_for(RouteId::Stats).state,
+        ScreenState::Planned { .. }
+    ));
+}
+
+#[wasm_bindgen_test]
 fn test_nav_only_marks_the_landed_routes_ready_or_live() {
     let landed: Vec<RouteId> = nav_entries()
         .into_iter()
@@ -109,6 +127,8 @@ fn test_nav_only_marks_the_landed_routes_ready_or_live() {
             RouteId::SkillLibrary,
             // W6.3: the session timeline.
             RouteId::SessionHistory,
+            // This wave: the stats screen.
+            RouteId::Stats,
         ]
     );
 }

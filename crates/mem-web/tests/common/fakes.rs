@@ -114,12 +114,18 @@ impl FakeBackend {
             scope_hash: PROJECT_HASH.to_string(),
             shard_index: 0,
             db_path: std::path::PathBuf::from("/tmp/fake-project.db"),
+            shard_id: Some(1),
+            vector_count: 1,
+            is_active: true,
         };
         let user = ShardRef {
             scope: Scope::User,
             scope_hash: USER_HASH.to_string(),
             shard_index: 0,
             db_path: std::path::PathBuf::from("/tmp/fake-user.db"),
+            shard_id: Some(2),
+            vector_count: 1,
+            is_active: true,
         };
 
         let project_memory = MemoryRow {
@@ -284,6 +290,9 @@ impl FakeBackend {
                 scope_hash: hash.to_string(),
                 shard_index: 0,
                 db_path: std::path::PathBuf::from(format!("/tmp/fake-{hash}.db")),
+                shard_id: None,
+                vector_count: 0,
+                is_active: true,
             })
     }
 
@@ -315,6 +324,50 @@ impl FakeBackend {
         let mut state = self.state.lock().expect("fake state lock");
         if let Some(profile) = state.profile.as_mut() {
             profile.profile_data = data.to_string();
+        }
+    }
+
+    /// Replaces the seeded profile's raw `profile_data` text (a test-only
+    /// seed, never recorded). Unlike [`Self::set_profile_data`] this accepts
+    /// any string, so a test can seed broken JSON.
+    pub fn set_profile_raw(&self, raw: String) {
+        let mut state = self.state.lock().expect("fake state lock");
+        if let Some(profile) = state.profile.as_mut() {
+            profile.profile_data = raw;
+        }
+    }
+
+    /// Removes the seeded profile so `active_profile` answers `Ok(None)`
+    /// (a test-only seed, never recorded).
+    pub fn clear_profile(&self) {
+        self.state.lock().expect("fake state lock").profile = None;
+    }
+
+    /// Points one seeded shard's `db_path` at `path` (a test-only seed, never
+    /// recorded) so a stats test can back it with a real (possibly missing)
+    /// file under its own temp dir.
+    pub fn set_shard_db_path(&self, scope: Scope, hash: &str, path: std::path::PathBuf) {
+        let mut state = self.state.lock().expect("fake state lock");
+        if let Some(shard) = state
+            .shards
+            .iter_mut()
+            .find(|shard| shard.scope == scope && shard.scope_hash == hash)
+        {
+            shard.db_path = path;
+        }
+    }
+
+    /// Sets one seeded shard's registered vector count and active flag (a
+    /// test-only seed, never recorded).
+    pub fn set_shard_meta(&self, scope: Scope, hash: &str, vector_count: u64, is_active: bool) {
+        let mut state = self.state.lock().expect("fake state lock");
+        if let Some(shard) = state
+            .shards
+            .iter_mut()
+            .find(|shard| shard.scope == scope && shard.scope_hash == hash)
+        {
+            shard.vector_count = vector_count;
+            shard.is_active = is_active;
         }
     }
 

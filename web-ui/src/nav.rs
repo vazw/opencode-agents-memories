@@ -52,6 +52,10 @@ pub fn state_for(id: RouteId) -> ScreenState {
             owner: spec.owner,
             endpoints: endpoints_for(id),
         },
+        RouteId::Stats => ScreenState::Live {
+            owner: spec.owner,
+            endpoints: endpoints_for(id),
+        },
         RouteId::ExportImport => ScreenState::Live {
             owner: spec.owner,
             endpoints: endpoints_for(id),

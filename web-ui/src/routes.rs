@@ -44,11 +44,12 @@ pub enum RouteId {
     ExportImport,
     SkillLibrary,
     SessionHistory,
+    Stats,
 }
 
 impl RouteId {
     /// Every declared route, in route-table order.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Home,
         Self::ProjectMemories,
         Self::Tags,
@@ -57,6 +58,7 @@ impl RouteId {
         Self::ExportImport,
         Self::SkillLibrary,
         Self::SessionHistory,
+        Self::Stats,
     ];
 
     /// A stable, human-readable identifier (used by tests and labels only).
@@ -70,6 +72,7 @@ impl RouteId {
             Self::ExportImport => "export-import",
             Self::SkillLibrary => "skill-library",
             Self::SessionHistory => "session-history",
+            Self::Stats => "stats",
         }
     }
 }
@@ -132,6 +135,15 @@ pub const ROUTES: &[RouteSpec] = &[
         path: "/sessions",
         label: "Sessions",
         owner: Owner::W6_3,
+    },
+    // Upstream parity path (`web/src/lib/routes.ts`). `Owner::ThisWave` marks
+    // the provenance; the label renders only on `Planned` placeholders and the
+    // stats screen is `Live`, so the owner label never renders.
+    RouteSpec {
+        id: RouteId::Stats,
+        path: "/stats",
+        label: "Stats",
+        owner: Owner::ThisWave,
     },
 ];
 

@@ -18,12 +18,13 @@ fn test_route_table_declares_the_upstream_and_port_paths() {
         (RouteId::ExportImport, "/export-import"),
         (RouteId::SkillLibrary, "/skill-library"),
         (RouteId::SessionHistory, "/sessions"),
+        (RouteId::Stats, "/stats"),
     ];
 
     assert_eq!(
         ROUTES.len(),
         expected.len(),
-        "the route table has exactly eight entries"
+        "the route table has exactly nine entries"
     );
     assert_eq!(RouteId::ALL.len(), expected.len());
 
@@ -62,6 +63,21 @@ fn test_route_table_declares_no_api_path() {
 }
 
 #[wasm_bindgen_test]
+fn test_route_table_has_nine_entries_with_the_stats_route() {
+    // Baseline 8 + the stats route (upstream parity path `/stats`).
+    assert_eq!(RouteId::ALL.len(), 9, "baseline eight + stats");
+    assert_eq!(ROUTES.len(), 9);
+    let spec = route(RouteId::Stats);
+    assert_eq!(spec.path, "/stats");
+    assert_eq!(spec.label, "Stats");
+    assert_eq!(
+        spec.owner,
+        Owner::ThisWave,
+        "the stats route is this wave's"
+    );
+}
+
+#[wasm_bindgen_test]
 fn test_route_table_paths_are_spa_eligible() {
     for spec in ROUTES {
         let last_segment = spec.path.rsplit('/').next().unwrap_or_default();
@@ -77,6 +93,13 @@ fn test_route_table_paths_are_spa_eligible() {
 #[wasm_bindgen_test]
 fn test_resolve_returns_the_route_for_a_declared_path() {
     assert_eq!(resolve("/project-memories"), Some(RouteId::ProjectMemories));
+}
+
+#[wasm_bindgen_test]
+fn test_resolve_maps_stats_path_to_stats_route() {
+    assert_eq!(resolve("/stats"), Some(RouteId::Stats));
+    assert_eq!(resolve("/stats/"), Some(RouteId::Stats));
+    assert_eq!(resolve("/stats?refresh=1"), Some(RouteId::Stats));
 }
 
 #[wasm_bindgen_test]

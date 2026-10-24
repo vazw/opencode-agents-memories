@@ -174,6 +174,10 @@ impl WebLauncher for RootWebLauncher {
                     storage_root.join(".auth-token"),
                 )),
                 dist_dir,
+                // The daily-stats scan directory, resolved once at the
+                // composition root (upstream `defaultLogDir`; the handler
+                // itself only reads the state field).
+                log_dir: mem_web::api::stats::default_log_dir(),
                 host_allowlist: mem_web::host_allowlist::HostAllowlist::for_bind_host(&host),
                 api,
                 user_id: "unknown".to_owned(),

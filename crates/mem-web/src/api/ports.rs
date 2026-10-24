@@ -31,6 +31,15 @@ pub struct ShardRef {
     pub scope_hash: String,
     pub shard_index: u32,
     pub db_path: PathBuf,
+    /// The registry row id (upstream `ShardInfo.id`); `None` preserves
+    /// upstream's `shardId: number | null` wire shape for adapters without
+    /// registry ids.
+    pub shard_id: Option<i64>,
+    /// The registered vector count (upstream `ShardInfo.vectorCount`).
+    pub vector_count: u64,
+    /// Whether the shard is the scope's active write target (upstream
+    /// `ShardInfo.isActive`).
+    pub is_active: bool,
 }
 
 /// One `memories` row in the shape the handlers consume.

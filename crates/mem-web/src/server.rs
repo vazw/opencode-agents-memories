@@ -32,6 +32,9 @@ pub struct AppState {
     pub local_token: Arc<dyn LocalTokenSource>,
     /// The directory holding the built SPA bundle.
     pub dist_dir: PathBuf,
+    /// The directory scanned for the daily stats series (upstream
+    /// `defaultLogDir`, resolved at the composition root).
+    pub log_dir: PathBuf,
     /// The D-8 Host allowlist — derived from the bound host by `start`.
     pub host_allowlist: HostAllowlist,
     /// The seven port seams behind the REST surface (W6.2).

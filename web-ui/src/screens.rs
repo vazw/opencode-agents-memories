@@ -20,7 +20,7 @@ use serde::Deserialize;
 use crate::api::auth::{AuthContext, read_marker_token};
 use crate::api::envelope::{ApiEnvelope, ApiError};
 use crate::api_request::{self, RequestSpec};
-use crate::core_screens::{MemoriesPanel, ProfilePanel, SettingsPanel, TagsPanel};
+use crate::core_screens::{MemoriesPanel, ProfilePanel, SettingsPanel, StatsPanel, TagsPanel};
 use crate::export_import::ExportImportPanel;
 use crate::nav::ScreenState;
 use crate::paths::{ENDPOINTS, EndpointId, EndpointSpec, encode_component};
@@ -79,6 +79,7 @@ pub fn ScreenBody(route: RouteId, state: ScreenState) -> impl IntoView {
             RouteId::SessionHistory => view! { <SessionHistoryPanel/> }.into_any(),
             RouteId::SkillLibrary => view! { <SkillLibraryPanel/> }.into_any(),
             RouteId::ExportImport => view! { <ExportImportPanel/> }.into_any(),
+            RouteId::Stats => view! { <StatsPanel/> }.into_any(),
         },
     }
 }

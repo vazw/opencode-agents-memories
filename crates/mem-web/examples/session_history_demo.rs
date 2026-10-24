@@ -145,6 +145,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         api_token: None,
         local_token: Arc::new(DemoTokenSource),
         dist_dir: dist_dir.clone(),
+        // The demo never serves real stats data; a throwaway dir keeps the
+        // daily-stats scan hermetic.
+        log_dir: std::env::temp_dir().join("opencode-mem-demo-logs"),
         // `start` re-derives this from the bound host; set for direct readers.
         host_allowlist: HostAllowlist::for_bind_host("127.0.0.1"),
         api: Arc::new(

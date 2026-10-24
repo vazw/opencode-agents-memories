@@ -997,7 +997,94 @@ pub struct ByScopeView {
     pub project: u64,
 }
 
+/// One shard row of `GET /api/stats` (upstream `StatsShard`; camelCase, every
+/// field defaulted so older or partial payloads still decode).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShardStatsView {
+    #[serde(default)]
+    pub shard_id: Option<i64>,
+    #[serde(default)]
+    pub scope: String,
+    #[serde(default)]
+    pub scope_hash: String,
+    #[serde(default)]
+    pub shard_index: u32,
+    #[serde(default)]
+    pub file_name: String,
+    #[serde(default)]
+    pub file_exists: bool,
+    #[serde(default)]
+    pub is_active: bool,
+    #[serde(default)]
+    pub registered_vector_count: u64,
+    #[serde(default)]
+    pub memory_count: u64,
+    #[serde(default)]
+    pub oldest_created_at: Option<String>,
+    #[serde(default)]
+    pub newest_created_at: Option<String>,
+    #[serde(default)]
+    pub duplicate_tag_count: u64,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// One day of the 14-day daily series (upstream `StatsDaily`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DailyStatsView {
+    #[serde(default)]
+    pub date: String,
+    #[serde(default)]
+    pub captures: u64,
+    #[serde(default)]
+    pub capture_skipped: u64,
+    #[serde(default)]
+    pub profile_injections: u64,
+    #[serde(default)]
+    pub compaction_injections: u64,
+    #[serde(default)]
+    pub errors: BTreeMap<String, u64>,
+}
+
+/// The profile array counts (upstream `ProfileStats.counts`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileCountsView {
+    #[serde(default)]
+    pub preferences: u64,
+    #[serde(default)]
+    pub patterns: u64,
+    #[serde(default)]
+    pub workflows: u64,
+}
+
+/// The profile summary section (upstream `ProfileStats`) — counts only, never
+/// the profile contents.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileStatsView {
+    #[serde(default)]
+    pub exists: bool,
+    #[serde(default)]
+    pub version: Option<i64>,
+    #[serde(default)]
+    pub counts: Option<ProfileCountsView>,
+    #[serde(default)]
+    pub last_analyzed_at: Option<String>,
+    #[serde(default)]
+    pub total_prompts_analyzed: Option<i64>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
 /// The `GET /api/stats` data payload.
+///
+/// The diagnostic sections are `#[serde(default)]` (upstream marks them
+/// optional: "older or partially available responses can omit diagnostic
+/// sections"), so a legacy `{total, byScope, byType, generatedAt}` payload
+/// decodes with empty defaults.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatsView {
@@ -1007,6 +1094,64 @@ pub struct StatsView {
     pub by_scope: ByScopeView,
     #[serde(default)]
     pub by_type: BTreeMap<String, u64>,
+    #[serde(default)]
+    pub generated_at: String,
+    #[serde(default)]
+    pub shards: Vec<ShardStatsView>,
+    #[serde(default)]
+    pub profile: Option<ProfileStatsView>,
+    #[serde(default)]
+    pub daily: Vec<DailyStatsView>,
+    #[serde(default)]
+    pub daily_error: Option<String>,
+}
+
+/// Upstream `StatsView.svelte` L43–50: scope ascending, then memory count
+/// descending, then shard index ascending.
+pub fn sorted_shards(shards: &[ShardStatsView]) -> Vec<ShardStatsView> {
+    let mut sorted = shards.to_vec();
+    sorted.sort_by(|left, right| {
+        left.scope
+            .cmp(&right.scope)
+            .then(right.memory_count.cmp(&left.memory_count))
+            .then(left.shard_index.cmp(&right.shard_index))
+    });
+    sorted
+}
+
+/// Upstream L51–53: the tallest daily counter, at least 1 (the bar-width
+/// division base never zeroes).
+pub fn daily_peak(daily: &[DailyStatsView]) -> u64 {
+    daily
+        .iter()
+        .flat_map(|day| {
+            [
+                day.captures,
+                day.capture_skipped,
+                day.profile_injections,
+                day.compaction_injections,
+            ]
+        })
+        .max()
+        .unwrap_or(0)
+        .max(1)
+}
+
+/// Upstream L55–59: buckets with a positive count, sorted by bucket name.
+pub fn error_buckets(day: &DailyStatsView) -> Vec<(String, u64)> {
+    let mut buckets: Vec<(String, u64)> = day
+        .errors
+        .iter()
+        .filter(|(_, count)| **count > 0)
+        .map(|(bucket, count)| (bucket.clone(), *count))
+        .collect();
+    buckets.sort_by(|left, right| left.0.cmp(&right.0));
+    buckets
+}
+
+/// Upstream L105: the active-shards card counts `isActive` flags only.
+pub fn active_shard_count(shards: &[ShardStatsView]) -> usize {
+    shards.iter().filter(|shard| shard.is_active).count()
 }
 
 /// The Settings screen's render shape.
@@ -1080,6 +1225,359 @@ pub fn settings_view(health: &HealthStatus, stats: &StatsView) -> SettingsScreen
         by_user: stats.by_scope.user,
         by_project: stats.by_scope.project,
         by_type: stats.by_type.clone(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Stats (this wave)
+// ---------------------------------------------------------------------------
+
+/// The stats screen's render shape: the fetch state machine. Like upstream's
+/// `createStatsStore`, a failed refresh keeps the last snapshot visible.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StatsScreen {
+    Loading,
+    Loaded(StatsView),
+    Failed {
+        message: String,
+        last: Option<StatsView>,
+    },
+}
+
+/// Fetch `GET /api/stats` through the shared seam (the stats envelope carries
+/// `data`, so no bare-body decoder is needed).
+async fn stats_data(auth: &AuthContext) -> Result<StatsView, ApiError> {
+    api_request::request::<StatsView>(&stats_spec(), auth).await
+}
+
+/// The `—` cell for an absent timestamp (upstream `date(value)`).
+fn stats_date_or_dash(value: Option<&String>) -> String {
+    value.map_or_else(|| "—".to_string(), |stamp| stamp.clone())
+}
+
+/// The bar-width percentage of one counter against the peak (`max(1, …)`).
+fn stats_bar_width(count: u64, peak: u64) -> String {
+    let percent = (count as f64 / peak as f64) * 100.0;
+    format!("width: {percent:.1}%")
+}
+
+/// The overview cards, the daily table and the shards table (upstream
+/// `StatsView.svelte`'s render logic, English-only — D8: no i18n layer in
+/// this UI; upstream's ~240 keys are a named follow-up).
+fn stats_overview(stats: &StatsView, active_shards: usize) -> AnyView {
+    let profile_cell = match stats.profile.as_ref() {
+        Some(profile) if profile.error.is_some() => {
+            let error = profile.error.clone().unwrap_or_default();
+            view! {
+                <p class="stats-profile-warning">"Profile unavailable"</p>
+                <p class="stats-profile-error">{error}</p>
+            }
+            .into_any()
+        }
+        None => view! { <p class="stats-profile-warning">"Profile unavailable"</p> }.into_any(),
+        Some(profile) if !profile.exists => {
+            view! { <p class="stats-profile-empty">"No profile yet"</p> }.into_any()
+        }
+        Some(profile) => {
+            let counts = profile.counts.as_ref().map(|counts| {
+                view! {
+                    <dl class="stats-profile-counts">
+                        <dt>"Preferences"</dt>
+                        <dd>{counts.preferences}</dd>
+                        <dt>"Patterns"</dt>
+                        <dd>{counts.patterns}</dd>
+                        <dt>"Workflows"</dt>
+                        <dd>{counts.workflows}</dd>
+                    </dl>
+                }
+            });
+            let prompts = profile
+                .total_prompts_analyzed
+                .map(|total| view! { <p class="stats-profile-prompts">{format!("Prompts analyzed: {total}")}</p> });
+            view! {
+                <p class="stats-profile-version">
+                    {format!("Version {}", profile.version.map_or("—".to_string(), |v| v.to_string()))}
+                </p>
+                <p class="stats-profile-analyzed">
+                    {format!("Last analyzed: {}", stats_date_or_dash(profile.last_analyzed_at.as_ref()))}
+                </p>
+                {counts}
+                {prompts}
+            }
+                .into_any()
+        }
+    };
+
+    let generated = if stats.generated_at.is_empty() {
+        "—".to_string()
+    } else {
+        stats.generated_at.clone()
+    };
+
+    view! {
+        <section class="stats-overview" aria-label="Stats overview">
+            <div class="stats-card" data-testid="stats-card-total">
+                <h3>"Total memories"</h3>
+                <p class="stats-card-value">{stats.total}</p>
+                <p class="stats-card-meta">
+                    {format!("user {} · project {}", stats.by_scope.user, stats.by_scope.project)}
+                </p>
+            </div>
+            <div class="stats-card" data-testid="stats-card-shards">
+                <h3>"Active shards"</h3>
+                <p class="stats-card-value">{active_shards}</p>
+                <p class="stats-card-meta">{format!("{} shards total", stats.shards.len())}</p>
+            </div>
+            <div class="stats-card" data-testid="stats-card-profile">
+                <h3>"Profile"</h3>
+                {profile_cell}
+            </div>
+            <div class="stats-card" data-testid="stats-card-generated">
+                <h3>"Generated"</h3>
+                <p class="stats-card-value stats-generated">{generated}</p>
+                <p class="stats-card-meta">"Snapshot of this answer"</p>
+            </div>
+        </section>
+    }
+    .into_any()
+}
+
+/// The 14-day daily table: one row per day, counter bars scaled by
+/// [`daily_peak`], error buckets collapsible per row.
+fn stats_daily_table(daily: &[DailyStatsView]) -> AnyView {
+    if daily.is_empty() {
+        return view! { <p class="stats-empty">"No activity recorded"</p> }.into_any();
+    }
+    let peak = daily_peak(daily);
+    let rows: Vec<_> = daily
+        .iter()
+        .map(|day| {
+            let buckets = error_buckets(day);
+            let errors_cell = if buckets.is_empty() {
+                view! { <span class="stats-no-errors">"no errors"</span> }.into_any()
+            } else {
+                let total: u64 = buckets.iter().map(|(_, count)| count).sum();
+                let items: Vec<_> = buckets
+                    .into_iter()
+                    .map(|(bucket, count)| {
+                        view! { <li class="stats-bucket">{format!("{bucket} ×{count}")}</li> }
+                    })
+                    .collect();
+                view! {
+                    <details class="stats-buckets">
+                        <summary>{total}</summary>
+                        <ul>{items}</ul>
+                    </details>
+                }
+                .into_any()
+            };
+            let row_cells = [
+                ("Captures", day.captures),
+                ("Skipped", day.capture_skipped),
+                ("Profile", day.profile_injections),
+                ("Compaction", day.compaction_injections),
+            ];
+            let cells: Vec<_> = row_cells
+                .into_iter()
+                .map(|(label, count)| {
+                    view! {
+                        <td class="stats-counter">
+                            <span class="stats-count">{count}</span>
+                            <span class="stats-bar" style=stats_bar_width(count, peak)></span>
+                            <span class="visually-hidden">{label}</span>
+                        </td>
+                    }
+                })
+                .collect();
+            view! {
+                <tr class="stats-day">
+                    <th scope="row">{day.date.clone()}</th>
+                    {cells}
+                    <td class="stats-errors-cell">{errors_cell}</td>
+                </tr>
+            }
+        })
+        .collect();
+
+    view! {
+        <table class="stats-daily" data-testid="stats-daily-table">
+            <thead>
+                <tr>
+                    <th scope="col">"Date"</th>
+                    <th scope="col">"Captures"</th>
+                    <th scope="col">"Skipped"</th>
+                    <th scope="col">"Profile"</th>
+                    <th scope="col">"Compaction"</th>
+                    <th scope="col">"Errors"</th>
+                </tr>
+            </thead>
+            <tbody>{rows}</tbody>
+        </table>
+    }
+    .into_any()
+}
+
+/// The shards table, [`sorted_shards`] order: scope, file, vectors, dates,
+/// duplicates and the per-shard error.
+fn stats_shards_table(shards: &[ShardStatsView]) -> AnyView {
+    if shards.is_empty() {
+        return view! { <p class="stats-empty">"No shards registered"</p> }.into_any();
+    }
+    let rows: Vec<_> = sorted_shards(shards)
+        .into_iter()
+        .map(|shard| {
+            let hash = shard.scope_hash.chars().take(8).collect::<String>();
+            let hash = if hash.is_empty() { "—".to_string() } else { hash };
+            let file_state = if shard.file_exists { "present" } else { "missing" };
+            let active = if shard.is_active { "active" } else { "inactive" };
+            let mismatch = (shard.memory_count != shard.registered_vector_count).then(|| {
+                view! { <p class="stats-mismatch">"count mismatch"</p> }
+            });
+            let error = shard.error.clone().map(|error| {
+                view! { <p class="stats-shard-error">{error}</p> }
+            });
+            view! {
+                <tr class="stats-shard-row">
+                    <td>
+                        <p>{shard.scope.clone()}</p>
+                        <p class="stats-hash">{hash}</p>
+                    </td>
+                    <td>
+                        <p>{shard.file_name.clone()}</p>
+                        <p class={if shard.file_exists { "stats-file-ok" } else { "stats-file-missing" }}>
+                            {file_state}
+                        </p>
+                        {error}
+                    </td>
+                    <td>{shard.shard_index}</td>
+                    <td>{active}</td>
+                    <td>
+                        {format!("{} / {}", shard.memory_count, shard.registered_vector_count)}
+                        {mismatch}
+                    </td>
+                    <td>
+                        <p>{format!("oldest: {}", stats_date_or_dash(shard.oldest_created_at.as_ref()))}</p>
+                        <p>{format!("newest: {}", stats_date_or_dash(shard.newest_created_at.as_ref()))}</p>
+                    </td>
+                    <td>{shard.duplicate_tag_count}</td>
+                </tr>
+            }
+        })
+        .collect();
+
+    view! {
+        <table class="stats-shards" data-testid="stats-shards-table">
+            <thead>
+                <tr>
+                    <th scope="col">"Scope"</th>
+                    <th scope="col">"File"</th>
+                    <th scope="col">"Index"</th>
+                    <th scope="col">"Status"</th>
+                    <th scope="col">"Memories / vectors"</th>
+                    <th scope="col">"Dates"</th>
+                    <th scope="col">"Duplicate tags"</th>
+                </tr>
+            </thead>
+            <tbody>{rows}</tbody>
+        </table>
+    }
+    .into_any()
+}
+
+/// The loaded body: overview cards, the dailyError alert, the daily table and
+/// the shards table.
+fn stats_loaded_view(stats: &StatsView) -> AnyView {
+    let active_shards = active_shard_count(&stats.shards);
+    let daily_error = stats.daily_error.clone().map(|daily_error| {
+        view! { <p class="stats-daily-error">{format!("Daily series error: {daily_error}")}</p> }
+    });
+    view! {
+        {stats_overview(stats, active_shards)}
+        {daily_error}
+        <section class="stats-section" aria-label="Daily activity">
+            <h3>"Daily activity (14 days)"</h3>
+            {stats_daily_table(&stats.daily)}
+        </section>
+        <section class="stats-section" aria-label="Shards">
+            <h3>"Shards"</h3>
+            {stats_shards_table(&stats.shards)}
+        </section>
+    }
+    .into_any()
+}
+
+/// The stats screen: `GET /api/stats` decoded into [`StatsView`], with a
+/// manual reload and the last snapshot kept on error.
+#[component]
+pub fn StatsPanel() -> impl IntoView {
+    let auth = AuthContext {
+        local_token: read_marker_token(),
+        basic: None,
+    };
+    let state = RwSignal::new(StatsScreen::Loading);
+
+    let reload = Callback::new({
+        let auth = auth.clone();
+        move |_: ()| {
+            let auth = auth.clone();
+            let previous = state.get_untracked();
+            leptos::task::spawn_local(async move {
+                match stats_data(&auth).await {
+                    Ok(stats) => state.set(StatsScreen::Loaded(stats)),
+                    Err(failure) => {
+                        let last = match previous {
+                            StatsScreen::Loaded(stats) => Some(stats),
+                            StatsScreen::Failed { last, .. } => last,
+                            StatsScreen::Loading => None,
+                        };
+                        state.set(StatsScreen::Failed {
+                            message: failure.to_string(),
+                            last,
+                        });
+                    }
+                }
+            });
+        }
+    });
+    Effect::new(move |_| reload.run(()));
+
+    view! {
+        <section class="stats-panel" data-testid="stats-panel">
+            <h2>"Stats"</h2>
+            <button
+                type="button"
+                class="stats-reload"
+                data-testid="stats-reload"
+                on:click=move |_| reload.run(())
+            >
+                "Reload"
+            </button>
+            {move || match state.get() {
+                StatsScreen::Loading => {
+                    view! {
+                        <p class="panel-loading" data-testid="stats-loading">"Loading stats…"</p>
+                    }
+                        .into_any()
+                }
+                StatsScreen::Loaded(stats) => stats_loaded_view(&stats),
+                StatsScreen::Failed { message, last } => {
+                    let stale = last.is_some().then(|| {
+                        view! {
+                            <p class="stats-stale" data-testid="stats-stale">
+                                "Showing the last successful snapshot."
+                            </p>
+                        }
+                    });
+                    let body = last.map(|stats| stats_loaded_view(&stats));
+                    view! {
+                        <p class="stats-error" data-testid="stats-error">{message}</p>
+                        {stale}
+                        {body}
+                    }
+                        .into_any()
+                }
+            }}
+        </section>
     }
 }
 

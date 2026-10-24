@@ -11,10 +11,11 @@ use wasm_bindgen_test::wasm_bindgen_test;
 use web_ui::api::envelope::ApiError;
 use web_ui::api_request::build_url;
 use web_ui::core_screens::{
-    HealthStatus, MemoriesView, MemoryPage, ProfileScreen, ProfileView, SettingsScreen, StatsView,
-    TagsPage, TagsView, delete_memory_spec, get_user_profile_spec, health_outcome, health_spec,
+    DailyStatsView, HealthStatus, MemoriesView, MemoryPage, ProfileScreen, ProfileView,
+    SettingsScreen, ShardStatsView, StatsView, TagsPage, TagsView, active_shard_count, daily_peak,
+    delete_memory_spec, error_buckets, get_user_profile_spec, health_outcome, health_spec,
     list_memories_spec, list_tags_spec, memories_view, pin_memory_spec, profile_view, search_spec,
-    settings_view, stats_spec, tags_view, unpin_memory_spec,
+    settings_view, sorted_shards, stats_spec, tags_view, unpin_memory_spec,
 };
 use web_ui::paths::{ENDPOINTS, EndpointId, encode_component};
 
@@ -524,4 +525,263 @@ fn test_stats_spec_matches_the_pinned_template() {
     assert_eq!(spec.path, template(EndpointId::Stats));
     assert_eq!(spec.path, "/api/stats");
     assert!(spec.query.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Stats screen (this wave) — full-payload decode, legacy defaults, and the
+// pure render helpers mirroring upstream `StatsView.svelte`
+// ---------------------------------------------------------------------------
+
+/// The new `GET /api/stats` payload, every section present.
+const STATS_FULL_JSON: &str = r#"{
+    "total": 3,
+    "byScope": { "user": 2, "project": 1 },
+    "byType": { "context": 3 },
+    "generatedAt": "2026-10-24T12:00:00.000Z",
+    "shards": [
+        {
+            "shardId": 2,
+            "scope": "user",
+            "scopeHash": "aaaaaaaaaaaaaaaa",
+            "shardIndex": 0,
+            "fileName": "user_aaaaaaaaaaaaaaaa_shard_0.db",
+            "fileExists": true,
+            "isActive": true,
+            "registeredVectorCount": 2,
+            "memoryCount": 2,
+            "oldestCreatedAt": "2026-10-12T00:00:00.000Z",
+            "newestCreatedAt": "2026-10-16T00:00:00.000Z",
+            "duplicateTagCount": 1
+        },
+        {
+            "shardId": null,
+            "scope": "project",
+            "scopeHash": "bbbbbbbbbbbbbbbb",
+            "shardIndex": 1,
+            "fileName": "project_missing.db",
+            "fileExists": false,
+            "isActive": false,
+            "registeredVectorCount": 4,
+            "memoryCount": 0,
+            "oldestCreatedAt": null,
+            "newestCreatedAt": null,
+            "duplicateTagCount": 0,
+            "error": "Shard DB file missing: project_missing.db"
+        }
+    ],
+    "profile": {
+        "exists": true,
+        "version": 3,
+        "counts": { "preferences": 2, "patterns": 1, "workflows": 0 },
+        "lastAnalyzedAt": "2023-11-14T22:13:20.000Z",
+        "totalPromptsAnalyzed": 12
+    },
+    "daily": [
+        {
+            "date": "2026-10-23",
+            "captures": 1,
+            "captureSkipped": 0,
+            "profileInjections": 2,
+            "compactionInjections": 0,
+            "errors": { "listMemories": 1 }
+        },
+        {
+            "date": "2026-10-24",
+            "captures": 0,
+            "captureSkipped": 0,
+            "profileInjections": 0,
+            "compactionInjections": 0,
+            "errors": {}
+        }
+    ],
+    "dailyError": null
+}"#;
+
+#[wasm_bindgen_test]
+fn test_stats_view_decodes_the_full_new_payload() {
+    let stats: StatsView = serde_json::from_str(STATS_FULL_JSON).expect("the full payload decodes");
+    assert_eq!(stats.total, 3);
+    assert_eq!(stats.by_scope.user, 2);
+    assert_eq!(stats.by_scope.project, 1);
+    assert_eq!(stats.by_type.get("context"), Some(&3));
+    assert_eq!(stats.generated_at, "2026-10-24T12:00:00.000Z");
+
+    let shards = &stats.shards;
+    assert_eq!(shards.len(), 2);
+    let user = &shards[0];
+    assert_eq!(user.shard_id, Some(2));
+    assert_eq!(user.scope, "user");
+    assert_eq!(user.scope_hash, "aaaaaaaaaaaaaaaa");
+    assert_eq!(user.shard_index, 0);
+    assert_eq!(user.file_name, "user_aaaaaaaaaaaaaaaa_shard_0.db");
+    assert!(user.file_exists);
+    assert!(user.is_active);
+    assert_eq!(user.registered_vector_count, 2);
+    assert_eq!(user.memory_count, 2);
+    assert_eq!(
+        user.oldest_created_at.as_deref(),
+        Some("2026-10-12T00:00:00.000Z")
+    );
+    assert_eq!(
+        user.newest_created_at.as_deref(),
+        Some("2026-10-16T00:00:00.000Z")
+    );
+    assert_eq!(user.duplicate_tag_count, 1);
+    assert!(user.error.is_none());
+
+    let project = &shards[1];
+    assert_eq!(project.shard_id, None, "shardId null decodes to None");
+    assert!(!project.file_exists);
+    assert!(!project.is_active);
+    assert_eq!(
+        project.error.as_deref(),
+        Some("Shard DB file missing: project_missing.db")
+    );
+
+    let profile = stats.profile.as_ref().expect("the profile section decodes");
+    assert!(profile.exists);
+    assert_eq!(profile.version, Some(3));
+    let counts = profile.counts.as_ref().expect("counts present");
+    assert_eq!(
+        (counts.preferences, counts.patterns, counts.workflows),
+        (2, 1, 0)
+    );
+    assert_eq!(
+        profile.last_analyzed_at.as_deref(),
+        Some("2023-11-14T22:13:20.000Z")
+    );
+    assert_eq!(profile.total_prompts_analyzed, Some(12));
+
+    assert_eq!(stats.daily.len(), 2);
+    let day = &stats.daily[0];
+    assert_eq!(day.date, "2026-10-23");
+    assert_eq!(day.captures, 1);
+    assert_eq!(day.capture_skipped, 0);
+    assert_eq!(day.profile_injections, 2);
+    assert_eq!(day.compaction_injections, 0);
+    assert_eq!(day.errors.get("listMemories"), Some(&1));
+    assert!(
+        stats.daily_error.is_none(),
+        "dailyError null decodes to None"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_stats_view_defaults_a_legacy_payload() {
+    // Older responses can omit the diagnostic sections; every new field
+    // defaults instead of failing the decode (upstream marks them optional).
+    let stats: StatsView = serde_json::from_str(
+        r#"{"total":3,"byScope":{"user":1,"project":2},"byType":{"note":2},"generatedAt":"2026-01-01T00:00:00.000Z"}"#,
+    )
+    .expect("the legacy payload decodes");
+    assert_eq!(stats.total, 3);
+    assert_eq!(stats.by_scope.user, 1);
+    assert_eq!(stats.by_scope.project, 2);
+    assert_eq!(stats.by_type.get("note"), Some(&2));
+    assert!(stats.shards.is_empty());
+    assert!(stats.profile.is_none());
+    assert!(stats.daily.is_empty());
+    assert!(stats.daily_error.is_none());
+}
+
+fn shard(scope: &str, memory_count: u64, shard_index: u32, is_active: bool) -> ShardStatsView {
+    ShardStatsView {
+        scope: scope.to_string(),
+        memory_count,
+        shard_index,
+        is_active,
+        ..ShardStatsView::default()
+    }
+}
+
+#[wasm_bindgen_test]
+fn test_sorted_shards_orders_by_scope_then_memory_count_desc_then_index() {
+    // Upstream `StatsView.svelte` L43–50.
+    let shards = vec![
+        shard("user", 0, 3, true),
+        shard("project", 5, 1, true),
+        shard("project", 9, 0, true),
+        shard("user", 4, 0, false),
+        shard("project", 5, 0, false),
+        shard("project", 0, 3, false),
+    ];
+    let sorted = sorted_shards(&shards);
+    let keys: Vec<(&str, u64, u32)> = sorted
+        .iter()
+        .map(|s| (s.scope.as_str(), s.memory_count, s.shard_index))
+        .collect();
+    assert_eq!(
+        keys,
+        vec![
+            ("project", 9, 0),
+            ("project", 5, 0),
+            ("project", 5, 1),
+            ("project", 0, 3),
+            ("user", 4, 0),
+            ("user", 0, 3),
+        ],
+        "scope asc, memoryCount desc, shardIndex asc"
+    );
+}
+
+fn day(
+    captures: u64,
+    capture_skipped: u64,
+    profile_injections: u64,
+    compaction_injections: u64,
+) -> DailyStatsView {
+    DailyStatsView {
+        date: "2026-10-24".to_string(),
+        captures,
+        capture_skipped,
+        profile_injections,
+        compaction_injections,
+        errors: Default::default(),
+    }
+}
+
+#[wasm_bindgen_test]
+fn test_daily_peak_is_the_max_counter_or_one() {
+    // Upstream L51–53: `Math.max(1, ...counters)`.
+    assert_eq!(daily_peak(&[]), 1, "an empty series still divides");
+    assert_eq!(
+        daily_peak(&[day(0, 0, 0, 0)]),
+        1,
+        "an all-zero series peaks at 1"
+    );
+    assert_eq!(daily_peak(&[day(1, 2, 3, 4)]), 4);
+    assert_eq!(
+        daily_peak(&[day(1, 2, 3, 4), day(0, 0, 9, 0)]),
+        9,
+        "the peak spans every counter of every day"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_error_buckets_filters_zero_and_sorts_keys() {
+    // Upstream L55–59: count > 0, sorted by bucket name.
+    let mut day_row = day(0, 0, 0, 0);
+    day_row.errors.insert("beta".to_string(), 2);
+    day_row.errors.insert("alpha".to_string(), 0);
+    day_row.errors.insert("gamma".to_string(), 1);
+    assert_eq!(
+        error_buckets(&day_row),
+        vec![("beta".to_string(), 2), ("gamma".to_string(), 1),],
+        "zero counts drop, keys sort ascending"
+    );
+    assert!(error_buckets(&day(0, 0, 0, 0)).is_empty());
+}
+
+#[wasm_bindgen_test]
+fn test_active_shard_count_counts_is_active_flags() {
+    // Upstream L105: the active-shards card counts `isActive` only.
+    assert_eq!(active_shard_count(&[]), 0);
+    assert_eq!(
+        active_shard_count(&[
+            shard("user", 1, 0, true),
+            shard("project", 1, 0, false),
+            shard("project", 1, 1, true),
+        ]),
+        2
+    );
 }
