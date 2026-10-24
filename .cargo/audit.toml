@@ -1,0 +1,55 @@
+# cargo-audit configuration for this workspace.
+# cargo-audit 0.22.2 reads this file ONLY at .cargo/audit.toml (cargo-config discovery,
+# relative to the invocation directory); a repo-root audit.toml is silently ignored.
+# Audit gates must therefore run from the repo root.
+#
+# Every entry below is an ACCEPTED finding with its class, its reason and its blocking
+# crate. Read this before adding or removing an ID. Only the ID's shape and year are
+# validated at parse time: `RUSTSEC-9999-9999` is a fatal parse error (out-of-range
+# year), but a well-formed nonexistent ID such as `RUSTSEC-2020-9999` is silently
+# accepted and has no effect. Never verify an entry by "the file parsed"; confirm each
+# ID by observing its finding present in a config-less audit of the same lock (a
+# Cargo.lock copy in a directory with no .cargo/audit.toml) and absent in the
+# config-driven run. Matching is exact-string: no prefix, no wildcard, no class filter.
+#
+# Classes as RustSec records them today: RUSTSEC-2025-0057 = unmaintained,
+# RUSTSEC-2024-0436 = unmaintained, RUSTSEC-2026-0253 = unsound.
+#
+# Drift check (periodic): an `ignore` entry silences its ID regardless of class, so a
+# reclassification (e.g. unsound -> vulnerability) would be hidden by this file. Copy
+# Cargo.lock into a config-less scratch dir and run `cargo audit -n` there (the Step
+# 5(b) probe without the root-level file); every ID that reappears is still open, and
+# its reported class must be compared with the class recorded above. Re-enumeration is
+# the drift check; the ledger's disposition table is the companion register.
+
+[advisories]
+ignore = [
+  # RUSTSEC-2025-0057 — unmaintained, not vulnerable. fxhash 0.2.1.
+  #   No escape exists on the 1.x tokenizer line: ptr_hash 2.1.3 (newest) still
+  #   requires fxhash ^0.2.1; only the pre-1.0 tokenizers 0.23.x line drops it,
+  #   which is a breaking downgrade of the embedding stack.
+  #   Revisit when ptr_hash re-releases without fxhash.
+  "RUSTSEC-2025-0057",
+
+  # RUSTSEC-2024-0436 — unmaintained, not vulnerable. paste 1.0.15 (proc-macro).
+  #   Compile-time only, on the build path of tk-encode; zero runtime exposure.
+  #   Escapable solely via tokenizers 1.0.0-rc.3, DECLINED: a pre-release tokenizer
+  #   bump can shift the token space of a persistent vector store and silently
+  #   degrade recall over already-stored vectors, with no migration and no gate
+  #   that could detect the drift. Revisit must BEGIN with an encoded-ID diff over
+  #   a fixed corpus, tokenizers 1.0.0-rc.2 vs rc.3, for this repo's model: an
+  #   unchanged token space closes the revisit with no migration; only a changed
+  #   space reopens it, and then only with a tokenizer version recorded alongside
+  #   stored vectors + a golden-vector test + a re-embed migration.
+  "RUSTSEC-2024-0436",
+
+  # RUSTSEC-2026-0253 — unsound, blocked upstream. lru 0.16.4 via
+  #   turso_core 0.8.3 -> tantivy 0.26.2 -> lru ^0.16.3. Fixed in lru 0.18.2 (the
+  #   line tantivy 0.27 uses), unreachable here: turso_core pins tantivy ^0.26.2 in
+  #   BOTH 0.8.3 and 0.9.0-pre.1. A direct lru = "0.18" would add a second copy,
+  #   not remove 0.16.4. Reachability: needs unwinding panics plus catch_unwind
+  #   with panicking-Drop keys inside LruCache::pop(); tantivy's usage is
+  #   undocumented — not demonstrably reachable, not demonstrably unreachable.
+  #   Revisit when turso_core admits tantivy ^0.27.
+  "RUSTSEC-2026-0253",
+]
