@@ -223,7 +223,7 @@ async fn test_ranks_exact_cosine_hits_and_filters_other_container_tags() {
         row.created_at = NOW_MS - (200 - i as i64);
         row.updated_at = NOW_MS;
         row.tags = Some(String::new());
-        statements.push(insert_vector_statement(&row));
+        statements.push(insert_vector_statement(&row).expect("statement builds"));
     }
     db.batch(statements, BatchMode::Write)
         .await

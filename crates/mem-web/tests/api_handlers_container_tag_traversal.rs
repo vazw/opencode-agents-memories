@@ -26,6 +26,7 @@ fn router() -> (Arc<FakeBackend>, axum::Router) {
         Some(API_TOKEN),
         None,
         std::path::PathBuf::from("/tmp/unused-dist"),
+        common::throwaway_log_dir(),
         services,
         common::fakes::USER_ID,
         "127.0.0.1",

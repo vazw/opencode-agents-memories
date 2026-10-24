@@ -287,7 +287,7 @@ impl EpisodicStore {
                 .unwrap_or(Value::Null),
             Value::Text(session.summary.clone()),
             Value::Text(metadata_json),
-            Value::Text(vector_to_text(&session.embedding)),
+            Value::Text(vector_to_text(&session.embedding)?),
             Value::Integer(session.created_at),
             Value::Integer(session.updated_at),
             Value::Null,
@@ -377,7 +377,7 @@ impl EpisodicStore {
                     .unwrap_or(Value::Null),
                 Value::Text(session.summary.clone()),
                 Value::Text(metadata_json),
-                Value::Text(vector_to_text(&session.embedding)),
+                Value::Text(vector_to_text(&session.embedding)?),
                 Value::Integer(session.created_at),
                 Value::Integer(session.updated_at),
                 Value::Null,
@@ -422,7 +422,7 @@ impl EpisodicStore {
             vec![
                 Value::Text(session.summary.clone()),
                 Value::Text(metadata_json),
-                Value::Text(vector_to_text(&session.embedding)),
+                Value::Text(vector_to_text(&session.embedding)?),
                 Value::Integer(now),
                 Value::Text(session.capture_id.clone().unwrap_or_default()),
                 Value::Text(existing_id),
@@ -589,7 +589,7 @@ impl EpisodicStore {
             .query(
                 sql::SEARCH_SESSIONS,
                 vec![
-                    Value::Text(vector_to_text(query_vector)),
+                    Value::Text(vector_to_text(query_vector)?),
                     Value::Text(project_id.to_string()),
                     Value::Integer(clamp_limit(limit)),
                 ],
@@ -719,7 +719,7 @@ impl EpisodicStore {
             ));
         }
         let mut params = vec![
-            Value::Text(vector_to_text(&query_vector)),
+            Value::Text(vector_to_text(&query_vector)?),
             Value::Text(project_id.to_string()),
         ];
         params.extend(timeline_predicate_params(filter));

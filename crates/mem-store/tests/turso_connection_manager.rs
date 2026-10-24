@@ -85,7 +85,12 @@ async fn test_waits_for_in_flight_open_before_closing_and_serializes_reopen() {
     let close_task = tokio::spawn({
         let manager = manager.clone();
         let path = path.clone();
-        async move { manager.close_connection(&path).await }
+        async move {
+            manager
+                .close_connection(&path)
+                .await
+                .expect("connection closes")
+        }
     });
     // Drive open0 to completion; the close task must wait for it.
     factory.release_next();

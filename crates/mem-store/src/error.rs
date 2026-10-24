@@ -95,6 +95,23 @@ pub enum StoreError {
     /// (registry failures, swap invariants, staged-count mismatch).
     #[error("{message}")]
     Internal { message: String },
+    /// A `std` lock was poisoned on a value whose failure cannot be recovered
+    /// (ADR-0013 D-2): the guard protects a cross-field protocol, key
+    /// material, or a side-effect gate, so the call refuses instead of
+    /// continuing on state the panicking thread left behind.
+    ///
+    /// The payload is two `&'static str` literals from the per-site closed
+    /// set — never `PoisonError`'s `Box<dyn Any>`, never a path, never key
+    /// material.
+    #[error(
+        "lock `{lock}` poisoned while {operation}; refusing to continue on possibly half-updated state"
+    )]
+    LockPoisoned {
+        /// The guarded value's name (a closed set of literals).
+        lock: &'static str,
+        /// The operation that found the lock poisoned.
+        operation: &'static str,
+    },
 }
 
 impl StoreError {

@@ -160,6 +160,7 @@ impl Fixture {
             Some(TOKEN),
             None,
             self.dir.path().clone(),
+            common::throwaway_log_dir(),
             self.api(),
             "tester@example.com",
             "127.0.0.1",

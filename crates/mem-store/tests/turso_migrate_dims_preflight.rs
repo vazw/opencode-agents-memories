@@ -69,7 +69,10 @@ async fn test_legacy_import_preserves_source_dims_for_the_mismatch_detector() {
             .expect("insert");
         }
         drop(db);
-        connections.close_connection(&db_path).await;
+        connections
+            .close_connection(&db_path)
+            .await
+            .expect("connection closes");
     }
 
     let shards = Arc::new(manager);

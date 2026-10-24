@@ -40,9 +40,11 @@ pub fn slice_utf8_bytes(text: &str, start: usize, end: Option<usize>) -> String 
         to -= 1;
     }
 
-    str::from_utf8(&bytes[from..to])
-        .expect("slice boundaries are re-aligned to UTF-8 char boundaries")
-        .to_string()
+    // text.get(from..to) with the existing empty-slice fallback: total for non-boundary ranges (ADR-0013 D-3)
+    let Some(slice) = text.get(from..to) else {
+        return String::new();
+    };
+    slice.to_string()
 }
 
 /// Truncate text to at most `max_bytes` UTF-8 bytes, using the default

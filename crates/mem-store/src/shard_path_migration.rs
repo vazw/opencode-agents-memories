@@ -131,7 +131,7 @@ async fn remove_file_helper(
     connections: &ConnectionManager,
     path: &Path,
 ) -> Result<(), StoreError> {
-    connections.close_connection(path).await;
+    connections.close_connection(path).await?;
     if path.exists() {
         with_sqlite_file_lock_retry(
             || remove_sqlite_database(path),
@@ -149,8 +149,8 @@ async fn rollback_move(
     old_hash: &str,
     mv: &ShardMove,
 ) -> Result<(), StoreError> {
-    connections.close_connection(&mv.new_path).await;
-    connections.close_connection(&mv.staged_path).await;
+    connections.close_connection(&mv.new_path).await?;
+    connections.close_connection(&mv.staged_path).await?;
     if mv.backup_path.exists() {
         remove_file_helper(connections, &mv.new_path).await?;
         remove_file_helper(connections, &mv.old_path).await?;
@@ -630,43 +630,43 @@ impl PathMigrationService {
                 format!("{}_project_{old_hash}", self.config.container_tag_prefix)
             });
         let nonce = format!("{}-{}", std::process::id(), now_millis_u64());
-        let moves: Vec<ShardMove> = source_shards
-            .iter()
-            .map(|shard| {
-                let new_path_shard = crate::shard_manager::ShardManager::shard_path(
-                    &self.storage_path,
-                    Scope::Project,
-                    &new_hash,
-                    shard.shard_index,
-                )
-                .expect("validated shard path");
-                let staged_basis = new_path_shard.clone();
-                let inventory_shard = resolved
-                    .group
-                    .shards
-                    .iter()
-                    .find(|candidate| candidate.shard_index == shard.shard_index);
-                ShardMove {
-                    shard_id: shard.id,
-                    shard_index: shard.shard_index,
-                    old_path: shard.db_path.clone(),
-                    new_path: new_path_shard,
-                    staged_path: PathBuf::from(format!(
-                        "{}.path-migrate-{nonce}.tmp",
-                        staged_basis.display()
-                    )),
-                    backup_path: PathBuf::from(format!(
-                        "{}.pre-path-migrate-{nonce}.bak",
-                        shard.db_path.display()
-                    )),
-                    is_active: shard.is_active,
-                    vector_count: inventory_shard
-                        .map(|candidate| candidate.memory_count)
-                        .unwrap_or(shard.vector_count),
-                    old_container_tag: old_container_tag.clone(),
-                }
-            })
-            .collect();
+        // shard_path validates the scope hash and containment, so its refusal is a real error to propagate (ADR-0013 D-3);
+        // a for loop, because propagation cannot leave the `.map()` closure
+        let mut moves: Vec<ShardMove> = Vec::with_capacity(source_shards.len());
+        for shard in &source_shards {
+            let new_path_shard = crate::shard_manager::ShardManager::shard_path(
+                &self.storage_path,
+                Scope::Project,
+                &new_hash,
+                shard.shard_index,
+            )
+            .map_err(PathMigrationError::Store)?;
+            let staged_basis = new_path_shard.clone();
+            let inventory_shard = resolved
+                .group
+                .shards
+                .iter()
+                .find(|candidate| candidate.shard_index == shard.shard_index);
+            moves.push(ShardMove {
+                shard_id: shard.id,
+                shard_index: shard.shard_index,
+                old_path: shard.db_path.clone(),
+                new_path: new_path_shard,
+                staged_path: PathBuf::from(format!(
+                    "{}.path-migrate-{nonce}.tmp",
+                    staged_basis.display()
+                )),
+                backup_path: PathBuf::from(format!(
+                    "{}.pre-path-migrate-{nonce}.bak",
+                    shard.db_path.display()
+                )),
+                is_active: shard.is_active,
+                vector_count: inventory_shard
+                    .map(|candidate| candidate.memory_count)
+                    .unwrap_or(shard.vector_count),
+                old_container_tag: old_container_tag.clone(),
+            });
+        }
 
         for mv in &moves {
             if mv.new_path.exists()
@@ -828,7 +828,10 @@ impl PathMigrationService {
     ) -> Result<(), String> {
         // Stage complete, updated copies while originals remain untouched.
         for mv in moves {
-            self.connections.close_connection(&mv.old_path).await;
+            self.connections
+                .close_connection(&mv.old_path)
+                .await
+                .map_err(|error| error.to_string())?;
             if !mv.old_path.exists() {
                 return Err(format!(
                     "Source shard file missing: {}",
@@ -878,7 +881,10 @@ impl PathMigrationService {
                 ));
             }
             drop(staged);
-            self.connections.close_connection(&mv.staged_path).await;
+            self.connections
+                .close_connection(&mv.staged_path)
+                .await
+                .map_err(|error| error.to_string())?;
         }
 
         // The journal only exists once renames may start.
@@ -897,7 +903,10 @@ impl PathMigrationService {
         }
 
         for mv in moves {
-            self.connections.close_connection(&mv.old_path).await;
+            self.connections
+                .close_connection(&mv.old_path)
+                .await
+                .map_err(|error| error.to_string())?;
             with_sqlite_file_lock_retry(
                 || rename_sqlite_database(&mv.old_path, &mv.backup_path),
                 FILE_LOCK_RETRY_DELAYS_MS.len(),

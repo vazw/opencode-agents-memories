@@ -100,21 +100,27 @@ pub async fn run_migration(State(state): State<Arc<AppState>>, body: Bytes) -> R
     }
 
     match state.api.maintenance.run_migration(&strategy).await {
-        Ok(report) => envelope::json(
-            StatusCode::OK,
-            envelope::success_with_flag(
-                report.success,
-                &MigrationRunDto {
-                    success: report.success,
-                    strategy: report.strategy,
-                    deleted_shards: report.deleted_shards,
-                    re_embedded_memories: report.re_embedded_memories,
-                    duration: report.duration_ms,
-                    error: report.error,
-                },
-            ),
+        Ok(report) => flagged_response(
+            report.success,
+            &MigrationRunDto {
+                success: report.success,
+                strategy: report.strategy,
+                deleted_shards: report.deleted_shards,
+                re_embedded_memories: report.re_embedded_memories,
+                duration: report.duration_ms,
+                error: report.error,
+            },
         ),
         Err(error) => maintenance_failure("POST /api/migration/run", error),
+    }
+}
+
+/// `{"success":<flag>,"data":…}` at `200`, or the D-9 `500` when the DTO
+/// cannot be serialized (F11: the flag form could not answer 500 before).
+fn flagged_response(flag: bool, data: &impl serde::Serialize) -> Response {
+    match envelope::success_with_flag(flag, data) {
+        Some(body) => envelope::json(StatusCode::OK, body),
+        None => envelope::internal_error(),
     }
 }
 
@@ -227,4 +233,28 @@ pub async fn cleanup() -> Response {
 /// upstream's memory-deduplication service; it must not be wired here.
 pub async fn deduplicate() -> Response {
     envelope::not_implemented(DEDUPLICATE_UNAVAILABLE)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A DTO whose `Serialize` always fails, so `success_with_flag`'s `None`
+    /// arm is reachable without a live maintenance run.
+    struct FailingSerialize;
+
+    impl serde::Serialize for FailingSerialize {
+        fn serialize<S: serde::Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
+            Err(serde::ser::Error::custom(
+                "intentional serialization failure",
+            ))
+        }
+    }
+
+    #[test]
+    fn test_success_with_flag_serialization_failure_yields_500() {
+        assert!(envelope::success_with_flag(true, &FailingSerialize).is_none());
+        let response = flagged_response(true, &FailingSerialize);
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
 }

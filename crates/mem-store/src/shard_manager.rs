@@ -94,8 +94,8 @@ pub struct ShardManager {
     config: StoreConfig,
     connections: Arc<ConnectionManager>,
     probe: Arc<dyn ProcessProbe>,
-    metadata: Mutex<Option<DbHandle>>,
-    init: Mutex<Option<Arc<InitCell>>>,
+    metadata: Arc<Mutex<Option<DbHandle>>>,
+    init: Arc<Mutex<Option<Arc<InitCell>>>>,
     scope_write_locks: Arc<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>>,
 }
 
@@ -106,8 +106,10 @@ impl Clone for ShardManager {
             config: self.config.clone(),
             connections: self.connections.clone(),
             probe: self.probe.clone(),
-            metadata: Mutex::new(self.metadata.lock().unwrap().clone()),
-            init: Mutex::new(self.init.lock().unwrap().clone()),
+            // Clone::clone may not fail: metadata and init are Arc-shared, so a clone shares
+            // the one authoritative cache and the one init slot instead of snapshotting them (ADR-0013 D-3 / F10)
+            metadata: self.metadata.clone(),
+            init: self.init.clone(),
             scope_write_locks: self.scope_write_locks.clone(),
         }
     }
@@ -151,8 +153,8 @@ impl ShardManager {
             config,
             connections,
             probe,
-            metadata: Mutex::new(None),
-            init: Mutex::new(None),
+            metadata: Arc::new(Mutex::new(None)),
+            init: Arc::new(Mutex::new(None)),
             scope_write_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -185,7 +187,14 @@ impl ShardManager {
     {
         let key = format!("{}:{}", scope.as_str(), scope_hash);
         let mutex = {
-            let mut locks = self.scope_write_locks.lock().unwrap();
+            // per-scope write locks: a lost entry mints a second AsyncMutex and lets two writers into one shard (ADR-0013 D-2 D2-a)
+            let mut locks =
+                self.scope_write_locks
+                    .lock()
+                    .map_err(|_| StoreError::LockPoisoned {
+                        lock: "scope_write_locks",
+                        operation: "with_scope_write_lock",
+                    })?;
             Arc::clone(
                 locks
                     .entry(key)
@@ -203,9 +212,18 @@ impl ShardManager {
     }
 
     /// Upstream `reset()` (sync; consumed by the lifecycle step).
-    pub fn reset(&self) {
-        *self.metadata.lock().unwrap() = None;
-        *self.init.lock().unwrap() = None;
+    pub fn reset(&self) -> Result<(), StoreError> {
+        // metadata cache: reset must invalidate, or the next call reuses a stale handle (ADR-0013 D-2 D2-c)
+        *self.metadata.lock().map_err(|_| StoreError::LockPoisoned {
+            lock: "metadata",
+            operation: "reset",
+        })? = None;
+        // init slot: reset must invalidate, or the next call joins a dead init cell (ADR-0013 D-2 D2-c)
+        *self.init.lock().map_err(|_| StoreError::LockPoisoned {
+            lock: "init",
+            operation: "reset",
+        })? = None;
+        Ok(())
     }
 
     /// Upstream `getShardPath` — strict hash validation (mem-core; failure
@@ -272,17 +290,36 @@ impl ShardManager {
         let metadata_path = self
             .storage_path
             .join(crate::operation_lock::METADATA_DB_NAME);
-        let cached = self.metadata.lock().unwrap().clone();
+        // metadata: the cached handle gates init and revalidation (ADR-0013 D-2 D2-a)
+        let cached = self
+            .metadata
+            .lock()
+            .map_err(|_| StoreError::LockPoisoned {
+                lock: "metadata",
+                operation: "ensure_initialized",
+            })?
+            .clone();
         if let Some(cached) = cached {
             let current = self.connections.get_connection(&metadata_path).await?;
             if !Arc::ptr_eq(&current, &cached) {
-                self.metadata.lock().unwrap().replace(current.clone());
+                // metadata: adopt the connection manager's authoritative handle, then re-init (ADR-0013 D-2 D2-c)
+                self.metadata
+                    .lock()
+                    .map_err(|_| StoreError::LockPoisoned {
+                        lock: "metadata",
+                        operation: "ensure_initialized",
+                    })?
+                    .replace(current.clone());
                 self.init_metadata_db(&current).await?;
             }
             return Ok(cached);
         }
         let cell = {
-            let mut slot = self.init.lock().unwrap();
+            // init: claim-or-install the init cell — the shard analogue of pending (ADR-0013 D-2 D2-a)
+            let mut slot = self.init.lock().map_err(|_| StoreError::LockPoisoned {
+                lock: "init",
+                operation: "ensure_initialized",
+            })?;
             match slot.as_ref() {
                 Some(cell) => Arc::clone(cell),
                 None => {
@@ -298,13 +335,25 @@ impl ShardManager {
             .clone();
         if result.is_err() {
             // upstream catch: clear both slots so the next call retries
-            *self.init.lock().unwrap() = None;
-            *self.metadata.lock().unwrap() = None;
+            // init: cleared after a failed init so the next call retries (ADR-0013 D-2 D2-c)
+            *self.init.lock().map_err(|_| StoreError::LockPoisoned {
+                lock: "init",
+                operation: "ensure_initialized",
+            })? = None;
+            // metadata: cleared after a failed init so the next call retries (ADR-0013 D-2 D2-c)
+            *self.metadata.lock().map_err(|_| StoreError::LockPoisoned {
+                lock: "metadata",
+                operation: "ensure_initialized",
+            })? = None;
         }
         result?;
+        // metadata: the post-init read; a miss is an internal defect, not a panic (ADR-0013 D-2 D2-a)
         self.metadata
             .lock()
-            .unwrap()
+            .map_err(|_| StoreError::LockPoisoned {
+                lock: "metadata",
+                operation: "ensure_initialized",
+            })?
             .clone()
             .ok_or_else(|| StoreError::Internal {
                 message: "metadata db missing after init".into(),
@@ -316,7 +365,11 @@ impl ShardManager {
         let outcome = self.init_metadata_db(&db).await;
         match outcome {
             Ok(()) => {
-                *self.metadata.lock().unwrap() = Some(db);
+                // metadata: store the initialized handle — the flag every later call trusts (ADR-0013 D-2 D2-c)
+                *self.metadata.lock().map_err(|_| StoreError::LockPoisoned {
+                    lock: "metadata",
+                    operation: "initialize_metadata_db",
+                })? = Some(db);
                 Ok(())
             }
             Err(error) => Err(error),
@@ -872,7 +925,7 @@ impl ShardManager {
         let scope = db_row_scope(&row);
         let stored = row.text("db_path").unwrap_or_default();
         let full_path = self.resolve_stored_path(&stored, &scope);
-        self.connections.close_connection(&full_path).await;
+        self.connections.close_connection(&full_path).await?;
         if full_path.exists() {
             let path = full_path.clone();
             let removed = with_sqlite_file_lock_retry(
@@ -912,7 +965,7 @@ impl ShardManager {
         let scope_text = db_row_scope(&row);
         let stored = row.text("db_path").unwrap_or_default();
         let full_path = self.resolve_stored_path(&stored, &scope_text);
-        self.connections.close_connection(&full_path).await;
+        self.connections.close_connection(&full_path).await?;
         let archive_path = match archive_path_override {
             Some(override_path) => override_path.to_path_buf(),
             None => PathBuf::from(format!(
@@ -1107,5 +1160,67 @@ impl ShardRegistry for ShardManager {
         shard_id: i64,
     ) -> BoxFuture<'a, Result<Option<ShardInfo>, StoreError>> {
         Box::pin(self.get_shard_by_id(shard_id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::platform::Platform;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    fn test_manager() -> ShardManager {
+        let storage_path = PathBuf::from("/nonexistent/opencode-mem-test");
+        let config = StoreConfig {
+            storage_path: storage_path.clone(),
+            embedding_dimensions: 2,
+            embedding_model: "test-model".to_string(),
+            max_vectors_per_shard: 1000,
+            container_tag_prefix: "opencode".to_string(),
+            database_encryption_enabled: false,
+            database_encryption_cipher: "aes256gcm".to_string(),
+            database_encryption_key: None,
+        };
+        ShardManager::new(
+            storage_path,
+            config,
+            Arc::new(ConnectionManager::new(
+                PathBuf::from("/nonexistent/opencode-mem-test"),
+                StoreConfig {
+                    storage_path: PathBuf::from("/nonexistent/opencode-mem-test"),
+                    embedding_dimensions: 2,
+                    embedding_model: "test-model".to_string(),
+                    max_vectors_per_shard: 1000,
+                    container_tag_prefix: "opencode".to_string(),
+                    database_encryption_enabled: false,
+                    database_encryption_cipher: "aes256gcm".to_string(),
+                    database_encryption_key: None,
+                },
+                Platform::current(),
+                Arc::new(crate::db::TursoConnectFactory),
+            )),
+            Arc::new(crate::platform::SystemProcessProbe),
+        )
+    }
+
+    #[test]
+    fn test_shard_manager_reset_propagates_poisoned_slot_lock() {
+        let manager = test_manager();
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = manager.init.lock().expect("fresh lock");
+            panic!("poison");
+        }));
+        assert!(manager.init.is_poisoned(), "init lock must be poisoned");
+
+        let error = manager
+            .reset()
+            .expect_err("a poisoned init slot must refuse the reset");
+        assert!(matches!(
+            error,
+            StoreError::LockPoisoned {
+                lock: "init",
+                operation: "reset",
+            }
+        ));
     }
 }

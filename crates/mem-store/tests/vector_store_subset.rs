@@ -315,9 +315,15 @@ async fn test_update_project_association_remaps_matching_rows_only() {
 
 #[test]
 fn test_vector_to_text_serializes_and_maps_nonfinite_to_null() {
-    assert_eq!(vector_to_text(&[1.0f32, 0.0]), "[1.0,0.0]");
+    assert_eq!(
+        vector_to_text(&[1.0f32, 0.0]).expect("vector serializes"),
+        "[1.0,0.0]"
+    );
     let nonfinite = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 1.5f32];
-    assert_eq!(vector_to_text(&nonfinite), "[null,null,null,1.5]");
+    assert_eq!(
+        vector_to_text(&nonfinite).expect("vector serializes"),
+        "[null,null,null,1.5]"
+    );
 }
 
 #[test]
@@ -357,9 +363,12 @@ async fn test_insert_vector_statement_batch_matches_single_insert() {
 
     // Commit the statement through one write batch (the seam the migrators
     // and re-embed staging use).
-    db.batch(vec![insert_vector_statement(&value)], BatchMode::Write)
-        .await
-        .expect("statement batch");
+    db.batch(
+        vec![insert_vector_statement(&value).expect("statement builds")],
+        BatchMode::Write,
+    )
+    .await
+    .expect("statement batch");
 
     // A reference row inserted through `insert_vector` (single execute).
     let mut reference = record("mem_stmt_single", 10, true, Some("/proj/a"));

@@ -164,7 +164,10 @@ async fn test_rejects_writes_when_shard_file_missing_but_registry_row_exists() {
     .expect("path");
 
     // close the manager handle, then unlink the file
-    connections.close_connection(&full).await;
+    connections
+        .close_connection(&full)
+        .await
+        .expect("connection closes");
     std::fs::remove_file(&full).expect("file removed");
 
     let error = expect_incompatible(&manager, &hash).await;

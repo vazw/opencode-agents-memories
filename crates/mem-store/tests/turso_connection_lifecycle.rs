@@ -85,7 +85,9 @@ async fn test_reopens_databases_after_close_turso_and_invalidate_caches() {
             .expect("insert");
     }
 
-    close_turso_and_invalidate_caches(&connections, &shards, &ReadyGate::new(Vec::new())).await;
+    close_turso_and_invalidate_caches(&connections, &shards, &ReadyGate::new(Vec::new()))
+        .await
+        .expect("close and invalidate");
 
     // Everything reopens fresh; the data survived the close.
     let db = shards.open_shard(&shard.db_path).await.expect("reopen");
@@ -135,7 +137,11 @@ async fn test_does_not_leak_in_flight_open_across_close_all() {
     while fake.opens.load(Ordering::SeqCst) < 1 {
         tokio::task::yield_now().await;
     }
-    assert!(!connections.has_open_connection(&storage.join("metadata.db")));
+    assert!(
+        !connections
+            .has_open_connection(&storage.join("metadata.db"))
+            .expect("has open")
+    );
 
     // Lifecycle while the open is parked: close_all awaits the shared
     // close-signal, then closes everything.
@@ -143,14 +149,18 @@ async fn test_does_not_leak_in_flight_open_across_close_all() {
     let closer = {
         let (connections, shards) = (connections.clone(), shards.clone());
         tokio::spawn(async move {
-            close_turso_and_invalidate_caches(&connections, &shards, &gate).await;
+            close_turso_and_invalidate_caches(&connections, &shards, &gate)
+                .await
+                .expect("close and invalidate");
         })
     };
     fake.release_next();
     let (opened, _) = tokio::join!(opener, closer);
     assert!(opened.expect("task").is_ok(), "open finished through close");
     assert!(
-        !connections.has_open_connection(&storage.join("metadata.db")),
+        !connections
+            .has_open_connection(&storage.join("metadata.db"))
+            .expect("has open"),
         "handle released after close-all"
     );
 
@@ -187,7 +197,9 @@ async fn test_close_invalidates_ready_gate_and_shard_manager() {
     gate.ensure_ready().await.expect("first ready");
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 
-    close_turso_and_invalidate_caches(&connections, &shards, &gate).await;
+    close_turso_and_invalidate_caches(&connections, &shards, &gate)
+        .await
+        .expect("close and invalidate");
 
     gate.ensure_ready().await.expect("re-runs after reset");
     assert_eq!(counter.load(Ordering::SeqCst), 2, "gate reset forced rerun");

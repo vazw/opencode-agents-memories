@@ -127,10 +127,22 @@ impl From<ParseLineError> for &'static str {
 
 /// `encode_request`'s output plus newline; used by the stdio loop.
 fn to_line(value: &Value) -> String {
-    let mut line = serde_json::to_string(value).expect("Value serializes");
+    // Value serialization failure: log the cause and emit a fixed valid JSON-RPC internal-error line (ADR-0013 D-3)
+    let mut line = match serde_json::to_string(value) {
+        Ok(line) => line,
+        Err(error) => {
+            tracing::error!(error = %error, "jsonrpc: value failed to serialize");
+            JSONRPC_INTERNAL_ERROR_LINE.to_string()
+        }
+    };
     line.push('\n');
     line
 }
+
+/// Fixed JSON-RPC 2.0 `Internal error` (-32603) line, emitted when a `Value`
+/// cannot be serialized. A constant, so the fallback cannot fail itself.
+const JSONRPC_INTERNAL_ERROR_LINE: &str =
+    r#"{"error":{"code":-32603,"message":"Internal error"},"id":null,"jsonrpc":"2.0"}"#;
 
 /// Parses one NDJSON line into a [`Request`].
 ///

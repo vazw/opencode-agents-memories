@@ -20,6 +20,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use mem_core::sync::lock_or_recover;
 use mem_store::config::StoreConfig;
 use mem_store::connection::ConnectionManager;
 use mem_store::db::{ConnectFactory, DbHandle, Value, query_one, turso_connect_factory};
@@ -475,14 +476,16 @@ impl ProfileStore {
     pub fn begin_cold_buffer_round(&self) -> Result<(), ProfileError> {
         match crate::cold_buffer::load_snapshot(&self.cold_buffer_path) {
             Ok(snapshot) => {
-                let mut state = self.cold_state.lock().expect("cold-buffer mutex poisoned");
+                // cold_state: reload writes buffers then load_error = None, adjacent, neither panics (ADR-0013 D-2 D2-R)
+                let mut state = lock_or_recover(&self.cold_state);
                 state.buffers = snapshot;
                 state.load_error = None;
                 Ok(())
             }
             Err(error) => {
                 let message = error.to_string();
-                let mut state = self.cold_state.lock().expect("cold-buffer mutex poisoned");
+                // cold_state: failure path stores one diagnostic String; the file is the durable record (ADR-0013 D-2 D2-R)
+                let mut state = lock_or_recover(&self.cold_state);
                 state.load_error = Some(message);
                 Err(error)
             }
@@ -492,7 +495,8 @@ impl ProfileStore {
     /// Upstream `getColdBuffer(profileId?)` — the unattributed bucket is used
     /// when a merge ran without a profile id.
     fn drain_cold_bucket(&self, profile_id: Option<&str>, item_type: ItemType) -> Vec<ProfileItem> {
-        let mut state = self.cold_state.lock().expect("cold-buffer mutex poisoned");
+        // cold_state: mem::take of one item-type bucket (ADR-0013 D-2 D2-R)
+        let mut state = lock_or_recover(&self.cold_state);
         let key = profile_id.unwrap_or(COLD_BUFFER_DEFAULT_KEY).to_string();
         let bucket = state.buffers.entry(key).or_default();
         std::mem::take(item_type.slice_mut(bucket))
@@ -507,7 +511,8 @@ impl ProfileStore {
         item: &ProfileItem,
     ) -> Result<(), ProfileError> {
         {
-            let mut state = self.cold_state.lock().expect("cold-buffer mutex poisoned");
+            // cold_state: push + cap on one bucket; a lost push loses one buffered observation (ADR-0013 D-2 D2-R)
+            let mut state = lock_or_recover(&self.cold_state);
             let key = profile_id.unwrap_or(COLD_BUFFER_DEFAULT_KEY).to_string();
             let bucket = state.buffers.entry(key).or_default();
             let slot = item_type.slice_mut(bucket);
@@ -522,7 +527,8 @@ impl ProfileStore {
     /// Upstream `saveColdBuffers()` — persists the current in-memory snapshot.
     pub fn save_cold_buffers(&self) -> Result<(), ProfileError> {
         let snapshot = {
-            let state = self.cold_state.lock().expect("cold-buffer mutex poisoned");
+            // cold_state: clone of buffers for persistence; no mutation (ADR-0013 D-2 D2-R)
+            let state = lock_or_recover(&self.cold_state);
             state.buffers.clone()
         };
         crate::cold_buffer::save_snapshot(&self.cold_buffer_path, &snapshot)
@@ -531,11 +537,8 @@ impl ProfileStore {
     /// Current in-memory snapshot (test/inspection helper — upstream has no
     /// equivalent; peers are observed through the file itself).
     pub fn cold_snapshot(&self) -> crate::cold_buffer::Snapshot {
-        self.cold_state
-            .lock()
-            .expect("cold-buffer mutex poisoned")
-            .buffers
-            .clone()
+        // cold_state: clone for inspection; no mutation (ADR-0013 D-2 D2-R)
+        lock_or_recover(&self.cold_state).buffers.clone()
     }
 
     /// Upstream `deleteProfile`: delete the row, then re-read the current
@@ -550,7 +553,8 @@ impl ProfileStore {
         .await?;
         self.begin_cold_buffer_round()?;
         let removed = {
-            let mut state = self.cold_state.lock().expect("cold-buffer mutex poisoned");
+            // cold_state: single bucket remove after the on-disk re-read (ADR-0013 D-2 D2-R)
+            let mut state = lock_or_recover(&self.cold_state);
             state.buffers.remove(profile_id).is_some()
         };
         if removed {
@@ -959,10 +963,14 @@ impl ProfileStore {
     /// lifecycle in `mem-bridge`/the composition root owns the daily tick).
     pub async fn sweep_decay_daily(&self, now: i64) -> Result<DecaySweepReport, ProfileError> {
         let due = {
+            // last_decay_sweep gates the persisted decay side effect: a poisoned gate must refuse (ADR-0013 D-2 D2-c)
             let last = self
                 .last_decay_sweep
                 .lock()
-                .expect("decay sweep mutex poisoned");
+                .map_err(|_| ProfileError::LockPoisoned {
+                    lock: "last_decay_sweep",
+                    operation: "sweep_decay_daily",
+                })?;
             crate::decay::sweep_is_due(*last, now, crate::decay::SWEEP_INTERVAL_MILLIS)
         };
         if !due {
@@ -1003,10 +1011,14 @@ impl ProfileStore {
             }
         }
 
+        // the same stamp, written after the loop: the write is the other half of the gate (ADR-0013 D-2 D2-c)
         *self
             .last_decay_sweep
             .lock()
-            .expect("decay sweep mutex poisoned") = Some(now);
+            .map_err(|_| ProfileError::LockPoisoned {
+                lock: "last_decay_sweep",
+                operation: "sweep_decay_daily",
+            })? = Some(now);
 
         Ok(DecaySweepReport {
             profiles_scanned,
@@ -1447,4 +1459,49 @@ fn init_item(
     item.anchor = anchor;
     sync_confidence(&mut item, now);
     item
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    #[tokio::test]
+    async fn test_sweep_decay_propagates_poisoned_stamp() {
+        let storage_path = PathBuf::from("/nonexistent/opencode-mem-profile-test");
+        let store_config = StoreConfig {
+            storage_path: storage_path.clone(),
+            embedding_dimensions: 2,
+            embedding_model: "test-model".to_string(),
+            max_vectors_per_shard: 1000,
+            container_tag_prefix: "opencode".to_string(),
+            database_encryption_enabled: false,
+            database_encryption_cipher: "aes256gcm".to_string(),
+            database_encryption_key: None,
+        };
+        let store = ProfileStore::new(storage_path, store_config, ProfileConfig::default());
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = store
+                .last_decay_sweep
+                .lock()
+                .expect("fresh decay sweep lock");
+            panic!("poison");
+        }));
+        assert!(
+            store.last_decay_sweep.is_poisoned(),
+            "the decay stamp must be poisoned"
+        );
+
+        let error = store
+            .sweep_decay_daily(1_700_000_000_000)
+            .await
+            .expect_err("a poisoned decay stamp must refuse the sweep");
+        assert!(matches!(
+            error,
+            ProfileError::LockPoisoned {
+                lock: "last_decay_sweep",
+                ..
+            }
+        ));
+    }
 }

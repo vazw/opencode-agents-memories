@@ -8,9 +8,10 @@
 //! [`VaultStore::put`] only, and reads through [`VaultStore::get`].
 //! `VaultEntry` carries no `content_hash` field — the store derives the
 //! identity from its own cached `KeyHex` (ADR-0012 D-6) — so a caller can
-//! never name, forge or pre-compute an id. Rekey, `recover_rekey`, the purge
-//! erasure leg and `VaultStore::erase` remain in W8b. The structural
-//! invariant is enforced by the compile-fail doctest on `VaultEntry` (AC-1)
+//! never name, forge or pre-compute an id. Rekey and `recover_rekey` are
+//! **W8c**; the purge erasure leg and `VaultStore::erase` stay in **W8b**.
+//! The structural invariant is enforced by the compile-fail doctest on
+//! `VaultEntry` (AC-1)
 //! and the lexical tripwire in `tests/no_write_path.rs` (AC-7).
 //!
 //! # Design authority
@@ -31,17 +32,22 @@
 //! - **D-7 / D-8** — rotation is decided there: a rekey rewrites every
 //!   `content_hash` (so ids are not stable across a rekey) and the marker is
 //!   the single commit point.
-//! - **D-9** — the rekey API belongs to the **first writer wave** and ships
-//!   in it. This crate ships none.
-//! - **D-11** — a vault writer owes `purge_session` an erasure path in the
-//!   wave that adds the writer.
+//! - **D-9** — rekey ships in **W8c**, after W8b's purge leg (the amended D-9
+//!   heading, `docs/adr/0012-vault-key-custody.md:388`); this crate ships no
+//!   rotation API and nothing here may be read as a second rotation design.
+//! - **D-11** — the purge erasure path ships in **W8b** (D-13 … D-16). W8a
+//!   shipped the writer without it, so the obligation is no longer "the wave
+//!   that adds the writer" — that wave has passed — and the gap is live.
 //!
 //! # Purge
 //!
-//! No purge path reaches this tier today because no writer exists; the wave
-//! that adds a writer owns the erase question (D-11). `purge.completed`'s
-//! `not_erased` therefore stays complete and true without naming the vault,
-//! and `mem-bridge`'s purge is proved unable to reach these directories.
+//! W8a has landed, so the premise of the old sentence is gone: the vault now
+//! holds content for any session that marked it, and `purge.completed`'s
+//! `not_erased` is **no longer** complete or true without naming the vault. The
+//! W8b leg (D-11, D-13 … D-16, D-18) is not shipped, so the gap is live: a
+//! purge run today erases no vault rows and does not say so. `mem-bridge`'s
+//! purge is proved unable to reach these directories only because no erasure
+//! path exists yet — that is the residual, not a guarantee.
 //!
 //! # Identity drift (accepted, documented, not mitigated)
 //!
@@ -62,8 +68,8 @@
 //! and reads through [`VaultStore::get`]. `VaultEntry` carries no
 //! `content_hash` field — the store derives the identity from its own cached
 //! `KeyHex` (ADR-0012 D-6) — so a caller can never name, forge or
-//! pre-compute an id. Rekey, `recover_rekey`, the purge erasure leg and
-//! `VaultStore::erase` remain in W8b.
+//! pre-compute an id. Rekey and `recover_rekey` are **W8c**; the purge
+//! erasure leg and `VaultStore::erase` stay in **W8b**.
 
 use std::path::PathBuf;
 
@@ -193,4 +199,18 @@ pub enum VaultError {
     /// Storage-layer pass-through.
     #[error(transparent)]
     Store(#[from] mem_store::error::StoreError),
+
+    /// The vault's per-scope map was poisoned (ADR-0013 D-2 `D2-b`): the map
+    /// holds key material and the manager built from it, so a vault that
+    /// cannot vouch for its key state refuses instead of continuing.
+    ///
+    /// The payload is two `&'static str` literals — never a path, never key
+    /// material (ADR-0012's `Display` contract).
+    #[error("vault lock `{lock}` poisoned while {operation}; refusing to continue")]
+    LockPoisoned {
+        /// The guarded value's name (a closed set of literals).
+        lock: &'static str,
+        /// The operation that found the lock poisoned.
+        operation: &'static str,
+    },
 }

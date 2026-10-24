@@ -302,10 +302,8 @@ impl CaptureSummarizer for ProviderCaptureSummarizer {
             let mut request = mem_ai::provider::request::CompletionRequest::new(self.model.clone())
                 .with_system(CAPTURE_SYSTEM_PROMPT)
                 .with_message(mem_ai::provider::request::ChatMessage::user(user_prompt));
-            request.json_schema = Some(
-                mem_store::serde_json::from_str(schema_json)
-                    .expect("the capture output schema is valid JSON schema"),
-            );
+            // CAPTURE_OUTPUT_SCHEMA parse: propagate into EpisodicError::Json, whose From<serde_json::Error> exists (ADR-0013 D-3)
+            request.json_schema = Some(mem_store::serde_json::from_str(schema_json)?);
             let mut stream = self.provider.complete(request);
             let mut text = String::new();
             while let Some(delta) = stream.next().await {

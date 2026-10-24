@@ -210,15 +210,18 @@ where
                 let retry_delay = FILE_LOCK_RETRY_DELAYS_MS.get(attempt).copied();
                 if ctx.platform != Platform::Windows
                     || error.lock_code().is_none()
-                    || retry_delay.is_none()
                     || attempt >= max_retries
                 {
                     return Err(error);
                 }
+                // the delay table is exhausted: the transient lock error is final (ADR-0013 D-3)
+                let Some(retry_delay) = retry_delay else {
+                    return Err(error);
+                };
                 if let Some(on_retry) = &ctx.on_retry {
                     on_retry();
                 }
-                (ctx.sleep)(std::time::Duration::from_millis(retry_delay.unwrap()));
+                (ctx.sleep)(std::time::Duration::from_millis(retry_delay));
             }
         }
     }

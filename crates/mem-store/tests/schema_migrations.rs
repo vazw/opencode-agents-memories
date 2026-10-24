@@ -104,7 +104,9 @@ async fn test_migrates_memory_shards_to_session_id_index_v2() {
     db.execute(
         "INSERT INTO memories (id, content, vector, container_tag, created_at, updated_at, metadata)
          VALUES ('m1', 'c1', ?1, 'tag', 10, 10, '{\"sessionID\":\"sess_from_meta\"}')",
-        vec![Value::Text(mem_store::vector::vector_to_text(&vector))],
+        vec![Value::Text(
+            mem_store::vector::vector_to_text(&vector).expect("vector serializes"),
+        )],
     )
     .await
     .expect("insert v1 row");
@@ -142,7 +144,9 @@ async fn test_migrates_memory_shards_to_session_id_index_v2() {
     let statement = Statement::new(
         "INSERT INTO memories (id, content, vector, container_tag, created_at, updated_at, session_id)
          VALUES ('m2', 'c2', ?1, 'tag', 20, 20, 'sess_direct')",
-        vec![Value::Text(mem_store::vector::vector_to_text(&vector))],
+        vec![Value::Text(
+            mem_store::vector::vector_to_text(&vector).expect("vector serializes"),
+        )],
     );
     db.execute(&statement.sql, statement.params)
         .await

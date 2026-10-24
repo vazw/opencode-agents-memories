@@ -4,8 +4,9 @@
 //! open, per-scope key custody and v1 schema remain, and the crate now also
 //! ships the content write/read path — `VaultStore::put` and
 //! `VaultStore::get` — with a cached `KeyHex` per scope, content-addressed ids
-//! derived from that key, and `VaultEntry`/`VaultRecord`. Rekey,
-//! `recover_rekey`, the purge erasure leg and `VaultStore::erase` stay in W8b.
+//! derived from that key, and `VaultEntry`/`VaultRecord`. Rekey and
+//! `recover_rekey` are **W8c**; the purge erasure leg and `VaultStore::erase`
+//! stay in **W8b**.
 //!
 //! The store takes **one** [`StoreConfig`] and every derived path descends
 //! from its `storage_path`; there is no second root that could disagree
@@ -119,7 +120,11 @@ impl VaultStore {
         // The guard is released at the end of this block — never held across
         // an await, and never held while minting or opening.
         let state = {
-            let mut scopes = self.scopes.lock().expect("vault scope map");
+            // scopes: per-scope key material plus the manager built from it (ADR-0013 D-2 D2-b)
+            let mut scopes = self.scopes.lock().map_err(|_| VaultError::LockPoisoned {
+                lock: "scopes",
+                operation: "ready",
+            })?;
             Arc::clone(
                 scopes
                     .entry(scope.to_owned())
@@ -138,11 +143,7 @@ impl VaultStore {
         let manager = state
             .manager
             .get_or_try_init(|| async {
-                let cached = state
-                    .key
-                    .get()
-                    .cloned()
-                    .ok_or_else(|| VaultError::InvalidKeyHex)?;
+                let cached = state.key.get().cloned().ok_or(VaultError::InvalidKeyHex)?;
                 Ok::<ConnectionManager, VaultError>(self.build_manager(&cached))
             })
             .await?;
@@ -194,7 +195,11 @@ impl VaultStore {
 
         // Read the cached KeyHex populated by ready().
         let state = {
-            let scopes = self.scopes.lock().expect("vault scope map");
+            // scopes: a scope whose key state nobody validated must refuse, not continue (ADR-0013 D-2 D2-b)
+            let scopes = self.scopes.lock().map_err(|_| VaultError::LockPoisoned {
+                lock: "scopes",
+                operation: "put",
+            })?;
             scopes.get(scope).cloned()
         };
         let key = state
@@ -271,5 +276,54 @@ impl VaultStore {
             Platform::current(),
             std::sync::Arc::clone(&self.factory),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    /// A valid scope hash (16 lowercase hex) — the map lock is taken after
+    /// validation and before any key work, so no key file is needed.
+    const POISON_SCOPE: &str = "0123456789abcdef";
+
+    // mem-vault has no direct `tokio` dependency (and this wave adds none), so
+    // the test drives the future through the re-exported runtime builder.
+    #[test]
+    fn test_vault_ready_propagates_poisoned_scope_map() {
+        let storage_path = PathBuf::from("/nonexistent/opencode-mem-vault-test");
+        let config = StoreConfig {
+            storage_path: storage_path.clone(),
+            embedding_dimensions: 2,
+            embedding_model: "test-model".to_string(),
+            max_vectors_per_shard: 1000,
+            container_tag_prefix: "opencode".to_string(),
+            database_encryption_enabled: true,
+            database_encryption_cipher: "aes256gcm".to_string(),
+            database_encryption_key: None,
+        };
+        let store = VaultStore::new(config);
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = store.scopes.lock().expect("fresh lock");
+            panic!("poison");
+        }));
+        assert!(store.scopes.is_poisoned(), "scope map must be poisoned");
+
+        let runtime = mem_store::tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a test runtime builds");
+        let error = runtime
+            .block_on(store.ready(POISON_SCOPE))
+            .err()
+            .expect("a poisoned scope map must refuse the open");
+        assert!(matches!(
+            error,
+            VaultError::LockPoisoned {
+                lock: "scopes",
+                operation: "ready",
+            }
+        ));
     }
 }

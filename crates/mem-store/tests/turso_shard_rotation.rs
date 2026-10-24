@@ -408,7 +408,7 @@ async fn test_delete_shard_closes_connection_removes_row_and_file() {
     manager.delete_shard(shard.id).await.expect("delete");
     assert!(!full.exists(), "file removed");
     assert!(
-        !connections.has_open_connection(&full),
+        !connections.has_open_connection(&full).expect("has open"),
         "manager connection closed"
     );
     assert!(

@@ -248,7 +248,7 @@ async fn restore_from_backup(
     if !backup.exists() {
         return Ok(());
     }
-    connections.close_connection(db_path).await;
+    connections.close_connection(db_path).await?;
     if db_path.exists() {
         let path = db_path.to_path_buf();
         with_sqlite_file_lock_retry(
@@ -490,7 +490,7 @@ async fn migrate_memory_shard(
 
     let backup = backup_path(db_path);
     drop(db);
-    connections.close_connection(db_path).await;
+    connections.close_connection(db_path).await?;
     if db_path.exists() {
         let from = db_path.to_path_buf();
         let to = backup.clone();
@@ -521,7 +521,7 @@ async fn migrate_memory_shard(
     let mut statements: Vec<Statement> = Vec::with_capacity(records.len() + pinned_ids.len());
     for chunk in records.chunks(BATCH_SIZE) {
         for record in chunk {
-            statements.push(insert_vector_statement(record));
+            statements.push(insert_vector_statement(record)?);
         }
     }
     for memory_id in pinned_ids {
@@ -664,14 +664,15 @@ async fn recover_one_swap(state_path: &Path) -> Result<(), StoreError> {
         backup.starts_with(&format!("{}.pre-reembed-", expected_db.display()))
             && backup.ends_with(".bak")
     });
-    if state.db_path.as_deref() != Some(expected_db.to_string_lossy().as_ref())
-        || staged.is_none()
-        || backup.is_none()
-    {
+    if state.db_path.as_deref() != Some(expected_db.to_string_lossy().as_ref()) {
         return Err(StoreError::internal("invalid re-embed swap state paths"));
     }
-    let staged = PathBuf::from(staged.expect("checked above"));
-    let backup = PathBuf::from(backup.expect("checked above"));
+    // the filtered pair is consumed once instead of re-asserted after an is_none guard (ADR-0013 D-3)
+    let (Some(staged), Some(backup)) = (staged, backup) else {
+        return Err(StoreError::internal("invalid re-embed swap state paths"));
+    };
+    let staged = PathBuf::from(staged);
+    let backup = PathBuf::from(backup);
 
     if expected_db.exists() {
         if staged.exists() {
@@ -789,10 +790,11 @@ async fn reconcile_shard_registry(
     }
     for shard in &parsed_shards {
         let key = (shard.scope.as_str().to_string(), shard.scope_hash.clone());
+        // the highest-index map is keyed from this same loop, so a missing key is an internal defect, not a panic (ADR-0013 D-3)
         let is_active = i64::from(shard.shard_index)
-            == *highest_index_by_scope
-                .get(&key)
-                .expect("key inserted above");
+            == *highest_index_by_scope.get(&key).ok_or_else(|| {
+                StoreError::internal("shard scope missing from the highest-index map")
+            })?;
         shards
             .register_existing_shard(
                 shard.scope,

@@ -14,6 +14,8 @@
 //! scope too), so the guard returned by [`on_skills_changed`] removes the
 //! listener on drop.
 
+use mem_core::sync::lock_or_recover;
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -89,9 +91,8 @@ fn next_listener_id() -> u64 {
 /// the same lifetime semantics (dropping it unsubscribes).
 pub fn on_skills_changed(listener: SkillsChangedListener) -> SkillsChangedGuard {
     let id = next_listener_id();
-    let mut registry = listeners()
-        .lock()
-        .expect("skills listener registry poisoned");
+    // listener Vec<(u64, Arc<dyn Fn()>)>: single push; nothing persistent depends on it (ADR-0013 D-2 D2-R)
+    let mut registry = lock_or_recover(listeners());
     registry.push((id, listener));
     SkillsChangedGuard { id: Some(id) }
 }
@@ -103,9 +104,8 @@ pub fn on_skills_changed(listener: SkillsChangedListener) -> SkillsChangedGuard 
 /// best-effort.
 pub fn notify_skills_changed() {
     let snapshot: Vec<SkillsChangedListener> = {
-        let registry = listeners()
-            .lock()
-            .expect("skills listener registry poisoned");
+        // listener registry: snapshot clone; listeners run after the guard drops (ADR-0013 D-2 D2-R)
+        let registry = lock_or_recover(listeners());
         registry
             .iter()
             .map(|(_, listener)| listener.clone())
@@ -144,9 +144,8 @@ impl SkillsChangedGuard {
         let Some(id) = self.id.take() else {
             return;
         };
-        let mut registry = listeners()
-            .lock()
-            .expect("skills listener registry poisoned");
+        // listener registry: retain by id; the id-keyed guard makes duplicate removal harmless (ADR-0013 D-2 D2-R)
+        let mut registry = lock_or_recover(listeners());
         registry.retain(|(registered, _)| *registered != id);
     }
 }

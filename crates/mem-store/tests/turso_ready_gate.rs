@@ -342,7 +342,7 @@ async fn test_reset_forces_full_rerun() {
     let gate = Arc::new(ReadyGate::new(vec![counter_step("only", counter.clone())]));
     gate.ensure_ready().await.expect("first");
     assert_eq!(counter.load(Ordering::SeqCst), 1);
-    gate.reset();
+    gate.reset().expect("gate resets");
     gate.ensure_ready().await.expect("after reset");
     assert_eq!(counter.load(Ordering::SeqCst), 2, "reset re-ran every step");
 }
@@ -488,7 +488,10 @@ async fn test_ready_gate_recovers_interrupted_reembed_swap_before_engine_convers
         if let Ok(db) = connections.get_connection(&control).await {
             let _ = db.query("SELECT 1", Vec::new()).await;
         }
-        connections.close_connection(&control).await;
+        connections
+            .close_connection(&control)
+            .await
+            .expect("connection closes");
     }
     let control_bytes = std::fs::read(&control).expect("control bytes");
     let restored_bytes = std::fs::read(&active).expect("active bytes");

@@ -431,6 +431,8 @@ impl ShardInventory {
             let mut git_repo_url: Option<String> = None;
             let mut container_tag: Option<String> = None;
 
+            // one hoisted read of the active shard index: the tail of a non-empty set (ADR-0013 D-3)
+            let active_index = shard_indices.last().copied();
             for shard_index in shard_indices.iter().copied() {
                 let registered_shard = entry
                     .registered
@@ -473,7 +475,7 @@ impl ShardInventory {
                         .unwrap_or_default(),
                     is_active: registered_shard
                         .map(|shard| shard.is_active)
-                        .unwrap_or(shard_index == *shard_indices.last().expect("non-empty")),
+                        .unwrap_or(Some(shard_index) == active_index),
                     vector_count: registered_shard
                         .map(|shard| shard.vector_count)
                         .unwrap_or(content.memory_count),

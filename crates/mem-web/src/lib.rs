@@ -18,6 +18,7 @@ pub mod web_auth;
 mod error;
 mod gate;
 mod health;
+mod http;
 mod settings;
 
 pub use error::WebError;

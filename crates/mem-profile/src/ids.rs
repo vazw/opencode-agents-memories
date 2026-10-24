@@ -35,14 +35,14 @@ pub fn base36(value: u64) -> String {
         return "0".to_string();
     }
     const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
-    let mut buffer = Vec::new();
+    // base36 digits: the String is built with push(char), so the Vec<u8> round-trip disappears (ADR-0013 D-3)
+    let mut buffer = String::with_capacity(13);
     let mut remaining = value;
     while remaining > 0 {
-        buffer.push(DIGITS[(remaining % 36) as usize]);
+        buffer.push(char::from(DIGITS[(remaining % 36) as usize]));
         remaining /= 36;
     }
-    buffer.reverse();
-    String::from_utf8(buffer).expect("base36 digits are ASCII")
+    buffer.chars().rev().collect()
 }
 
 /// A unique owner token: `{pid}-{unix_millis}-{counter}`.

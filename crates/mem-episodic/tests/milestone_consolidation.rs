@@ -43,7 +43,7 @@ async fn raw_insert_milestone(
             Value::Integer(1),
             Value::Integer(11),
             Value::Integer(11),
-            Value::Text(vector_to_text(&[0.5_f32; 8])),
+            Value::Text(vector_to_text(&[0.5_f32; 8]).expect("vector serializes")),
             Value::Integer(created_at),
         ],
     )

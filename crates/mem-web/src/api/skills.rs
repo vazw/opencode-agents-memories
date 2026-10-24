@@ -273,13 +273,21 @@ pub async fn catalog_file(
     Path((id, file)): Path<(String, String)>,
 ) -> Response {
     if !is_valid_skill_id(&id) || file != format!("{id}.md") {
-        return envelope::text(StatusCode::NOT_FOUND, "text/plain", "Not Found".to_string());
+        return envelope::text(
+            StatusCode::NOT_FOUND,
+            crate::http::TEXT_PLAIN,
+            "Not Found".to_string(),
+        );
     }
     match state.api.skills.catalog_markdown(&id).await {
         Ok(Some(markdown)) => {
-            envelope::text(StatusCode::OK, "text/markdown; charset=utf-8", markdown)
+            envelope::text(StatusCode::OK, crate::http::TEXT_MARKDOWN_UTF8, markdown)
         }
-        Ok(None) => envelope::text(StatusCode::NOT_FOUND, "text/plain", "Not Found".to_string()),
+        Ok(None) => envelope::text(
+            StatusCode::NOT_FOUND,
+            crate::http::TEXT_PLAIN,
+            "Not Found".to_string(),
+        ),
         Err(PortError::Unavailable) => envelope::internal_error(),
         Err(error) => super::port_failure("GET /skills/{id}/{file}", error),
     }

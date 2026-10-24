@@ -45,9 +45,11 @@ pub(crate) fn health_envelope(auth_enabled: bool) -> String {
 /// `GET /api/health` — the liveness envelope.
 pub(crate) async fn health_handler(State(state): State<Arc<AppState>>) -> Response {
     let auth_enabled = state.basic_auth.is_enabled();
-    axum::http::Response::builder()
-        .status(StatusCode::OK)
-        .header("Content-Type", "application/json")
-        .body(Body::from(health_envelope(auth_enabled)))
-        .expect("the health response is always a valid HTTP response")
+    // infallible constructor; the body is already a format! string (ADR-0013 D-3)
+    crate::http::response(
+        StatusCode::OK,
+        crate::http::JSON,
+        &[],
+        Body::from(health_envelope(auth_enabled)),
+    )
 }

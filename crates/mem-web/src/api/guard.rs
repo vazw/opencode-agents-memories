@@ -14,7 +14,7 @@
 //! bound SQL parameter and the shard path is derived from the validated
 //! `Scope` + `ScopeHash`, so it never becomes a path segment.
 
-use mem_core::scope::{Scope, extract_scope_from_container_tag};
+use mem_core::scope::{Scope, split_container_tag};
 
 /// The fixed rejection message (D-10 — no echo of the offending tag).
 pub const INVALID_CONTAINER_TAG: &str = "Invalid container tag";
@@ -53,26 +53,19 @@ pub fn is_valid_container_tag(container_tag: &str) -> bool {
 /// tag is attacker-controlled and must never reach a log line or a response
 /// body.
 pub fn resolve_scoped_request(container_tag: &str) -> Result<ScopedRequest, ScopeRejection> {
-    match extract_scope_from_container_tag(container_tag) {
-        Ok(resolved) => {
-            let hash = resolved
-                .hash
-                .expect("extract_scope_from_container_tag always carries a hash")
-                .as_str()
-                .to_string();
-            Ok(ScopedRequest {
-                scope: resolved.scope,
-                hash,
-            })
-        }
-        Err(error) => {
-            tracing::warn!(
-                reason = %ScopeRejection::InvalidContainerTag.reason(),
-                tag_length = container_tag.len(),
-                error = %error,
-                "container tag rejected"
-            );
-            Err(ScopeRejection::InvalidContainerTag)
-        }
-    }
+    // split_container_tag returns the scope AND the validated hash, so the Option read disappears (ADR-0013 D-3).
+    // The Err arm binds `_`: ScopeError's Display interpolates the attacker-controlled container_tag (D-10 / F19),
+    // so only the reason and the tag length may be logged — never the error, never the tag.
+    let (scope, hash) = split_container_tag(container_tag).map_err(|_| {
+        tracing::warn!(
+            reason = %ScopeRejection::InvalidContainerTag.reason(),
+            tag_length = container_tag.len(),
+            "container tag rejected"
+        );
+        ScopeRejection::InvalidContainerTag
+    })?;
+    Ok(ScopedRequest {
+        scope,
+        hash: hash.as_str().to_string(),
+    })
 }

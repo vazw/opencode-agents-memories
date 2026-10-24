@@ -19,6 +19,7 @@ fn router_with_fakes() -> (std::sync::Arc<common::fakes::FakeBackend>, axum::Rou
         Some("test-token"),
         None,
         std::path::PathBuf::from("/tmp/unused-dist"),
+        common::throwaway_log_dir(),
         services,
         USER_ID,
         "127.0.0.1",

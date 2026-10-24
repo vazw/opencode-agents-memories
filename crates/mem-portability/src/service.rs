@@ -614,7 +614,10 @@ impl PortabilityService {
                     Value::Integer(milestone.source_count),
                     Value::Integer(milestone.window_start),
                     Value::Integer(milestone.window_end),
-                    Value::Text(vector_to_text(&embedding)),
+                    Value::Text(
+                        vector_to_text(&embedding)
+                            .map_err(|error| PortabilityError::Store(error.message()))?,
+                    ),
                     Value::Integer(milestone.created_at),
                 ],
             ));

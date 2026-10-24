@@ -83,7 +83,10 @@ async fn probe_shard(db_path: &Path, connections: &ConnectionManager) -> Result<
     match connections.get_connection(db_path).await {
         Ok(db) => {
             let probed = db.query("SELECT 1", Vec::new()).await;
-            connections.close_connection(db_path).await;
+            connections
+                .close_connection(db_path)
+                .await
+                .map_err(|error| error.message())?;
             probed.map(|_| ()).map_err(|error| error.message())
         }
         Err(error) => Err(error.message()),

@@ -99,7 +99,7 @@ async fn raw_insert(
             parent_session_id.map(str::to_string).into(),
             Value::Text(summary.to_string()),
             Value::Text(metadata.to_string()),
-            Value::Text(vector_to_text(embedding)),
+            Value::Text(vector_to_text(embedding).expect("vector serializes")),
             Value::Integer(created_at),
             Value::Integer(updated_at),
         ],

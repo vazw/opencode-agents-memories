@@ -11,6 +11,7 @@ pub mod error;
 pub mod logging;
 pub mod scope;
 pub mod sha256;
+pub mod sync;
 pub mod tags;
 pub mod tier;
 pub mod utils;

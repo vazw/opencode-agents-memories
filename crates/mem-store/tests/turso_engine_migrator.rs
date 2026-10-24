@@ -137,7 +137,10 @@ async fn test_refuses_diskann_indexed_shard_loudly_without_marker_or_backup() {
     if let Ok(db) = connections.get_connection(&control).await {
         let _ = db.query("SELECT 1", Vec::new()).await;
     }
-    connections.close_connection(&control).await;
+    connections
+        .close_connection(&control)
+        .await
+        .expect("connection closes");
 
     let error = run_engine_migration(&storage, &connections)
         .await
@@ -226,7 +229,10 @@ async fn test_skips_shards_that_already_open_with_the_turso_engine() {
         .await
         .expect("insert");
     }
-    connections.close_connection(&shard).await;
+    connections
+        .close_connection(&shard)
+        .await
+        .expect("connection closes");
 
     run_engine_migration(&storage, &connections)
         .await

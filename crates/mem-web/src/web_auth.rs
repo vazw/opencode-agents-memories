@@ -4,7 +4,7 @@
 //! gate entirely. Credentials are compared in constant time.
 
 use axum::body::Body;
-use axum::http::{Response, StatusCode};
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::Response as AxumResponse;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -18,6 +18,14 @@ const FALLBACK_USERNAME: &str = "user";
 
 /// The body of the challenge response.
 const CHALLENGE_BODY: &str = "Authentication required";
+
+/// The `WWW-Authenticate` challenge header.
+///
+/// A `const HeaderValue`: the literal is validated at compile time, and
+/// `test_www_authenticate_header_matches_realm` ties it to
+/// [`WEB_AUTH_REALM`] so the two cannot drift.
+const WWW_AUTHENTICATE: HeaderValue =
+    HeaderValue::from_static("Basic realm=\"OpenCode Memory Explorer\", charset=\"UTF-8\"");
 
 /// The Basic-auth gate for the web server.
 #[derive(Debug, Clone)]
@@ -96,16 +104,16 @@ impl WebAuth {
 
     /// The 401 challenge response.
     pub fn challenge(&self) -> AxumResponse {
-        Response::builder()
-            .status(StatusCode::UNAUTHORIZED)
-            .header("Content-Type", "text/plain; charset=utf-8")
-            .header(
-                "WWW-Authenticate",
-                format!("Basic realm=\"{WEB_AUTH_REALM}\", charset=\"UTF-8\""),
-            )
-            .header("Cache-Control", "no-store")
-            .body(Body::from(CHALLENGE_BODY))
-            .expect("the challenge response is always a valid HTTP response")
+        // infallible constructor; WWW-Authenticate is a const HeaderValue tied to WEB_AUTH_REALM by a test (ADR-0013 D-3)
+        crate::http::response(
+            StatusCode::UNAUTHORIZED,
+            crate::http::TEXT_PLAIN_UTF8,
+            &[
+                (axum::http::header::WWW_AUTHENTICATE, WWW_AUTHENTICATE),
+                (axum::http::header::CACHE_CONTROL, crate::http::NO_STORE),
+            ],
+            Body::from(CHALLENGE_BODY),
+        )
     }
 }
 
@@ -126,4 +134,20 @@ fn decode_basic_auth(header: &str) -> Option<(String, String)> {
     let text = String::from_utf8(decoded).ok()?;
     let colon = text.find(':')?;
     Some((text[..colon].to_owned(), text[colon + 1..].to_owned()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_www_authenticate_header_matches_realm() {
+        let expected = format!("Basic realm=\"{WEB_AUTH_REALM}\", charset=\"UTF-8\"");
+        assert_eq!(
+            WWW_AUTHENTICATE
+                .to_str()
+                .expect("the header value is ASCII"),
+            expected
+        );
+    }
 }

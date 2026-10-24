@@ -449,10 +449,13 @@ impl Consolidator {
         }
 
         // (f) ONE episodic write batch.
+        // The milestone vector is serialized here, so the batch builder itself stays infallible (ADR-0013 D-3).
+        let milestone_vector = vector_to_text(&milestone.embedding)?;
         let statements = self.batch_statements(
             project_id,
             agent_id,
             &milestone,
+            &milestone_vector,
             &contributors_json,
             consolidated,
             now,
@@ -493,11 +496,16 @@ impl Consolidator {
 
     /// The ONE atomic batch: the milestone INSERT, then per consolidated row
     /// the orphan mark and the scoped DELETE.
+    // Eight parameters: the milestone vector is threaded as a prepared value
+    // (the caller owns serialization, keeping this function infallible) and
+    // grouping the rest would only relocate the same argument list.
+    #[allow(clippy::too_many_arguments)]
     fn batch_statements(
         &self,
         project_id: &str,
         agent_id: &str,
         milestone: &crate::milestone::Milestone,
+        milestone_vector: &str,
         contributors_json: &str,
         consolidated: &[crate::record::AgentSession],
         now: i64,
@@ -513,7 +521,7 @@ impl Consolidator {
                 Value::Integer(milestone.source_count),
                 Value::Integer(milestone.window_start),
                 Value::Integer(milestone.window_end),
-                Value::Text(vector_to_text(&milestone.embedding)),
+                Value::Text(milestone_vector.to_string()),
                 Value::Integer(milestone.created_at),
             ],
         )];

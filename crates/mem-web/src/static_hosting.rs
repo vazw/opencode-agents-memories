@@ -52,7 +52,14 @@ pub fn inject_token_script(html: &str, token: Option<&str>) -> String {
     let Some(token) = token else {
         return html.to_owned();
     };
-    let encoded = serde_json::to_string(token).expect("a string is always serializable");
+    // on a serialization failure return the HTML unchanged — never an unescaped token (ADR-0013 D-3)
+    let encoded = match serde_json::to_string(token) {
+        Ok(encoded) => encoded,
+        Err(error) => {
+            tracing::error!(error = %error, "token script: token failed to serialize");
+            return html.to_owned();
+        }
+    };
     let escaped = encoded.replace('<', "\\u003c");
     let script = format!("<script>window.{TOKEN_MARKER}={escaped}</script>");
     match html.find("</head>") {
@@ -142,11 +149,13 @@ pub(crate) async fn not_found_handler() -> Response {
 
 /// Builds a plain-text response.
 fn text_response(status: StatusCode, body: &str) -> Response {
-    axum::http::Response::builder()
-        .status(status)
-        .header("Content-Type", "text/plain")
-        .body(Body::from(body.to_owned()))
-        .expect("the text response is always a valid HTTP response")
+    // infallible constructor with the const text/plain content type (ADR-0013 D-3)
+    crate::http::response(
+        status,
+        crate::http::TEXT_PLAIN,
+        &[],
+        Body::from(body.to_owned()),
+    )
 }
 
 /// Reads the shell from the dist directory (never cached).
@@ -155,12 +164,13 @@ async fn index_shell(state: &AppState) -> Response {
         Some(html) => {
             let token = state.local_token.token();
             let body = inject_token_script(&html, token.as_deref());
-            axum::http::Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", "text/html")
-                .header("Cache-Control", NO_CACHE)
-                .body(Body::from(body))
-                .expect("the shell response is always a valid HTTP response")
+            // infallible constructor with the const text/html content type plus Cache-Control (ADR-0013 D-3)
+            crate::http::response(
+                StatusCode::OK,
+                crate::http::HTML,
+                &[(axum::http::header::CACHE_CONTROL, crate::http::NO_CACHE)],
+                Body::from(body),
+            )
         }
         None => file_not_found_response(),
     }

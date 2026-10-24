@@ -435,7 +435,7 @@ impl MigrationService {
             Err(error) => {
                 // Upstream catch: close + remove the staged shard, drop the
                 // journal only while the (untouched) source still exists.
-                connections.close_connection(&staged_path).await;
+                connections.close_connection(&staged_path).await?;
                 if staged_path.exists() {
                     let ctx = RetryContext::system();
                     let staged = staged_path.as_path();
@@ -524,7 +524,7 @@ impl MigrationService {
                 project_name: memory.text("project_name").filter(|name| !name.is_empty()),
                 git_repo_url: memory.text("git_repo_url").filter(|url| !url.is_empty()),
             };
-            statements.push(insert_vector_statement(&record));
+            statements.push(insert_vector_statement(&record)?);
             if memory.i64("is_pinned").unwrap_or(0) == 1 {
                 statements.push(Statement::new(sql::PIN_MEMORY, vec![Value::Text(id)]));
             }
@@ -539,7 +539,7 @@ impl MigrationService {
         }
 
         // Verified swap: journal first, source out, replacement in.
-        connections.close_connection(staged_path).await;
+        connections.close_connection(staged_path).await?;
         let journal = SwapState {
             db_path: &db_path.to_string_lossy(),
             staged_path: &staged_path.to_string_lossy(),
@@ -549,7 +549,7 @@ impl MigrationService {
             message: error.to_string(),
         })?;
         std::fs::write(swap_state_path, body)?;
-        connections.close_connection(db_path).await;
+        connections.close_connection(db_path).await?;
 
         let ctx = RetryContext::system();
         with_sqlite_file_lock_retry(

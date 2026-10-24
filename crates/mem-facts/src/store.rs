@@ -245,7 +245,7 @@ impl FactsStore {
                 ];
                 let statement = match &input.embedding {
                     Some(embedding) => {
-                        params.push(Value::Text(mem_store::vector::vector_to_text(embedding)));
+                        params.push(Value::Text(mem_store::vector::vector_to_text(embedding)?));
                         params.push(
                             input
                                 .model_id

@@ -137,6 +137,17 @@ pub fn assert_safe_scope_hash(candidate: &str) -> Result<ScopeHash, ScopeError> 
 /// strict hash check → [`ScopeError::InvalidContainerTagHash`]. The prefix
 /// may itself contain underscores (only the last two segments are read).
 pub fn extract_scope_from_container_tag(container_tag: &str) -> Result<ScopeRef, ScopeError> {
+    split_container_tag(container_tag).map(|(scope, hash)| ScopeRef {
+        scope,
+        hash: Some(hash),
+    })
+}
+
+/// Returns the scope **and** the validated hash, so a caller that needs both
+/// (the HTTP guard) cannot fall back to an `Option` for the hash half.
+/// Branch order is identical to [`extract_scope_from_container_tag`]; that
+/// function delegates here so the two can never drift.
+pub fn split_container_tag(container_tag: &str) -> Result<(Scope, ScopeHash), ScopeError> {
     let parts: Vec<&str> = container_tag.split('_').collect();
     if parts.len() < 3 {
         return Err(ScopeError::InvalidContainerTag {
@@ -167,10 +178,7 @@ pub fn extract_scope_from_container_tag(container_tag: &str) -> Result<ScopeRef,
         }
     };
 
-    Ok(ScopeRef {
-        scope,
-        hash: Some(hash),
-    })
+    Ok((scope, hash))
 }
 
 /// Non-throwing variant (upstream `tryExtractScopeFromContainerTag`).
@@ -211,5 +219,20 @@ pub fn resolve_memory_scope(
             },
         ]),
         ScopeSelection::Project => Ok(vec![extract_scope_from_container_tag(container_tag)?]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split_container_tag_separates_scope_and_hash() {
+        let (scope, hash) =
+            split_container_tag("opencode_project_0123456789abcdef").expect("valid tag");
+        assert_eq!(scope, Scope::Project);
+        assert_eq!(hash.as_str(), "0123456789abcdef");
+
+        assert!(split_container_tag("bad").is_err());
     }
 }

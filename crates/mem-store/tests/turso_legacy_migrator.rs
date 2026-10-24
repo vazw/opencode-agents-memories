@@ -134,7 +134,10 @@ impl Rig {
             .expect("legacy insert");
         }
         drop(db);
-        self.connections.close_connection(&db_path).await;
+        self.connections
+            .close_connection(&db_path)
+            .await
+            .expect("connection closes");
         db_path
     }
 
@@ -497,7 +500,10 @@ async fn test_does_not_skip_migration_when_index_exists_but_embedding_dimensions
     .await
     .expect("corrupt metadata");
     drop(db);
-    rig.connections.close_connection(&shard.db_path).await;
+    rig.connections
+        .close_connection(&shard.db_path)
+        .await
+        .expect("connection closes");
     let sidecar_path = PathBuf::from(format!("{}.turso-migrate.json", shard.db_path.display()));
     if sidecar_path.exists() {
         std::fs::remove_file(&sidecar_path).expect("sidecar clear");

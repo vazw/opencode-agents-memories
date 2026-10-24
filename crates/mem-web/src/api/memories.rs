@@ -294,13 +294,12 @@ pub async fn list_memories(
         }
     }
 
-    let mut complete: Vec<LinkedPair> = Vec::new();
+    // a complete pair is a typed (memory, prompt) index pair: both Options are
+    // bound once here, so no later read can find them absent (ADR-0013 D-3)
+    let mut complete: Vec<(usize, usize)> = Vec::new();
     for pair in pairs {
         match (pair.memory, pair.prompt) {
-            (Some(memory), Some(prompt)) => complete.push(LinkedPair {
-                memory: Some(memory),
-                prompt: Some(prompt),
-            }),
+            (Some(memory), Some(prompt)) => complete.push((memory, prompt)),
             (Some(memory), None) => standalone.push(memory),
             (None, Some(prompt)) => standalone.push(prompt),
             (None, None) => {}
@@ -311,15 +310,11 @@ pub async fn list_memories(
     // / `a.memory.createdAt`), the item itself otherwise. Stable sort: pinned
     // first, then `createdAt` descending.
     let mut order: Vec<(bool, i64, Vec<usize>)> = Vec::new();
-    for pair in &complete {
-        let memory = pair.memory.expect("a complete pair carries a memory index");
+    for (memory, prompt) in &complete {
         order.push((
-            entries[memory].is_pinned(),
-            entries[memory].created_at(),
-            vec![
-                memory,
-                pair.prompt.expect("a complete pair carries a prompt index"),
-            ],
+            entries[*memory].is_pinned(),
+            entries[*memory].created_at(),
+            vec![*memory, *prompt],
         ));
     }
     for index in standalone {

@@ -32,11 +32,11 @@ pub const HTTP_IDLE_TIMEOUT: Duration = Duration::from_secs(
 
 /// The generic 500 envelope returned when a handler panics (D-3).
 pub fn panic_response() -> Response {
-    axum::http::Response::builder()
-        .status(StatusCode::INTERNAL_SERVER_ERROR)
-        .header("Content-Type", "application/json")
-        .body(Body::from(crate::error::error_envelope(
-            "Internal Server Error",
-        )))
-        .expect("the panic response is always a valid HTTP response")
+    // infallible constructor — this is the panic-recovery middleware and must not be able to panic (ADR-0013 D-3)
+    crate::http::response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        crate::http::JSON,
+        &[],
+        Body::from(crate::error::error_envelope("Internal Server Error")),
+    )
 }

@@ -61,11 +61,24 @@ impl ReadyGate {
 
     /// Upstream `ensureTursoReady`.
     pub async fn ensure_ready(&self) -> Result<(), StoreError> {
-        if self.state.lock().unwrap().ready {
+        // GateState { ready, in_flight }: cross-field; a stale ready skips every migration step (ADR-0013 D-2 D2-a)
+        if self
+            .state
+            .lock()
+            .map_err(|_| StoreError::LockPoisoned {
+                lock: "state",
+                operation: "ensure_ready",
+            })?
+            .ready
+        {
             return Ok(());
         }
         let cell = {
-            let mut state = self.state.lock().unwrap();
+            // GateState: claim-or-install the init cell; a cell whose initializer panicked never completes (ADR-0013 D-2 D2-a)
+            let mut state = self.state.lock().map_err(|_| StoreError::LockPoisoned {
+                lock: "state",
+                operation: "ensure_ready",
+            })?;
             if state.ready {
                 return Ok(());
             }
@@ -80,11 +93,19 @@ impl ReadyGate {
         };
         let result: Result<(), StoreError> = cell.get_or_init(|| self.run_steps()).await.clone();
         if result.is_ok() {
-            let mut state = self.state.lock().unwrap();
+            // GateState: ready = true then in_flight = None — the pair is the invariant (ADR-0013 D-2 D2-a)
+            let mut state = self.state.lock().map_err(|_| StoreError::LockPoisoned {
+                lock: "state",
+                operation: "ensure_ready",
+            })?;
             state.ready = true;
             state.in_flight = None;
         } else {
-            let mut state = self.state.lock().unwrap();
+            // GateState: clear in_flight after a failed init so a retry re-runs every step (ADR-0013 D-2 D2-a)
+            let mut state = self.state.lock().map_err(|_| StoreError::LockPoisoned {
+                lock: "state",
+                operation: "ensure_ready",
+            })?;
             state.in_flight = None;
         }
         result
@@ -98,10 +119,15 @@ impl ReadyGate {
     }
 
     /// Upstream `resetTursoReady`.
-    pub fn reset(&self) {
-        let mut state = self.state.lock().unwrap();
+    pub fn reset(&self) -> Result<(), StoreError> {
+        // GateState: reset() clears both fields — the gate that decides whether the steps run again (ADR-0013 D-2 D2-c)
+        let mut state = self.state.lock().map_err(|_| StoreError::LockPoisoned {
+            lock: "state",
+            operation: "reset",
+        })?;
         state.ready = false;
         state.in_flight = None;
+        Ok(())
     }
 
     /// Registered step names in execution order.
@@ -262,4 +288,32 @@ pub fn build_ready_gate_with_encryption(
     ));
     steps.push(shard_warmup_step(shards));
     ReadyGate::new(steps)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    #[tokio::test]
+    async fn test_ready_gate_propagates_poisoned_state_lock() {
+        let gate = ReadyGate::new(Vec::new());
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = gate.state.lock().expect("fresh lock");
+            panic!("poison");
+        }));
+        assert!(gate.state.is_poisoned(), "state lock must be poisoned");
+
+        let error = gate
+            .ensure_ready()
+            .await
+            .expect_err("a poisoned gate must refuse to claim readiness");
+        assert!(matches!(
+            error,
+            StoreError::LockPoisoned {
+                lock: "state",
+                operation: "ensure_ready",
+            }
+        ));
+    }
 }

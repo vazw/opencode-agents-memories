@@ -12,7 +12,7 @@
 //! may front the server on another port).
 
 use axum::body::Body;
-use axum::http::{Response, StatusCode};
+use axum::http::StatusCode;
 use axum::response::Response as AxumResponse;
 
 /// The loopback names that are always allowed.
@@ -94,12 +94,13 @@ impl HostAllowlist {
 /// It never carries the token, the `__OPENCODE_MEM_TOKEN__` marker, or an
 /// echo of the offending (attacker-controlled) `Host` value.
 pub fn host_refusal_response() -> AxumResponse {
-    Response::builder()
-        .status(StatusCode::FORBIDDEN)
-        .header("Content-Type", "application/json")
-        .header("Cache-Control", "no-store")
-        .body(Body::from(REFUSAL_BODY))
-        .expect("the host refusal response is always a valid HTTP response")
+    // infallible constructor; the refusal body is a const &str (ADR-0013 D-3)
+    crate::http::response(
+        StatusCode::FORBIDDEN,
+        crate::http::JSON,
+        &[(axum::http::header::CACHE_CONTROL, crate::http::NO_STORE)],
+        Body::from(REFUSAL_BODY),
+    )
 }
 
 /// Normalizes a host name: trimmed, ASCII-lowercased, IPv6 brackets stripped.

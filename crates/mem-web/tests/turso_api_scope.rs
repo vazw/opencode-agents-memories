@@ -100,6 +100,7 @@ impl RealStore {
             Some(API_TOKEN),
             None,
             PathBuf::from("/tmp/unused-dist"),
+            common::throwaway_log_dir(),
             services,
             "unknown",
             "127.0.0.1",

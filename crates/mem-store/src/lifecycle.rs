@@ -10,16 +10,32 @@
 #![allow(dead_code)]
 
 use crate::connection::ConnectionManager;
+use crate::error::StoreError;
 use crate::ready::ReadyGate;
 use crate::shard_manager::ShardManager;
 
 /// Upstream `closeTursoAndInvalidateCaches` (store-side half).
+///
+/// All three stages are **attempted**: the contract is "close *and*
+/// invalidate", so a failed close is precisely when the caches must still be
+/// cleared. Every failure is either returned or reported — nothing is dropped
+/// silently (ADR-0013 D-4).
 pub async fn close_turso_and_invalidate_caches(
     connections: &ConnectionManager,
     shards: &ShardManager,
     ready: &ReadyGate,
-) {
-    connections.close_all().await;
-    shards.reset();
-    ready.reset();
+) -> Result<(), StoreError> {
+    let close_result = connections.close_all().await;
+    let reset_result = shards.reset();
+    let ready_result = ready.reset();
+    if let Err(error) = &reset_result {
+        tracing::error!(error = %error, "shard caches not reset");
+    }
+    if let Err(error) = &ready_result {
+        tracing::error!(error = %error, "ready gate not reset");
+    }
+    close_result?;
+    reset_result?;
+    ready_result?;
+    Ok(())
 }

@@ -450,7 +450,10 @@ mod step5 {
         let path = config.storage_path.join("fds.db");
         // warm-up cycle (allocator + registry entry points warm up here)
         let warm = manager.get_connection(&path).await.expect("warm-up");
-        manager.close_connection(&path).await;
+        manager
+            .close_connection(&path)
+            .await
+            .expect("connection closes");
         drop(warm);
 
         fn fd_count() -> usize {
@@ -461,7 +464,10 @@ mod step5 {
         let baseline = fd_count();
         for _ in 0..3 {
             let handle = manager.get_connection(&path).await.expect("cycle open");
-            manager.close_connection(&path).await;
+            manager
+                .close_connection(&path)
+                .await
+                .expect("connection closes");
             drop(handle);
         }
         let after = fd_count();
@@ -484,7 +490,10 @@ mod step5 {
         );
         let path = config.storage_path.join("na.db");
         let _ = manager.get_connection(&path).await.expect("open");
-        manager.close_connection(&path).await;
+        manager
+            .close_connection(&path)
+            .await
+            .expect("connection closes");
     }
 
     // -----------------------------------------------------------------------
@@ -502,16 +511,28 @@ mod step5 {
         );
         let path = config.storage_path.join("recover.db");
         let handle = manager.get_connection(&path).await.expect("open");
-        assert!(manager.has_open_connection(&path));
-        manager.close_connection(&path).await;
+        assert!(manager.has_open_connection(&path).expect("has open"));
+        manager
+            .close_connection(&path)
+            .await
+            .expect("connection closes");
         drop(handle);
-        assert!(!manager.has_open_connection(&path), "released");
+        assert!(
+            !manager.has_open_connection(&path).expect("has open"),
+            "released"
+        );
         let reopened = manager.get_connection(&path).await.expect("reopen");
-        assert!(manager.has_open_connection(&path));
-        manager.close_connection(&path).await;
-        manager.close_connection(&path).await; // second close: no-op
+        assert!(manager.has_open_connection(&path).expect("has open"));
+        manager
+            .close_connection(&path)
+            .await
+            .expect("connection closes");
+        manager
+            .close_connection(&path)
+            .await
+            .expect("connection closes"); // second close: no-op
         drop(reopened);
-        assert!(!manager.has_open_connection(&path));
+        assert!(!manager.has_open_connection(&path).expect("has open"));
     }
 
     // -----------------------------------------------------------------------
@@ -545,7 +566,7 @@ mod step5 {
         }
         let close_task = tokio::spawn({
             let manager = manager.clone();
-            async move { manager.close_all().await }
+            async move { manager.close_all().await.expect("close all") }
         });
         factory.release_next();
         let handle = open_task.await.expect("open join").expect("open");
@@ -553,7 +574,7 @@ mod step5 {
         drop(handle);
 
         assert!(
-            !manager.has_open_connection(&path),
+            !manager.has_open_connection(&path).expect("has open"),
             "close_all drained the manager"
         );
         manager.get_connection(&path).await.expect("fresh open");

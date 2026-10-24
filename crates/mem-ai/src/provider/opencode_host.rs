@@ -12,6 +12,8 @@
 //! them, and the client-side step budget aborts runaway structured-output
 //! loops.
 
+use mem_core::sync::{lock_or_recover, read_or_recover, write_or_recover};
+
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -415,10 +417,8 @@ impl HostState {
 
         let session_id = self.create_session(&cancellation, budget).await?;
         self.internal.track(&session_id);
-        self.step_counts
-            .lock()
-            .expect("step counts poisoned")
-            .insert(session_id.clone(), 0);
+        // step_counts: diagnostic budget per session; a lost count resets one budget (ADR-0013 D-2 D2-R)
+        lock_or_recover(&self.step_counts).insert(session_id.clone(), 0);
 
         let mut guard = CleanupGuard::new(self.clone(), session_id.clone(), cancellation.clone());
         let result = self
@@ -435,10 +435,8 @@ impl HostState {
         guard.disarm();
         self.delete_session(&session_id, &cancellation).await;
         self.internal.untrack(&session_id);
-        self.step_counts
-            .lock()
-            .expect("step counts poisoned")
-            .remove(&session_id);
+        // step_counts: single remove at session end (ADR-0013 D-2 D2-R)
+        lock_or_recover(&self.step_counts).remove(&session_id);
         result
     }
 
@@ -467,27 +465,28 @@ impl HostState {
     }
 
     fn is_provider_connected(&self, name: &str) -> bool {
-        self.connected
-            .read()
-            .expect("connected set poisoned")
-            .contains(name)
+        // connected: read-only contains; re-derived from GET /config (ADR-0013 D-2 D2-R)
+        read_or_recover(&self.connected).contains(name)
     }
 
     fn set_connected_providers(&self, providers: Vec<String>) {
-        let mut connected = self.connected.write().expect("connected set poisoned");
+        // connected: clear + extend in one write guard, so readers never see a partial set (ADR-0013 D-2 D2-R)
+        let mut connected = write_or_recover(&self.connected);
         connected.clear();
         connected.extend(providers);
     }
 
     fn set_connected_providers_refresher(&self, refresher: ConnectedRefresher) {
-        *self.refresher.write().expect("refresher poisoned") = Some(refresher);
+        // refresher: one Option store; a stale value only changes who refreshes (ADR-0013 D-2 D2-R)
+        *write_or_recover(&self.refresher) = Some(refresher);
     }
 
     async fn ensure_provider_connected(&self, name: &str) -> bool {
         if self.is_provider_connected(name) {
             return true;
         }
-        let refresher = self.refresher.read().expect("refresher poisoned").clone();
+        // refresher: clone out, invoked after the guard is dropped (ADR-0013 D-2 D2-R)
+        let refresher = read_or_recover(&self.refresher).clone();
         if let Some(refresher) = refresher {
             // The refresher logs; a failed refresh keeps the previous set.
             let _ = refresher().await;
@@ -510,9 +509,10 @@ impl HostState {
                 should_abort: false,
             };
         }
-        let mut counts = self.step_counts.lock().expect("step counts poisoned");
+        // step_counts: entry-or-insert then saturating_add(1) (ADR-0013 D-2 D2-R)
+        let mut counts = lock_or_recover(&self.step_counts);
         let steps = counts.entry(session_id.to_owned()).or_insert(0);
-        *steps += 1;
+        *steps = steps.saturating_add(1);
         StepNote {
             tracked: true,
             steps: *steps,

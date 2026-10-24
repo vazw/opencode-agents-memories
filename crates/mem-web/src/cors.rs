@@ -4,8 +4,10 @@
 //! origin gets a 403 envelope with no `Access-Control-*` header at all.
 
 use axum::body::Body;
-use axum::http::{Response, StatusCode};
+use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::Response as AxumResponse;
+
+use crate::http;
 
 /// The loopback hosts a browser origin may come from.
 const ALLOWED_LOOPBACK_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
@@ -52,26 +54,37 @@ pub fn preflight_response(origin: Option<&str>, http_auth_enabled: bool) -> Axum
         return disallowed_response();
     }
 
-    let mut builder = Response::builder()
-        .status(StatusCode::NO_CONTENT)
-        .header("Access-Control-Max-Age", CORS_MAX_AGE);
+    // infallible constructor: the static values are `const HeaderValue`s and the
+    // echoed Origin is validated; a failure DENIES, it never echoes (ADR-0013 D-3)
+    let mut extra: Vec<(HeaderName, HeaderValue)> = vec![(
+        header::ACCESS_CONTROL_MAX_AGE,
+        HeaderValue::from_static(CORS_MAX_AGE),
+    )];
     if let Some(origin) = origin {
-        builder = builder
-            .header("Access-Control-Allow-Origin", origin)
-            .header("Access-Control-Allow-Methods", CORS_ALLOWED_METHODS)
-            .header("Access-Control-Allow-Headers", CORS_ALLOWED_HEADERS)
-            .header("Vary", "Origin");
+        let Ok(allow_origin) = HeaderValue::try_from(origin) else {
+            return disallowed_response();
+        };
+        extra.push((header::ACCESS_CONTROL_ALLOW_ORIGIN, allow_origin));
+        extra.push((
+            header::ACCESS_CONTROL_ALLOW_METHODS,
+            HeaderValue::from_static(CORS_ALLOWED_METHODS),
+        ));
+        extra.push((
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            HeaderValue::from_static(CORS_ALLOWED_HEADERS),
+        ));
+        extra.push((header::VARY, HeaderValue::from_static("Origin")));
     }
-    builder
-        .body(Body::empty())
-        .expect("the preflight response is always a valid HTTP response")
+    http::response_without_content_type(StatusCode::NO_CONTENT, &extra, Body::empty())
 }
 
 /// The 403 envelope for a rejected cross-origin request.
 pub fn disallowed_response() -> AxumResponse {
-    Response::builder()
-        .status(StatusCode::FORBIDDEN)
-        .header("Content-Type", "application/json")
-        .body(Body::from(DISALLOWED_BODY))
-        .expect("the disallowed response is always a valid HTTP response")
+    // infallible constructor with the const JSON content type and a fixed body (ADR-0013 D-3)
+    http::response(
+        StatusCode::FORBIDDEN,
+        http::JSON,
+        &[],
+        Body::from(DISALLOWED_BODY),
+    )
 }

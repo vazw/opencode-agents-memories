@@ -49,6 +49,19 @@ pub enum ProfileError {
     /// gate said no".
     #[error("{0}")]
     Analysis(String),
+    /// The daily decay stamp was poisoned (ADR-0013 D-2 `D2-c`): the stamp
+    /// **gates** a side effect over on-disk profiles, so a poisoned gate must
+    /// refuse rather than continue on a value its owner left behind.
+    ///
+    /// The payload is two `&'static str` literals — never `PoisonError`'s
+    /// `Box<dyn Any>`.
+    #[error("lock `{lock}` poisoned while {operation}; refusing to continue")]
+    LockPoisoned {
+        /// The guarded value's name (a closed set of literals).
+        lock: &'static str,
+        /// The operation that found the lock poisoned.
+        operation: &'static str,
+    },
 }
 
 impl ProfileError {

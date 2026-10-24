@@ -79,7 +79,7 @@ async fn fixture(prefix: &str) -> (Fixture, ShardInfo) {
             project_name: None,
             git_repo_url: None,
         };
-        let statement = insert_vector_statement(&record);
+        let statement = insert_vector_statement(&record).expect("statement builds");
         db.execute(&statement.sql, statement.params)
             .await
             .expect("insert memory");
@@ -92,7 +92,10 @@ async fn fixture(prefix: &str) -> (Fixture, ShardInfo) {
         .await
         .expect("pin mem_one");
     drop(db);
-    connections.close_connection(&shard.db_path).await;
+    connections
+        .close_connection(&shard.db_path)
+        .await
+        .expect("connection closes");
 
     // Upstream flips CONFIG.embeddingDimensions = 4 before migrating.
     let mut service_config = config.clone();
@@ -201,7 +204,11 @@ async fn test_stages_a_complete_replacement_and_preserves_metadata_tags_and_pins
     );
 
     drop(db);
-    fixture.connections.close_connection(&shard.db_path).await;
+    fixture
+        .connections
+        .close_connection(&shard.db_path)
+        .await
+        .expect("connection closes");
     cleanup_temp_dir(&fixture.storage).expect("cleanup");
 }
 
@@ -261,7 +268,11 @@ async fn test_leaves_the_source_shard_untouched_when_any_embedding_fails() {
     assert_eq!(metadata.text("value").as_deref(), Some("2"));
 
     drop(db);
-    fixture.connections.close_connection(&shard.db_path).await;
+    fixture
+        .connections
+        .close_connection(&shard.db_path)
+        .await
+        .expect("connection closes");
     cleanup_temp_dir(&fixture.storage).expect("cleanup");
 }
 
@@ -309,7 +320,11 @@ async fn test_archives_source_shards_instead_of_deleting_them_during_fresh_start
 #[tokio::test]
 async fn test_recovers_a_crash_between_source_backup_and_replacement_rename() {
     let (fixture, shard) = fixture("reembed-crash").await;
-    fixture.connections.close_connection(&shard.db_path).await;
+    fixture
+        .connections
+        .close_connection(&shard.db_path)
+        .await
+        .expect("connection closes");
 
     // Emulate the crash window: staged replacement exists, the source has
     // already been moved to the backup, the journal is on disk.
@@ -345,6 +360,10 @@ async fn test_recovers_a_crash_between_source_backup_and_replacement_rename() {
     assert_eq!(count.i64("count"), Some(2));
 
     drop(db);
-    fixture.connections.close_connection(&shard.db_path).await;
+    fixture
+        .connections
+        .close_connection(&shard.db_path)
+        .await
+        .expect("connection closes");
     cleanup_temp_dir(&fixture.storage).expect("cleanup");
 }

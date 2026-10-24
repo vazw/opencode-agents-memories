@@ -108,7 +108,10 @@ pub async fn apply_schema_migrations(
     if pending.is_empty() {
         return Ok(current);
     }
-    let target = *pending.last().expect("pending non-empty checked above");
+    // pending is non-empty here: the last version is the migration target (ADR-0013 D-3)
+    let Some(target) = pending.last().copied() else {
+        return Ok(current);
+    };
     // DIVERGENCE (reviewer note): upstream closes the handle before the
     // backup copy; a borrowed `&dyn Db` cannot. Without a checkpoint the
     // seeded `PRAGMA user_version` write may still live in the live WAL,

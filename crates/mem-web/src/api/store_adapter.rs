@@ -280,6 +280,9 @@ impl MemoryPort for ProductionMemory {
                 scope_hash: shard.scope_hash,
                 shard_index: shard.shard_index,
                 db_path: shard.db_path,
+                shard_id: Some(shard.id),
+                vector_count: shard.vector_count,
+                is_active: shard.is_active,
             }));
         }
         Ok(refs)
@@ -358,12 +361,13 @@ impl MemoryPort for ProductionMemory {
         let db = self.open(shard).await?;
         // Upstream's `db.transaction("write")`: delete + insert atomically.
         // `BatchMode::Write` is the transactional batch (IMMEDIATE).
+        let statement = vector::insert_vector_statement(&insert).map_err(store_failure)?;
         let statements = vec![
             Statement::new(
                 mem_store::sql::DELETE_MEMORY_BY_ID,
                 vec![Value::Text(insert.id.clone())],
             ),
-            vector::insert_vector_statement(&insert),
+            statement,
         ];
         db.batch(statements, BatchMode::Write)
             .await
@@ -957,6 +961,9 @@ impl ProductionFacts {
                 scope_hash: shard.scope_hash,
                 shard_index: shard.shard_index,
                 db_path: shard.db_path,
+                shard_id: Some(shard.id),
+                vector_count: shard.vector_count,
+                is_active: shard.is_active,
             })
             .collect())
     }

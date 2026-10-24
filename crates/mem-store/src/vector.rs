@@ -47,8 +47,9 @@ pub struct MemoryInsert {
 
 /// Upstream `vectorToJson` (serde_json maps non-finite floats to `null`,
 /// matching `JSON.stringify`).
-pub fn vector_to_text(vector: &[f32]) -> String {
-    serde_json::to_string(vector).expect("float serialization cannot fail")
+pub fn vector_to_text(vector: &[f32]) -> Result<String, StoreError> {
+    // vector serialization: the failure is real and typed, 13 call sites thread it (ADR-0013 D-3)
+    Ok(serde_json::to_string(vector)?)
 }
 
 /// Upstream `resolveSessionId`: explicit non-empty wins, else metadata.
@@ -61,15 +62,16 @@ pub fn resolve_session_id(session_id: Option<String>, metadata: Option<&str>) ->
 }
 
 /// Upstream `insertArgs` — param order pinned to the frozen INSERTs.
-fn insert_args(value: &MemoryInsert) -> Vec<Value> {
-    let content_vector = vector_to_text(&value.vector);
+fn insert_args(value: &MemoryInsert) -> Result<Vec<Value>, StoreError> {
+    // the parameter list carries serialized vectors, so the whole list becomes fallible with them (ADR-0013 D-3)
+    let content_vector = vector_to_text(&value.vector)?;
     let mut params = vec![
         Value::Text(value.id.clone()),
         Value::Text(value.content.clone()),
         Value::Text(content_vector),
     ];
     if let Some(tags_vector) = &value.tags_vector {
-        params.push(Value::Text(vector_to_text(tags_vector)));
+        params.push(Value::Text(vector_to_text(tags_vector)?));
     }
     params.extend([
         Value::Text(value.container_tag.clone()),
@@ -120,24 +122,25 @@ fn insert_args(value: &MemoryInsert) -> Vec<Value> {
             .map(Value::Text)
             .unwrap_or(Value::Null),
     ]);
-    params
+    Ok(params)
 }
 
 /// Upstream `insertVector` statement form — the frozen INSERT chosen by
 /// `tags_vector.is_some()` plus the frozen `insert_args` params. Consumed by
 /// `insert_vector` and the migration/re-embed batch write paths.
-pub fn insert_vector_statement(value: &MemoryInsert) -> Statement {
-    let params = insert_args(value);
+pub fn insert_vector_statement(value: &MemoryInsert) -> Result<Statement, StoreError> {
+    // the frozen INSERT needs the serialized params, so building it is fallible (ADR-0013 D-3)
+    let params = insert_args(value)?;
     if value.tags_vector.is_some() {
-        Statement::new(crate::sql::INSERT_WITH_TAGS, params)
+        Ok(Statement::new(crate::sql::INSERT_WITH_TAGS, params))
     } else {
-        Statement::new(crate::sql::INSERT_WITHOUT_TAGS, params)
+        Ok(Statement::new(crate::sql::INSERT_WITHOUT_TAGS, params))
     }
 }
 
 /// Upstream `insertVector` (no `prepareShardDb` — manager wiring, step 8).
 pub async fn insert_vector(db: &dyn Db, value: &MemoryInsert) -> Result<(), StoreError> {
-    let statement = insert_vector_statement(value);
+    let statement = insert_vector_statement(value)?;
     db.execute(&statement.sql, statement.params).await?;
     Ok(())
 }
@@ -390,7 +393,8 @@ pub async fn search_in_shard(
     limit: usize,
     query_text: Option<&str>,
 ) -> Result<Vec<SearchResult>, StoreError> {
-    let query_json = vector_to_text(query_vector);
+    // the query vector is serialized once and threaded: a failure is typed, not a panic (ADR-0013 D-3)
+    let query_json = vector_to_text(query_vector)?;
     // Exact cosine already returns the best-k rows; over-fetch a little so
     // content+tags+keyword candidates can merge before the hybrid re-rank.
     let k = (limit.saturating_mul(2)).max(32);
@@ -615,14 +619,15 @@ pub async fn update_memory_vectors(
     content_vector: &[f32],
     tags_vector: Option<&[f32]>,
 ) -> Result<(), StoreError> {
-    let content = vector_to_text(content_vector);
+    // the content vector is serialized once and threaded: a failure is typed, not a panic (ADR-0013 D-3)
+    let content = vector_to_text(content_vector)?;
     match tags_vector {
         Some(tags_vector) => {
             db.execute(
                 crate::sql::UPDATE_MEMORY_VECTORS,
                 vec![
                     Value::Text(content),
-                    Value::Text(vector_to_text(tags_vector)),
+                    Value::Text(vector_to_text(tags_vector)?),
                     Value::Text(memory_id.to_string()),
                 ],
             )

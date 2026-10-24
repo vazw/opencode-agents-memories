@@ -308,7 +308,7 @@ pub async fn dump_and_reload_encrypted(
     };
 
     crate::db::assert_path_inside_storage(storage_path, db_path)?;
-    connections.close_connection(db_path).await;
+    connections.close_connection(db_path).await?;
 
     let millis = now_millis();
     let staged = PathBuf::from(format!("{}.encrypt-{millis}.tmp", db_path.display()));
@@ -412,8 +412,10 @@ pub async fn run_database_encryption_migration(
 
     // Upstream `finally`: the shard manager always resets and the lock is
     // always released, on success and on failure alike.
-    shards.reset();
+    // the reset must not skip the release: an op-lock leak blocks every later write
+    let reset = shards.reset();
     lock.release();
+    reset?;
     outcome
 }
 

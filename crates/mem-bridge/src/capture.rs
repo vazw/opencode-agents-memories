@@ -254,7 +254,8 @@ pub async fn write_capture_summary(
                         project_name: scope.project_name.clone(),
                         git_repo_url: scope.git_repo_url.clone(),
                     };
-                    let statement = insert_vector_statement(&insert);
+                    let statement =
+                        insert_vector_statement(&insert).map_err(CaptureWriterError::Failed)?;
                     let statements = vec![
                         statement,
                         // SQLite allows DML batches; the count bump is

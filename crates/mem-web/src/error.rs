@@ -50,6 +50,27 @@ pub enum WebError {
 /// `serde_json::Map` sorts its keys, so the envelope is assembled directly to
 /// keep the upstream byte order (`success` before `error`).
 pub(crate) fn error_envelope(message: &str) -> String {
-    let escaped = serde_json::to_string(message).expect("a string is always serializable");
-    format!(r#"{{"success":false,"error":{escaped}}}"#)
+    // error envelope: on a serialization failure log the cause and fall back to the fixed body (ADR-0013 D-3)
+    match serde_json::to_string(message) {
+        Ok(escaped) => format!(r#"{{"success":false,"error":{escaped}}}"#),
+        Err(error) => {
+            tracing::error!(error = %error, "error envelope message failed to serialize");
+            r#"{"success":false,"error":"Internal Server Error"}"#.to_string()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_envelope_escapes_message_byte_identically() {
+        let message = "quote \" backslash \\ newline \n tab \t";
+        let escaped = serde_json::to_string(message).expect("a string serializes");
+        assert_eq!(
+            error_envelope(message),
+            format!(r#"{{"success":false,"error":{escaped}}}"#)
+        );
+    }
 }

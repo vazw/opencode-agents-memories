@@ -106,10 +106,11 @@ pub(crate) async fn gate(
 
 /// The 401 answer for an unauthorized API request.
 fn unauthorized_response() -> Response {
-    axum::http::Response::builder()
-        .status(StatusCode::UNAUTHORIZED)
-        .header("Content-Type", "application/json")
-        .header("Cache-Control", "no-store")
-        .body(Body::from(error_envelope("Unauthorized")))
-        .expect("the unauthorized response is always a valid HTTP response")
+    // infallible constructor with const Content-Type and Cache-Control (ADR-0013 D-3)
+    crate::http::response(
+        StatusCode::UNAUTHORIZED,
+        crate::http::JSON,
+        &[(axum::http::header::CACHE_CONTROL, crate::http::NO_STORE)],
+        Body::from(error_envelope("Unauthorized")),
+    )
 }

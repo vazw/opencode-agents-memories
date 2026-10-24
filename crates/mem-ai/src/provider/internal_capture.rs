@@ -7,6 +7,8 @@
 //! keeps a grace window so a late `session.idle` still matches after the
 //! session was already deleted.
 
+use mem_core::sync::lock_or_recover;
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -68,9 +70,8 @@ impl InternalCaptureSessions {
 
     /// Mark a session as an internal capture session (live).
     pub fn track(&self, session_id: &str) {
-        self.inner
-            .lock()
-            .expect("internal capture set poisoned")
+        // tracked map: session id to grace deadline; single insert, in-process, nothing persisted (ADR-0013 D-2 D2-R)
+        lock_or_recover(&self.inner)
             .tracked
             .insert(session_id.to_owned(), None);
     }
@@ -78,20 +79,24 @@ impl InternalCaptureSessions {
     /// Release a session after the grace window (or immediately when grace is
     /// zero).
     pub fn untrack(&self, session_id: &str) {
-        let mut state = self.inner.lock().expect("internal capture set poisoned");
+        // tracked: insert-or-remove of one entry; worst case one capture skipped (ADR-0013 D-2 D2-R)
+        let mut state = lock_or_recover(&self.inner);
         if self.grace.is_zero() {
             state.tracked.remove(session_id);
         } else {
-            state
-                .tracked
-                .insert(session_id.to_owned(), Some(Instant::now() + self.grace));
+            // checked_add: an overflow stores None ("live"), the fail-safe direction (ADR-0013 D-2 D2-R)
+            state.tracked.insert(
+                session_id.to_owned(),
+                Instant::now().checked_add(self.grace),
+            );
         }
     }
 
     /// True while `session_id` is tracked (live or still inside its grace
     /// window). Expired entries are pruned eagerly.
     pub fn is_tracked(&self, session_id: &str) -> bool {
-        let mut state = self.inner.lock().expect("internal capture set poisoned");
+        // tracked: read plus eager prune of one entry (ADR-0013 D-2 D2-R)
+        let mut state = lock_or_recover(&self.inner);
         match state.tracked.get(session_id) {
             None => false,
             Some(None) => true,
@@ -114,10 +119,7 @@ impl InternalCaptureSessions {
 
     /// Drop all tracked ids.
     pub fn clear(&self) {
-        self.inner
-            .lock()
-            .expect("internal capture set poisoned")
-            .tracked
-            .clear();
+        // tracked: one clear; the set is a per-process cache (ADR-0013 D-2 D2-R)
+        lock_or_recover(&self.inner).tracked.clear();
     }
 }

@@ -1197,11 +1197,17 @@ async fn test_purge_session_reports_busy_with_exit_75() {
     held.release();
 }
 
-/// ADR-0012 D-11, option (b): the vault holds nothing for any session because
-/// it has **no writer**, so `not_erased` stays complete and true without a
-/// vault entry — and the purge must be proved unable to reach the vault's
-/// directories. The fixture is plain bytes on purpose: `mem-bridge` declares
-/// no edge to `mem-vault` (normal or dev), so it cannot construct a real one.
+/// ADR-0012 D-11: the purge erasure leg is not shipped yet — W8b owns it — so
+/// the purge must be proved unable to reach the vault's directories. The fixture
+/// is synthetic opaque bytes on purpose: the property under test is that purge
+/// reaches no path under `{storage_root}/vault/`, which must hold for any
+/// content there. `mem-bridge` does declare a `mem-vault` edge (`Cargo.toml:14`,
+/// used by `vault_feeder.rs`), so a real store could be constructed; a real
+/// vault is not used because it would couple this purge oracle to key custody
+/// without widening the purge path it proves. When W8b lands the erasure leg,
+/// this oracle must be re-scoped: erasure is then supposed to delete the scopes
+/// named in `PurgeRequest.vault_scopes`, and this claim must narrow to the
+/// scopes the request does not name.
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_purge_does_not_touch_the_vault_directories() {
     let seeded = seed(TestDir::new("w72-purge-vault"), true).await;

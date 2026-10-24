@@ -63,9 +63,14 @@ impl From<i64> for Value {
     }
 }
 
-impl From<u64> for Value {
-    fn from(value: u64) -> Self {
-        Self::Integer(i64::try_from(value).expect("u64 fits in i64 for SQLite"))
+// impl From<u64> for Value is a false infallibility claim: From may not fail, so the trait is the defect (ADR-0013 D-3)
+impl TryFrom<u64> for Value {
+    type Error = StoreError;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        i64::try_from(value)
+            .map(Value::Integer)
+            .map_err(|_| StoreError::internal("u64 value exceeds i64::MAX"))
     }
 }
 
@@ -618,3 +623,31 @@ fn assert_send_sync<T: ?Sized + Send + Sync>() {}
 /// Unused-parameter silencer for the probe accessor kept for later steps.
 #[allow(dead_code)]
 fn probe_placeholder(_probe: &Arc<dyn ProcessProbe>) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_value_try_from_u64_accepts_values_within_i64() {
+        assert_eq!(
+            Value::try_from(0_u64).expect("0 fits in i64"),
+            Value::Integer(0)
+        );
+        assert_eq!(
+            Value::try_from(42_u64).expect("42 fits in i64"),
+            Value::Integer(42)
+        );
+        assert_eq!(
+            Value::try_from(i64::MAX as u64).expect("i64::MAX fits"),
+            Value::Integer(i64::MAX)
+        );
+    }
+
+    #[test]
+    fn test_value_try_from_u64_rejects_values_above_i64_max() {
+        let error = Value::try_from(u64::MAX).expect_err("u64::MAX exceeds i64::MAX");
+        assert!(matches!(error, StoreError::Internal { .. }));
+        assert!(Value::try_from(i64::MAX as u64 + 1).is_err());
+    }
+}

@@ -54,6 +54,11 @@ pub const DEFAULT_WEB_PORT: u16 = 3742;
 // Structured stderr (mandate 2)
 // ---------------------------------------------------------------------------
 
+/// The fixed fallback emitted when the diagnostics payload cannot be
+/// serialized: still one valid JSON object, so the NDJSON framing survives.
+const STDERR_SERIALIZE_FALLBACK: &str =
+    r#"{"component":"bridge","event":"stderr.serialize_failed","level":"error"}"#;
+
 /// Writes one structured-JSON diagnostics line to stderr.
 ///
 /// Only the named level/component/event and the explicit extras are emitted:
@@ -71,7 +76,14 @@ pub fn structured_stderr(event: &str, level: &str, component: &str, extras: serd
             base.insert(key.clone(), value.clone());
         }
     }
-    let mut line = serde_json::to_string(&payload).expect("structured stderr serializes");
+    // stderr logger: a serialization failure emits a fixed valid JSON line, never breaking NDJSON framing (ADR-0013 D-3)
+    let mut line = match serde_json::to_string(&payload) {
+        Ok(line) => line,
+        Err(error) => {
+            tracing::error!(error = %error, "structured stderr payload failed to serialize");
+            STDERR_SERIALIZE_FALLBACK.to_string()
+        }
+    };
     line.push('\n');
     let mut stderr = std::io::stderr().lock();
     let _ = stderr.write_all(line.as_bytes());
@@ -758,10 +770,19 @@ pub fn run(
         );
         return 78;
     }
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    // the runtime build is the only way in: on failure report and return the existing run-failure code (ADR-0013 D-3)
+    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .expect("the engine's single runtime builds");
+    else {
+        structured_stderr(
+            "engine.runtime_failed",
+            "error",
+            "engine",
+            serde_json::json!({ "detail": "the engine's single runtime could not be built" }),
+        );
+        return 70;
+    };
     let code = runtime
         .block_on(run_in_runtime(
             mode,
@@ -789,12 +810,23 @@ pub fn run(
 fn graceful_signal_futures(mode: LaunchMode) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     if mode.installs_signal_handlers() {
         Box::pin(async {
-            let mut term =
-                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                    .expect("SIGTERM handler registers");
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {}
-                _ = term.recv() => {}
+            // SIGTERM registration: on failure log and await ctrl_c() only, so SIGINT still shuts down (ADR-0013 D-3)
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                Ok(mut term) => {
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {}
+                        _ = term.recv() => {}
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(error = %error, "SIGTERM handler failed to register");
+                    if let Err(ctrl_c_error) = tokio::signal::ctrl_c().await {
+                        tracing::error!(
+                            error = %ctrl_c_error,
+                            "SIGINT handler failed to register"
+                        );
+                    }
+                }
             }
         })
     } else {
