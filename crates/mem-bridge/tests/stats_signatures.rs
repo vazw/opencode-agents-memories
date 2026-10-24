@@ -292,12 +292,12 @@ async fn test_capture_still_completes_when_the_sink_becomes_unwritable() {
         "the capture completes regardless: {report:?}"
     );
 
-    // Restore through the real ENOENT re-init path. The facade goes
-    // `SinkLayer::on_event -> sink.append` (which opens with `create(true)`), so
-    // it can never re-initialize; only `LogSink::log` does. Delete the sink's
-    // PARENT directory: `append` then fails `NotFound`, `log` clears
-    // `initialized`, and `init()` recreates the directory, rewrites the banner,
-    // and appends the triggering line.
+    // Restore through the real ENOENT re-init path. The capture above exercised
+    // only the layer's swallow branch (`EISDIR`); this is a separate facade
+    // call. The facade and `SinkLayer` now share one rotation-aware
+    // `write_line` path (ADR-0015): delete the sink's PARENT directory so the
+    // append fails `NotFound`, the path clears `initialized`, re-creates the
+    // directory, rewrites the banner and appends the triggering line.
     let sink_dir = path
         .parent()
         .expect("the sink path has a parent directory")
@@ -307,12 +307,11 @@ async fn test_capture_still_completes_when_the_sink_becomes_unwritable() {
         !path.exists(),
         "the sink file must be gone before the re-init probe"
     );
-    sink.log("restore the sink after the unwritable case", None)
-        .expect("log() re-initializes after the directory vanishes");
+    mem_core::logging::log("restore the sink after the unwritable case", None);
     let restored = std::fs::read_to_string(&path).expect("the log file is recreated");
     assert!(
         restored.contains("--- Session started: "),
-        "init() rewrites the banner, which append() alone cannot: {restored}"
+        "recovery rewrites the banner, which append() alone cannot: {restored}"
     );
     assert!(
         restored.contains("] restore the sink after the unwritable case"),

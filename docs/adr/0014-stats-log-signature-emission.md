@@ -7,6 +7,8 @@
   `stats-service.ts` contract via `crates/mem-web/src/api/stats.rs` (frozen reader).
 - **Extends:** ADR-0008 (capture drain) and ADR-0013 (panic-free production paths) from
   behaviour to **observability**. **Supersedes:** nothing.
+- **Amended (2026-10-25):** the rotation-gap consequence is closed by ADR-0015 (see the CLOSED
+  bullet under Consequences).
 - **Binding on:** `mem-core::logging`, `mem-bridge::capture`, `mem-web::api::stats` (reader,
   unchanged) and the root composition binary.
 
@@ -85,11 +87,15 @@ are structurally dormant behind subsystems that do not exist yet.
   most one `captures` increment per entry. A `mark_done` error is swallowed by the existing
   `let _ =`; the row stays queued, the retry re-writes and returns `Replayed`, and the
   `Replayed` arm correctly emits nothing. This is an undercount, never a correctness bug.
-- **Rotation gap (gated follow-up, not this wave).** `SinkLayer::on_event` calls
-  `sink.append` directly and therefore bypasses `LogSink::log`'s 5 MiB rotation and its ENOENT
-  re-init. After this wave the layer is the sole production writer, so runtime rotation is
-  never enforced and a deleted log directory kills file logging silently until restart.
-  Stats correctness is unaffected — the series is driven by the line dates, not by filenames.
+- **Rotation gap — CLOSED by ADR-0015 (2026-10-25).** *Historical (kept verbatim):*
+  `SinkLayer::on_event` calls `sink.append` directly and therefore bypasses `LogSink::log`'s
+  5 MiB rotation and its ENOENT re-init. After this wave the layer is the sole production
+  writer, so runtime rotation is never enforced and a deleted log directory kills file logging
+  silently until restart. *Closed:* the facade and the layer now share one private
+  rotation-aware `write_line` path (ADR-0015 D-1/D-2/D-4): `rotate()` runs before every write,
+  so the 5 MiB cap is enforced at runtime, and one `ENOENT` retry re-creates the directory and
+  rewrites the banner. Stats correctness was unaffected either way — the series is driven by
+  the line dates, not by filenames.
 - **Dead-letter terminality.** Double-emit is excluded because `dead_letter` sets
   `status = 'dead'` and `dequeue` selects `status = 'queued'`; a persistently failing
   dead-letter leaves the row queued and re-emits on each attempt — identical in shape to the

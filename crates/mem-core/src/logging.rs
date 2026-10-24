@@ -5,9 +5,14 @@
 //!   from any other module never reaches the file.
 //! - Production file logging goes through [`log`]; the composition root
 //!   installs the subscriber once via [`init_process_logging`].
-//! - A sink write failure after install is accepted loss: the layer uses
-//!   `let _ = sink.append(..)` and never re-enters `tracing` (a logging
-//!   failure must never fail a capture).
+//! - The facade and [`SinkLayer`] share one private, rotation-aware write path
+//!   ([`LogSink::write_line`]): it primes the directory/banner, rotates,
+//!   appends and retries once on `ENOENT`. Neither entry point can bypass
+//!   rotation or directory recovery (ADR-0015).
+//! - A sink write failure after install is accepted loss: the layer swallows
+//!   `write_line`'s `Result` and never re-enters `tracing` and never writes
+//!   stderr (a logging failure must never fail a capture, and the engine's
+//!   NDJSON stderr seam must stay clean).
 //! - File sink: env-overridden path, session banner, 5 MiB / daily rotation,
 //!   30-day archive cleanup, `[<local-ISO-timestamp>] <message>[: <json>]`
 //!   lines, and ENOENT re-init retry.
@@ -70,7 +75,6 @@ fn data_json(data: Option<&Value>) -> Option<String> {
 #[derive(Debug, Default)]
 struct LogSinkInner {
     initialized: bool,
-    last_rotate_date: Option<String>,
 }
 
 /// Cheap-clone handle over a single log file (upstream `logger.ts`).
@@ -121,7 +125,16 @@ impl LogSink {
 
     /// Creates the log directory, rotates stale files, appends the session
     /// banner, and flags the sink initialized.
+    ///
+    /// Acquires the writer lock once and delegates to [`Self::init_locked`].
     pub fn init(&self) -> Result<(), LoggingError> {
+        let mut inner = self.lock();
+        self.init_locked(&mut inner)
+    }
+
+    /// The locked body of [`Self::init`]. Caller holds the writer lock; this
+    /// never locks, never calls `tracing` and never touches stderr.
+    fn init_locked(&self, inner: &mut LogSinkInner) -> Result<(), LoggingError> {
         let dir = self.log_dir();
         if dir != Path::new(".") {
             fs::create_dir_all(&dir).map_err(|source| LoggingError::Io {
@@ -139,39 +152,35 @@ impl LogSink {
             path: self.path.clone(),
             source,
         })?;
-        let mut inner = self.lock();
         inner.initialized = true;
-        inner.last_rotate_date = Some(format_date(local_today()));
         Ok(())
     }
 
-    /// Appends one rendered line, re-initializing once when the directory
-    /// vanished after init (`ENOENT`), mirroring upstream recovery.
-    pub fn log(&self, message: &str, data: Option<&Value>) -> Result<(), LoggingError> {
-        if !self.lock().initialized {
-            self.init()?;
+    /// The single rotation-aware write path shared by [`Self::log`] and
+    /// [`SinkLayer::on_event`] (ADR-0015).
+    ///
+    /// Owns the whole sequence under one acquisition of the writer lock:
+    /// prime (directory + banner) → rotate → append → exactly one `ENOENT`
+    /// retry. The critical section is a leaf: `std::fs` calls, `chrono` and
+    /// pure formatting only — never `tracing`, never stderr, never another
+    /// lock, never a re-entry into `LogSink`.
+    fn write_line(&self, line: &str) -> Result<(), LoggingError> {
+        let mut inner = self.lock();
+        if !inner.initialized {
+            self.init_locked(&mut inner)?;
         }
 
-        let today = format_date(local_today());
-        {
-            let mut inner = self.lock();
-            if inner.last_rotate_date.as_deref() != Some(today.as_str()) {
-                inner.last_rotate_date = Some(today.clone());
-                drop(inner);
-                self.rotate();
-            }
-        }
+        // Rotation is checked before EVERY write: the size branch enforces the
+        // 5 MiB cap at runtime, the mtime branch keeps the midnight rollover
+        // working (ADR-0015 D-2).
+        self.rotate();
 
-        let line = build_line(&format_timestamp(), message, data_json(data).as_deref());
-        match self.append(&line) {
+        match self.append(line) {
             Ok(()) => Ok(()),
             Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
-                {
-                    let mut inner = self.lock();
-                    inner.initialized = false;
-                }
-                self.init()?;
-                self.append(&line).map_err(|source| LoggingError::Io {
+                inner.initialized = false;
+                self.init_locked(&mut inner)?;
+                self.append(line).map_err(|source| LoggingError::Io {
                     path: self.path.clone(),
                     source,
                 })
@@ -181,6 +190,15 @@ impl LogSink {
                 source,
             }),
         }
+    }
+
+    /// Appends one rendered line through the shared write path (rotation,
+    /// directory recovery, one `ENOENT` retry). The timestamp is rendered
+    /// before the lock — one `Local::now()` fewer; `rotate`'s date work stays
+    /// inside the section and is leaf-safe.
+    pub fn log(&self, message: &str, data: Option<&Value>) -> Result<(), LoggingError> {
+        let line = build_line(&format_timestamp(), message, data_json(data).as_deref());
+        self.write_line(&line)
     }
 
     fn append(&self, line: &str) -> std::io::Result<()> {
@@ -309,9 +327,11 @@ fn build_line(timestamp: &str, message: &str, data_json: Option<&str>) -> String
 ///
 /// `on_event` captures the `message` and `data_json` fields (in both the
 /// string and debug visitor paths) and renders through the same builder as
-/// [`LogSink::log`]. Events without a `message` fall back to the event target.
-/// Never panics and never calls back into `tracing` (no recursion); write
-/// errors are swallowed because a layer cannot propagate.
+/// [`LogSink::log`], then writes through the same private rotation-aware
+/// `write_line` path. Events without a `message` fall back to the event
+/// target. Never panics, never calls back into `tracing` (no recursion) and
+/// never writes stderr; write errors are swallowed because a layer cannot
+/// propagate.
 #[derive(Debug, Clone)]
 pub struct SinkLayer {
     sink: LogSink,
@@ -370,7 +390,9 @@ impl<S: tracing::Subscriber> Layer<S> for SinkLayer {
             .message
             .unwrap_or_else(|| event.metadata().target().to_owned());
         let line = build_line(&format_timestamp(), &message, visitor.data_json.as_deref());
-        let _ = self.sink.append(&line);
+        // The layer shares the facade's rotation-aware write path; a layer
+        // cannot propagate, so the error is accepted loss (ADR-0015).
+        let _ = self.sink.write_line(&line);
     }
 }
 
