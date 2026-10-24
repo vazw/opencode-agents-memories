@@ -276,7 +276,9 @@ fn spawn_engine(storage: &Path, web_port: u16, dist: &Path, stderr_path: &Path) 
         .arg(format!("--web-dist={}", dist.display()))
         // The dist is named by the CLI flag; an inherited env var must not
         // shadow it in either direction.
-        .env_remove(opencode_agents_memory::web_dist::ENV_VAR);
+        .env_remove(opencode_agents_memory::web_dist::ENV_VAR)
+        // Isolate the process-global file log from the real home.
+        .env("OPENCODE_MEM_LOG_FILE", storage.join("opencode-mem.log"));
     command
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))

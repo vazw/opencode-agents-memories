@@ -5,6 +5,10 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use mem_core::logging::log;
+use mem_core::logging::signatures::{
+    AUTO_CAPTURE_FINAL_ERROR, AUTO_CAPTURE_MEMORY_PERSISTED, AUTO_CAPTURE_SKIPPED,
+};
 use mem_core::scope::Scope;
 use mem_core::sha256;
 
@@ -713,7 +717,22 @@ impl CaptureService {
         }
         let tier_input = capture_summary_input(entry, &summary, &memory_type, &tags, &params);
         match self.writer.write(&scope, &tier_input).await {
-            Ok(Tier1WriteOutcome::Written | Tier1WriteOutcome::Replayed) => {
+            Ok(Tier1WriteOutcome::Written) => {
+                let _ = self.inbox.mark_done(&entry.capture_id).await;
+                log(
+                    AUTO_CAPTURE_MEMORY_PERSISTED,
+                    Some(&serde_json::json!({
+                        "captureId": &entry.capture_id,
+                        "sessionId": &params.session_id,
+                        "projectId": &params.project_id,
+                        "memoryType": &memory_type,
+                    })),
+                );
+                EntryOutcome::Done
+            }
+            // A replay means the deterministic row already existed: emitting
+            // here would double-count a retry after a lost `mark_done`.
+            Ok(Tier1WriteOutcome::Replayed) => {
                 let _ = self.inbox.mark_done(&entry.capture_id).await;
                 EntryOutcome::Done
             }
@@ -762,6 +781,14 @@ impl CaptureService {
         let (summary, memory_type, tags, extension) = match output {
             CaptureSummaryOutput::Skip => {
                 let _ = self.inbox.mark_done(&entry.capture_id).await;
+                log(
+                    AUTO_CAPTURE_SKIPPED,
+                    Some(&serde_json::json!({
+                        "captureId": &entry.capture_id,
+                        "sessionId": &params.session_id,
+                        "type": "skip",
+                    })),
+                );
                 return EntryOutcome::Done;
             }
             CaptureSummaryOutput::Capture {
@@ -795,7 +822,22 @@ impl CaptureService {
         // row still gets its own deterministic tier-1 row per capture_id.
         let tier_input = capture_summary_input(entry, &summary, &memory_type, &tags, &params);
         match self.writer.write(&scope, &tier_input).await {
-            Ok(Tier1WriteOutcome::Written | Tier1WriteOutcome::Replayed) => {
+            Ok(Tier1WriteOutcome::Written) => {
+                let _ = self.inbox.mark_done(&entry.capture_id).await;
+                log(
+                    AUTO_CAPTURE_MEMORY_PERSISTED,
+                    Some(&serde_json::json!({
+                        "captureId": &entry.capture_id,
+                        "sessionId": &params.session_id,
+                        "projectId": &params.project_id,
+                        "memoryType": &memory_type,
+                    })),
+                );
+                EntryOutcome::Done
+            }
+            // A replay means the deterministic row already existed: emitting
+            // here would double-count a retry after a lost `mark_done`.
+            Ok(Tier1WriteOutcome::Replayed) => {
                 let _ = self.inbox.mark_done(&entry.capture_id).await;
                 EntryOutcome::Done
             }
@@ -819,6 +861,15 @@ impl CaptureService {
                 "warn",
                 "capture",
                 serde_json::json!({ "capture_id": entry.capture_id, "project_id": entry.project_id }),
+            );
+            log(
+                &format!("{AUTO_CAPTURE_FINAL_ERROR} after {attempts_after} attempts"),
+                Some(&serde_json::json!({
+                    "captureId": &entry.capture_id,
+                    "projectId": &entry.project_id,
+                    "attempts": attempts_after,
+                    "outcome": "dead_lettered",
+                })),
             );
             EntryOutcome::Dead
         } else {
@@ -846,6 +897,14 @@ impl CaptureService {
                 "project_id": entry.project_id,
                 "reason": reason,
             }),
+        );
+        log(
+            AUTO_CAPTURE_FINAL_ERROR,
+            Some(&serde_json::json!({
+                "captureId": &entry.capture_id,
+                "projectId": &entry.project_id,
+                "reason": reason,
+            })),
         );
         EntryOutcome::Dead
     }

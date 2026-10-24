@@ -212,7 +212,12 @@ fn spawn_standalone(
         .arg(format!("--web-port={web_port}"))
         // The parent test runner's environment is never trusted: the setting
         // under test is injected per child, and only per child.
-        .env_remove(web_dist::ENV_VAR);
+        .env_remove(web_dist::ENV_VAR)
+        // Isolate the process-global file log from the real home.
+        .env(
+            "OPENCODE_MEM_LOG_FILE",
+            storage_root.join("opencode-mem.log"),
+        );
     for extra in extras {
         command.arg(extra);
     }

@@ -18,7 +18,7 @@
 //! missing build is loud and diagnosable instead of a silent 404 shell
 //! (W6.8/AC3).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -94,6 +94,9 @@ fn version_line() -> String {
 struct RootWebLauncher {
     dist: ResolvedDist,
     config: mem_core::config::Config,
+    /// The daily-stats scan directory, derived from the log sink at the
+    /// composition root so the writer and the reader cannot disagree.
+    log_dir: PathBuf,
 }
 
 impl WebLauncher for RootWebLauncher {
@@ -174,10 +177,11 @@ impl WebLauncher for RootWebLauncher {
                     storage_root.join(".auth-token"),
                 )),
                 dist_dir,
-                // The daily-stats scan directory, resolved once at the
-                // composition root (upstream `defaultLogDir`; the handler
-                // itself only reads the state field).
-                log_dir: mem_web::api::stats::default_log_dir(),
+                // The daily-stats scan directory, derived from the SAME sink
+                // the composition root installed (W-log-signature): the
+                // writer and the reader share one resolution path and cannot
+                // disagree. `default_log_dir()` remains a reader-side helper.
+                log_dir: self.log_dir.clone(),
                 host_allowlist: mem_web::host_allowlist::HostAllowlist::for_bind_host(&host),
                 api,
                 user_id: "unknown".to_owned(),
@@ -396,6 +400,31 @@ fn main() {
         ));
     }
 
+    // W-log-signature — install the structured-log sink ONCE at the
+    // composition root, and derive the stats scan directory from that same
+    // sink. Both stdio and standalone modes reach this point; the sync modes
+    // (`--version`, `print-crates`, `purge-session`) returned above.
+    //
+    // Degraded observability: a failed install must not abort the engine (a
+    // zero counter is strictly better than no engine); the existing
+    // machine-readable stderr seam reports it.
+    let env = mem_core::env::ProcessEnv;
+    let home = mem_core::env::home_dir(&env).unwrap_or_else(|| PathBuf::from("."));
+    let sink = mem_core::logging::LogSink::from_env(&env, &home);
+    let log_dir = sink
+        .path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    if let Err(error) = mem_core::logging::init_process_logging(sink) {
+        structured_stderr(
+            "logging.init_failed",
+            "warn",
+            "engine",
+            mem_store::serde_json::json!({ "error": error.to_string() }),
+        );
+    }
+
     let exit = engine_run(
         config.mode,
         config,
@@ -403,6 +432,7 @@ fn main() {
         Box::new(RootWebLauncher {
             dist,
             config: core_config,
+            log_dir,
         }),
     );
     std::process::exit(exit);

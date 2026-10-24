@@ -1,7 +1,13 @@
 //! Logging strategy mirror of upstream `src/services/logger.ts`.
 //!
-//! - `tracing` is the repo-wide log facade; file output goes through a
-//!   `LogSink` handle so the composition binary owns the target path.
+//! - `tracing` is the repo-wide log facade; **the file sink is scoped to the
+//!   [`log`] facade's target** (`mem_core::logging`) — a raw `tracing` event
+//!   from any other module never reaches the file.
+//! - Production file logging goes through [`log`]; the composition root
+//!   installs the subscriber once via [`init_process_logging`].
+//! - A sink write failure after install is accepted loss: the layer uses
+//!   `let _ = sink.append(..)` and never re-enters `tracing` (a logging
+//!   failure must never fail a capture).
 //! - File sink: env-overridden path, session banner, 5 MiB / daily rotation,
 //!   30-day archive cleanup, `[<local-ISO-timestamp>] <message>[: <json>]`
 //!   lines, and ENOENT re-init retry.
@@ -20,6 +26,18 @@ use crate::error::LoggingError;
 
 pub const MAX_LOG_SIZE: u64 = 5 * 1024 * 1024;
 pub const MAX_LOG_DAYS: i64 = 30;
+
+/// The tracing target the file sink accepts. Exact equality only: a prefix
+/// match would re-admit sibling targets (e.g. `mem_core::logging::x`).
+///
+/// Private on purpose — it is an internal detail, not a public contract; the
+/// public contract is [`log`].
+const LOG_TARGET: &str = "mem_core::logging";
+
+/// The nine scraped structured-log signatures, as one public spelling for the
+/// writer side. The reader's classifier keeps its own literals; the mem-web
+/// drift guard is the bridge between the two.
+pub mod signatures;
 
 const TIMESTAMP_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.3f%:z";
 const DATE_FORMAT: &str = "%Y-%m-%d";
@@ -340,6 +358,12 @@ impl<S: tracing::Subscriber> Layer<S> for SinkLayer {
         event: &tracing::Event<'_>,
         _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
+        // The file sink is a contract, not a diagnostic dump: only the facade
+        // (`mem_core::logging::log`) may write lines. Exact equality keeps
+        // sibling targets out.
+        if event.metadata().target() != LOG_TARGET {
+            return;
+        }
         let mut visitor = EventVisitor::default();
         event.record(&mut visitor);
         let message = visitor
@@ -370,12 +394,28 @@ pub fn init_logging(
     .map_err(|_| LoggingError::AlreadyInstalled)
 }
 
+/// The composition-root install: pins the production level policy (`INFO`) in
+/// `mem-core` and delegates to [`init_logging`].
+///
+/// The root package cannot name `tracing_subscriber::filter::LevelFilter`, so
+/// keeping the policy here avoids leaking a dependency into the binary crate.
+/// Errors are typed: an unwritable sink path surfaces as
+/// [`LoggingError::Io`] and a second install as
+/// [`LoggingError::AlreadyInstalled`].
+pub fn init_process_logging(sink: LogSink) -> Result<(), LoggingError> {
+    init_logging(sink, tracing_subscriber::filter::LevelFilter::INFO)
+}
+
 /// The canonical log call later waves use: emits an `INFO` event with
 /// `message` and, when data is present, `data_json` (compact JSON via
 /// Display). No subscriber installed → no-op (tracing semantics).
+///
+/// The event carries the [`LOG_TARGET`] target, which is what scopes the file
+/// sink to this facade. Infallible by design: a logging failure must never
+/// fail a capture.
 pub fn log(message: &str, data: Option<&Value>) {
     match data {
-        None => tracing::info!(message = message),
-        Some(value) => tracing::info!(message = message, data_json = %value),
+        None => tracing::info!(target: LOG_TARGET, message = message),
+        Some(value) => tracing::info!(target: LOG_TARGET, message = message, data_json = %value),
     }
 }

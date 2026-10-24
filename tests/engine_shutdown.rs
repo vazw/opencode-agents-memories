@@ -91,6 +91,9 @@ fn spawn_engine(root: &Path, extra_env: &[(&str, &str)]) -> Guarded {
         .arg(format!("--storage-root={}", root.display()))
         .arg(format!("--web-port={}", free_port()))
         .env("OPENCODE_MEM_WEB_HOST", DEFAULT_WEB_HOST)
+        // Isolate the process-global file log: never the developer's real
+        // `~/.opencode-mem/opencode-mem.log`.
+        .env("OPENCODE_MEM_LOG_FILE", root.join("opencode-mem.log"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -324,6 +327,7 @@ fn test_engine_lock_loser_exits_75() {
     let loser_output = Command::new(env!("CARGO_BIN_EXE_opencode-agents-memory"))
         .arg(format!("--storage-root={}", root.display()))
         .arg(format!("--web-port={}", free_port()))
+        .env("OPENCODE_MEM_LOG_FILE", root.join("opencode-mem.log"))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

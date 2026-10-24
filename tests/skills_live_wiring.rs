@@ -114,6 +114,11 @@ fn spawn_standalone(
         .arg(format!("--web-port={web_port}"))
         .arg(format!("{}={}", web_dist::CLI_FLAG, dist.display()))
         .env_remove(web_dist::ENV_VAR)
+        // Isolate the process-global file log from the real home.
+        .env(
+            "OPENCODE_MEM_LOG_FILE",
+            storage_root.join("opencode-mem.log"),
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));

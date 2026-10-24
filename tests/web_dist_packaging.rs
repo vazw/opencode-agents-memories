@@ -301,6 +301,11 @@ fn spawn_packaged(
         // The parent test runner's environment is never trusted: the setting
         // under test is absent, per child.
         .env_remove(web_dist::ENV_VAR)
+        // Isolate the process-global file log from the real home.
+        .env(
+            "OPENCODE_MEM_LOG_FILE",
+            storage_root.join("opencode-mem.log"),
+        )
         .stdin(Stdio::piped())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))

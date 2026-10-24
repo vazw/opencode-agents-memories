@@ -256,11 +256,16 @@ pub(crate) async fn collect_profile_stats(state: &AppState) -> ProfileStatsDto {
 // Parsers + daily series (this wave; upstream `stats-service.ts`)
 // -------------------------------------------------------------------------
 
-/// The upstream `defaultLogDir()` seam for the composition root: the directory
-/// of the env-overridden log file, else `<home>/.opencode-mem` (the same env
-/// contract as [`mem_core::logging::LogSink::from_env`], with a panic-free
-/// `"."` fallback when no home is resolvable). The handler itself only reads
-/// `AppState::log_dir` — this helper is called once, when the state is built.
+/// The upstream `defaultLogDir()` reference, retained as a **reader-side
+/// helper for tests and spawn helpers**: the directory of the env-overridden
+/// log file, else `<home>/.opencode-mem` (the same env contract as
+/// [`mem_core::logging::LogSink::from_env`], with a panic-free `"."` fallback
+/// when no home is resolvable).
+///
+/// The production composition root no longer calls it: `src/main.rs` derives
+/// `log_dir` from the very sink it installs (`LogSink::path().parent()`), so
+/// the writer and the reader share one resolution path and cannot disagree.
+/// The handler itself only reads `AppState::log_dir`.
 pub fn default_log_dir() -> PathBuf {
     let env = mem_core::env::ProcessEnv;
     let home = mem_core::env::home_dir(&env).unwrap_or_else(|| PathBuf::from("."));
