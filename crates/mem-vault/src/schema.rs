@@ -12,8 +12,8 @@
 //! Rotation is decided in ADR-0012 D-7 (a full rekey of one scope directory;
 //! every `content_hash` is rewritten, so ids are **not** stable across a
 //! rekey) and D-8 (the marker is the single commit point). It is implemented
-//! by the first writer wave (D-9). This crate ships no rotation API and
-//! nothing here may be read as a second rotation design.
+//! by **W8c** (D-9). This crate ships no rotation API and nothing here may be
+//! read as a second rotation design.
 //!
 //! # The v2 rule: additive only
 //!
@@ -23,11 +23,14 @@
 //! accepted ADR plus a rehash of every row, because it would invalidate every
 //! id already on disk.
 //!
-//! # Deleting the file is a valid reset — only while there is no writer
+//! # Deleting the file was a valid reset only under the no-writer premise, which is discharged
 //!
-//! With no writer, a scope holds nothing, so deleting `vault.db` is a
-//! legitimate v0→v1 reset. The moment a writer exists that stops being true
-//! (a lost key over live ciphertext is unrecoverable by design, D-10).
+//! Before W8a a scope held nothing, so deleting `vault.db` was a legitimate
+//! v0→v1 reset. Since W8a's content path a scope can hold live ciphertext, so
+//! deleting `vault.db` — or a key file — is data loss: the library never
+//! deletes either, a lost key over live ciphertext is unrecoverable by design,
+//! and the fail-closed errors are `KeyMissingForExistingData` and `InvalidKey`
+//! (D-10). Nothing here authorises a reset today.
 
 use mem_store::db::Statement;
 use mem_store::schema_migrations::SchemaMigration;
@@ -45,7 +48,7 @@ pub const VAULT_KEYS_DIR: &str = "vault-keys";
 /// The data directory under the storage root.
 pub const VAULT_DIR: &str = "vault";
 
-/// The `vault_entries` v1 DDL: six columns, no writer.
+/// The `vault_entries` v1 DDL: six columns; a writer has existed since W8a.
 ///
 /// `content_hash` is the identity **and** the keyed-digest contract;
 /// `content` is verbatim (L0, no normalization); `mime_type` renders a `BLOB`;

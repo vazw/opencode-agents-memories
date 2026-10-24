@@ -5,7 +5,7 @@ hash, one encrypted `vault.db` per scope, keyed content ids (`content_hash`),
 a v1 schema, and a content write/read path (`put`/`get`) whose identity is
 derived from the store's cached `KeyHex`.
 
-Design authority: `docs/adr/0012-vault-key-custody.md` (D-1 … D-12). Encryption
+Design authority: `docs/adr/0012-vault-key-custody.md` (D-1 … D-18). Encryption
 of the global shards stays ADR-0004's, untouched (D-12).
 
 ## Ubiquitous language
@@ -83,17 +83,21 @@ not injectable). Vault tests assert the store sets it, not a specific value.
 
 ## Rotation stance
 
-Rotation is decided in ADR-0012 D-7/D-8 and implemented by the **first writer
-wave** (D-9): a rekey rewrites every `content_hash`, so ids are not stable
-across a rekey, and no reference outside the vault may persist one. This crate
-ships no rotation API and nothing here may be read as a second rotation design.
+Rotation is decided in ADR-0012 D-7/D-8 and implemented by **W8c**: the rekey,
+`recover_rekey`, and the shared rekey/purge lock (D-18) ship in one change. W8b,
+between W8a and W8c, is the purge erasure leg (D-9, D-11). A rekey rewrites every
+`content_hash`, so ids are not stable across a rekey, and no reference outside
+the vault may persist one. This crate ships no rotation API and nothing here may
+be read as a second rotation design.
 
 ## Purge stance
 
-No purge path reaches this tier today because no writer exists; the wave that
-adds a writer owns the erase question (D-11). Until then `purge.completed`'s
-`not_erased` is complete and true without a vault entry, and
-`mem-bridge`'s purge is proved unable to touch these directories.
+The purge erasure leg is **not shipped yet** — W8b owns it (D-11, D-13 … D-16,
+D-18). The gap is live: W8a's feeder writes vault content, so `purge.completed`'s
+`not_erased` is **not** complete without a vault entry. Until W8b lands, a purge
+leaves this tier's bytes in place and over-reports completeness; `mem-bridge`'s
+purge is proved unable to touch these directories only because no erasure path
+exists yet — that is the residual, not a guarantee.
 
 ## Accepted, documented, not mitigated
 
