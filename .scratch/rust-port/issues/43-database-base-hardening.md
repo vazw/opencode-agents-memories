@@ -81,6 +81,52 @@ deliberately left unamended so the evidence that the design was wrong survives.
 
 ---
 
+## W6 ERASURE — PRIOR ART, AND A CONTRADICTION IN THE DESIGN (2026-10-25, vault research)
+
+Before deciding W6, know that the owner's own ADR already ruled on this — and that the design
+contradicts itself.
+
+**ADR-0012 D-14 (2026-10-23) refuses exactly the remedy the design proposes** (`docs/adr/0012-vault-key-custody.md:539`):
+
+> "**No `VACUUM` and no `secure_delete` in the purge path.** `VACUUM` rewrites the whole database: it
+> is expensive, it needs the key, and it can fail on a busy database, which would make erasure *less
+> reliable* than leaving the page images alone."
+
+Its stated posture is **logical** deletion plus named residuals, and its argument works because the vault
+database is **encrypted**, so what survives in old pages is **ciphertext**, and destroying a key generation
+is the real defence.
+
+**That reasoning does not transfer to `user-prompts.db` for free, because that database is not encrypted.**
+`crates/mem-core/src/config/schema.rs:602` sets `database_encryption_enabled: false` as the default.
+
+The design draft (`.tmp/drafts/20261025-database-base-hardening-design.md:144`) says:
+
+> "Encryption at rest stays the real posture (default is `false`, `schema.rs:602`); VACUUM is
+> belt-and-braces on a plaintext root."
+
+**Those two clauses cannot both hold.** If encryption is off by default there is no ciphertext, so the
+residue is plaintext and "encryption is the real posture" is a position nobody has taken a decision for.
+Also note ADR-0012's reason for refusing `VACUUM` is **reliability** ("it can fail on a busy database"),
+not absence — and the engine measurement supersedes its parenthetical: `secure_delete` does not exist at
+all in turso 0.8.3, so "it does not scrub the WAL" is moot.
+
+**Consequence for the owner's decision.** W6 is not only "drop multiprocess WAL so `VACUUM` can run?".
+It is at least three options, and the third was not on the table before:
+
+1. drop multiprocess WAL for `user-prompts.db` and `VACUUM` on sweep;
+2. keep multiprocess WAL and accept that deleted prompt text is never erasable — which, with
+   `database_encryption_enabled = false`, means **plaintext residue on disk**;
+3. turn encryption on for that database (which changes the key-custody question, ADR-0012's subject) and
+   treat the residue as ciphertext, exactly as the vault does.
+
+The vault's own privacy page (`[[open-problem-9-privacy-model-agent-memory]]`) lists "**Right to forget**:
+users can delete their data" among its privacy-by-design requirements — so option 2 is in tension with a
+stated product position, not merely with a preference.
+
+**Still not decided, and not decidable by a wave. Recorded so the decision arrives with its history.**
+
+---
+
 ## Why this exists
 
 Two independent reviews of `.tmp/drafts/20261025-database-design-handover.md` (2026-10-25) found defects in
