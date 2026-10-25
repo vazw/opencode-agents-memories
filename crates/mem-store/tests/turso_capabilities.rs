@@ -42,7 +42,7 @@
 
 mod common;
 
-use std::io::BufRead;
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use mem_store::config::StoreConfig;
@@ -135,13 +135,26 @@ async fn open_with_vacuum(
     path: &Path,
     multiprocess_wal: bool,
 ) -> (turso::Database, turso::Connection) {
+    try_open_with_vacuum(path, multiprocess_wal)
+        .await
+        .unwrap_or_else(|error| panic!("build vacuum database: {error}"))
+}
+
+/// The non-panicking twin of [`open_with_vacuum`], one builder chain, two
+/// contracts. The Step 8 second-wave probe's **question** is whether this open
+/// succeeds, so it cannot share a helper that panics on the answer it is
+/// measuring; the callers that require success keep [`open_with_vacuum`].
+async fn try_open_with_vacuum(
+    path: &Path,
+    multiprocess_wal: bool,
+) -> Result<(turso::Database, turso::Connection), String> {
     let mut builder = turso::Builder::new_local(&path.to_string_lossy()).experimental_vacuum(true);
     if multiprocess_wal {
         builder = builder.experimental_multiprocess_wal(true);
     }
-    let database = builder.build().await.expect("build vacuum database");
-    let connection = database.connect().expect("connect vacuum database");
-    (database, connection)
+    let database = builder.build().await.map_err(|error| error.to_string())?;
+    let connection = database.connect().map_err(|error| error.to_string())?;
+    Ok((database, connection))
 }
 
 /// Byte-pattern search with an explicit empty/short guard (a naive
@@ -1602,6 +1615,25 @@ async fn open_single_process(
     multiprocess_wal: bool,
     encryption: Option<&EncryptionOptions>,
 ) -> (turso::Database, turso::Connection) {
+    try_open_single_process(path, multiprocess_wal, encryption)
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "open {} with multiprocess_wal={multiprocess_wal}: {error}",
+                path.display()
+            )
+        })
+}
+
+/// The non-panicking twin of [`open_single_process`] (same builder, one
+/// definition). Probe B's cells measure whether a second process's open is
+/// *refused*, and the refusal text is the datum, so the opener child must be
+/// able to report it instead of panicking.
+async fn try_open_single_process(
+    path: &Path,
+    multiprocess_wal: bool,
+    encryption: Option<&EncryptionOptions>,
+) -> Result<(turso::Database, turso::Connection), String> {
     let mut builder = turso::Builder::new_local(&path.to_string_lossy())
         .experimental_encryption(encryption.is_some());
     if multiprocess_wal {
@@ -1613,19 +1645,9 @@ async fn open_single_process(
             hexkey: encryption.hexkey.clone(),
         });
     }
-    let database = builder.build().await.unwrap_or_else(|error| {
-        panic!(
-            "open {} with multiprocess_wal={multiprocess_wal}: {error}",
-            path.display()
-        )
-    });
-    let connection = database.connect().unwrap_or_else(|error| {
-        panic!(
-            "connect {} with multiprocess_wal={multiprocess_wal}: {error}",
-            path.display()
-        )
-    });
-    (database, connection)
+    let database = builder.build().await.map_err(|error| error.to_string())?;
+    let connection = database.connect().map_err(|error| error.to_string())?;
+    Ok((database, connection))
 }
 
 /// Sorted `(path relative to `dir`, byte length)` inventory of every regular
@@ -3129,5 +3151,1420 @@ async fn test_flag_on_crash_then_flag_off_upgrade() {
     drop(database);
     println!("[upgrade after crash] final={:?}", file_inventory(&dir));
 
+    common::cleanup_temp_dir(&dir).expect("cleanup temp dir");
+}
+
+// ===========================================================================
+// Step 8, second wave — the two questions the erasure ADR must settle first
+// ===========================================================================
+//
+// Both probes are measurements, not ports: no production file is touched, and
+// both are hermetic (per-test temp dir, no sleeps — every barrier is a pipe, a
+// completed engine call, or a handle the caller closes on purpose).
+//
+// **A.** Can ONE process hold a second `Database` on a live path with
+// *different* open options, so the erasure sweep could run beside the engine's
+// normal handle? `experimental_vacuum` is a `Builder`-level option
+// (`turso::Builder::new_local(..).experimental_vacuum(true)`), so "enable it
+// only on the erasure handle" implies exactly that shape. If the engine refuses
+// it, or silently hands back the existing database, the erasure path becomes
+// close main handle → open with vacuum → sweep → reopen, which changes
+// availability during a sweep and must be known before the ADR is written.
+//
+// **B.** After the multiprocess-WAL flag is dropped, is a flag-off open
+// exclusive against a live flag-off holder in another process? `purge-session`
+// is a mode of the same binary; today it coordinates with a live engine through
+// the operation lock while both hold the file open. If a flag-off open is
+// exclusive, that concurrency model changes with no mixed versions involved.
+//
+// **Non-vacuity, stated per arm.**
+// - A's refusal arm is only meaningful because a CONTROL arm runs the same
+//   `VACUUM` on a single vacuum-enabled handle in the same process: if the
+//   control fails, the refusal is VACUUM's fault, not the second open's.
+// - A's DECISIVE arm is the reverse direction: a vacuum-enabled FIRST handle
+//   plus a plain second open whose `VACUUM` still runs. The only mechanism that
+//   produces that is the engine returning the first `Database` for the path, so
+//   the second open's requested option set was never in effect.
+// - B's cells are externally controlled: the holder's row set and integrity
+//   verdict are asserted after the opener acted, so "the opener was refused"
+//   cannot be confused with "the holder quietly broke".
+
+/// How long a probe waits for one engine call or one child protocol line
+/// before calling it *blocked*. Not a synchronisation sleep: a successful wait
+/// is woken by the pipe line the caller's own last action caused. This only
+/// exists so "the engine blocked" becomes a named failure instead of a hung
+/// suite — which is itself one of the answers these probes ask for.
+const PROBE_GUARD: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Runs `future` under [`PROBE_GUARD`]; `Err` means "did not return", i.e. the
+/// blocked answer.
+async fn within_guard<F: std::future::Future>(what: &str, future: F) -> Result<F::Output, String> {
+    tokio::time::timeout(PROBE_GUARD, future)
+        .await
+        .map_err(|_| format!("{what} did not return within {PROBE_GUARD:?} (blocked)"))
+}
+
+/// The budget for the one leg that claims an engine call returns *fast*, not
+/// merely that it returns: `VACUUM` against a live writer must REFUSE rather
+/// than block ([`test_vacuum_is_refused_while_another_connection_holds_a_write_transaction`]).
+///
+/// Deliberately distinct from [`PROBE_GUARD`]. The guard only turns a hang into a
+/// named failure, so a 9-second busy-handler wait would satisfy it while
+/// "refuses rather than blocks" became false — the claim would be unfalsifiable.
+/// This constant IS the claim: a refusal that takes longer than this fails the
+/// leg, and the leg prints the elapsed time it actually measured.
+const VACUUM_REFUSAL_BUDGET: std::time::Duration = std::time::Duration::from_secs(1);
+
+// ---------------------------------------------------------------------------
+// Probe A — a second `Database` on a live path with different open options
+// ---------------------------------------------------------------------------
+//
+// **Not a statement about lock state.** The inherited-option finding below is
+// about the engine's `Database` registry and the option set it hands back, never
+// about file locks: a transient second in-process open of a live path releases
+// the primary's lock on the `.db` file — the second open takes its own
+// descriptor before the registry is consulted and `turso_core`'s
+// `impl Drop for UnixFile` unlocks unconditionally, POSIX `fcntl` locks being
+// per-process — so after one such open, cross-process exclusivity survives only
+// through the `-wal` lock.
+
+/// Probe A, arms 1 and 4: **a second same-path open does not get its own option
+/// set**, so there is no vacuum-enabled handle to be had beside a live primary.
+///
+/// Arm 1 (the ADR's question, forward direction): a normal flag-off handle
+/// writes the canary fixture, then the SAME path is opened with
+/// `experimental_vacuum(true)` while the primary is still live. Recorded: does
+/// the open succeed, and can the second handle run `VACUUM`?
+///
+/// Arm 2 (baseline): the same path opened a third time with IDENTICAL options
+/// to the primary. Without this, arm 1's `Ok` could be blamed on the option
+/// difference or on double-opening, and the two conclusions are opposite.
+///
+/// Arm 3 (control): the same `VACUUM` on a single vacuum-enabled handle — the
+/// counterfactual that stops a refusal in arm 1 from being VACUUM's fault.
+///
+/// Arm 4 (decisive): the REVERSE direction. The vacuum-enabled handle opens
+/// first; a plain (vacuum-free) open comes second; `VACUUM` through that plain
+/// handle is attempted. If it runs, the second open inherited the FIRST
+/// database's option set — the engine handed back the existing instance and the
+/// requested options were ignored. That is the only mechanism that can produce
+/// it, and it is what makes "not an independent handle" a measurement rather
+/// than an inference from the refusal alone.
+///
+/// Measured on turso 0.8.3, Linux: the second open is `Ok` in both directions,
+/// `VACUUM` is refused in arm 1 and RUNS in arm 4, and arm 4 erases the canary.
+#[tokio::test]
+async fn test_second_handle_with_the_vacuum_flag_on_a_live_path_inherits_the_first_option_set() {
+    // -- Arm 1: normal handle first, vacuum-enabled second (the forward case).
+    let dir = common::temp_dir("cap-second-handle-forward");
+    let path = dir.join("p.db");
+    let (primary_database, primary) = open_single_process(&path, false, None).await;
+    primary
+        .execute(
+            "CREATE TABLE probe_rows (id INTEGER PRIMARY KEY, v TEXT NOT NULL)",
+            (),
+        )
+        .await
+        .expect("create probe_rows");
+    primary
+        .execute("INSERT INTO probe_rows (id, v) VALUES (1, 'primary')", ())
+        .await
+        .expect("write through the primary handle");
+    raw_seed_and_delete_canary(&primary, &dir).await;
+    raw_checkpoint(&primary).await;
+    assert!(
+        file_contains(&path, CANARY),
+        "the deleted canary must be in the main file before the second open, otherwise the later survival assertion is vacuous; files: {:?}",
+        file_inventory(&dir)
+    );
+    println!("[A arm 1, primary live] {:?}", file_inventory(&dir));
+
+    let second = try_open_with_vacuum(&path, false).await;
+    println!("[A arm 1] second_open_error={:?}", second.as_ref().err());
+    let (second_database, second) = second.unwrap_or_else(|error| {
+        panic!(
+            "the second open of a LIVE path with `experimental_vacuum(true)` must be measured, not assumed; it returned the error {error:?} instead of a handle. A refusal here is also an ADR answer (no second handle at all), so read this failure as a decision point rather than a test fix; files: {:?}",
+            file_inventory(&dir)
+        )
+    });
+
+    // The second handle's own answer: can it vacuum while the primary is live?
+    let vacuum = second.execute("VACUUM", ()).await;
+    println!(
+        "[A arm 1] vacuum_on_second_error={:?}",
+        vacuum.as_ref().err()
+    );
+    let vacuum_error = vacuum.expect_err(
+        "the second handle asked the engine for `experimental_vacuum(true)` and VACUUM was REFUSED here. If this assertion starts failing, VACUUM ran on a second handle while the primary was still live: a same-process second open then carries its own option set, the erasure sweep can keep the engine's handle open, and the ADR's close-reopen branch disappears — an ADR-level change.",
+    );
+    println!("[A arm 1] vacuum_refusal_text={vacuum_error}");
+    assert!(
+        file_contains(&path, CANARY),
+        "a refused VACUUM must not have touched the file: the canary is still in the main file; files: {:?}",
+        file_inventory(&dir)
+    );
+
+    // The second open IS a live handle on the same database (reads the
+    // primary's row, its writes are visible to the primary) — the point of the
+    // arm is that it is a handle WITHOUT the options it asked for.
+    assert_eq!(
+        raw_count(&second, "probe_rows").await,
+        1,
+        "the second open must at least read the primary's committed row, otherwise 'the options were ignored' and 'the open is useless' would be indistinguishable"
+    );
+    second
+        .execute("INSERT INTO probe_rows (id, v) VALUES (2, 'second')", ())
+        .await
+        .expect("write through the second handle");
+    assert_eq!(
+        raw_count(&primary, "probe_rows").await,
+        2,
+        "a write through the second handle must be visible to the primary handle: that is what 'one database' looks like, and it is why the missing option set is the finding rather than a failed open"
+    );
+
+    // The primary must still read AND write after a refused VACUUM (nothing
+    // ran, so this is the "not left in a broken state" leg, not an erasure leg).
+    primary
+        .execute(
+            "INSERT INTO probe_rows (id, v) VALUES (3, 'primary-after')",
+            (),
+        )
+        .await
+        .expect("the primary must still take writes after the refused VACUUM");
+    assert_eq!(
+        raw_integer_column(&primary, "SELECT id FROM probe_rows ORDER BY id", "id").await,
+        vec![1, 2, 3],
+        "the primary's view must be complete after the second handle's refused VACUUM"
+    );
+    assert_eq!(
+        raw_first_column_text(&primary, "PRAGMA integrity_check")
+            .await
+            .as_deref(),
+        Some("ok"),
+        "the file must still be intact after the second open and the refused VACUUM"
+    );
+
+    // -- Arm 2: the baseline. Same path, IDENTICAL options.
+    let baseline = try_open_single_process(&path, false, None).await;
+    println!(
+        "[A arm 2] baseline_second_open_error={:?}",
+        baseline.as_ref().err()
+    );
+    assert!(
+        baseline.is_ok(),
+        "a second open of the SAME path with IDENTICAL options must be Ok, otherwise arm 1's Ok is attributable to the option difference rather than to double-opening (the opposite conclusion); got {:?}",
+        baseline.as_ref().err()
+    );
+    drop(baseline);
+
+    // -- Arm 3: the control. One handle, vacuum enabled, nothing else live.
+    let control_dir = common::temp_dir("cap-second-handle-control");
+    let control_path = control_dir.join("c.db");
+    let (control_database, control) = open_with_vacuum(&control_path, false).await;
+    control
+        .execute(
+            "CREATE TABLE probe_rows (id INTEGER PRIMARY KEY, v TEXT NOT NULL)",
+            (),
+        )
+        .await
+        .expect("create the control's probe_rows");
+    control
+        .execute("INSERT INTO probe_rows (id, v) VALUES (1, 'control')", ())
+        .await
+        .expect("write the control's row");
+    let control_vacuum = control.execute("VACUUM", ()).await;
+    assert!(
+        control_vacuum.is_ok(),
+        "CONTROL: the same VACUUM on a single handle opened with `experimental_vacuum(true)` must run on this build; if it does not, arm 1's refusal is VACUUM's fault, not the second open's: {control_vacuum:?}"
+    );
+    drop(control);
+    drop(control_database);
+    common::cleanup_temp_dir(&control_dir).expect("cleanup the control arm");
+
+    // -- Arm 4: the decisive reverse direction.
+    let reverse_dir = common::temp_dir("cap-second-handle-reverse");
+    let reverse_path = reverse_dir.join("r.db");
+    let (vacuum_database, vacuum_first) = open_with_vacuum(&reverse_path, false).await;
+    vacuum_first
+        .execute(
+            "CREATE TABLE probe_rows (id INTEGER PRIMARY KEY, v TEXT NOT NULL)",
+            (),
+        )
+        .await
+        .expect("create the reverse arm's probe_rows");
+    vacuum_first
+        .execute("INSERT INTO probe_rows (id, v) VALUES (1, 'vacuum')", ())
+        .await
+        .expect("write through the vacuum-enabled first handle");
+    raw_seed_and_delete_canary(&vacuum_first, &reverse_dir).await;
+    raw_checkpoint(&vacuum_first).await;
+    assert!(
+        file_contains(&reverse_path, CANARY),
+        "the canary must be in the reverse arm's main file before the second open"
+    );
+
+    let plain = try_open_single_process(&reverse_path, false, None).await;
+    println!(
+        "[A arm 4] plain_second_open_error={:?}",
+        plain.as_ref().err()
+    );
+    let (_plain_database, plain) = plain.unwrap_or_else(|error| {
+        panic!(
+            "the second, vacuum-FREE open of a live path must return a handle (arm 1 already showed the same-path open is accepted): {error:?}"
+        )
+    });
+    let inherited = plain.execute("VACUUM", ()).await;
+    println!(
+        "[A arm 4] vacuum_on_the_vacuum_free_second_handle_error={:?}",
+        inherited.as_ref().err()
+    );
+    assert!(
+        inherited.is_ok(),
+        "DECISIVE ARM: this second open asked for NO vacuum feature, yet VACUUM ran through it. The only mechanism that produces that is the engine handing back the FIRST (vacuum-enabled) Database for this path: the requested option set was never in effect, so a same-process second open is not an independent handle. If this ever fails, same-path second opens have become independent and the erasure design can keep the primary open."
+    );
+    assert!(
+        !dir_contains_canary(&reverse_dir),
+        "the VACUUM that ran through the second connection must have erased the deleted canary from every file under the directory — which is what says the inherited handle is a WORKING vacuum handle, not merely one that accepted the statement; files: {:?}",
+        file_inventory(&reverse_dir)
+    );
+    assert_eq!(
+        raw_count(&vacuum_first, "user_prompts").await,
+        0,
+        "the vacuum-enabled first handle must still answer after the VACUUM its second connection ran"
+    );
+    assert_eq!(
+        raw_integer_column(&vacuum_first, "SELECT id FROM probe_rows", "id").await,
+        vec![1],
+        "the first handle must read the REWRITTEN image, not a stale pre-VACUUM page cache: its kept row is still there"
+    );
+    assert_eq!(
+        raw_first_column_text(&vacuum_first, "PRAGMA integrity_check")
+            .await
+            .as_deref(),
+        Some("ok"),
+        "the file must be intact after the inherited-handle VACUUM"
+    );
+
+    drop(plain);
+    drop(_plain_database);
+    drop(second);
+    drop(second_database);
+    drop(primary);
+    drop(primary_database);
+    drop(vacuum_first);
+    drop(vacuum_database);
+    common::cleanup_temp_dir(&reverse_dir).expect("cleanup the reverse arm");
+    common::cleanup_temp_dir(&dir).expect("cleanup the forward arm");
+}
+
+/// Probe A, arm 5 — the fallback the ADR would have to adopt: **close the
+/// primary, open with the vacuum flag, sweep, reopen.**
+///
+/// This is the design's cost made measurable: the sweep is only reachable with
+/// the engine's handle closed, so availability during a sweep is a design
+/// decision, not an implementation detail. The arm therefore asserts the whole
+/// cycle, not just that VACUUM ran: canary present in the main file before,
+/// erased from every file after, every kept row readable through the reopened
+/// flag-off handle, and the engine's own integrity verdict.
+#[tokio::test]
+async fn test_close_then_reopen_with_the_vacuum_flag_erases_and_reopens_clean() {
+    let dir = common::temp_dir("cap-erasure-close-reopen");
+    let path = dir.join("p.db");
+
+    {
+        let (database, connection) = open_single_process(&path, false, None).await;
+        connection
+            .execute(
+                "CREATE TABLE probe_rows (id INTEGER PRIMARY KEY, v TEXT NOT NULL)",
+                (),
+            )
+            .await
+            .expect("create probe_rows");
+        for id in 0..8_i64 {
+            connection
+                .execute(
+                    "INSERT INTO probe_rows (id, v) VALUES (?, ?)",
+                    vec![
+                        turso::Value::Integer(id),
+                        turso::Value::Text(format!("kept-row-{id}")),
+                    ],
+                )
+                .await
+                .expect("write a kept row");
+        }
+        raw_seed_and_delete_canary(&connection, &dir).await;
+        raw_checkpoint(&connection).await;
+        drop(connection);
+        drop(database);
+    }
+    println!("[erase close-reopen, closed] {:?}", file_inventory(&dir));
+    assert!(
+        file_contains(&path, CANARY),
+        "the deleted canary's bytes must be in the main file after the close, otherwise the erase assertion is vacuous; files: {:?}",
+        file_inventory(&dir)
+    );
+
+    // The sweep itself: a fresh, single vacuum-enabled handle on the closed
+    // file — the only shape Probe A's arm 4 showed is reachable.
+    {
+        let (database, connection) = open_with_vacuum(&path, false).await;
+        connection
+            .execute("VACUUM", ())
+            .await
+            .expect("VACUUM must run on a closed-then-reopened file with the vacuum flag");
+        drop(connection);
+        drop(database);
+    }
+    println!("[erase close-reopen, vacuumed] {:?}", file_inventory(&dir));
+    assert!(
+        !dir_contains_canary(&dir),
+        "VACUUM must have removed the marker's bytes from every file under the directory"
+    );
+
+    let (database, connection) = open_single_process(&path, false, None).await;
+    assert_eq!(
+        raw_integer_column(&connection, "SELECT id FROM probe_rows ORDER BY id", "id").await,
+        (0..8).collect::<Vec<i64>>(),
+        "every kept row must be readable through the reopened flag-off handle"
+    );
+    assert_eq!(
+        raw_count(&connection, "user_prompts").await,
+        0,
+        "the deleted canary row stays deleted"
+    );
+    assert_eq!(
+        raw_first_column_text(&connection, "PRAGMA integrity_check")
+            .await
+            .as_deref(),
+        Some("ok"),
+        "the rewritten file must be intact for the flag-off build"
+    );
+    drop(connection);
+    drop(database);
+
+    common::cleanup_temp_dir(&dir).expect("cleanup temp dir");
+}
+
+// ---------------------------------------------------------------------------
+// Probe B — is a flag-off open exclusive against a live flag-off holder?
+// ---------------------------------------------------------------------------
+//
+// Orientation: the HOLDER is this test process (it must be, so its row set and
+// integrity verdict can be read directly), and the OPENER is a child process
+// re-executing this test binary, filtered to [`test_lock_probe_opener_child`].
+// The opener is the child because a mixed-mode second open is the call most
+// likely to fail *inside* the engine, and a panic there must be one cell's
+// datum, not the whole suite's.
+
+const LOCK_PROBE_TABLE: &str =
+    "CREATE TABLE IF NOT EXISTS lock_probe (id INTEGER PRIMARY KEY, writer TEXT NOT NULL)";
+
+/// The holder's committed seed row: the row that must still be readable after
+/// the opener has done whatever it does.
+const LOCK_SEED_ID: i64 = 1;
+
+/// The row the holder writes (and leaves UNCOMMITTED) in the mid-write cells.
+const LOCK_MID_WRITE_ID: i64 = 2;
+
+/// The row the holder writes AFTER the opener's attempt — the "does the holder
+/// still take writes" leg, and the row the opener's second read looks for.
+const LOCK_HOLDER_AFTER_ID: i64 = 3;
+
+/// The row the opener writes. Distinct from every holder row so "the holder
+/// sees the opener's data" and "the opener sees the holder's data" are two
+/// different assertions rather than one count.
+const LOCK_OPENER_ID: i64 = 100;
+
+/// `ids` as the child protocol carries them (`1,2,100`).
+fn join_ids(ids: &[i64]) -> String {
+    ids.iter()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Ids in `lock_probe`, or the engine's error text. Deliberately tolerant: the
+/// mixed cells must be able to REPORT a failed read (that is the finding), so
+/// this twin of [`raw_integer_column`] returns the error instead of panicking.
+async fn lock_probe_ids(connection: &turso::Connection) -> Result<Vec<i64>, String> {
+    let mut rows = connection
+        .query("SELECT id FROM lock_probe ORDER BY id", ())
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut ids = Vec::new();
+    while let Some(row) = rows.next().await.map_err(|error| error.to_string())? {
+        match row.get_value(0).map_err(|error| error.to_string())? {
+            turso::Value::Integer(id) => ids.push(id),
+            other => return Err(format!("lock_probe.id is not an INTEGER: {other:?}")),
+        }
+    }
+    Ok(ids)
+}
+
+/// The engine's own verdict, tolerant for the same reason as
+/// [`lock_probe_ids`]. A `None`/zero-row answer is an `Err`, not a silent pass.
+async fn lock_probe_integrity(connection: &turso::Connection) -> Result<String, String> {
+    let mut rows = connection
+        .query("PRAGMA integrity_check", ())
+        .await
+        .map_err(|error| error.to_string())?;
+    let Some(row) = rows.next().await.map_err(|error| error.to_string())? else {
+        return Err("PRAGMA integrity_check returned no row".to_string());
+    };
+    match row.get_value(0).map_err(|error| error.to_string())? {
+        turso::Value::Text(verdict) => Ok(verdict),
+        other => Err(format!(
+            "integrity_check's first column is not TEXT: {other:?}"
+        )),
+    }
+}
+
+/// Probe B's opener child. It is INERT unless `MEM_STORE_LOCK_PROBE_DB` is set,
+/// so it is `#[ignore]`d: a normal suite run then reports it as one IGNORED test
+/// rather than as a green pass that asserted nothing. [`ProbeChild::spawn_opener`]
+/// re-executes this binary with `--ignored` and the environment set — that spawn
+/// is the only way this entry point is meant to run, and when it does it performs
+/// the whole protocol below.
+///
+/// Protocol (stdout, one line each):
+/// - `OPEN-OK` — the open returned a live handle;
+/// - `OPEN-ERR <engine text>` — the open was refused, text verbatim;
+/// - `OPEN-BLOCKED <text>` — the open did not return inside [`PROBE_GUARD`];
+/// - `OPENER-WRITE ok` / `OPENER-WRITE err <text>`;
+/// - `OPENER-IDS <csv>` / `OPENER-READ-ERR <text>` — what the opener sees after
+///   its own write;
+/// - then it blocks on stdin (the parent's barrier: the holder writes while the
+///   opener is still live);
+/// - `OPENER-IDS2 <csv>` / `OPENER-READ-ERR <text>` — what it sees after;
+/// - `OPENER-DONE`.
+///
+/// No sleep anywhere: the parent's `OPEN-OK` read is woken by this child's
+/// open, and `OPENER-IDS2` by the parent's own release line.
+#[test]
+#[ignore = "re-exec'd worker: ProbeChild::spawn_opener runs it with --ignored; a suite-run of it asserts nothing"]
+fn test_lock_probe_opener_child() {
+    let Some(path) = std::env::var_os("MEM_STORE_LOCK_PROBE_DB") else {
+        return;
+    };
+    let path = PathBuf::from(path);
+    let multiprocess_wal =
+        std::env::var("MEM_STORE_LOCK_PROBE_OPENER_MULTIPROCESS").as_deref() == Ok("1");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("opener child runtime");
+    runtime.block_on(async move {
+        let opened = within_guard(
+            "the opener's build",
+            try_open_single_process(&path, multiprocess_wal, None),
+        )
+        .await;
+        let (_database, connection) = match opened {
+            Ok(Ok(handles)) => handles,
+            Ok(Err(error)) => {
+                println!("OPEN-ERR {error}");
+                println!("OPENER-DONE");
+                return;
+            }
+            Err(blocked) => {
+                println!("OPEN-BLOCKED {blocked}");
+                println!("OPENER-DONE");
+                return;
+            }
+        };
+        println!("OPEN-OK");
+
+        let write = connection
+            .execute(
+                "INSERT INTO lock_probe (id, writer) VALUES (?, 'opener')",
+                vec![turso::Value::Integer(LOCK_OPENER_ID)],
+            )
+            .await;
+        println!(
+            "OPENER-WRITE {}",
+            match &write {
+                Ok(_) => "ok".to_string(),
+                Err(error) => format!("err {error}"),
+            }
+        );
+        match lock_probe_ids(&connection).await {
+            Ok(ids) => println!("OPENER-IDS {}", join_ids(&ids)),
+            Err(error) => println!("OPENER-READ-ERR {error}"),
+        }
+
+        // The barrier: the holder writes while this handle is still open.
+        let mut release = String::new();
+        let _ = std::io::stdin().read_line(&mut release);
+
+        match lock_probe_ids(&connection).await {
+            Ok(ids) => println!("OPENER-IDS2 {}", join_ids(&ids)),
+            Err(error) => println!("OPENER-READ-ERR {error}"),
+        }
+        println!("OPENER-DONE");
+        drop(connection);
+        drop(_database);
+    });
+}
+
+/// The protocol tags the opener child emits, in the order they appear. Used to
+/// separate the child's lines from libtest's chatter on the same stdout.
+const OPENER_PROTOCOL_TAGS: [&str; 8] = [
+    "OPEN-OK",
+    "OPEN-ERR",
+    "OPEN-BLOCKED",
+    "OPENER-WRITE",
+    "OPENER-IDS",
+    "OPENER-IDS2",
+    "OPENER-READ-ERR",
+    "OPENER-DONE",
+];
+
+/// The protocol part of a child stdout line, or `None` when the line is libtest
+/// chatter. `find`, not `strip_prefix`: the harness's `test <name> ... ` line has
+/// no trailing newline, so the first protocol line is glued to it.
+fn opener_protocol_line(line: &str) -> Option<&str> {
+    let at = OPENER_PROTOCOL_TAGS
+        .iter()
+        .filter_map(|tag| line.find(tag))
+        .min()?;
+    Some(&line[at..])
+}
+
+/// A spawned probe child plus its line protocol.
+///
+/// The reader runs on its own OS thread so a child that stops talking becomes a
+/// NAMED failure instead of a hung suite: a blocking `read_line` inside a
+/// `current_thread` test runtime would also stop the timer that is supposed to
+/// bound it. The guard is a hang detector — every successful line arrives when
+/// the parent's own last action caused the child to produce it.
+struct ProbeChild {
+    child: std::process::Child,
+    stdin: Option<std::process::ChildStdin>,
+    lines: std::sync::mpsc::Receiver<String>,
+    finished: bool,
+}
+
+impl ProbeChild {
+    fn spawn_opener(path: &Path, multiprocess_wal: bool) -> Self {
+        let mut command = std::process::Command::new(
+            std::env::current_exe().expect("the running test binary path"),
+        );
+        command
+            .arg("--exact")
+            .arg("test_lock_probe_opener_child")
+            .arg("--nocapture")
+            .arg("--test-threads=1")
+            // The worker is `#[ignore]`d so the recorded suite counts it as
+            // ignored rather than as a green no-op; `--ignored` is what still
+            // lets the suite SPAWN it. Without this flag the child would run
+            // zero tests and close its stdout immediately.
+            .arg("--ignored")
+            .env("MEM_STORE_LOCK_PROBE_DB", path)
+            .env(
+                "MEM_STORE_LOCK_PROBE_OPENER_MULTIPROCESS",
+                if multiprocess_wal { "1" } else { "0" },
+            )
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped());
+        let mut child = command.spawn().expect("spawn the lock-probe opener child");
+        let stdin = child.stdin.take().expect("piped child stdin");
+        let stdout = child.stdout.take().expect("piped child stdout");
+        let (sender, lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for line in std::io::BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        Self {
+            child,
+            stdin: Some(stdin),
+            lines,
+            finished: false,
+        }
+    }
+
+    /// The child's next protocol line. Every line is echoed into the test
+    /// output so a run's report can quote the child verbatim.
+    ///
+    /// libtest's own chatter shares the child's stdout (`running 1 test`, the
+    /// `test <name> ...` line, a blank line, `ok`), and the harness prints the
+    /// test-name line WITHOUT a trailing newline — so the child's first protocol
+    /// line can arrive glued to it. Lines are therefore scanned for a protocol
+    /// tag and trimmed to it, and chatter is skipped rather than mistaken for a
+    /// verdict.
+    fn next_line(&mut self) -> String {
+        loop {
+            match self.lines.recv_timeout(PROBE_GUARD) {
+                Ok(line) => {
+                    println!("[opener child] {line}");
+                    if let Some(protocol) = opener_protocol_line(&line) {
+                        return protocol.to_string();
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!(
+                    "the opener child produced no protocol line for {PROBE_GUARD:?}: the engine call that should have produced it did not return, so this cell measured a BLOCK, not a verdict"
+                ),
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => panic!(
+                    "the opener child closed its stdout without finishing its protocol (it exited early); its stderr is INHERITED, not piped or captured, so the reason went straight to this test binary's own stderr rather than into this message — and that exit is a finding rather than a pass"
+                ),
+            }
+        }
+    }
+
+    /// Releases the child's stdin barrier. Dropping the pipe also means a child
+    /// that ever asks for a second line sees EOF instead of blocking.
+    fn release(&mut self) {
+        if let Some(mut stdin) = self.stdin.take() {
+            let _ = stdin.write_all(b"go\n");
+            let _ = stdin.flush();
+        }
+    }
+
+    /// Reads the child's last protocol line, reaps it, and requires a successful
+    /// exit — a panic inside the opener is one cell's datum, never a green cell.
+    ///
+    /// The reap is bounded for the same reason the line read is: a child that
+    /// prints `OPENER-DONE` and then wedges inside `drop(connection)` or
+    /// `drop(database)` would otherwise hang `wait()` forever, which is exactly
+    /// the unnamed hang [`Self::next_line`] exists to prevent — an unbounded
+    /// `wait()` here would make that guard decorative.
+    fn finish(mut self) {
+        let done = self.next_line();
+        assert_eq!(
+            done, "OPENER-DONE",
+            "the opener child must end its protocol with OPENER-DONE"
+        );
+        let deadline = std::time::Instant::now() + PROBE_GUARD;
+        let status = loop {
+            match self.child.try_wait().expect("poll the opener child") {
+                Some(status) => break status,
+                None if std::time::Instant::now() >= deadline => panic!(
+                    "the opener child printed OPENER-DONE but had still not exited {PROBE_GUARD:?} later: it is wedged AFTER its protocol (a handle drop inside the engine, not the test protocol), so this cell measured a HANG rather than a verdict"
+                ),
+                // A poll interval for the bounded reap, not a synchronisation
+                // barrier: the child's own exit is the event, and no assertion
+                // depends on this thread's timing.
+                None => std::thread::sleep(std::time::Duration::from_millis(5)),
+            }
+        };
+        self.finished = true;
+        assert!(
+            status.success(),
+            "the opener child must exit successfully (a panic inside the engine is a finding, not a pass); got {status:?}"
+        );
+    }
+}
+
+impl Drop for ProbeChild {
+    fn drop(&mut self) {
+        if !self.finished {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
+/// One cell of Probe B's matrix.
+struct LockCellSpec {
+    /// Temp-dir label, also printed as the cell's name.
+    label: &'static str,
+    /// The HOLDER's (this process's) option set: `experimental_multiprocess_wal`.
+    holder_multiprocess_wal: bool,
+    /// Whether the holder is mid-write (an open `BEGIN IMMEDIATE` transaction
+    /// with an uncommitted row) at the moment of the second open.
+    holder_mid_write: bool,
+    /// The OPENER's (child process's) option set.
+    opener_multiprocess_wal: bool,
+    /// Whether the holder writes [`LOCK_HOLDER_AFTER_ID`] after the opener's
+    /// attempt. `false` isolates "the mixed open itself" from "the holder's next
+    /// commit" — the difference between a poisoned WAL and a clobbered frame.
+    holder_writes_after: bool,
+}
+
+/// What one cell observed. Every field is a measurement, not a verdict: the
+/// per-cell tests do the pinning, so one cell's answer can be quoted without
+/// re-running the others.
+struct LockCell {
+    /// `Ok` = the opener got a live handle; `Err` = the engine's refusal text
+    /// (or the blocked text). This is the cell's primary answer.
+    opener: Result<(), String>,
+    opener_write: Option<String>,
+    /// What the opener reads after its own write (before the holder's write).
+    opener_ids: Option<Result<Vec<i64>, String>>,
+    /// What the opener reads after the holder's write — the "does the opener
+    /// see the holder's later data" leg.
+    opener_ids_after: Option<Result<Vec<i64>, String>>,
+    /// The holder's view while the opener is still live.
+    holder_ids: Result<Vec<i64>, String>,
+    holder_integrity: Result<String, String>,
+    /// The holder's post-open write result, or `None` when the cell was built
+    /// not to write (the isolation variant).
+    holder_write: Option<Result<(), String>>,
+    holder_commit: Option<Result<(), String>>,
+    /// The file set while the holder was live and after everything closed.
+    held_files: Vec<(String, u64)>,
+    after_files: Vec<(String, u64)>,
+    /// A FRESH handle opened with the opener's option set once the holder is
+    /// gone: is the file still a database both option sets can read?
+    final_ids: Result<Vec<i64>, String>,
+    final_integrity: Result<String, String>,
+}
+
+/// Runs one Probe B cell: holder here, opener in a child, holder still live for
+/// the whole second open. The order is deliberate — the opener's verdict and
+/// its write happen while the holder is live, the holder then reads, commits and
+/// writes, the opener reads again on the parent's release and exits (its handles
+/// close with the child process, before the holder's), and only then does the
+/// HOLDER close, so no assertion is about a state that has already moved on.
+async fn run_lock_cell(spec: LockCellSpec) -> LockCell {
+    let LockCellSpec {
+        label,
+        holder_multiprocess_wal,
+        holder_mid_write,
+        opener_multiprocess_wal,
+        holder_writes_after,
+    } = spec;
+    let dir = common::temp_dir(label);
+    let path = dir.join("lock.db");
+
+    let (holder_database, holder) = open_single_process(&path, holder_multiprocess_wal, None).await;
+    holder
+        .execute(LOCK_PROBE_TABLE, ())
+        .await
+        .expect("create lock_probe");
+    holder
+        .execute(
+            format!("INSERT INTO lock_probe (id, writer) VALUES ({LOCK_SEED_ID}, 'holder-seed')")
+                .as_str(),
+            (),
+        )
+        .await
+        .expect("write the holder's committed seed row");
+    if holder_mid_write {
+        holder
+            .execute("BEGIN IMMEDIATE", ())
+            .await
+            .expect("open the holder's write transaction");
+        holder
+            .execute(
+                format!(
+                    "INSERT INTO lock_probe (id, writer) VALUES ({LOCK_MID_WRITE_ID}, 'holder-mid-write')"
+                )
+                .as_str(),
+                (),
+            )
+            .await
+            .expect("write inside the holder's open transaction");
+    }
+    let held_files = file_inventory(&dir);
+    println!(
+        "[cell {label}] holder_live multiprocess_wal={holder_multiprocess_wal} mid_write={holder_mid_write} files={held_files:?}"
+    );
+    if holder_mid_write {
+        println!(
+            "[cell {label}] holder_view_mid_write={:?}",
+            lock_probe_ids(&holder).await
+        );
+    }
+
+    // -- The second open, in another process, while the holder is live.
+    let mut child = ProbeChild::spawn_opener(&path, opener_multiprocess_wal);
+    let verdict = child.next_line();
+    let opener = if verdict == "OPEN-OK" {
+        Ok(())
+    } else if let Some(error) = verdict.strip_prefix("OPEN-ERR ") {
+        Err(error.to_string())
+    } else if let Some(blocked) = verdict.strip_prefix("OPEN-BLOCKED ") {
+        Err(blocked.to_string())
+    } else {
+        panic!(
+            "the opener child's first line must be OPEN-OK / OPEN-ERR / OPEN-BLOCKED, got {verdict:?}"
+        )
+    };
+    println!("[cell {label}] opener={opener:?}");
+
+    let mut opener_write = None;
+    let mut opener_ids = None;
+    let mut opener_ids_after = None;
+    if opener.is_ok() {
+        let write = child.next_line();
+        opener_write = Some(
+            write
+                .strip_prefix("OPENER-WRITE ")
+                .unwrap_or_else(|| panic!("unexpected opener write line {write:?}"))
+                .to_string(),
+        );
+        opener_ids = Some(parse_opener_ids(&child.next_line()));
+    }
+
+    // -- The holder's view while the opener is STILL live.
+    let holder_ids = lock_probe_ids(&holder).await;
+    let holder_integrity = lock_probe_integrity(&holder).await;
+    println!("[cell {label}] holder_ids_while_opener_live={holder_ids:?}");
+
+    let holder_commit = if holder_mid_write {
+        let commit = holder
+            .execute("COMMIT", ())
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+        println!("[cell {label}] holder_commit={commit:?}");
+        Some(commit)
+    } else {
+        None
+    };
+    let holder_write = if holder_writes_after {
+        let write = holder
+            .execute(
+                format!(
+                    "INSERT INTO lock_probe (id, writer) VALUES ({LOCK_HOLDER_AFTER_ID}, 'holder-after')"
+                )
+                .as_str(),
+                (),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+        println!("[cell {label}] holder_write={write:?}");
+        Some(write)
+    } else {
+        println!("[cell {label}] holder_write=skipped (isolation variant)");
+        None
+    };
+
+    // -- Release the opener so it can re-read; its second read is the
+    // "opener sees the holder's later data" leg.
+    child.release();
+    if opener.is_ok() {
+        opener_ids_after = Some(parse_opener_ids(&child.next_line()));
+    }
+    child.finish();
+
+    let after_files = file_inventory(&dir);
+    println!("[cell {label}] files_after={after_files:?}");
+    drop(holder);
+    drop(holder_database);
+
+    // -- The quiet file must still be a database for BOTH option sets: this is
+    // what distinguishes "the second open succeeded harmlessly" from "the two
+    // bookkeepings diverged and one side's writes are now unreadable".
+    let (final_database, final_connection) =
+        try_open_single_process(&path, opener_multiprocess_wal, None)
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "[cell {label}] after every handle closed, the file must reopen with the opener's option set (multiprocess_wal={opener_multiprocess_wal}): {error}; files while held: {held_files:?}; files after: {after_files:?}"
+                )
+            });
+    let final_ids = lock_probe_ids(&final_connection).await;
+    let final_integrity = lock_probe_integrity(&final_connection).await;
+    println!("[cell {label}] final_ids={final_ids:?} final_integrity={final_integrity:?}");
+    drop(final_connection);
+    drop(final_database);
+
+    common::cleanup_temp_dir(&dir).expect("cleanup the cell's temp dir");
+
+    LockCell {
+        opener,
+        opener_write,
+        opener_ids,
+        opener_ids_after,
+        holder_ids,
+        holder_integrity,
+        holder_write,
+        holder_commit,
+        held_files,
+        after_files,
+        final_ids,
+        final_integrity,
+    }
+}
+
+/// Parses `OPENER-IDS <csv>` / `OPENER-IDS2 <csv>` / `OPENER-READ-ERR <text>`.
+fn parse_opener_ids(line: &str) -> Result<Vec<i64>, String> {
+    if let Some(csv) = line
+        .strip_prefix("OPENER-IDS ")
+        .or_else(|| line.strip_prefix("OPENER-IDS2 "))
+    {
+        let ids = csv
+            .split(',')
+            .map(|id| {
+                id.trim()
+                    .parse::<i64>()
+                    .unwrap_or_else(|_| panic!("the opener sent an unparsable id in {line:?}"))
+            })
+            .collect();
+        return Ok(ids);
+    }
+    if let Some(error) = line.strip_prefix("OPENER-READ-ERR ") {
+        return Err(error.to_string());
+    }
+    panic!("unexpected opener id line {line:?}");
+}
+
+/// Probe B, cell 1 — a live, **idle** flag-off holder versus a second flag-off
+/// opener in another process.
+///
+/// The cell the earlier scratch probe reported but never pinned. Expected on
+/// turso 0.8.3: the holder took the database file's exclusive `fcntl` lock at
+/// open time (the legacy, non-multiprocess path locks the file), so the second
+/// opener is REFUSED with the engine's locking error — the holder is untouched.
+///
+/// This is the cell that matters for `purge-session` after the flag is dropped:
+/// a flag-off `purge-session` could not open a database a flag-off engine
+/// holds, with no mixed versions involved.
+#[tokio::test]
+async fn test_flag_off_holder_refuses_a_flag_off_opener() {
+    let cell = run_lock_cell(LockCellSpec {
+        label: "cap-lock-cell-1-flag-off-idle",
+        holder_multiprocess_wal: false,
+        holder_mid_write: false,
+        opener_multiprocess_wal: false,
+        holder_writes_after: true,
+    })
+    .await;
+
+    let refusal = match &cell.opener {
+        Ok(()) => panic!(
+            "a live flag-off holder must REFUSE a second flag-off opener in another process, but the opener got a handle (it saw {:?}); holder files: {:?}",
+            cell.opener_ids, cell.held_files
+        ),
+        Err(error) => error.clone(),
+    };
+    assert!(
+        refusal.contains("Locking error"),
+        "the refusal must be the engine's locking error (a classifier, not a text pin: `LimboError::LockingError` reaches the crate as a plain `Error(String)`, so its prefix is the only machine-recognisable carrier); got {refusal:?}"
+    );
+    assert!(
+        refusal.contains("locked by another process"),
+        "the refusal must name the other holder; got {refusal:?}"
+    );
+    assert_eq!(
+        cell.holder_ids,
+        Ok(vec![LOCK_SEED_ID]),
+        "while the opener is refused, the holder must see exactly its own seed row — no opener row, nothing replayed"
+    );
+    assert_eq!(
+        cell.holder_integrity,
+        Ok("ok".to_string()),
+        "the refused open must leave the holder's file intact"
+    );
+    assert_eq!(
+        cell.holder_write,
+        Some(Ok(())),
+        "the holder must still take writes"
+    );
+    assert_eq!(
+        cell.final_ids,
+        Ok(vec![LOCK_SEED_ID, LOCK_HOLDER_AFTER_ID]),
+        "after both handles closed, the file must hold exactly the holder's two rows"
+    );
+    assert_eq!(
+        cell.final_integrity,
+        Ok("ok".to_string()),
+        "the file must be intact for a fresh handle"
+    );
+}
+
+/// Probe B, cell 2 — a live **mid-write** flag-off holder versus a second
+/// flag-off opener.
+///
+/// The difference from cell 1 is the holder's state, not its option set: an
+/// open `BEGIN IMMEDIATE` transaction with one uncommitted row. The expected
+/// answer is the same refusal (the lock is taken at OPEN time, before any
+/// transaction exists), which is the useful part: `purge-session` cannot get a
+/// handle even while the engine is mid-transaction, so the refusal is not a
+/// momentary write-lock artefact. The holder then commits, and its post state
+/// (both rows present) proves the refused open did not disturb the transaction.
+#[tokio::test]
+async fn test_flag_off_holder_mid_write_refuses_a_flag_off_opener() {
+    let cell = run_lock_cell(LockCellSpec {
+        label: "cap-lock-cell-2-flag-off-mid-write",
+        holder_multiprocess_wal: false,
+        holder_mid_write: true,
+        opener_multiprocess_wal: false,
+        holder_writes_after: true,
+    })
+    .await;
+
+    let refusal = match &cell.opener {
+        Ok(()) => panic!(
+            "a live flag-off holder must REFUSE a second flag-off opener even mid-transaction, but the opener got a handle (it saw {:?}); holder files: {:?}",
+            cell.opener_ids, cell.held_files
+        ),
+        Err(error) => error.clone(),
+    };
+    assert!(
+        refusal.contains("Locking error"),
+        "the mid-write refusal must be the same locking error as cell 1, got {refusal:?}"
+    );
+    assert_eq!(
+        cell.holder_commit,
+        Some(Ok(())),
+        "the holder's open transaction must still commit after the refused open"
+    );
+    assert_eq!(
+        cell.holder_ids,
+        Ok(vec![LOCK_SEED_ID, LOCK_MID_WRITE_ID]),
+        "while the opener is refused the holder must see its seed row AND the row its own open transaction holds (same connection), which is what proves the cell really was measured mid-write"
+    );
+    assert_eq!(cell.holder_integrity, Ok("ok".to_string()));
+    assert_eq!(
+        cell.final_ids,
+        Ok(vec![LOCK_SEED_ID, LOCK_MID_WRITE_ID, LOCK_HOLDER_AFTER_ID]),
+        "the committed transaction and the post-open write must be durable"
+    );
+}
+
+/// Probe B, cell 3 — a live **flag-on** holder versus a flag-off opener: the
+/// mixed-version direction the earlier scratch probe reported as *not* refused.
+///
+/// Measured on turso 0.8.3, Linux — **it is not refused, and it is not
+/// harmless**:
+/// - the flag-on holder opened the database file with `NoLock` (multiprocess
+///   WAL coordinates through `-tshm` instead), so the flag-off opener's
+///   exclusive `fcntl` lock is uncontended and the open is ACCEPTED;
+/// - the opener commits a row and never sees the holder's later commit, and
+///   the holder never sees the opener's row: two live handles, two WAL
+///   bookkeepings, one file;
+/// - after both handles close, the opener's COMMITTED row is gone and only the
+///   holder's rows are readable. No error was reported on either side.
+///
+/// The loss is pinned as the difference between what the opener was told it
+/// committed and what the quiet file holds. It is a data-loss hazard, not a
+/// theory about frames: `final_ids` is read through a FRESH handle after
+/// everything closed. Cell 6 isolates the cause on the mirrored direction: with
+/// no later write from the other side, the opener's row survives.
+#[tokio::test]
+async fn test_mixed_flag_on_holder_and_flag_off_opener_succeed_and_lose_the_opener_row() {
+    let cell = run_lock_cell(LockCellSpec {
+        label: "cap-lock-cell-3-flag-on-vs-flag-off",
+        holder_multiprocess_wal: true,
+        holder_mid_write: false,
+        opener_multiprocess_wal: false,
+        holder_writes_after: true,
+    })
+    .await;
+
+    assert!(
+        cell.opener.is_ok(),
+        "MEASURED: a flag-on holder takes no OS lock on the database file, so a flag-off opener in another process is ACCEPTED. If this starts failing, the engine has grown a cross-mode guard and purge-session's coexistence with a flag-on engine is safe by refusal — an ADR-level change. Got {:?}; holder files: {:?}",
+        cell.opener,
+        cell.held_files
+    );
+    assert_eq!(
+        cell.opener_write.as_deref(),
+        Some("ok"),
+        "the accepted opener's write must report success — that is what makes the later loss silent"
+    );
+    assert_eq!(
+        cell.opener_ids,
+        Some(Ok(vec![LOCK_SEED_ID, LOCK_OPENER_ID])),
+        "the opener must read the holder's pre-existing row plus its own"
+    );
+    assert_eq!(
+        cell.opener_ids_after,
+        Some(Ok(vec![LOCK_SEED_ID, LOCK_OPENER_ID])),
+        "the opener must NOT see the row the flag-on holder commits while both are live: the two bookkeepings do not share a view"
+    );
+    assert_eq!(
+        cell.holder_ids,
+        Ok(vec![LOCK_SEED_ID]),
+        "the flag-on holder must NOT see the flag-off opener's committed row"
+    );
+    assert_eq!(
+        cell.holder_write,
+        Some(Ok(())),
+        "the holder must still take writes"
+    );
+    assert_eq!(cell.holder_integrity, Ok("ok".to_string()));
+    assert_eq!(
+        cell.final_ids,
+        Ok(vec![LOCK_SEED_ID, LOCK_HOLDER_AFTER_ID]),
+        "after both handles closed, the file must hold the holder's rows only: the opener's committed row {LOCK_OPENER_ID} is GONE. If this ever starts including it, mixed-mode coexistence has become lossless and the ADR can treat a second process as safe; until then it cannot."
+    );
+    assert_eq!(
+        cell.final_integrity,
+        Ok("ok".to_string()),
+        "the loss is silent: the surviving file still reports a clean integrity verdict"
+    );
+}
+
+/// Probe B, cell 4 — a live flag-on holder versus a flag-on opener: the
+/// baseline contrast for cell 3, and the configuration the engine is designed
+/// for (`-tshm` coordination, `NoLock` on the database file).
+///
+/// Both handles must be live AND coherent: each side's write must be readable
+/// by the other, and the file must still be a database with one integrity
+/// verdict of `ok` after both close. "Succeeds" alone would not say that.
+#[tokio::test]
+async fn test_flag_on_holder_and_a_flag_on_opener_share_the_database() {
+    let cell = run_lock_cell(LockCellSpec {
+        label: "cap-lock-cell-4-flag-on-vs-flag-on",
+        holder_multiprocess_wal: true,
+        holder_mid_write: false,
+        opener_multiprocess_wal: true,
+        holder_writes_after: true,
+    })
+    .await;
+
+    assert!(
+        cell.opener.is_ok(),
+        "the supported multiprocess configuration must accept a second process's flag-on open; got {:?}; holder files: {:?}",
+        cell.opener,
+        cell.held_files
+    );
+    assert_eq!(
+        cell.opener_write.as_deref(),
+        Some("ok"),
+        "the opener's write must succeed on a live multiprocess database"
+    );
+    assert_eq!(
+        cell.opener_ids,
+        Some(Ok(vec![LOCK_SEED_ID, LOCK_OPENER_ID])),
+        "the opener must see the holder's seed row plus its own row"
+    );
+    assert_eq!(
+        cell.opener_ids_after,
+        Some(Ok(vec![LOCK_SEED_ID, LOCK_HOLDER_AFTER_ID, LOCK_OPENER_ID])),
+        "the opener's SECOND read must include the row the holder wrote while both were live: two live handles, one database"
+    );
+    assert_eq!(
+        cell.holder_ids,
+        Ok(vec![LOCK_SEED_ID, LOCK_OPENER_ID]),
+        "the holder must see the opener's committed row while the opener is still live (the holder's own later write has not happened yet at this read)"
+    );
+    assert_eq!(cell.holder_integrity, Ok("ok".to_string()));
+    assert_eq!(
+        cell.final_ids,
+        Ok(vec![LOCK_SEED_ID, LOCK_HOLDER_AFTER_ID, LOCK_OPENER_ID]),
+        "after both close, exactly the three committed rows must remain — no replayed or invented row"
+    );
+    assert_eq!(cell.final_integrity, Ok("ok".to_string()));
+}
+
+/// Probe B, cell 5 — a live flag-off holder versus a **flag-on** opener: the
+/// reverse mixed direction, which the earlier scratch probe never pinned.
+///
+/// Measured on turso 0.8.3, Linux — the same shape as cell 3, mirrored: the
+/// flag-on opener is ACCEPTED (it bypasses the database-file lock by design),
+/// commits a row, loses the holder's later commit from its own view, is itself
+/// invisible to the holder, and after both close its committed row is gone
+/// while the holder's rows survive. Neither side reports an error. Cell 6 shows
+/// the loss needs the other side's next COMMIT: the mixed open alone does not
+/// destroy the row.
+#[tokio::test]
+async fn test_mixed_flag_off_holder_and_flag_on_opener_succeed_and_lose_the_opener_row() {
+    let cell = run_lock_cell(LockCellSpec {
+        label: "cap-lock-cell-5-flag-off-vs-flag-on",
+        holder_multiprocess_wal: false,
+        holder_mid_write: false,
+        opener_multiprocess_wal: true,
+        holder_writes_after: true,
+    })
+    .await;
+
+    assert!(
+        cell.opener.is_ok(),
+        "MEASURED: a flag-on opener bypasses the database-file lock, so a flag-off holder does not refuse it. If this starts failing, a cross-mode guard exists and the reverse mixed direction is safe by refusal — an ADR-level change. Got {:?}; holder files: {:?}",
+        cell.opener,
+        cell.held_files
+    );
+    assert_eq!(
+        cell.opener_write.as_deref(),
+        Some("ok"),
+        "the accepted opener's write must report success"
+    );
+    assert_eq!(
+        cell.opener_ids,
+        Some(Ok(vec![LOCK_SEED_ID, LOCK_OPENER_ID])),
+        "the opener must read the holder's pre-existing row plus its own"
+    );
+    assert_eq!(
+        cell.opener_ids_after,
+        Some(Ok(vec![LOCK_SEED_ID, LOCK_OPENER_ID])),
+        "the opener must NOT see the row the flag-off holder commits while both are live"
+    );
+    assert_eq!(
+        cell.holder_ids,
+        Ok(vec![LOCK_SEED_ID]),
+        "the flag-off holder must NOT see the flag-on opener's committed row"
+    );
+    assert_eq!(
+        cell.holder_write,
+        Some(Ok(())),
+        "the holder must still take writes"
+    );
+    assert_eq!(cell.holder_integrity, Ok("ok".to_string()));
+    assert_eq!(
+        cell.final_ids,
+        Ok(vec![LOCK_SEED_ID, LOCK_HOLDER_AFTER_ID]),
+        "after both handles closed, the opener's committed row {LOCK_OPENER_ID} is GONE and only the holder's rows remain"
+    );
+    assert_eq!(
+        cell.final_integrity,
+        Ok("ok".to_string()),
+        "the loss is silent: the surviving file reports a clean integrity verdict"
+    );
+    assert!(
+        cell.after_files
+            .iter()
+            .any(|(name, _)| name.ends_with("-tshm")),
+        "the flag-on opener must have created its coordination sidecar next to the flag-off holder's database — the two bookkeepings really did coexist; files: {:?}",
+        cell.after_files
+    );
+}
+
+/// Probe B, isolation variant of cell 5 — the same mixed open, but the holder
+/// does **no** write of its own after the opener's attempt.
+///
+/// Cell 5 cannot say whether the opener's row is lost because the holder's next
+/// commit clobbered frames or because the mixed open itself poisons the WAL.
+/// This cell removes the holder's write, so the only later mutation is the
+/// holder's clean close: whatever happens to the opener's committed row here is
+/// attributable to the coexistence itself.
+#[tokio::test]
+async fn test_mixed_flag_off_holder_and_flag_on_opener_without_a_later_holder_write() {
+    let cell = run_lock_cell(LockCellSpec {
+        label: "cap-lock-cell-6-flag-off-vs-flag-on-no-holder-write",
+        holder_multiprocess_wal: false,
+        holder_mid_write: false,
+        opener_multiprocess_wal: true,
+        holder_writes_after: false,
+    })
+    .await;
+
+    println!(
+        "[cell 6] opener={:?} opener_write={:?} opener_ids={:?} opener_ids_after={:?}",
+        cell.opener, cell.opener_write, cell.opener_ids, cell.opener_ids_after
+    );
+    println!(
+        "[cell 6] holder_ids={:?} holder_integrity={:?} final_ids={:?} final_integrity={:?} files_after={:?}",
+        cell.holder_ids,
+        cell.holder_integrity,
+        cell.final_ids,
+        cell.final_integrity,
+        cell.after_files
+    );
+    assert!(
+        cell.opener.is_ok(),
+        "the isolation variant only means something if the mixed open is still accepted; got {:?}",
+        cell.opener
+    );
+    assert_eq!(cell.opener_write.as_deref(), Some("ok"));
+    assert_eq!(
+        cell.opener_ids,
+        Some(Ok(vec![LOCK_SEED_ID, LOCK_OPENER_ID])),
+        "the opener's row must commit while the holder is live"
+    );
+    assert_eq!(
+        cell.holder_ids,
+        Ok(vec![LOCK_SEED_ID]),
+        "the holder still must not see the opener's row while both are live"
+    );
+    // THE POINT OF THIS CELL: with no later holder write, the opener's
+    // committed row SURVIVES the coexistence and the holder's clean close.
+    assert_eq!(
+        cell.final_ids,
+        Ok(vec![LOCK_SEED_ID, LOCK_OPENER_ID]),
+        "MEASURED: without a later holder write, the flag-on opener's committed row survives. Cell 5 loses it only when the flag-off holder commits again — so the mixed OPEN is not what destroys the row, the next commit on the other side of the bookkeeping split is. If this ever starts losing the row, the divergence is deeper than a clobbered frame and the ADR's hazard statement widens."
+    );
+    assert_eq!(cell.final_integrity, Ok("ok".to_string()));
+}
+
+/// Probe A, side-check — does `VACUUM` block against a live writer, or refuse?
+///
+/// The ADR's other availability question: if a sweep ever ran beside a live
+/// engine handle, would it wait for writers or fail? Three legs on ONE
+/// vacuum-enabled handle, so the answer cannot be confused with "VACUUM is
+/// broken":
+/// 1. control: with no transaction open, `VACUUM` runs (this is what makes the
+///    refusal below attributable to the writer);
+/// 2. a second connection holds `BEGIN IMMEDIATE` + an uncommitted row, and
+///    `VACUUM` on the first connection must return as `Busy("database is
+///    locked")` — refused, never waited out. This leg carries its OWN budget,
+///    [`VACUUM_REFUSAL_BUDGET`] (1 s), separate from the [`PROBE_GUARD`] hang
+///    guard: the guard alone would accept a 9-second busy-handler wait while
+///    "refuses rather than blocks" quietly became false. The leg prints the
+///    elapsed time it measured, so a regression shows the number that moved;
+/// 3. after `ROLLBACK`, the same `VACUUM` runs again, so the busy was the
+///    writer's lock and not a poisoned connection.
+///
+/// Not a stress harness: the writer's transaction is opened BEFORE the VACUUM,
+/// so there is no race to hit and no sleep anywhere.
+#[tokio::test]
+async fn test_vacuum_is_refused_while_another_connection_holds_a_write_transaction() {
+    let dir = common::temp_dir("cap-vacuum-lock-shape");
+    let path = dir.join("v.db");
+    let (database, writer) = open_with_vacuum(&path, false).await;
+    writer
+        .execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", ())
+        .await
+        .expect("create t");
+    writer
+        .execute("INSERT INTO t (id, v) VALUES (1, 'a')", ())
+        .await
+        .expect("write a row");
+    let reader = database.connect().expect("the handle's second connection");
+
+    // Leg 1 — the control: no transaction open, VACUUM runs.
+    let control = reader.execute("VACUUM", ()).await;
+    assert!(
+        control.is_ok(),
+        "CONTROL: VACUUM must run on this handle while no transaction is open, otherwise the refusal below is VACUUM's fault: {control:?}"
+    );
+
+    // Leg 2 — a live write transaction on the other connection.
+    writer
+        .execute("BEGIN IMMEDIATE", ())
+        .await
+        .expect("open the writer's transaction");
+    writer
+        .execute("INSERT INTO t (id, v) VALUES (2, 'b')", ())
+        .await
+        .expect("write inside the writer's transaction");
+    // The refusal is the claim, so it is measured against its own budget rather
+    // than the hang guard: `started`/`elapsed` are the measurement, printed
+    // below. See [`VACUUM_REFUSAL_BUDGET`].
+    let started = std::time::Instant::now();
+    let busy = tokio::time::timeout(VACUUM_REFUSAL_BUDGET, reader.execute("VACUUM", ()))
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "VACUUM must REFUSE rather than block against a live writer, but it did not return within the refusal budget {VACUUM_REFUSAL_BUDGET:?} — this leg is deliberately tighter than the {PROBE_GUARD:?} hang guard, precisely so a multi-second busy-handler wait fails here instead of passing"
+            )
+        });
+    let elapsed = started.elapsed();
+    println!("[vacuum lock shape] against_a_live_writer={busy:?} elapsed={elapsed:?}");
+    let busy = busy.expect_err(
+        "VACUUM must not succeed while another connection holds an uncommitted write transaction",
+    );
+    assert!(
+        matches!(busy, turso::Error::Busy(_)),
+        "the refusal must be the engine's Busy variant (the same-connection 'database is locked' class), not a parse/generic error: {busy:?}"
+    );
+
+    // Leg 3 — release, and the same VACUUM runs.
+    writer
+        .execute("ROLLBACK", ())
+        .await
+        .expect("roll back the writer's transaction");
+    let after = reader.execute("VACUUM", ()).await;
+    assert!(
+        after.is_ok(),
+        "once the writer's transaction is gone, the same VACUUM must run: that is what proves the Busy was the lock, not a broken connection: {after:?}"
+    );
+    assert_eq!(
+        raw_integer_column(&writer, "SELECT id FROM t ORDER BY id", "id").await,
+        vec![1],
+        "the rolled-back row stays rolled back and the kept row stays readable after the sweep"
+    );
+
+    drop(reader);
+    drop(writer);
+    drop(database);
     common::cleanup_temp_dir(&dir).expect("cleanup temp dir");
 }
