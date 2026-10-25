@@ -1,6 +1,35 @@
 # 37 — W6.2 follow-up · Wire the production API services into the composition root
 
-Status: open — re-scoped to AC4 + AC6 (2026-10-21)
+Status: ready-for-agent — 2026-10-25 (grilled and re-scoped: AC4 = contract-only doc statement;
+AC6 = sessions wiring ONLY — the maintenance half moved to issue 39. Anchors are symbol-precise,
+line numbers demoted to hints. See "2026-10-25 re-scope" below.)
+
+## 2026-10-25 re-scope — four decisions from the grilling pass
+
+Measured at `065ffdb` before deciding; two of this issue's premises were false.
+
+1. **The `skills` 500 claim is stale and is withdrawn.** `src/main.rs` calls
+   `.with_skills(skills_port)` on **both** the production and the degrade branch (landed with W6.4),
+   so `/api/skills` is wired and answers from a real port. There is no skills conflation to record,
+   and AC4 must not assert one. The conflation that *does* exist is **`/api/migration/*`**:
+   `maintenance_failure` funnels `PortError::Unavailable` through `port_failure` →
+   `internal_error()` = **500**, where `sessions` correctly answers **501**. That finding is carried
+   to issue 39, not fixed here.
+2. **AC4 becomes contract-only — no endpoint inventory.** `docs/bridge-schema.md` states the token
+   shape and the `501` (service absent in this build) vs `500` (internal fault) *mechanism*, and
+   explicitly does **not** enumerate per-endpoint availability, with one sentence saying why: that
+   inventory tracks the build, so it belongs in release notes. Rationale: an inventory written now
+   is falsified the moment issue 39 lands, and a doc asserting a volatile measurement is a gate that
+   fails for the wrong reason.
+3. **AC6 keeps the sessions half only; maintenance moves to issue 39.** `cleanup()` and
+   `deduplicate()` take **no `State`** — they are unconditional `envelope::not_implemented(...)`
+   stubs (D-15), so no `MaintenancePort` can reach them. Making all four maintenance routes real is
+   two services (retention cleanup, memory deduplication), filed as issues 39 and 40.
+4. **Anchors are symbol-precise; line numbers are hints.** Every line reference in the original AC6
+   had drifted (`WebStoreDeps` 563→**593**, the fill site 853→**938**, `ComposedRuntime` is in
+   `composition.rs` not `engine.rs`). Instructions now name the symbol and quote one context line;
+   any line number is written `≈ N at HEAD 065ffdb`. **Start execution by re-locating each symbol
+   and recording its actual line** — a stale hint must fail loudly, not point at the wrong code.
 
 **Scheduling:** ABSORBED into W6.7 (issue 31), by user decision of 2026-10-21. The W6.7 Plan Gate
 accepted the absorption in principle, conditioned on ten corrections, and the user confirmed it
@@ -139,35 +168,47 @@ Bearer authenticates the CONFIGURED `api_token`, which is `None` in standalone m
       the seeded row. It went RED first on the stub's `500 {"success":false,"error":"Internal Server
       Error"}`. A second oracle, `test_no_mem_bridge_to_mem_web_edge`, keeps the forbidden
       `mem-bridge`→`mem-web` edge absent (ADR-0007:584).
-- [ ] `docs/bridge-schema.md` states the local-token header shape (`x-opencode-mem-token`) and the
-      500-vs-501 distinction — **with the skills case stated as measured above, not as the old
-      "skills/maintenance/sessions are all 501" claim.** The W6.7 blueprint's Finding 4 and the
-      W6.7 Plan Gate's "verified sound" list both carried that wrong claim; it was measured, not
-      inferred, and it is the reason this AC is the last thing standing. **This is the whole of the
-      documentation work; AC6 is the plumbing work.** The sentence must also say which endpoints
-      answer 501 by design
-      (`sessions`, `maintenance`) and which answer 500 (`skills`), and either name the skills
-      handler's conflation as a mem-web defect to fix or record the exception explicitly.
+- [ ] **AC4 (re-scoped 2026-10-25, contract-only)** — `docs/bridge-schema.md` states, as contract
+      rather than inventory:
+      1. the local-token header shape: `x-opencode-mem-token` (`crate::AUTH_HEADER`), and that
+         neither `Authorization: Basic <token>` nor `Authorization: Bearer <token>` works — Bearer
+         authenticates the *configured* `api_token`, which is `None` in standalone mode, so both
+         shapes get 401 and only the custom header passes the gate. This is the fact a UI fetch seam
+         author needs and cannot infer from the live server.
+      2. the failure distinction: **501** = the endpoint's service is absent *in this build* (stable
+         contract semantics, D-13/D-15), **500** = internal fault. A client must not conflate them.
+      3. an explicit statement that per-endpoint availability is **deliberately not enumerated**
+         here, because it tracks the build and belongs in release notes.
+      **Do not write an endpoint status table.** An earlier draft of this AC would have recorded
+      "skills answers 500", which is false since W6.4 wired the skills port — and any table written
+      now is invalidated by issue 39. Verify the three statements against
+      `crates/mem-web/src/api_auth.rs`, the gate order in `crates/mem-web/src/gate.rs`, and
+      `crates/mem-web/src/api/maintenance.rs` before writing.
 
-- [ ] AC6 · Wire the sessions and maintenance ports at the composition root. Sessions: add
-      `episodic: Arc<EpisodicStore>` to `WebStoreDeps` (`crates/mem-bridge/src/engine.rs:563-575`,
-      filled from `ComposedRuntime.store` at `:853-863`), call
-      `.with_sessions(episodic_session_port(deps.episodic))` at `src/main.rs:132-137`, and add an
-      oracle in `tests/production_api_wiring.rs` asserting the two session routes answer 200 after
-      seeding a row (nothing asserts the 501 today, so the change would otherwise land unproven).
-      Maintenance: surface **only** `Arc<ConnectionManager>` (a local at
-      `crates/mem-bridge/src/composition.rs:101-106`, moved into `ShardManager::new` at `:107-112`)
-      and build the `ReadyGate` with `mem_store::ready::build_ready_gate_with_encryption`
-      (`crates/mem-store/src/ready.rs:236`) — its registry argument is the `ShardManager` itself
-      (`impl ShardRegistry for ShardManager`, `crates/mem-store/src/shard_manager.rs:1047`) and the
-      `StoreConfig` comes from `ShardManager::config()` (`:162`), so **no `StoreConfig` field is to
-      be added** — then add a `ReEmbedder` adapter
-      (`crates/mem-store/src/migration_service.rs:39-46`), a `ProductionMaintenance` port in
-      `crates/mem-web/src/api/store_adapter.rs`, and `.with_maintenance(...)` at `src/main.rs:132`;
-      `MigrationService` itself already exists (`migration_service.rs:133`, tested by
-      `crates/mem-store/tests/turso_reembed_migration.rs`). Finally delete the two stale doc
-      comments that still await "the W5.x readiness gate" (`crates/mem-web/src/api/ports.rs:561`,
-      `store_adapter.rs:21`).
+- [ ] **AC6 (re-scoped 2026-10-25, sessions only)** — wire the sessions port at the composition root.
+      Anchors are symbols; line numbers are hints at HEAD `065ffdb` and **must be re-located before
+      use**.
+
+      1. Add `episodic: Arc<EpisodicStore>` to `WebStoreDeps` (`crates/mem-bridge/src/engine.rs`,
+         `pub struct WebStoreDeps` ≈ `:593`; the struct's existing fields are `shards`, `prompts`,
+         `profile`, `embedder`). Fill it at the single construction site — the `composed.as_ref()
+         .map(|runtime| WebStoreDeps { … })` expression in the same file ≈ `:938` — from
+         `ComposedRuntime.store`, which already exists (`crates/mem-bridge/src/composition.rs`,
+         `pub struct ComposedRuntime`, field `pub store: Arc<EpisodicStore>`).
+      2. Call `.with_sessions(episodic_session_port(deps.episodic))` in the composition root
+         (`src/main.rs`, the `ApiServices::production(ProductionDeps { … })` chain, ≈ `:159-166`;
+         the builder is `crates/mem-web/src/api/store_adapter.rs`, `pub fn episodic_session_port`).
+         `.with_skills(...)` is already called there — follow that shape, and keep the degrade branch
+         (`ApiServices::unavailable()`) unchanged: sessions stay 501 when there is no composition.
+      3. Add an oracle in `tests/production_api_wiring.rs` asserting the **two** session routes
+         (`GET /api/projects/{project_id}/sessions`, `DELETE /api/projects/{project_id}/sessions/
+         {session_id}`) answer **200** after seeding a row, and that they answer **501** on the
+         degrade path. Nothing asserts today's 501, so without both directions the change lands
+         unproven — mirror the existing file's token-acquisition pattern rather than inventing one.
+
+      **Maintenance is NOT in this AC.** It moved to issue 39 because `cleanup()` and
+      `deduplicate()` take no `State` and are unconditional 501 stubs (D-15), so a
+      `MaintenancePort` wiring cannot reach them.
 
 ## Blocked by
 
