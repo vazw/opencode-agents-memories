@@ -4,6 +4,7 @@
 //! to the `mem-web` axum REST surface over a single same-origin `fetch` seam.
 //! The module root is the public interface the integration tests link against.
 
+pub mod agents;
 pub mod api;
 pub mod api_request;
 pub mod core_screens;

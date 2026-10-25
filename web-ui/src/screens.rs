@@ -4,7 +4,10 @@
 //! placeholder notice. `Ready` renders the shell landing panel, `Planned`
 //! renders a documented "not yet implemented" notice naming the owning wave and
 //! listing the endpoints the screen will consume, and `Live` renders the real
-//! screen — today that is the W6.3 session-history timeline plus W6.5.
+//! screen — today that is the W6.3 session-history timeline, the W6.5
+//! portability and skills screens, the four W6.7 core screens, and the W6.6
+//! `Agents` panel, which renders its own documented unavailable state rather
+//! than a planned notice.
 //!
 //! Security: the notice interpolates only compile-time constants from the route
 //! table and the path table. The session screen builds its two paths from the
@@ -17,6 +20,7 @@ use leptos::callback::Callable;
 use leptos::prelude::*;
 use serde::Deserialize;
 
+use crate::agents::AgentsPanel;
 use crate::api::auth::{AuthContext, read_marker_token};
 use crate::api::envelope::{ApiEnvelope, ApiError};
 use crate::api_request::{self, RequestSpec};
@@ -77,6 +81,7 @@ pub fn ScreenBody(route: RouteId, state: ScreenState) -> impl IntoView {
             RouteId::Profile => view! { <ProfilePanel/> }.into_any(),
             RouteId::Settings => view! { <SettingsPanel/> }.into_any(),
             RouteId::SessionHistory => view! { <SessionHistoryPanel/> }.into_any(),
+            RouteId::Agents => view! { <AgentsPanel/> }.into_any(),
             RouteId::SkillLibrary => view! { <SkillLibraryPanel/> }.into_any(),
             RouteId::ExportImport => view! { <ExportImportPanel/> }.into_any(),
             RouteId::Stats => view! { <StatsPanel/> }.into_any(),

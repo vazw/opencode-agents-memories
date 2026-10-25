@@ -211,6 +211,7 @@ body {
  * Skill Library (W6.5)
  * ------------------------------------------------------------------------- */
 
+.agents-panel,
 .skill-library-panel,
 .export-import-panel {
   max-width: 64rem;
@@ -220,6 +221,7 @@ body {
   border-radius: 0.5rem;
 }
 
+.agents-panel h2,
 .skill-library-panel h2,
 .export-import-panel h2 {
   margin-top: 0;
@@ -472,4 +474,88 @@ body {
   display: block;
   color: var(--muted);
   font-size: 0.85em;
+}
+
+/* ---------------------------------------------------------------------------
+   Agents (W6.6)
+
+   Unavailable/empty are informational (dashed, muted); failure is a left bar —
+   the same two shapes the Maintenance section uses, so the distinction survives
+   monochrome and high-contrast rendering. Existing theme tokens only: no new
+   hex colours and no force-overridden declarations.
+   --------------------------------------------------------------------------- */
+
+.agents-hint {
+  color: var(--muted);
+}
+
+.agents-loading {
+  color: var(--muted);
+}
+
+.agents-empty {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 0.25rem;
+}
+
+.agents-unavailable {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 0.25rem;
+}
+
+.agents-error {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--warn-text);
+  border-left: 3px solid var(--warn-border);
+}
+
+.agents-roster {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agents-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.25rem 0.75rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+
+.agents-agent-id,
+.agents-last-contribution,
+.agents-window,
+.agents-source-count,
+.agents-fact {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.agents-milestone-list,
+.agents-fact-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.agents-milestone {
+  margin-top: 0.5rem;
 }

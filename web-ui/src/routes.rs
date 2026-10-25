@@ -19,6 +19,7 @@ pub enum Owner {
     W6_7,
     W6_3,
     W6_5,
+    W6_6,
 }
 
 impl Owner {
@@ -29,6 +30,7 @@ impl Owner {
             Self::W6_7 => "W6.7",
             Self::W6_3 => "W6.3",
             Self::W6_5 => "W6.5",
+            Self::W6_6 => "W6.6",
         }
     }
 }
@@ -44,12 +46,13 @@ pub enum RouteId {
     ExportImport,
     SkillLibrary,
     SessionHistory,
+    Agents,
     Stats,
 }
 
 impl RouteId {
     /// Every declared route, in route-table order.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Home,
         Self::ProjectMemories,
         Self::Tags,
@@ -58,6 +61,7 @@ impl RouteId {
         Self::ExportImport,
         Self::SkillLibrary,
         Self::SessionHistory,
+        Self::Agents,
         Self::Stats,
     ];
 
@@ -72,6 +76,7 @@ impl RouteId {
             Self::ExportImport => "export-import",
             Self::SkillLibrary => "skill-library",
             Self::SessionHistory => "session-history",
+            Self::Agents => "agents",
             Self::Stats => "stats",
         }
     }
@@ -135,6 +140,12 @@ pub const ROUTES: &[RouteSpec] = &[
         path: "/sessions",
         label: "Sessions",
         owner: Owner::W6_3,
+    },
+    RouteSpec {
+        id: RouteId::Agents,
+        path: "/agents",
+        label: "Agents",
+        owner: Owner::W6_6,
     },
     // Upstream parity path (`web/src/lib/routes.ts`). `Owner::ThisWave` marks
     // the provenance; the label renders only on `Planned` placeholders and the

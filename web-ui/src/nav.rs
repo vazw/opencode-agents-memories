@@ -18,7 +18,12 @@ pub enum ScreenState {
         owner: Owner,
         endpoints: &'static [&'static str],
     },
-    /// A screen whose owning wave has landed: it fetches and renders real data.
+    /// A screen whose owning wave has landed: it renders its own panel.
+    ///
+    /// A screen with a live endpoint fetches on mount and renders the real
+    /// data. A landed screen whose data path is still deferred — `Agents`
+    /// (W6.6) in this build — renders its documented unavailable state and
+    /// consumes no endpoint (`endpoints` is empty).
     Live {
         owner: Owner,
         endpoints: &'static [&'static str],
@@ -49,6 +54,10 @@ pub fn state_for(id: RouteId) -> ScreenState {
             }
         }
         RouteId::SessionHistory => ScreenState::Live {
+            owner: spec.owner,
+            endpoints: endpoints_for(id),
+        },
+        RouteId::Agents => ScreenState::Live {
             owner: spec.owner,
             endpoints: endpoints_for(id),
         },
