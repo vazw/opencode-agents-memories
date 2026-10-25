@@ -86,8 +86,29 @@ together, as the header requires; neither may be revised without the other.
 
 ### Leg A — A2, read-only
 
-**Nothing learns this release.** The renderer (issue 44) still ships and renders whatever row exists,
-including one carried in from a migrated root; nothing creates or updates a profile row.
+**No prompt-derived learning this release.** The renderer (issue 44) still ships and renders whatever row
+exists, including one carried in from a migrated root.
+
+**Precisely — and correcting a sentence written here earlier.** A2 forbids any model call that turns
+**prompt text** into profile content. It does **not** freeze the profile row; the first draft of this ruling
+said "nothing creates or updates a profile row", which is **false**. Three production endpoints already
+write the row without learning from prompts, and they stay:
+
+| endpoint | writes how | why it is not learning |
+|---|---|---|
+| `POST /api/user-profile/refresh` | `decay()` then `update_profile(…, "Applied confidence decay")` (`crates/mem-web/src/api/profile.rs:171-201`) | deterministic ageing of existing content |
+| `POST /api/user-profile/ai-cleanup/apply` | `apply_cleanup` | a model call over existing profile content, never over prompts |
+| `PATCH /api/user-profile/item` | `update_profile_item` | user-driven edit |
+
+None can introduce content derived from a prompt, so none widens the erasure hole, and disabling them
+would remove working features for no privacy gain. The definition is stated this precisely so nobody
+later smuggles prompt-derived learning in as "maintenance": **the test is what the write's input is, not
+whether a write happens.**
+
+**One honesty item this exposes:** `crates/mem-web/src/api/store_adapter.rs:496` calls
+`count_unanalyzed_for_user_learning`, so the UI advertises a learning backlog that, under A2, nothing will
+ever consume. It must be removed or relabelled in issue 48 — a readout that promises work the system will
+not do is the same class of defect as a config field nothing reads.
 
 *Rationale.* A1 is not one feature but four unwired links plus a dependency: `save_prompt`
 (`prompt.rs:174`) has zero production callers, `LearningRound::new` (`learning_service.rs:210`) has zero

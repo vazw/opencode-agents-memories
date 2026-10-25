@@ -1,8 +1,9 @@
 # 48 — Profile · The learner leg and the erasure leg land together
 
-Status: needs-triage — 2026-10-25. **Wiring the learner without the erasure mechanism turns a latent
-promise hole into a live one; this issue carries both legs and may not merge one without the other.**
-Blocked by issue 47, which supplies the ruling this issue implements.
+Status: **ready-for-agent** — 2026-10-25, scoped by 47.1 (`Leg A = A2`, `Leg B = B2′`). **This issue is
+now the erasure leg only**: the learner leg is N/A, and the coupling rule resolves to *the erasure leg may
+not be partially landed*. Blocked by issue 47 — now **ruled**, so that blocker is discharged. See
+§ *SCOPE RESTATED* for the five decisions that fix the seam, the ordering, the canary and the surface.
 
 ## What to build
 
@@ -24,9 +25,54 @@ and a `user_id` — and production implementations of all of them already exist
 (`PromptLedgerAdapter` `:591`, `ProfileWriterAdapter` `:625`, `ProviderAnalysisGateway`
 `provider_gateway.rs:122`).
 
+## SCOPE RESTATED 2026-10-25 — 47.1 ruled A2: this issue is the **erasure leg**
+
+Issue 47 ruled `Leg A = A2` and `Leg B = B2′`. The learner leg below is therefore **skipped**, and the
+coupling rule of this issue resolves to: the erasure leg ships, and **48.11 now reads "the erasure leg may
+not be partially landed"**. Five decisions were taken in a grilling round, each after the code was measured.
+
+**E1 — the invalidation seam is inside `delete_prompt`, with an injected eraser.** Upstream keeps the two
+tiers independent (`user-prompt-manager.ts:155` is a bare `DELETE`; `grep profile src/services/user-prompt*`
+is empty), so B2′ is a **deliberate divergence** — justified because we made a promise upstream never made.
+A caller-level hook was rejected on evidence: upstream alone has **three** callers of `deletePrompt`
+(`api-handlers.ts:459`, `:980`, `auto-capture.ts:160`), and our next one is issue 39's pruning path.
+`crates/mem-bridge/src/composition.rs` builds both stores five lines apart (`prompts` `:90`, `profile`
+`:95`), and `ProfileWriter` (`learning_service.rs:625`) is the precedent for the injected trait.
+`delete_prompt` must read `created_at` before deleting — it is a bare `DELETE` today — because the
+watermark comparison needs it (`user_prompts.created_at`, `mem-store/src/sql.rs:50`).
+
+**E2 — erase the profile first, the prompt second.** The two tables live in different databases and no
+transaction spans them. Profile-first fails toward privacy (a lost profile is recoverable in principle; a
+surviving derivative is a silent promise break with no event left to re-trigger it, since the prompt is
+gone). A partial failure must return a **typed outcome** so the API reports it rather than swallowing it.
+
+**E3 — the canary asserts logical erasure, and *measures* byte residue.** `turso_core-0.8.3` has **no
+`secure_delete`**, so a plain `DELETE` does not make bytes unrecoverable; a canary written as "grep finds
+nothing" would fail by construction after a correct erase. 48.10 therefore asserts: no query returns the
+profile, the changelog rows are gone, a fresh open sees neither — and separately records what residue the
+file and `-wal` still hold, as ADR-0019's residual. It is a measurement with a stated outcome, not a
+threshold. VACUUM was rejected: turso promises only that unused pages are removed (47.4b) and it writes a
+full copy to `{temp_dir}/etilqs_{db}`, the residual already named in 47.4.
+
+**E4 — the promise must be exercisable: `DELETE /api/user-profile`.** No delete route exists today, and
+`save_prompt` has no production caller, so prompts exist only on migrated roots — a root with a profile and
+**zero prompts** has no event B2′ can fire on. The route reuses the same explicit two-table delete, and is
+also what gives `delete_profile` its first caller (it has **zero upstream too**,
+`user-profile-manager.ts:621`).
+
+**E5 — A2 is precisely "no prompt-derived learning", not "no writes".** The profile row is written today by
+`refresh` (decay), `ai-cleanup/apply` and `PATCH /item`. Those stay; see 47.1's corrected definition.
+
+**AC mapping after the re-scope:** 48.1–48.5 and 48.12 → **N/A** (no learner; issue 52 is not blocking).
+48.6 → E1/E2. 48.7 → E4 **and** the B2′ hook. 48.8 → enforced paths are `delete_prompt` and
+`DELETE /api/user-profile`; the exempted path is `delete_old_prompts`, deferred to issue 39 with the reason
+recorded there, and the upstream capture-skip deletion (`auto-capture.ts:160`) has no port counterpart
+because capture does not write prompts. 48.9 → unchanged, and it is the reason A2 is not a no-op.
+48.10 → E3. 48.11 → erasure leg only. 48.13/48.14 are new.
+
 ## Acceptance criteria
 
-**The learner leg (skip if 47 ruled `A2`)**
+**The learner leg — SKIPPED: 47.1 ruled `A2` (2026-10-25). ACs 48.1–48.5 are N/A; 48.12 is N/A too.**
 
 - [ ] **48.1** `LearningRound` is constructed at the composition site 47.2 names, with the production
       adapters above — no test doubles in a production path, no second `ProfileStore` instance (issue 44's
@@ -81,6 +127,16 @@ and a `user_id` — and production implementations of all of them already exist
       filtering: **issue 52** owns it, and when 47 rules `A1` this issue is blocked by 52 (see below). The
       criterion here is only that the wiring order is right — a profile learned from another plugin's
       orchestration boilerplate is a worse artefact than no profile, because it is *re-injected*.
+
+- [ ] **48.13** **The pending-learning readout stops advertising work nothing does.** Under A2 the UI's
+      unanalyzed-prompt count (`crates/mem-web/src/api/store_adapter.rs:496`,
+      `count_unanalyzed_for_user_learning`) advertises a learning backlog that will never be consumed.
+      Remove it or relabel it as "not analysed — learning disabled", with a test. A readout that promises
+      work the system will not do is the same defect class as a config field nothing reads.
+- [ ] **48.14** **`DELETE /api/user-profile` exists and erases both tables.** The handler reuses the same
+      explicit two-table delete as B2′ (changelogs first, then the profile row), is the first caller of
+      `delete_profile` in this tree or upstream, and is tested against a root that has **no prompts** — the
+      population for which B2′ can never fire.
 
 ## Blocked by / Blocks
 
