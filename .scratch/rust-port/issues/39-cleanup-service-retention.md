@@ -57,13 +57,11 @@ to create must be loud, not tolerated.
 7. **Manual endpoint only.** No scheduled tick in this wave (`auto_cleanup_enabled` is read but not
    yet acted on). Follow-up issue 41 carries the scheduler.
 
-Plus, per the same ruling: **`auto_cleanup_enabled`'s default flips to `false`** (owner decision).
-This is a **deliberate divergence from upstream**, whose default is `true`
-(`example/opencode-mem/src/config.ts:272`) — the port must not delete memories on first boot for
-someone who never touched config. Flip `DEFAULTS.auto_cleanup_enabled`
-(`crates/mem-core/src/config/schema.rs:574`) and the assertion at
-`crates/mem-core/tests/config_defaults.rs:157` (`assert!` → `assert!(!…)`). `config_resolution.rs`
-tests explicit values and is unaffected.
+**`auto_cleanup_enabled` keeps its upstream default `true`** (owner decision, 2026-10-25 — reverses an
+earlier decision to flip it off). Nothing reads the flag in this wave: the manual endpoint does not
+consult it and no scheduler exists yet, so it cannot delete anything. The "deletes on first boot"
+risk belongs to issue 41, where the timer and the default are decided together. **Do not touch
+`DEFAULTS.auto_cleanup_enabled` or `crates/mem-core/tests/config_defaults.rs`.**
 
 ## Included defect fix
 
@@ -122,7 +120,7 @@ skip pinned/protected, delete vector + `decrementVectorCount`, count `_user_`/`_
 - [ ] Deleting a memory clears `linked_memory_id` on prompts that referenced it.
 - [ ] `vector_count` decremented exactly once per deletion; no orphan vectors.
 - [ ] `POST /api/migration/*` answers **501** (not 500) when the service is unavailable.
-- [ ] `auto_cleanup_enabled` defaults to `false`; `config_defaults.rs:157` asserts the new default.
+- [ ] Config untouched: `auto_cleanup_enabled` keeps its `true` default and no config test changes.
 - [ ] No new dependencies; manifests byte-identical; production panic-free.
 
 ## Test plan (seeded directly — no capture wiring)
@@ -180,8 +178,8 @@ Record **`docs/adr/0017-linked-memory-retention-restart.md`**, status Accepted, 
 
 Consequences to list: upstream's one-cycle protection becomes `retention_days`; the prompts DB gains
 a table pruned by the predicate that governs eligibility; `delete_old_prompts` is superseded; the
-expiry tick is the sole writer; and `auto_cleanup_enabled` now defaults to `false`, diverging from
-upstream's `true`.
+expiry tick is the sole writer. No config default changes: `auto_cleanup_enabled` keeps
+upstream's `true`, and the scheduler that would act on it is issue 41.
 
 ## Comments
 
