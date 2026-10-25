@@ -181,6 +181,31 @@ vault is the one open path that is **always** encrypted and therefore always in 
 is about — it cannot be config-flipped to flag-off. Its row is `covered` either way; do not hard-code the
 assumption that it stays flag-on (53 may remove the combination there).
 
+## OWNER DECISIONS 2026-10-25 — grilling round (O1–O6), supersedes parts of this issue
+
+Six decisions taken by the owner before implementation, each reached after the code was measured rather
+than assumed. **Where a decision disagrees with the text above, the decision wins**; the text is kept as
+history. The measurements that drove them are cited inline.
+
+| # | decision | supersedes |
+|---|---|---|
+| **O1** | **Positive detection ⇒ refuse. "The probe cannot answer" ⇒ refuse too, but paired with an explicit override (O4).** A read-only degraded open was considered and **rejected**: the ready gate unconditionally appends three steps and two of them write (`ready.rs:226-246` — migrations, and interrupted-swap recovery which renames shard files), so a read-only database cannot complete `ensure_ready()`; `engine.rs:1270`'s `let db = self.store.ready().await?` then fails startup anyway, and skipping swap recovery would serve inconsistent shard paths while claiming to be up. | the posture is unchanged; this records the rejected alternative and why |
+| **O2** | **Mirror turso's direction matrix exactly.** The live-multiprocess-authority probe applies **only when the opener is legacy** (`turso_core-0.8.3/database.rs:939`: `if opts.enable_multiprocess_wal \|\| is_memory_like(path) \|\| … { return Ok(()) }`); the legacy-holder probe applies only to a multiprocess opener (`:991`: `if !opts.enable_multiprocess_wal \|\| flags.contains(ReadOnly)`). | **"probe A … applies to every open"** — that rule refuses the *second legitimate multiprocess opener* (engine + `purge-session` today; any future concurrent reader), i.e. the configuration multiprocess WAL exists to serve. It is stricter than the engine in a way that breaks supported use. |
+| **O3** | **Probe A is not implemented. A legacy open is refused by construction** with a typed `UnsupportedOpenMode` — the "refused" disposition `45.1` already permits per row. `ConnectOptions::for_config` pushes `MultiprocessWal` unconditionally on non-Windows (`db.rs:258-262`; `config` is not consulted — `let _ = &config.database_encryption_cipher`), so this tree cannot produce a legacy opener, and on Windows the `.tshm` leg is vacuous by construction. The `mode × writability → outcome` decision table is still implemented and tested, so the first legacy opener inherits a refusal rather than silence. | **`45.3`** (the `.tshm` probe), and the "probe A" half of **`45.13`** |
+| **O4** | **One override, bypassing both outcomes**, named for what it does — it disables the mixed-version guard. Grounds: an OFD lock carries no `l_pid`, so "held" and "cannot lock" are not reliably distinguishable (a permission error or an unlucky filesystem is indistinguishable from a live holder), and a misclassification must never leave the user with no memory engine. Every bypass logs path + bypassed outcome + the fact that the override is active, and `health` reports it. | the unconditional **"Unknown ⇒ refuse"** sentence |
+| **O5** | **The override is both an env var and a config key, env var winning when both are set:** `OPENCODE_MEM_ALLOW_UNGUARDED_OPEN` (precedent `OPENCODE_MEM_HANG_ON_SHUTDOWN`, `engine.rs:501`) and a config key. **The config key must carry a reader test** — issue 49's rule: a parsed-but-unread field is the exact defect that issue exists to remove, so a closed implementation with no reader fails review. | — (new) |
+| **O6** | **`45.8` reduces to one integration direction** (live legacy holder ⇒ refuse) **plus** the decision-table test covering the multiprocess row. Two-directional positive controls are not meaningful when one direction cannot fire. The inversion arm stays: disable the probe, and that one direction's control must go red. | **`45.8`**'s "two positive controls plus their two inversion arms" |
+
+**Unchanged by these decisions:** the seam (`ConnectFactory::connect`), the self-conflict requirement
+(`45.6`), the typed-refusal constraints (`45.7`), the marker-location rule (A5 / `45.14`), the
+`purge-session` requirement (`45.9`), the platform matrix (`45.10`), `libc`-only (`45.11`), and the cost
+measurement (`45.12`).
+
+**One consequence worth carrying forward:** with probe A gone, **the self-conflict problem is entirely a
+probe-B concern on Linux** — an exclusive lock on the database file conflicts between open file
+descriptions, including two in the same process, and our own cached handle is exactly such a description.
+`45.6` is therefore not a corner case; it is the main correctness risk of the remaining guard.
+
 ## Acceptance criteria
 
 - [ ] **45.1** The open-path table exists in this issue before any code: every path that opens a database
