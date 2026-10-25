@@ -1,7 +1,7 @@
 # 51 — Tracker · Issue 40's status still says `ready-for-agent` although its code merged
 
-Status: needs-triage — 2026-10-25. **A merged feature is still advertised as unstarted, and the same audit
-that found it also mis-attributed the `/api/cleanup` 501 to it — so the misreading is already spreading.**
+Status: done — 2026-10-25 (commit `ce9e0b5`, which carries every correction this issue lists; the 51.3
+sweep, its method and its evidence are in the sections below)
 
 ## What to build
 
@@ -36,20 +36,20 @@ error is recorded and corrected in the brief's own correction block
 
 ## Acceptance criteria
 
-- [ ] **51.1** `40-dedup-service-memories.md`'s `Status:` line names the landing commit `6bf7b28`, states
+- [x] **51.1** `40-dedup-service-memories.md`'s `Status:` line names the landing commit `6bf7b28`, states
       what landed (handler + `MaintenancePort` implementation + `production_deduplication_port`), and states
       the residual (factory has no production caller). It does **not** say `done` unless the wiring is
       either in the tree or explicitly moved to another issue, which must be named.
-- [ ] **51.2** The comments record the two corrections with evidence: the 501 belongs to `POST /api/cleanup`
+- [x] **51.2** The comments record the two corrections with evidence: the 501 belongs to `POST /api/cleanup`
       (issue 39, D-15), and `ProductionDeduplication::new` is called while the *factory* is uncalled — the
       distinction the audit lost.
-- [ ] **51.3** A **bounded** sweep of the other issues for the same defect, with a stated method: for each
+- [x] **51.3** A **bounded** sweep of the other issues for the same defect, with a stated method: for each
       issue whose status claims `ready-for-agent`, check whether its named deliverable is already in the
       tree; for each claiming `done`, check that it names a commit or a review outcome. The sweep's output
       is a list in this issue — fixed here, or recorded as "no change needed" **with the reason**. Two
       classes are explicitly **not** findings: issues still open with some waves landed (e.g. **43**, whose
       W0/W1 landed while the issue is correctly open) and issues paused with a pause note (**39**).
-- [ ] **51.4** One paragraph added to `docs/agents/issue-tracker.md` so the next issue cannot repeat it: a
+- [x] **51.4** One paragraph added to `docs/agents/issue-tracker.md` so the next issue cannot repeat it: a
       status that claims readiness names the symbols or files it will create; a status that claims landing
       names the commit. No other tracker conventions change.
 
