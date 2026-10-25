@@ -209,12 +209,15 @@ pub fn delete_memory_spec(id: &str) -> RequestSpec {
 
 /// Run one request through the shared seam and hand back the raw answer.
 ///
-/// The two screen-local decoders ([`crate::screens::delete_outcome`] and
-/// [`health_outcome`]) classify by HTTP status before they touch the body —
-/// `/api/cleanup`'s `501` in particular must never reach a generic error view —
-/// so they need the status and the bytes, not a typed envelope. The request is
-/// still prepared by [`api_request::prepare`]: same-origin, same-origin
-/// credentials, token header included (`x-opencode-mem-token`, never `Bearer`).
+/// The screen-local decoders ([`crate::screens::delete_outcome`],
+/// [`health_outcome`] and [`cleanup_outcome`]) receive the raw status because
+/// each one's classification depends on it as well as on the bytes:
+/// `delete_outcome` and `health_outcome` decode the body first and then require
+/// a `2xx` with `success: true`, while `cleanup_outcome` short-circuits `501`
+/// before decoding, so a `501` body is never parsed and never reaches a
+/// generic error view. The request is still prepared by
+/// [`api_request::prepare`]: same-origin, same-origin credentials, token
+/// header included (`x-opencode-mem-token`, never `Bearer`).
 async fn fetch_status_and_bytes(
     spec: &RequestSpec,
     auth: &AuthContext,

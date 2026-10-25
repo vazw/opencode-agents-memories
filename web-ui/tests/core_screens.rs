@@ -3,8 +3,9 @@
 //! Everything asserted here is pure (no `fetch`, no DOM): the request specs are
 //! compared against the pinned [`ENDPOINTS`] templates and the shared URL
 //! builder, the DTOs are decoded from the exact `mem-web` projections, and the
-//! render shapes pin the empty / loaded / missing branches. The live path is the
-//! browser smoke, recorded in the wave handoff.
+//! render shapes pin the empty / loaded / missing branches. This pure wasm
+//! suite — run under the Node runner, no DOM and no browser — is the proof for
+//! these screens; there is no browser smoke.
 #![cfg(target_arch = "wasm32")]
 
 use wasm_bindgen_test::wasm_bindgen_test;
