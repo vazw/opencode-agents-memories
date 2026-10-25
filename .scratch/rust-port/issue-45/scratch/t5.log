@@ -1,0 +1,31 @@
+warning: constant `F_RDLCK` is never used
+  --> crates/mem-store/tests/issue45_ab_measure.rs:35:7
+   |
+35 | const F_RDLCK: i16 = 0;
+   |       ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mem-store` (test "issue45_ab_measure") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.18s
+     Running tests/issue45_ab_measure.rs (target/debug/deps/issue45_ab_measure-4ace7108add51775)
+
+running 1 test
+test m45_t5_decision_table ... [m45] t5 writability=Writable probe_a=Free probe_b=Some(Free) => Clear
+[m45] t5 writability=Writable probe_a=Free probe_b=Held => Refuse("legacy-authority")
+[m45] t5 writability=Writable probe_a=Held probe_b=Some(Free) => Refuse("multiprocess-authority")
+[m45] t5 writability=Writable probe_a=Held probe_b=Held => Refuse("multiprocess-authority")
+[m45] t5 writability=Writable probe_a=Missing probe_b=Some(Free) => Clear
+[m45] t5 writability=Writable probe_a=Missing probe_b=Held => Refuse("legacy-authority")
+[m45] t5 writability=Writable probe_a=Unknown(5) probe_b=Some(Free) => Refuse("probe-a-unknown")
+[m45] t5 writability=Writable probe_a=Unknown(5) probe_b=Held => Refuse("probe-a-unknown")
+[m45] t5 writability=Writable own=Ours => Clear
+[m45] t5 writability=ReadOnly probe_a=Free probe_b=None => Clear
+[m45] t5 writability=ReadOnly probe_a=Held probe_b=None => Refuse("multiprocess-authority")
+[m45] t5 writability=ReadOnly probe_a=Missing probe_b=None => Clear
+[m45] t5 writability=ReadOnly probe_a=Unknown(5) probe_b=None => Refuse("probe-a-unknown")
+[m45] t5 writability=ReadOnly own=Ours => Clear
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+

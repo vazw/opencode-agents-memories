@@ -1,0 +1,2 @@
+[m45] size_of StoreError = 112 ; Option<StoreError> = 112 ; PathBuf+u8 = 32 ; PathBuf = 24 ; String = 24
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

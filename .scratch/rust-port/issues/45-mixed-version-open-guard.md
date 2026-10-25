@@ -195,16 +195,76 @@ history. The measurements that drove them are cited inline.
 | **O4** | **One override, bypassing both outcomes**, named for what it does — it disables the mixed-version guard. Grounds: an OFD lock carries no `l_pid`, so "held" and "cannot lock" are not reliably distinguishable (a permission error or an unlucky filesystem is indistinguishable from a live holder), and a misclassification must never leave the user with no memory engine. Every bypass logs path + bypassed outcome + the fact that the override is active, and `health` reports it. | the unconditional **"Unknown ⇒ refuse"** sentence |
 | **O5** | **The override is both an env var and a config key, env var winning when both are set:** `OPENCODE_MEM_ALLOW_UNGUARDED_OPEN` (precedent `OPENCODE_MEM_HANG_ON_SHUTDOWN`, `engine.rs:501`) and a config key. **The config key must carry a reader test** — issue 49's rule: a parsed-but-unread field is the exact defect that issue exists to remove, so a closed implementation with no reader fails review. | — (new) |
 | **O6** | **`45.8` reduces to one integration direction** (live legacy holder ⇒ refuse) **plus** the decision-table test covering the multiprocess row. Two-directional positive controls are not meaningful when one direction cannot fire. The inversion arm stays: disable the probe, and that one direction's control must go red. | **`45.8`**'s "two positive controls plus their two inversion arms" |
+| **O7** | **`45.6` is satisfied by proof, not by a mechanism.** Measured: `probe_b=Free` against our own **live multiprocess handle** — a multiprocess handle holds **no** lock on the database file, so probe B cannot see it. The distinct hazard the measurement did find is that **`close()` on a database file releases a POSIX lock the process holds on it**, and that requires an *in-process **legacy** handle*, which O3 refuses. Zero new state, zero per-open cost, nothing shipped that cannot fire. **The tripwire is structural:** the `UnsupportedOpenMode` test *is* the guard — any future change that admits a legacy opener fails it and must land the clearance mechanism in the same change. | the assumption (recorded here by me, and wrong) that self-conflict was "the main correctness risk of the remaining guard" |
 
 **Unchanged by these decisions:** the seam (`ConnectFactory::connect`), the self-conflict requirement
 (`45.6`), the typed-refusal constraints (`45.7`), the marker-location rule (A5 / `45.14`), the
 `purge-session` requirement (`45.9`), the platform matrix (`45.10`), `libc`-only (`45.11`), and the cost
 measurement (`45.12`).
 
-**One consequence worth carrying forward:** with probe A gone, **the self-conflict problem is entirely a
-probe-B concern on Linux** — an exclusive lock on the database file conflicts between open file
-descriptions, including two in the same process, and our own cached handle is exactly such a description.
-`45.6` is therefore not a corner case; it is the main correctness risk of the remaining guard.
+**Corrected by measurement (2026-10-25), superseding a sentence previously written here.** It said the
+self-conflict problem was "entirely a probe-B concern … our own cached handle is exactly such a
+description", and that `45.6` was "the main correctness risk of the remaining guard". Both were **wrong**:
+`probe_b` answers **`Free`** against our own live multiprocess handle, because a multiprocess handle holds
+**no** lock on the database file. Under O2+O3 there is no self to conflict with, so `45.6` is **vacuous**
+and is discharged by proof (O7) — not by a registry.
+
+**A residual the A/B measurement did find, and the blueprint must carry:** `close()` on a database file
+**releases a POSIX lock the process holds on it** — any fcntl variant, it is `close()` and not the lock
+call. It is unreachable while O3 holds (it needs an in-process *legacy* handle), but it is the hazard the
+clearance design existed to avoid, and it must be stated where the seam is described so nobody reinstates
+a probe that opens and closes the database file while holding a lock on it.
+
+**Disposition for `O3`'s only known cost:** two existing tests open *through the factory* with the
+multiprocess feature removed (`crates/mem-store/tests/turso_capabilities.rs:2550`, `:2840`), and
+`UnsupportedOpenMode` refuses exactly that. They must be changed to build their legacy handle through
+`turso::Builder` **directly** — production code does not get a test-only escape hatch through the seam.
+
+## A/B MEASUREMENT 2026-10-25 — design A wins (drafts + raw logs now tracked)
+
+Two competing designs were drafted and scored against **one** discriminating measurement, per the
+repo's standing workflow. Everything is tracked under `.scratch/rust-port/issue-45/` — `guard-a.md`,
+`guard-b.md`, `measurement.md`, and `scratch/` (the harness, `apply-and-run.sh`, and six raw logs) —
+because a ruling that lives only in `.tmp/` is one `rm -rf` from gone.
+
+**Verdict: A, decided by one arm (T3).** Design B's own-process clearance table lets a **foreign legacy
+holder of a sibling database in the same root** through, and the row is lost: `A=Refuse("legacy-authority")
+B=Clear differ=true`, B path `final=[1,3]`, `lost_row_2=true`. A guard that clears on identity is a guard
+that clears its own attacker.
+
+**Reproduced, unfiltered:**
+
+- **G1 holds.** The mixed open through `TursoConnectFactory` **succeeds**, and the opener's committed row
+  is silently gone with `integrity_check = ok` (`t1`: `opener_before=[1,2]`, `final=[1,3]`,
+  `lost_row_2=true`). The premise of this issue is confirmed by measurement, not by citation.
+- G3 holds: stale `-tshm` with no holder ⇒ `probe_a=Free`.
+- A2 holds as a **measurement** now, not a read: the flag-on holder holds no OS lock on the database file.
+- A5 holds: `.tshm` is byte-identical across a guarded open (`before_len=86016 after_len=86016
+  identical=true`).
+- `size_of::<StoreError>() = 112` — `45.7`'s budget still fits.
+- Cell 4 re-measured coherent (`[1,3,100]`, integrity ok), confirming O2 and refuting A3's original rule.
+
+**Cost, measured (`45.12` — and the "two `fcntl` calls" estimate was an undercount):** probe B (one byte,
+`F_OFD_SETLK`) mean **5.695 µs** / p95 5.640 / max 25.458; the lock+unlock syscalls alone 2.240 µs (OFD)
+and 2.285 µs (`F_SETLK`); a bare open+close baseline 3.253 µs — each probe also opens and closes; marker
+read+parse 7.115 µs; registry lookup 225.7 ns (`1735.5` ns with a per-op metadata call). **Under O3 the
+guard runs one probe, not two.**
+
+**What did not reproduce — recorded, not argued away:**
+
+1. The self-conflict claim this issue's own O1–O6 block asserted is **false**; corrected in place above,
+   discharged as O7 by proof rather than mechanism.
+2. `O3` has an **unlisted cost**: two tests open through the factory with multiprocess removed
+   (`turso_capabilities.rs:2550`, `:2840`); disposition stated above.
+3. **`45.1`'s open-path table is incomplete**: it omits `encryption_migrator`'s four connect sites
+   (including a staged temp path) and `mem-profile`'s per-operation coordination DB, and the largest test
+   class **bypasses the seam entirely** — so the seam covers production, not every open in the tree. The
+   table must say that, rather than imply the seam is universal.
+4. A 0.9 upgrade still does not fix this issue (A1 of the amendment, re-confirmed at HEAD `aa93d669`).
+
+**Rider (measured, not deferred):** A's registry is **not shipped**. Under O2+O3 its trigger — a live
+legacy opener meeting a live multiprocess authority — cannot occur, and `probe_b` is `Free` against our
+own handle. Its trigger binds the **first legacy opener** to land the clearance in the same change (O7).
 
 ## Acceptance criteria
 

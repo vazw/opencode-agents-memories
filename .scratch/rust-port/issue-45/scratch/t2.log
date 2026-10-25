@@ -1,0 +1,24 @@
+warning: constant `F_RDLCK` is never used
+  --> crates/mem-store/tests/issue45_ab_measure.rs:35:7
+   |
+35 | const F_RDLCK: i16 = 0;
+   |       ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mem-store` (test "issue45_ab_measure") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.41s
+     Running tests/issue45_ab_measure.rs (target/debug/deps/issue45_ab_measure-4ace7108add51775)
+
+running 1 test
+test m45_t2_self_conflict ... [m45] t2 S1 own_flag_on probe_a=Held second_factory_open=ok
+[m45] t2 S5 probe_a_does_not_mutate_tshm while_held=Held before_len=Some(86016) after_len=Some(86016) identical=true
+[m45] t2 S2 stale_tshm_no_holder probe_a=Free (G3: must be Free)
+[m45] t2 S3 control_no_probe_foreign_flag_off_open=OPEN-ERR Locking error: Failed locking file '/tmp/mem-store-m45-self-21446-1792944050476892830/own_off_control.db'. File is locked by another process
+[m45] t2 S4 own_flag_off probe_b_wholefile=Free foreign_open_after=OPEN-ERR Locking error: Failed locking file '/tmp/mem-store-m45-self-21446-1792944050476892830/own_off_whole.db-wal'. File is locked by another process
+[m45] t2 S6 own_flag_off probe_b_one_byte=Free foreign_open_after=OPEN-ERR Locking error: Failed locking file '/tmp/mem-store-m45-self-21446-1792944050476892830/own_off_byte.db-wal'. File is locked by another process
+[m45] t2 S7 own_flag_off probe_b_ofd_byte=Held foreign_open_after=OPEN-ERR Locking error: Failed locking file '/tmp/mem-store-m45-self-21446-1792944050476892830/own_off_ofd.db-wal'. File is locked by another process
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.09s
+

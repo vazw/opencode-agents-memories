@@ -1,0 +1,60 @@
+   Compiling mem-store v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/crates/mem-store)
+warning: constant `F_RDLCK` is never used
+  --> crates/mem-store/tests/issue45_ab_measure.rs:35:7
+   |
+35 | const F_RDLCK: i16 = 0;
+   |       ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mem-store` (test "issue45_ab_measure") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.47s
+     Running tests/issue45_ab_measure.rs (target/debug/deps/issue45_ab_measure-4ace7108add51775)
+
+running 6 tests
+test m45_child ... ignored, re-exec'd worker: Kid::spawn runs it with --ignored
+test m45_t1_g1_unguarded_open_through_the_factory ... [m45] t1 probes_live_flag_on_holder probe_a=Held probe_b=Free
+[m45] t1 opener=OPEN-OK (premise holds: the guard does not exist)
+[m45] t1 RESULT opener=OPEN-OK opener_before=[1, 2] opener_after=[1, 2] final=[1, 3] integrity=ok lost_row_2=true
+ok
+test m45_t2_self_conflict ... [m45] t2 S1 own_flag_on probe_a=Held second_factory_open=ok
+[m45] t2 S5 probe_a_does_not_mutate_tshm while_held=Held before_len=Some(86016) after_len=Some(86016) identical=true
+[m45] t2 S2 stale_tshm_no_holder probe_a=Free (G3: must be Free)
+[m45] t2 S3 control_no_probe_foreign_flag_off_open=OPEN-ERR Locking error: Failed locking file '/tmp/mem-store-m45-self-24733-1792944254907292517/own_off_control.db'. File is locked by another process
+[m45] t2 S4 own_flag_off probe_b_wholefile=Free foreign_open_after=OPEN-ERR Locking error: Failed locking file '/tmp/mem-store-m45-self-24733-1792944254907292517/own_off_whole.db-wal'. File is locked by another process
+[m45] t2 S6 own_flag_off probe_b_one_byte=Free foreign_open_after=OPEN-ERR Locking error: Failed locking file '/tmp/mem-store-m45-self-24733-1792944254907292517/own_off_byte.db-wal'. File is locked by another process
+[m45] t2 S7 own_flag_off probe_b_ofd_byte=Held foreign_open_after=OPEN-ERR Locking error: Failed locking file '/tmp/mem-store-m45-self-24733-1792944254907292517/own_off_ofd.db-wal'. File is locked by another process
+ok
+test m45_t3_clearance_evidence_ab ... [m45] t3 marker_written={"pid":24733,"start_time":28848369,"mode":"multiprocess"}
+[m45] t3 inputs a=Missing b=Held registry={(34, 1864669): 1} a_own=NotOurs b_own=true a_decision=Refuse("legacy-authority") b_decision=Clear
+[m45] t3 B_path_open=OPEN-OK
+[m45] t3 B_path_result before=[1, 2] after=[1, 2] final=[1, 3] integrity=ok lost_row_2=true
+[m45] t3 DECISION A=Refuse("legacy-authority") B=Clear differ=true
+ok
+test m45_t4_cost ... [m45] t4 probe_a_tshm: n=2000 mean=5.668us p95=5.600us max=53.591us
+[m45] t4 probe_b_db_one_byte_fsetlk: n=2000 mean=5.695us p95=5.640us max=25.458us
+[m45] t4 bare_open_close_baseline: n=2000 mean=3.253us p95=3.247us max=8.717us
+[m45] t4 marker_read_parse: n=2000 mean=7.115us p95=7.224us max=33.533us
+[m45] t4 fcntl_ofd_lock_unlock_only: n=2000 mean=2.240us p95=2.235us max=8.917us
+[m45] t4 fcntl_setlk_lock_unlock_only: n=2000 mean=2.285us p95=2.275us max=15.519us
+[m45] t4 registry_contains_key_with_stat: n=200000 mean=1735.504ns
+[m45] t4 registry_contains_key_precomputed: n=200000 mean=225.733ns
+ok
+test m45_t5_decision_table ... [m45] t5 writability=Writable probe_a=Free probe_b=Some(Free) => Clear
+[m45] t5 writability=Writable probe_a=Free probe_b=Held => Refuse("legacy-authority")
+[m45] t5 writability=Writable probe_a=Held probe_b=Some(Free) => Refuse("multiprocess-authority")
+[m45] t5 writability=Writable probe_a=Held probe_b=Held => Refuse("multiprocess-authority")
+[m45] t5 writability=Writable probe_a=Missing probe_b=Some(Free) => Clear
+[m45] t5 writability=Writable probe_a=Missing probe_b=Held => Refuse("legacy-authority")
+[m45] t5 writability=Writable probe_a=Unknown(5) probe_b=Some(Free) => Refuse("probe-a-unknown")
+[m45] t5 writability=Writable probe_a=Unknown(5) probe_b=Held => Refuse("probe-a-unknown")
+[m45] t5 writability=Writable own=Ours => Clear
+[m45] t5 writability=ReadOnly probe_a=Free probe_b=None => Clear
+[m45] t5 writability=ReadOnly probe_a=Held probe_b=None => Refuse("multiprocess-authority")
+[m45] t5 writability=ReadOnly probe_a=Missing probe_b=None => Clear
+[m45] t5 writability=ReadOnly probe_a=Unknown(5) probe_b=None => Refuse("probe-a-unknown")
+[m45] t5 writability=ReadOnly own=Ours => Clear
+ok
+
+test result: ok. 5 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.62s
+

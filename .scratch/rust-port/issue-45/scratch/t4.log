@@ -1,0 +1,26 @@
+   Compiling mem-store v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/crates/mem-store)
+warning: constant `F_RDLCK` is never used
+  --> crates/mem-store/tests/issue45_ab_measure.rs:35:7
+   |
+35 | const F_RDLCK: i16 = 0;
+   |       ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mem-store` (test "issue45_ab_measure") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.68s
+     Running tests/issue45_ab_measure.rs (target/debug/deps/issue45_ab_measure-4ace7108add51775)
+
+running 1 test
+test m45_t4_cost ... [m45] t4 probe_a_tshm: n=2000 mean=5.619us p95=7.133us max=18.886us
+[m45] t4 probe_b_db_one_byte_fsetlk: n=2000 mean=5.661us p95=7.244us max=14.026us
+[m45] t4 bare_open_close_baseline: n=2000 mean=3.240us p95=4.197us max=8.235us
+[m45] t4 marker_read_parse: n=2000 mean=7.184us p95=9.558us max=39.925us
+[m45] t4 fcntl_ofd_lock_unlock_only: n=2000 mean=2.238us p95=2.235us max=8.416us
+[m45] t4 fcntl_setlk_lock_unlock_only: n=2000 mean=2.284us p95=2.284us max=11.441us
+[m45] t4 registry_contains_key_with_stat: n=200000 mean=1749.304ns
+[m45] t4 registry_contains_key_precomputed: n=200000 mean=233.495ns
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.48s
+

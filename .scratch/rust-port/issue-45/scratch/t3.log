@@ -1,0 +1,22 @@
+warning: constant `F_RDLCK` is never used
+  --> crates/mem-store/tests/issue45_ab_measure.rs:35:7
+   |
+35 | const F_RDLCK: i16 = 0;
+   |       ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mem-store` (test "issue45_ab_measure") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.18s
+     Running tests/issue45_ab_measure.rs (target/debug/deps/issue45_ab_measure-4ace7108add51775)
+
+running 1 test
+test m45_t3_clearance_evidence_ab ... [m45] t3 marker_written={"pid":25088,"start_time":28830016,"mode":"multiprocess"}
+[m45] t3 inputs a=Missing b=Held registry={(34, 1860425): 1} a_own=NotOurs b_own=true a_decision=Refuse("legacy-authority") b_decision=Clear
+[m45] t3 B_path_open=OPEN-OK
+[m45] t3 B_path_result before=[1, 2] after=[1, 2] final=[1, 3] integrity=ok lost_row_2=true
+[m45] t3 DECISION A=Refuse("legacy-authority") B=Clear differ=true
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.06s
+
