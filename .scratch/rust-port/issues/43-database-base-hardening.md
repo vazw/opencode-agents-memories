@@ -160,6 +160,26 @@ check exists and is simply unreachable), "`-tshm` carries content" (header count
 settled — items 1–3 are code/probe work that can land now, items 4–12 are ADR text. Not one requires
 re-litigating a pinned measurement.
 
+**Blocker 1 closed 2026-10-25 — `aa0dcc4`** (`fix(mem-store): close the fail-open in the process-liveness
+probe`). `is_alive` now matches its documented contract on every platform; the decision became a pure function
+over data (`decide_liveness`) so all cells are testable on one build; a process start-time token defeats PID
+reuse on Linux; 16 new tests; reverting the two facts fails exactly the six tests that pin them. Review
+`APPROVED`, five non-blocking advisories, of which **A1 (non-Linux `unused_imports`) and A2
+(`docs/bridge-schema.md` still describing the old body) are being fixed as prescribed**. Three are recorded as
+follow-ups and not done now:
+
+- **A3 — the one remaining fail-open.** `hidepid=2` mounts return `ENOENT` for other users' pids, so
+  `observe_process` reads them as `Absent` ⇒ **Dead** ⇒ the lock can be stolen. It needs cross-user processes
+  on a shared storage root (same-uid processes stay visible). A working precedent exists in
+  `crates/mem-profile/src/learning_lock.rs:15-16` (require `/proc` **absent and** `kill(pid,0)==ESRCH`), but
+  `mem-profile` depends on `mem-store`, so reuse needs a dependency decision. Belongs to the hardening issue.
+- **A4 — the parser's hard case is untested.** No test spawns a process whose `comm` contains `)` or spaces, so
+  `rsplit_once` vs `split_once` is verified only out-of-band. Failure direction is safe (writer and reader share
+  the parser, so a misparse yields a *match* ⇒ Alive), hence advisory.
+- **A5 — forward-compat nuance.** `start_time` is now a *known* key: a future writer that changed its JSON type
+  would make this binary treat the record as corrupt and unlink a live lock. Today's writers cannot produce
+  that; if the token format ever evolves, make the field lenient rather than failing the whole record.
+
 
 
 ---
