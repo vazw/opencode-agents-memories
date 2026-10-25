@@ -487,12 +487,73 @@ pub struct CleanupDto {
     pub project_count: u64,
 }
 
-/// `POST /api/deduplicate` data (never served in this build — D-15).
+/// `POST /api/deduplicate` data.
+///
+/// Served whenever a `MaintenancePort` with a real `deduplicate()` is
+/// injected (`api::deduplication::production_deduplication_port`); the
+/// default wiring's `UnavailablePort` is what still answers the documented
+/// 501.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DedupDto {
     pub exact_duplicates_deleted: u64,
-    pub near_duplicate_groups: Vec<Value>,
+    pub near_duplicate_groups: Vec<NearDuplicateGroupDto>,
+}
+
+/// One reported near-duplicate group (upstream `DuplicateGroup`).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NearDuplicateGroupDto {
+    pub representative: DedupMemoryRefDto,
+    pub duplicates: Vec<DedupDuplicateDto>,
+}
+
+/// The survivor of an exact group (upstream `representative`).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DedupMemoryRefDto {
+    pub id: String,
+    pub content: String,
+    pub container_tag: String,
+    pub created_at: i64,
+}
+
+/// One reported near-duplicate (upstream `duplicates[]`).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DedupDuplicateDto {
+    pub id: String,
+    pub content: String,
+    pub similarity: f64,
+}
+
+impl From<super::ports::DedupReport> for DedupDto {
+    fn from(report: super::ports::DedupReport) -> Self {
+        Self {
+            exact_duplicates_deleted: report.exact_duplicates_deleted,
+            near_duplicate_groups: report
+                .near_duplicate_groups
+                .into_iter()
+                .map(|group| NearDuplicateGroupDto {
+                    representative: DedupMemoryRefDto {
+                        id: group.representative.id,
+                        content: group.representative.content,
+                        container_tag: group.representative.container_tag,
+                        created_at: group.representative.created_at,
+                    },
+                    duplicates: group
+                        .duplicates
+                        .into_iter()
+                        .map(|duplicate| DedupDuplicateDto {
+                            id: duplicate.id,
+                            content: duplicate.content,
+                            similarity: duplicate.similarity,
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
 }
 
 /// The session list payload (W6.3 owns the shape; the stub never produces it).

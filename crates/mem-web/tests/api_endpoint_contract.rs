@@ -583,33 +583,47 @@ async fn test_maintenance_endpoints_answer_their_documented_envelopes() {
 }
 
 #[tokio::test]
-async fn test_cleanup_and_deduplicate_answer_501_until_the_services_land() {
+async fn test_cleanup_answers_501_until_the_service_lands() {
     let (backend, router) = router_with_fakes();
 
-    for (path, message) in [
-        ("/api/cleanup", "cleanup is not available in this build"),
-        (
-            "/api/deduplicate",
-            "deduplicate is not available in this build",
-        ),
-    ] {
-        let response = api_request(router.clone(), "POST", path, Some("test-token"), None).await;
-        assert_eq!(
-            response.status,
-            501,
-            "{path} is the documented stub: {}",
-            response.body_string()
-        );
-        assert_eq!(
-            response.body_string(),
-            format!(r#"{{"success":false,"error":"{message}"}}"#)
-        );
-        assert!(
-            backend.calls().is_empty(),
-            "{path} must not touch a port: {:?}",
-            backend.calls()
-        );
-    }
+    let response = api_request(router, "POST", "/api/cleanup", Some("test-token"), None).await;
+    assert_eq!(
+        response.status,
+        501,
+        "/api/cleanup is the documented stub: {}",
+        response.body_string()
+    );
+    assert_eq!(
+        response.body_string(),
+        r#"{"success":false,"error":"cleanup is not available in this build"}"#
+    );
+    assert!(
+        backend.calls().is_empty(),
+        "/api/cleanup must not touch a port: {:?}",
+        backend.calls()
+    );
+}
+
+#[tokio::test]
+async fn test_deduplicate_answers_501_when_the_port_is_unavailable() {
+    let (backend, router) = router_with_fakes();
+
+    let response = api_request(router, "POST", "/api/deduplicate", Some("test-token"), None).await;
+    assert_eq!(
+        response.status,
+        501,
+        "/api/deduplicate degrades when its port is unavailable: {}",
+        response.body_string()
+    );
+    assert_eq!(
+        response.body_string(),
+        r#"{"success":false,"error":"deduplicate is not available in this build"}"#
+    );
+    assert_eq!(
+        backend.calls(),
+        vec!["deduplicate".to_string()],
+        "the handler reaches the port; the 501 is the Unavailable arm (not a stub)"
+    );
 }
 
 #[tokio::test]

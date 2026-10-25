@@ -26,6 +26,7 @@
 #![allow(clippy::result_large_err)]
 
 pub mod client;
+pub mod deduplication;
 pub mod dto;
 pub mod envelope;
 pub mod guard;
@@ -66,7 +67,8 @@ pub enum RouteExpectation {
     BusinessError,
     /// `4xx` (the skills routes only, upstream's explicit status map).
     ClientError,
-    /// The documented `501` stub.
+    /// The documented `501`: a stub, or a real handler whose port is
+    /// unavailable in this build.
     Stub,
 }
 
@@ -180,6 +182,8 @@ pub const ROUTE_TABLE: [RouteSpec; 37] = [
         path: "/api/deduplicate",
         upstream_line: ":601",
         module: "api/maintenance.rs",
+        // The handler is real: the 501 comes from the unavailable port the
+        // default (and fake) wiring injects, not from a leftover stub.
         expectation: RouteExpectation::Stub,
     },
     RouteSpec {

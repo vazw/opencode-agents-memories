@@ -1142,6 +1142,9 @@ impl MaintenancePort for FakeBackend {
     }
 
     async fn deduplicate(&self) -> Result<DedupReport, PortError> {
+        // The handler is real: the fake records the call and still answers
+        // `Unavailable`, so the 501 test proves the port was reached.
+        self.record("deduplicate".to_string());
         Err(PortError::Unavailable)
     }
 }
