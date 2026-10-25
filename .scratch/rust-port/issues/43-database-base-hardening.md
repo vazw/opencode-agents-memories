@@ -174,6 +174,49 @@ stated product position, not merely with a preference.
 
 **Still not decided, and not decidable by a wave. Recorded so the decision arrives with its history.**
 
+**SCOPE DEFERRED 2026-10-25 — the owner waits on a measurement, not on more argument.** Owner's words:
+*"agree let's wait on W0-style measurement of the single-process path, before we decide."* Direction agreed
+is **engine-wide** (drop `experimental_multiprocess_wal` for the whole engine, not a `user-prompts.db`
+exception), because **ADR-0007 D-31** (*"one engine process serves every session of a host; a session is a
+logical instance inside it … this replaces 'one engine per session'"*) plus **D-39** (*"the exclusive engine
+lock means exactly one engine owns the DB; the loser exits"*) make the flag architecturally unnecessary —
+and `ConnectOptions::for_config` enables it only because it ports upstream's `tursoExperimentalFeatures`.
+
+**What W0 already measured — do not redo this.** `crates/mem-store/tests/turso_capabilities.rs`:
+
+- `test_vacuum_is_refused_in_the_production_configuration` — refused while multiprocess WAL is on.
+- **`test_vacuum_with_the_experimental_flag_erases_the_canary`** — with `experimental_vacuum(true)` and the
+  flag **off**, `VACUUM` erases the canary. **The erasure capability itself is already proven.**
+- `test_vacuum_with_the_flag_is_refused_when_multiprocess_wal_is_enabled` — the refusal control.
+- The harness already parameterises the flag: `open_with_vacuum(path, multiprocess_wal: bool)`, plus
+  `bytes_contain`, `file_contains`, `sidecar`, `checkpoint_truncate`.
+
+**What remains unmeasured is ship-safety, not capability.** The open question is not *can the bytes be
+erased* but *can the port run with the flag off*. A W0-style pass must establish each of these, and each
+needs a control that fails when the fact stops holding:
+
+1. **Stale-`-tshm` upgrade path — highest risk, decide this first.** A database previously opened *with* the
+   flag carries `-tshm` sidecars. Open it *without* the flag and verify correctness. **Every existing user's
+   storage root is in exactly that state on upgrade.** If this is unsafe, the whole option dies regardless of
+   erasure, and options 2/3 come back.
+2. **Crash recovery.** `SIGKILL` mid-write, reopen, verify committed rows survive and nothing is corrupt.
+   Changing WAL mode changes what is durable — this is the load-bearing one.
+3. **Sidecar expectations.** Which sidecars appear with the flag off (`-shm` vs `-tshm`), and whether stale
+   ones are cleaned or must be reaped.
+4. **Durability semantics.** What `synchronous` / checkpoint behaviour means on the flag-off path; the WAL
+   story differs from the multiprocess one.
+5. **In-engine concurrency.** The engine is single-process but multi-task on a `current_thread` runtime —
+   verify concurrent tasks still behave on one connection pool.
+6. **`wal_checkpoint(TRUNCATE)` without the flag** — it is part of the erasure recipe, not decoration.
+7. **Encryption interaction.** `VACUUM` needs the key; verify VACUUM under flag-off **and** encryption on
+   (the option-3 combination), since ADR-0012's reasoning assumes an encrypted database.
+8. **The refusal control.** Re-assert that `VACUUM` is refused *with* the flag, so the tests fail if turso
+   changes the behaviour.
+
+Until that pass lands, **all three options stay open, and option 1's real cost is not "a second process" —
+it is whatever item 1 turns out to be.**
+
+
 ---
 
 ## BOOKKEEPING 2026-10-25 (from the vault project setup)
