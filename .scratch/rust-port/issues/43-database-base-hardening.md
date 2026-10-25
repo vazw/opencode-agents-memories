@@ -216,6 +216,47 @@ needs a control that fails when the fact stops holding:
 Until that pass lands, **all three options stay open, and option 1's real cost is not "a second process" —
 it is whatever item 1 turns out to be.**
 
+**MEASUREMENT LANDED 2026-10-25 — `f6e3ff1` (nine pinned tests, 32/32 serial and parallel).** The pass is
+done, and it **overturned three of the eight items** and found one hazard the list did not contain.
+
+**Verdict: option 1 is viable, and it needs no migration for correctness.** A database whose entire content
+sits in a flag-on-produced WAL reopens flag-off with `integrity_check=ok`, accepts writes, then reopens again.
+The dirty variant passes too: a flag-on process `SIGKILL`ed mid-transaction leaves 1025 spilled **uncommitted**
+rows on disk, and the flag-off reopen recovers exactly the committed prefix.
+
+Corrections to the spec above — it was wrong in four places:
+
+1. **Item 1 was not the killer.** A stale `-tshm` is inert in every form tested (stale, zero-length, 100-byte
+   garbage, 86 KiB garbage, absent): never read, never rewritten, never reaped. Downgraded to a regression
+   pin. But the files are **permanent debris** (~86 KiB per database, never deleted by turso) — W7 must reap
+   them or ADR-0019 must accept them by name.
+2. **Item 2's premise was unsupported.** Durability is **flag-independent**: both modes are WAL, the sync type
+   is a compile-time `Fsync`, and no code path derives it from the flag.
+3. **The flag is not what refuses `VACUUM` — the *vacuum feature* is.** `VACUUM` on a flag-off handle without
+   `experimental_vacuum(true)` is still refused (`Parse error: VACUUM is an experimental feature`). So
+   **dropping the flag restores nothing on its own**: the erasure recipe needs both changes, the engine-wide
+   flag drop *and* a per-open vacuum feature on the erasure handle.
+4. **The W6 canary in the design doc targets `-shm`, which never exists on this path.** Sidecars are two
+   disjoint sets — flag-on `{db, -wal, -tshm}`, flag-off `{db, -wal}` — so the canary must target `-tshm` or it
+   will pass vacuously.
+
+**The hazard the list did not contain: the mixed-version window.** The flag disables turso's own OS file lock
+(`OpenFlags::NoLock`) and the legacy-open rejection does not fire when the peer did not open in multiprocess
+mode — so a flag-off build can attach to a database held live by a flag-on build. The pinned tests are all
+sequenced and do not cover it. **It is not a reason to withhold option 1**; it decides between a release-note
+deploy rule (*never run a flag-on and a flag-off build against one storage root in the same release window*)
+and an open-path guard. **Owner decision, open.**
+
+Also measured: encryption and the flag are orthogonal (an encrypted database opens, writes and reads flag-off;
+`VACUUM` under encryption rewrites the file and preserves the cipher — so erasure-by-VACUUM is only meaningful
+in the **default unencrypted** configuration); rollback across four transitions is non-destructive; and a clean
+close **never checkpoints**, so the at-rest `-wal` is load-bearing data, not scratch.
+
+**Still open and still the owner's:** the promise itself — prompt text only or all user content — and
+best-effort-with-a-typed-outcome versus a hard guarantee. Precedent research (vault, 2026-10-25): no system in
+the vault promises physical deletion of user content; none promises artefact-scoped deletion; none ships
+encryption-on by default as its guarantee. ADR-0019 stays unwritten until the owner rules.
+
 
 ---
 
