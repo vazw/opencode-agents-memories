@@ -367,3 +367,109 @@ body {
     border-bottom: 1px solid var(--border);
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Settings · Maintenance (issue 42 / W8.4)
+
+   Four outcome treatments that must stay distinct in shape as well as colour
+   (unavailable = dashed/muted, refused = solid warn box, failure = left bar), so
+   the distinction survives monochrome and high-contrast rendering. Existing
+   theme tokens only: no new hex colours and no force-overridden declarations.
+   --------------------------------------------------------------------------- */
+
+.maintenance {
+  margin-top: 1.5rem;
+  padding: 1rem 1.25rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.maintenance-action {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.9rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+
+.maintenance-action:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.maintenance-cancel {
+  margin-left: 0.5rem;
+  padding: 0.4rem 0.9rem;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+
+/* The armed step is loud: the next click deletes memories. */
+.maintenance-armed {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 0.25rem;
+}
+
+/* Informational, not an error: the build has no cleanup endpoint. */
+.maintenance-unavailable {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 0.25rem;
+}
+
+/* A business refusal: the server declined; nothing failed. */
+.maintenance-refused {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 0.25rem;
+}
+
+/* A real failure: shaped as a bar, so colour is not the only signal. */
+.maintenance-error {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--warn-text);
+  border-left: 3px solid var(--warn-border);
+}
+
+.maintenance-report {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0.75rem 0 0;
+}
+
+.maintenance-report dt {
+  color: var(--muted);
+}
+
+.maintenance-report dd {
+  margin: 0;
+}
+
+.maintenance-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.maintenance-hint {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85em;
+}
