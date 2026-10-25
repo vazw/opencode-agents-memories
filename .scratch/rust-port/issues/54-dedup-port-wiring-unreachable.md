@@ -1,12 +1,20 @@
 # 54 — Composition root · `POST /api/deduplicate` is implemented, tested and unreachable in the shipped binary
 
-Status: ready-for-agent — 2026-10-25. Filed on the owner's ruling ("file issue 54, narrow scope") after issue 51's
-sweep found the residual unowned. **The work will add nothing to `crates/`**: the symbols it needs already exist —
-`ApiServices::with_maintenance` (`crates/mem-web/src/api/ports.rs:622`), `production_deduplication_port`
-(`crates/mem-web/src/api/deduplication/mod.rs:264`), and the two resolved config fields
-`deduplication_enabled` / `deduplication_similarity_threshold` (`crates/mem-core/src/config/mod.rs:487-492`).
-The new artifact is one `.with_maintenance(..)` call in `src/main.rs`'s `Some(deps)` arm, plus the tests that
-prove it is read.
+Status: done — 2026-10-25. `POST /api/deduplicate` is reachable in the shipped binary: **`fa40b6ce2bd9d6b6b969b55a3bc81237c19c7458`**
+(`feat: wire POST /api/deduplicate into the composition root (issue 54)`) adds the single
+`.with_maintenance(production_deduplication_port(..))` call to `src/main.rs`'s `Some(deps)` arm, fed
+by the resolved `deduplication_enabled` / `deduplication_similarity_threshold`; the oracles are
+`test_production_wiring_runs_deduplicate_over_the_live_shards`,
+`test_production_wiring_reads_deduplication_enabled_from_the_resolved_config` and
+`test_production_wiring_reads_deduplication_similarity_threshold_from_the_resolved_config`
+(`tests/production_api_wiring.rs`). **Reachability flag:** an authenticated client can now run
+`DedupService::run()` over live shard vectors — deleting exact duplicates **including pinned rows**,
+which the pass cannot exempt — gated only by `deduplicationEnabled` (default `true`); the control
+level is unchanged (no dry-run, no default flip, no new config key); the `None` (no composed stores)
+D-38 degrade arm still answers the documented 501. Out of scope and owned elsewhere: `/api/cleanup`
+and every migration method on `MaintenancePort` keep returning `Unavailable` (issue 39, PAUSED). 54.4
+re-derived: the route row stays `RouteExpectation::Stub` because `api_endpoint_contract` and
+`api_route_auth` drive `fake_services()`, whose `deduplicate()` is `Err(PortError::Unavailable)`.
 
 ## The defect, measured at `8a39e01`
 
