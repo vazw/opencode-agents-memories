@@ -49,6 +49,38 @@ shard is a constraint · 0023 retired-shard reaping · 0024 brute-force scan cos
 Decision 3 is the cheapest: it deletes a whole compatibility dimension from W2 and W5.
 
 
+## W0 LANDED 2026-10-25 — `af01156` (engine facts pinned)
+
+`crates/mem-store/tests/turso_capabilities.rs`, 22 tests, `mem-store` 194 -> 216. Test-only; no
+production file, no manifest, `sql.rs`/`golden_sql.rs` untouched. Reviewer APPROVED after five
+independent inversions of its own; the two previously-rejected vacuous controls (AC6's fixture,
+AC3/AC4's missing distinct `shard_index`) are verifiably gone.
+
+**Two facts that bind the later waves:**
+
+1. `Connection::execute` compiles only the **first** statement of a multi-statement string — it
+   returns `Ok` and applies nothing after it. Any multi-statement sequence must go through
+   `Db::batch(BatchMode::Write)`. Pinned by AC2.
+2. A constraint raised **inside** `BatchMode::Write` surfaces as `BatchStatementFailed`, which
+   `StoreError::from` does not classify, so `is_constraint == false`. W4's rider is sound on
+   `execute` paths; **W2's `CHECK (vector_count >= 0)` fires inside a batch and must not expect
+   the classifier.** Pinned by AC6/AC7/AC8.
+
+**OPEN OWNER DECISION (blocks W6's erasure posture, not W0):**
+
+`VACUUM` cannot run in the configuration production builds. With `experimental_vacuum(true)` **and**
+multiprocess WAL enabled, the engine refuses it at translation
+(`VACUUM is incompatible with experimental multiprocess WAL`); production enables multiprocess WAL
+on every non-Windows platform. Measured, pinned by AC15/AC17.
+
+Consequence: the design's W6 remedy ("enable `experimental_vacuum(true)` in the connect factory —
+one flag") **does not work**. Every sweep would report `PendingErase` against an operation that can
+never succeed. W6 must first decide whether multiprocess WAL is dropped for the prompts database —
+a production trade, not a test-wave choice. This is recorded, not decided: the design document was
+deliberately left unamended so the evidence that the design was wrong survives.
+
+---
+
 ## Why this exists
 
 Two independent reviews of `.tmp/drafts/20261025-database-design-handover.md` (2026-10-25) found defects in
