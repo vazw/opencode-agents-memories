@@ -1,9 +1,7 @@
 # 48 — Profile · The learner leg and the erasure leg land together
 
-Status: **ready-for-agent** — 2026-10-25, scoped by 47.1 (`Leg A = A2`, `Leg B = B2′`). **This issue is
-now the erasure leg only**: the learner leg is N/A, and the coupling rule resolves to *the erasure leg may
-not be partially landed*. Blocked by issue 47 — now **ruled**, so that blocker is discharged. See
-§ *SCOPE RESTATED* for the five decisions that fix the seam, the ordering, the canary and the surface.
+Status: **landed — residual (owned by issue 39)** — implementation `86ff7d7`, merged as `fddffe3`
+(`--no-ff`), under 47.1's ruling (`Leg A = A2`, `Leg B = B2′`). Residual: `delete_old_prompts`, untouched here.
 
 ## What to build
 
