@@ -58,6 +58,10 @@ error is recorded and corrected in the brief's own correction block
 - Re-designing issue 40 or re-deciding its merged decisions. This issue touches status and comments only.
 - Whether `production_deduplication_port` *should* be wired, and by whom (issue 37's composition root or a
   follow-up). Naming the owner is in scope; doing the wiring is not.
+- **Authorized narrow exception:** the one-line annotation on issue 40's `## What to build` heading,
+  marking that section as the state at filing (`## What to build (AS FILED — superseded by …)`), as this
+  wave does. A heading is neither status nor a comment; this line authorizes that single heading and
+  nothing else inside that section.
 - Any edit to `crates/` or `src/`.
 
 ## Blocked by / Blocks
@@ -65,6 +69,33 @@ error is recorded and corrected in the brief's own correction block
 - **Blocked by:** nothing.
 - **Blocks:** the credibility of every other status line in the directory, in the weak sense that a reader
   who has been burned once stops trusting the field.
+
+## 51.3 sweep — 2026-10-25
+
+Method, applied at `8a39e01`. **Readiness class:** for every issue whose `Status:` claims
+`ready-for-agent`, ask `git log --format='%h %s' -F --grep="(issue NN)" -1` whether a commit already
+names it; where one does, read that commit and the issue's own ACs and classify the deliverable as
+landed, partial or absent. **Landing class:** for every issue whose `Status:` says `done`, require a
+cited commit that resolves in history (`git cat-file -e <sha>^{commit}`) or a recorded review outcome;
+the 01–04 backfill that `docs/agents/triage-labels.md` records (2026-10-18) is the sanction for those
+four closing without a commit, and the rule added to `issue-tracker.md` is forward-looking, so these
+closings are conformant rather than grandfathered exceptions. The two classes 51.3 excludes stay
+excluded: an issue open with some waves landed, and a paused issue with a pause note.
+
+| # | status today | what the tree says | verdict | action |
+|---|---|---|---|---|
+| **40** | `ready-for-agent` | `6bf7b28` merged the handler, the `MaintenancePort` implementation and the factory; the factory is uncalled by any production path | landed, residual **owned by issue 54** | status rewritten (51.1) |
+| **42** | `ready-for-agent` | `e996a63` merged the Maintenance section, confirm flow and wasm tests; its backend `/api/cleanup` is issue 39, PAUSED | frontend half landed | status amended: names the commit and the paused backend |
+| **38** | `ready-for-agent` | `4232934` moved `web-ui/Cargo.lock` to `tokio 1.54.1`; the AC evidence needs cargo and was never recorded | deliverable landed, evidence open | status amended: names the commit and the evidence gap |
+| 24 | `ready-for-agent` | AC1 ticked; AC2 pending on 26 · 37 · 29, and the line names them | open with waves landed | no change — excluded class, and the line already names what is pending |
+| 29 | `ready-for-agent` | the shell slice landed with a reviewer APPROVED; ACs 3–4 named as pending on the same line | open with waves landed | no change — excluded class |
+| 37 | `ready-for-agent` | AC4 and AC6 unticked; `src/main.rs` has no `.with_sessions(..)` | not landed | status unchanged; a comment records the AC6 supersession (the 2026-10-25 comment added to that file by this wave) |
+| 48 | `ready-for-agent` | rescoped the same day by `8a39e01`; nothing of it is in the tree | not landed | no change |
+| 26 `done` files | `done` | 25 close on a recorded review outcome (01–04 via the sanctioned 2026-10-18 backfill; 05, 08–10, 14, 16, 25 and the rest by an `APPROVED` outcome) and one (`34`, `a96a2bc`) names a commit; `36`'s `9a523b5` is a clean-tree baseline inside a comment, not a status citation | conforms | no change — the landing rule is forward-looking |
+
+Twenty-six `done` lines were checked and none needed a change — one names a commit, twenty-five close on
+a recorded review outcome — so the defect is concentrated in the readiness label rather than in the
+landing label. Three findings, one defect: a status line asserting a state the tree contradicts.
 
 ## Comments
 
@@ -82,3 +113,19 @@ error is recorded and corrected in the brief's own correction block
   into the status line**. If the hash is wrong, the status line carries the right one, not this issue's.
 - Also corrected here, and not to be re-filed: the audit's *"issue 40 is `ready-for-agent` with a 501 route
   and `ProductionDeduplication::new` uncalled"* is wrong in two of three clauses — see 51.2.
+- **2026-10-25 — 40's residual, and who owns it.** Three status lines were corrected here (40, 42, 38);
+  none became `done`, and none could: in all three the deliverable is in the tree while the line asserted
+  otherwise. 40's residual — `production_deduplication_port` is called by nothing in `src/main.rs`, issue
+  37's AC6 disclaims maintenance "to issue 39", and issue 39 is PAUSED and scoped to `/api/cleanup` — is
+  **owned by issue 54** (`54-dedup-port-wiring-unreachable`), filed 2026-10-25, which scopes the
+  `.with_maintenance(..)` wiring in the composition root, a reader test for the two resolved-but-unread
+  config keys `deduplication_enabled` / `deduplication_similarity_threshold`, and an anti-regression test
+  that the shipped maintenance port is not `Unavailable`. Filing is not scheduling: nothing here says
+  when 54 runs. Naming that owner was in this issue's scope; doing the wiring is not.
+- **2026-10-25 — the mis-attribution's tracked reach.** The audit's conflation of `/api/deduplicate`
+  with the `/api/cleanup` 501 survived in three tracked places, all corrected here: this issue's own
+  line numbers, issue 37's AC6 premise, and `docs/web-skeleton-smoke.md`'s D-15 rationale. The audit
+  brief itself (`.tmp/drafts/20261025-design-concerns-audit-brief.md`) is gitignored and absent from
+  this worktree, so its correction block cannot be reached by a commit — the durable copies are 40's
+  comments and this list, which is root `AGENTS.md`'s rule: a ruling that lives only in `.tmp/` is one
+  `rm -rf` from gone.

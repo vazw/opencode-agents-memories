@@ -1,6 +1,11 @@
 # 38 — Security · Upgrade tokio 1.54.0 in `web-ui` (RUSTSEC-2026-0384)
 
-Status: ready-for-agent — 2026-10-25 (triage closed: patch bump only; the two unmaintained warnings come from the frozen leptos/thaw stack and are accepted, not fixed here)
+Status: **landed — AC evidence unrecorded** — 2026-10-25. The bump merged as **`4232934`**
+(`fix(web-ui): bump tokio to 1.54.1 for RUSTSEC-2026-0384 (issue 38)`); `web-ui/Cargo.lock` pins `tokio
+1.54.1`. **Residual:** the acceptance evidence — `cargo audit` = 0 vulnerabilities, the `cargo tree -i
+tokio` re-measurement, the wasm suite at its baseline and both web-ui gates — is not recorded in this
+file, and a docs-only wave cannot produce it, so the boxes below stay open. Closing needs one run with
+cargo in `web-ui/`.
 
 ## What to build
 

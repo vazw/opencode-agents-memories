@@ -1,6 +1,12 @@
 # 42 — W8.4 · Maintenance section in Settings (run cleanup from the UI)
 
-Status: ready-for-agent — 2026-10-25 (paired with issue 39; frontend half of the cleanup wave)
+Status: **landed — frontend half only** — 2026-10-25. The Maintenance section, its arming/confirm flow
+and the report/refused/unavailable/error rendering merged as **`e996a63`** (`feat(web-ui): add a
+confirmed Maintenance section that runs cleanup (issue 42)`) in `web-ui/src/core_screens.rs`, with its
+wasm tests (`web-ui/tests/core_screens.rs`) and styles. **Residual:** the `200 success:true` five-count
+path cannot be exercised against a real server until `POST /api/cleanup` is real — issue 39, currently
+**PAUSED** — and the acceptance boxes below stay open because this docs wave runs no cargo: they are
+unverified here, not failed.
 
 ## What to build
 
