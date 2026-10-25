@@ -2,6 +2,40 @@
 
 Status: needs-triage — 2026-10-25. **Blocks issue 39 (retention cleanup) and issue 41 (scheduler).**
 
+## RE-VERIFICATION 2026-10-25 (architecture pass) — read this before the items below
+
+An architecture review re-derived every claim from the tree and from turso probes. **Four claims in this
+issue do not survive** — three of them mine. The items below are retained as history; the rulings live in
+`.tmp/drafts/20261025-database-base-hardening-design.md` and in the wave table there.
+
+| claim as filed | verdict |
+|---|---|
+| 43.3 "`memories` records no embedding model" | **True of the row, false of the shard.** `shard_metadata.embedding_model` exists (`sql.rs:428-431`, written at `shard_manager.rs:585-608`). The real defect: **nothing reads it**, and `INSERT OR REPLACE` **overwrites** it. Fix = verify, don't just record. |
+| 43.2 "`vector_count` drift makes rotation early or late" | **False.** `resolve_write_shard` → `sync_shard_vector_count` → `COUNT(*)` → absolute `SET` on **every write** (`shard_manager.rs:681-702, 808`). Drift self-heals on the write path; the residue is that `shard_path_migration.rs:618` makes a decision from the count without reconciling. |
+| 43.6 "`user-prompts.db` has no schema version" | **False as stated.** `prompt.rs:147-161` runs the shared runner and `schema_migrations.rs:143-157` stamps `user_version = 1`. The real gap: `ensure_user_prompt_columns` runs three `ALTER`s on every open **outside** the version mechanism and swallows every non-duplicate error. |
+| 43.4 "`secure_delete = ON` fixes the WAL residue" | **The pragma does not exist in this engine.** Probe: set returns `Ok`, read returns **zero rows**, and the canary survives in the main file after DELETE + `wal_checkpoint(TRUNCATE)`, with or without it. Recovery is `wal_checkpoint(TRUNCATE)` + `VACUUM` under `experimental_vacuum(true)` (without the flag `VACUUM` is a **parse error** — so the existing best-effort VACUUM can never have succeeded). |
+
+**Two things this issue understated:** 43.1 has **two** deterministic-id writers (`promotion.rs:344` as well
+as `capture.rs:212`); and the review-prescribed "id index in `metadata.db`" would **fail open** — a lost index
+row *is* the duplicate it exists to prevent — so the ruling is a scope scan on the write path, measured at
+53 µs (k=1) / 131 µs (k=5) / 453 µs (k=20) with cached handles.
+
+**Measured, and it kills a proposed re-layout:** 3 000 rows × 768 dims, two vectors/row — inline 24.7 MB /
+26.8 ms cold / 12.3 ms warm; narrow companion table **28.8 MB** / 20.1 ms / 11.8 ms, +1.76 ms hydrate. Warm
+delta **4 %**, and the narrow file is **larger**. Both run at ~4 µs/row: **compute-bound on
+`vector_distance_cos`**, which a table split cannot fix. Real root: 19 shards, 2 341 rows. The cheaper lever
+is `max_vectors_per_shard` (currently 50 000 ⇒ ~400 ms per query before rotation).
+
+**Wave sequence (design §2):** W0 engine-capability tests → W1 id resolution → W2 shard v3 (`shard_stats` +
+fingerprint) → W3 count/model authority → W4 one-active index → W5 prompts v2 → W6 erasure → W7 retired-shard
+reaping → W8 benchmark gate. W4 and W5 are parallel-safe; W2→W3 is a strict schema-then-authority boundary.
+
+**ADRs to write:** 0017 scope-wide id resolution · 0018 the shard is the source of truth for its own facts ·
+0019 erasure posture · 0020 cross-file backup ordering · 0021 schema version discipline · 0022 one active
+shard is a constraint · 0023 retired-shard reaping · 0024 brute-force scan cost, measured.
+
+---
+
 ## Why this exists
 
 Two independent reviews of `.tmp/drafts/20261025-database-design-handover.md` (2026-10-25) found defects in
