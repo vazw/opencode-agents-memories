@@ -315,8 +315,8 @@ The migration service **exists** — `crates/mem-store/src/migration_service.rs`
 `crates/mem-store/tests/turso_reembed_migration.rs`) — but it is **unwired**.
 The migration routes read `ApiServices::maintenance`, whose slot now holds the
 deduplication port (issue 54); the migration service still has no adapter, so
-those methods answer `Unavailable`, which `port_failure` maps to the D-9 500
-(`crates/mem-web/src/api/mod.rs:534-537`). The residual is issue 37's AC6
+those methods answer `Unavailable`, which `port_failure` maps to the D-9 500.
+The residual is issue 37's AC6
 (issue 39 stays PAUSED and scoped to `/api/cleanup`). The envelopes above are
 the handler contract, exercised by
 `api_endpoint_contract.rs` over the fake port.
