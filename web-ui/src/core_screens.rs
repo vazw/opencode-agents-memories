@@ -3,16 +3,20 @@
 //! Each screen follows the W6.5 house pattern:
 //!
 //! 1. a **pure request spec** (`list_memories_spec`, `list_tags_spec`,
-//!    `get_user_profile_spec`, `health_spec`, `stats_spec`) built from the
-//!    pinned [`crate::paths::ENDPOINTS`] templates, so the wasm tests pin the
-//!    exact request with no `fetch`;
+//!    `get_user_profile_spec`, `health_spec`, `stats_spec`, `cleanup_spec`)
+//!    built from the pinned [`crate::paths::ENDPOINTS`] templates, so the wasm
+//!    tests pin the exact request with no `fetch`;
 //! 2. a **pure DTO decode** (`MemoryPage`, `TagsPage`, `ProfileView`,
-//!    `HealthStatus`, `StatsView`) matching the `mem-web` projection;
+//!    `HealthStatus`, `StatsView`, `CleanupReport`) matching the `mem-web`
+//!    projection;
 //! 3. a **pure render shape** (`memories_view`, `tags_view`, `profile_view`,
-//!    `settings_view`) the panel renders from, so the empty / loaded / missing /
-//!    error branches are testable without a DOM;
+//!    `settings_view`, `cleanup_outcome_view`, and the `cleanup_next` state
+//!    machine) the panel renders from, so the empty / loaded / missing / error
+//!    branches are testable without a DOM;
 //! 4. the **panel component** itself, which owns the signals and the one
-//!    same-origin fetch seam ([`crate::api_request`]).
+//!    same-origin fetch seam ([`crate::api_request`]). The one destructive call
+//!    in the file — `POST /api/cleanup` — is emitted only from an explicit
+//!    arm-then-confirm click, never on mount, reload or a timer.
 //!
 //! Security: every request goes through the existing seam (`prepare` /
 //! `request`), so it is same-origin, root-relative and token-bearing
@@ -28,7 +32,7 @@ use leptos::prelude::*;
 use serde::Deserialize;
 
 use crate::api::auth::{AuthContext, read_marker_token};
-use crate::api::envelope::ApiError;
+use crate::api::envelope::{ApiError, parse_envelope};
 use crate::api_request::{self, RequestSpec};
 use crate::paths::{EndpointId, endpoint, fill};
 use crate::screens::format_created_at;
@@ -203,15 +207,21 @@ pub fn delete_memory_spec(id: &str) -> RequestSpec {
     RequestSpec::delete(fill(endpoint(EndpointId::DeleteMemory).template, id))
 }
 
-/// Run a data-less mutation through the shared seam.
+/// Run one request through the shared seam and hand back the raw answer.
 ///
-/// `POST …/pin`, `POST …/unpin` and `DELETE /api/memories/{id}` all answer a
-/// success envelope without the `data` payload [`api_request::request`]
-/// requires, so the body goes through the same bounded
-/// [`crate::screens::delete_outcome`] decoder the session delete uses. The
-/// request itself is still prepared by [`api_request::prepare`]: same-origin,
-/// same-origin credentials, token header included.
-async fn perform_action(spec: &RequestSpec, auth: &AuthContext) -> Result<(), ApiError> {
+/// The screen-local decoders ([`crate::screens::delete_outcome`],
+/// [`health_outcome`] and [`cleanup_outcome`]) receive the raw status because
+/// each one's classification depends on it as well as on the bytes:
+/// `delete_outcome` and `health_outcome` decode the body first and then require
+/// a `2xx` with `success: true`, while `cleanup_outcome` short-circuits `501`
+/// before decoding, so a `501` body is never parsed and never reaches a
+/// generic error view. The request is still prepared by
+/// [`api_request::prepare`]: same-origin, same-origin credentials, token
+/// header included (`x-opencode-mem-token`, never `Bearer`).
+async fn fetch_status_and_bytes(
+    spec: &RequestSpec,
+    auth: &AuthContext,
+) -> Result<(u16, Vec<u8>), ApiError> {
     let (url, init) = api_request::prepare::<serde_json::Value>(spec, auth)?;
     let window = web_sys::window().ok_or(ApiError::Transport)?;
     let response =
@@ -226,7 +236,19 @@ async fn perform_action(spec: &RequestSpec, auth: &AuthContext) -> Result<(), Ap
     )
     .await
     .map_err(api_request::map_transport)?;
-    let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+    Ok((status, js_sys::Uint8Array::new(&buffer).to_vec()))
+}
+
+/// Run a data-less mutation through the shared seam.
+///
+/// `POST …/pin`, `POST …/unpin` and `DELETE /api/memories/{id}` all answer a
+/// success envelope without the `data` payload [`api_request::request`]
+/// requires, so the body goes through the same bounded
+/// [`crate::screens::delete_outcome`] decoder the session delete uses. The
+/// request itself is still prepared by [`api_request::prepare`]: same-origin,
+/// same-origin credentials, token header included.
+async fn perform_action(spec: &RequestSpec, auth: &AuthContext) -> Result<(), ApiError> {
+    let (status, bytes) = fetch_status_and_bytes(spec, auth).await?;
     crate::screens::delete_outcome(status, &bytes)
 }
 
@@ -1187,21 +1209,7 @@ pub fn health_outcome(status: u16, bytes: &[u8]) -> Result<HealthStatus, ApiErro
 
 /// Fetch the health envelope through the shared seam.
 pub async fn health(auth: &AuthContext) -> Result<HealthStatus, ApiError> {
-    let (url, init) = api_request::prepare::<serde_json::Value>(&health_spec(), auth)?;
-    let window = web_sys::window().ok_or(ApiError::Transport)?;
-    let response =
-        wasm_bindgen_futures::JsFuture::from(window.fetch_with_str_and_init(&url, &init))
-            .await
-            .map_err(api_request::map_transport)?;
-    let response: web_sys::Response =
-        wasm_bindgen::JsCast::dyn_into(response).map_err(api_request::map_transport)?;
-    let status = response.status();
-    let buffer = wasm_bindgen_futures::JsFuture::from(
-        response.array_buffer().map_err(|_| ApiError::Transport)?,
-    )
-    .await
-    .map_err(api_request::map_transport)?;
-    let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+    let (status, bytes) = fetch_status_and_bytes(&health_spec(), auth).await?;
     health_outcome(status, &bytes)
 }
 
@@ -1573,12 +1581,309 @@ pub fn StatsPanel() -> impl IntoView {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Maintenance (issue 42 / W8.4)
+// ---------------------------------------------------------------------------
+
+/// `POST /api/cleanup`.
+///
+/// Bodyless by design: the server owns the retention window and the scope of
+/// the sweep, so the client sends nothing to interpret.
+pub fn cleanup_spec() -> RequestSpec {
+    RequestSpec::post(endpoint(EndpointId::Cleanup).template)
+}
+
+/// The frozen five-field cleanup report (issue 39).
+///
+/// Every field is **required** on purpose: no `#[serde(default)]` anywhere, so
+/// a partial or `null` body classifies as a malformed response instead of
+/// rendering a zero the server never sent (D-3).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupReport {
+    pub deleted_count: u64,
+    pub user_count: u64,
+    pub project_count: u64,
+    pub prompts_deleted: u64,
+    pub protected_memories_skipped: u64,
+}
+
+/// What one cleanup run answered.
+///
+/// `Unavailable` (the `501` build) and `Refused` (a `200 success:false`
+/// business decision) are outcomes, not failures — only `Failed` means the
+/// screen could not get an answer at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CleanupOutcome {
+    Ran(CleanupReport),
+    Refused(String),
+    Unavailable,
+    Failed(String),
+}
+
+/// Classify one `/api/cleanup` answer.
+///
+/// `501` is checked **first**, before a single body byte is decoded: the
+/// documented degraded-server answer can arrive with any body (a proxy page, a
+/// truncated response) and must still render as unavailable rather than as the
+/// permanent error a generic `ApiError::Server { status: 501 }` would produce
+/// (D-2). A `2xx` failure envelope is a business refusal, not an error (D-5);
+/// everything else keeps the existing health/stats wording.
+pub fn cleanup_outcome(status: u16, bytes: &[u8]) -> CleanupOutcome {
+    if status == 501 {
+        return CleanupOutcome::Unavailable;
+    }
+    match parse_envelope::<CleanupReport>(status, bytes) {
+        Ok(report) => CleanupOutcome::Ran(report),
+        Err(ApiError::Server {
+            status: 200..=299,
+            message,
+        }) => CleanupOutcome::Refused(message),
+        Err(failure) => CleanupOutcome::Failed(failure.to_string()),
+    }
+}
+
+/// The Maintenance section's arming / in-flight state.
+///
+/// `last` survives re-arming so the previous report stays readable; it is
+/// replaced only by the next finished run.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CleanupState {
+    pub armed: bool,
+    pub running: bool,
+    pub last: Option<CleanupOutcome>,
+}
+
+/// The user's intent on the section's two buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CleanupAction {
+    Arm,
+    Cancel,
+    Confirm,
+}
+
+/// Everything that can move [`CleanupState`] forward.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CleanupEvent {
+    Action(CleanupAction),
+    Finished(CleanupOutcome),
+}
+
+/// One reducer step: the next state, plus whether to start a server run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CleanupStep {
+    pub state: CleanupState,
+    pub run: bool,
+}
+
+/// The reducer for the maintenance section.
+///
+/// Total and side-effect free. `run` is true **iff** the event is
+/// `Action(Confirm)` from an armed, non-running state — the single transition
+/// that may reach the network. Arming, cancelling, a queued click while a run is
+/// in flight and every `Finished` outcome all return `run == false`, so no
+/// mount, reload or polling path can start a cleanup.
+/// `last` is preserved by every `Action` and overwritten only by `Finished`.
+pub fn cleanup_next(state: &CleanupState, event: CleanupEvent) -> CleanupStep {
+    let mut next = state.clone();
+    let mut run = false;
+    match event {
+        CleanupEvent::Action(CleanupAction::Arm) => {
+            if !next.running {
+                next.armed = true;
+            }
+        }
+        CleanupEvent::Action(CleanupAction::Cancel) => {
+            if !next.running {
+                next.armed = false;
+            }
+        }
+        CleanupEvent::Action(CleanupAction::Confirm) => {
+            if next.armed && !next.running {
+                next.armed = false;
+                next.running = true;
+                run = true;
+            }
+        }
+        CleanupEvent::Finished(outcome) => {
+            next.armed = false;
+            next.running = false;
+            next.last = Some(outcome);
+        }
+    }
+    CleanupStep { state: next, run }
+}
+
+/// The three shapes the section's single action can take.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CleanupStatus {
+    Idle,
+    Armed,
+    Running,
+}
+
+/// Which button shape the section is in.
+pub fn cleanup_status(state: &CleanupState) -> CleanupStatus {
+    if state.running {
+        CleanupStatus::Running
+    } else if state.armed {
+        CleanupStatus::Armed
+    } else {
+        CleanupStatus::Idle
+    }
+}
+
+/// The action button's label; the armed step must be readable.
+pub fn cleanup_action_label(status: CleanupStatus) -> &'static str {
+    match status {
+        CleanupStatus::Idle => "Run cleanup…",
+        CleanupStatus::Armed => "Confirm cleanup",
+        CleanupStatus::Running => "Cleaning up…",
+    }
+}
+
+/// Whether the action button is disabled (in flight, nothing else).
+pub fn cleanup_disabled(state: &CleanupState) -> bool {
+    state.running
+}
+
+/// The fixed copy of the documented degraded-server state.
+///
+/// Deliberately **not** the server's own 501 text: the panel never renders a
+/// body from a 501 (the classifier discards it before decoding — D-2), so a
+/// proxy-supplied body cannot reach the screen and the UI copy cannot drift
+/// with a server constant.
+pub const CLEANUP_UNAVAILABLE_MESSAGE: &str = "Cleanup is not available in this build.";
+
+/// The warning shown between arming and confirming.
+pub const CLEANUP_ARMED_NOTICE: &str =
+    "This deletes memories older than the retention window. Confirm to run it.";
+
+/// The `data-testid` of the rendered report.
+pub const CLEANUP_REPORT_TESTID: &str = "maintenance-report";
+
+/// The `data-testid` of the business-refusal note.
+pub const CLEANUP_REFUSED_TESTID: &str = "maintenance-refused";
+
+/// The `data-testid` of the unavailable note.
+pub const CLEANUP_UNAVAILABLE_TESTID: &str = "maintenance-unavailable";
+
+/// The `data-testid` of the failure note.
+pub const CLEANUP_ERROR_TESTID: &str = "maintenance-error";
+
+/// The `data-testid` of the armed notice.
+pub const CLEANUP_ARMED_TESTID: &str = "maintenance-armed";
+
+/// The class of the rendered report.
+pub const CLEANUP_REPORT_CLASS: &str = "maintenance-report";
+
+/// The class of the business-refusal note.
+pub const CLEANUP_REFUSED_CLASS: &str = "maintenance-refused";
+
+/// The class of the unavailable note.
+pub const CLEANUP_UNAVAILABLE_CLASS: &str = "maintenance-unavailable";
+
+/// The class of the failure note.
+pub const CLEANUP_ERROR_CLASS: &str = "maintenance-error";
+
+/// One rendered report row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CleanupReportRow {
+    pub testid: &'static str,
+    pub label: &'static str,
+    pub hint: Option<&'static str>,
+    pub count: u64,
+}
+
+/// The five report rows, in issue 39's field order.
+///
+/// The counts are shown exactly as the server answered them: the UI does not
+/// re-derive cross-field sums, so a backend grouping slip cannot be masked by
+/// browser arithmetic (D-3).
+pub fn cleanup_report_rows(report: &CleanupReport) -> [CleanupReportRow; 5] {
+    [
+        CleanupReportRow {
+            testid: "maintenance-deleted",
+            label: "Memories deleted",
+            hint: None,
+            count: report.deleted_count,
+        },
+        CleanupReportRow {
+            testid: "maintenance-user",
+            label: "User memories deleted",
+            hint: None,
+            count: report.user_count,
+        },
+        CleanupReportRow {
+            testid: "maintenance-project",
+            label: "Project memories deleted",
+            hint: None,
+            count: report.project_count,
+        },
+        CleanupReportRow {
+            testid: "maintenance-prompts",
+            label: "Prompts deleted",
+            hint: None,
+            count: report.prompts_deleted,
+        },
+        CleanupReportRow {
+            testid: "maintenance-protected",
+            label: "Memories spared",
+            hint: Some("Spared because a linked prompt expired recently."),
+            count: report.protected_memories_skipped,
+        },
+    ]
+}
+
+/// The outcome block's render shape.
+///
+/// The `Report` arm carries the five rows inline: they are `Copy` and built on
+/// the render path, so boxing them would add an allocation per render for no
+/// gain. The variant-size spread is the price of that.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CleanupOutcomeView {
+    Nothing,
+    Report([CleanupReportRow; 5]),
+    Refused(String),
+    Unavailable(&'static str),
+    Failed(String),
+}
+
+/// Map the last outcome onto the render shape.
+pub fn cleanup_outcome_view(outcome: Option<&CleanupOutcome>) -> CleanupOutcomeView {
+    match outcome {
+        None => CleanupOutcomeView::Nothing,
+        Some(CleanupOutcome::Ran(report)) => {
+            CleanupOutcomeView::Report(cleanup_report_rows(report))
+        }
+        Some(CleanupOutcome::Refused(message)) => CleanupOutcomeView::Refused(message.clone()),
+        Some(CleanupOutcome::Unavailable) => {
+            CleanupOutcomeView::Unavailable(CLEANUP_UNAVAILABLE_MESSAGE)
+        }
+        Some(CleanupOutcome::Failed(message)) => CleanupOutcomeView::Failed(message.clone()),
+    }
+}
+
+/// Run one confirmed cleanup and classify its answer.
+///
+/// Reads the raw status and bytes because a `501` has to be recognised before
+/// the body is decoded ([`cleanup_outcome`], D-2).
+async fn run_cleanup(auth: &AuthContext) -> CleanupOutcome {
+    match fetch_status_and_bytes(&cleanup_spec(), auth).await {
+        Ok((status, bytes)) => cleanup_outcome(status, &bytes),
+        Err(failure) => CleanupOutcome::Failed(failure.to_string()),
+    }
+}
+
 /// The W6.7 Settings screen.
 ///
-/// It reads ONLY `/api/health` and `/api/stats`. The rest of the Settings path
-/// group (`/api/cleanup`, `/api/deduplicate`, `/api/migration/*`) is
-/// maintenance-backed and answers the documented stub in this build, so calling
-/// it would show a permanent error instead of data (Decision 3).
+/// It reads `/api/health` and `/api/stats` on every mount, and adds the
+/// Maintenance section, which calls `POST /api/cleanup` **only** after an
+/// explicit arm-then-confirm click — never on mount, never on reload, never on
+/// a timer. A `501` from that endpoint is rendered as the documented "not
+/// available in this build" state (D-15), not as an error. `/api/deduplicate`
+/// and `/api/migration/*` remain uncalled (Decision 3).
 #[component]
 pub fn SettingsPanel() -> impl IntoView {
     let auth = AuthContext {
@@ -1605,6 +1910,28 @@ pub fn SettingsPanel() -> impl IntoView {
         }
     });
     Effect::new(move |_| reload.run(()));
+
+    // The Maintenance section's only path to the network: this callback is
+    // reachable from the two `on:click` handlers below and from nowhere else
+    // (no reactive effect, no mount hook, no interval, no call from `reload`).
+    let cleanup = RwSignal::new(CleanupState::default());
+    let dispatch = Callback::new({
+        let auth = auth.clone();
+        move |action: CleanupAction| {
+            let step = cleanup_next(&cleanup.get_untracked(), CleanupEvent::Action(action));
+            cleanup.set(step.state);
+            if !step.run {
+                return;
+            }
+            let auth = auth.clone();
+            leptos::task::spawn_local(async move {
+                let outcome = run_cleanup(&auth).await;
+                cleanup.update(|current| {
+                    *current = cleanup_next(current, CleanupEvent::Finished(outcome)).state;
+                });
+            });
+        }
+    });
 
     view! {
         <section class="settings-panel" data-testid="settings-panel">
@@ -1668,6 +1995,113 @@ pub fn SettingsPanel() -> impl IntoView {
                         }
                             .into_any()
                     }
+                }
+            }}
+            {move || {
+                // Bound first: `cleanup_outcome_view(snapshot.last.as_ref())`
+                // needs an owner for the borrow (a temporary is E0716).
+                let snapshot = cleanup.get();
+                let status = cleanup_status(&snapshot);
+                let outcome = cleanup_outcome_view(snapshot.last.as_ref());
+                let armed_notice = (status == CleanupStatus::Armed).then(|| {
+                    view! {
+                        <p class="maintenance-armed" data-testid=CLEANUP_ARMED_TESTID>
+                            {CLEANUP_ARMED_NOTICE}
+                        </p>
+                    }
+                });
+                let cancel = (status == CleanupStatus::Armed).then(|| {
+                    view! {
+                        <button
+                            type="button"
+                            class="maintenance-cancel"
+                            data-testid="maintenance-cancel"
+                            on:click=move |_| dispatch.run(CleanupAction::Cancel)
+                        >
+                            "Cancel"
+                        </button>
+                    }
+                });
+                let outcome_view = match outcome {
+                    CleanupOutcomeView::Nothing => ().into_any(),
+                    CleanupOutcomeView::Report(rows) => {
+                        view! {
+                            <h4>"Last cleanup"</h4>
+                            <dl class=CLEANUP_REPORT_CLASS data-testid=CLEANUP_REPORT_TESTID>
+                                {rows
+                                    .into_iter()
+                                    .map(|row| {
+                                        let hint = row
+                                            .hint
+                                            .map(|hint| {
+                                                view! { <span class="maintenance-hint">{hint}</span> }
+                                            });
+                                        view! {
+                                            <dt>{row.label}</dt>
+                                            <dd data-testid=row.testid>
+                                                <span class="maintenance-count">{row.count}</span>
+                                                {hint}
+                                            </dd>
+                                        }
+                                    })
+                                    .collect_view()}
+                            </dl>
+                        }
+                            .into_any()
+                    }
+                    CleanupOutcomeView::Refused(message) => {
+                        view! {
+                            <p class=CLEANUP_REFUSED_CLASS data-testid=CLEANUP_REFUSED_TESTID>
+                                {message}
+                            </p>
+                        }
+                            .into_any()
+                    }
+                    CleanupOutcomeView::Unavailable(message) => {
+                        view! {
+                            <p class=CLEANUP_UNAVAILABLE_CLASS data-testid=CLEANUP_UNAVAILABLE_TESTID>
+                                {message}
+                            </p>
+                        }
+                            .into_any()
+                    }
+                    CleanupOutcomeView::Failed(message) => {
+                        view! {
+                            <p class=CLEANUP_ERROR_CLASS data-testid=CLEANUP_ERROR_TESTID>{message}</p>
+                        }
+                            .into_any()
+                    }
+                };
+                view! {
+                    <section
+                        class="maintenance"
+                        data-testid="maintenance-section"
+                        aria-label="Maintenance"
+                    >
+                        <h3>"Maintenance"</h3>
+                        <p>
+                            "Cleanup deletes memories older than the retention window. It is never run automatically."
+                        </p>
+                        {armed_notice}
+                        <button
+                            type="button"
+                            class="maintenance-action"
+                            data-testid="maintenance-action"
+                            prop:disabled=move || cleanup_disabled(&cleanup.get())
+                            on:click=move |_| {
+                                let action = if cleanup.get_untracked().armed {
+                                    CleanupAction::Confirm
+                                } else {
+                                    CleanupAction::Arm
+                                };
+                                dispatch.run(action);
+                            }
+                        >
+                            {cleanup_action_label(status)}
+                        </button>
+                        {cancel}
+                        {outcome_view}
+                    </section>
                 }
             }}
         </section>

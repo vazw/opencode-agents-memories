@@ -3,13 +3,25 @@
 //! Everything asserted here is pure (no `fetch`, no DOM): the request specs are
 //! compared against the pinned [`ENDPOINTS`] templates and the shared URL
 //! builder, the DTOs are decoded from the exact `mem-web` projections, and the
-//! render shapes pin the empty / loaded / missing branches. The live path is the
-//! browser smoke, recorded in the wave handoff.
+//! render shapes pin the empty / loaded / missing branches. This pure wasm
+//! suite — run under the Node runner, no DOM and no browser — is the proof for
+//! these screens; there is no browser smoke.
 #![cfg(target_arch = "wasm32")]
 
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_ui::api::envelope::ApiError;
 use web_ui::api_request::build_url;
+use web_ui::core_screens::cleanup_spec;
+use web_ui::core_screens::{
+    CLEANUP_ARMED_TESTID, CLEANUP_ERROR_CLASS, CLEANUP_ERROR_TESTID, CLEANUP_REFUSED_CLASS,
+    CLEANUP_REFUSED_TESTID, CLEANUP_REPORT_CLASS, CLEANUP_REPORT_TESTID, CLEANUP_UNAVAILABLE_CLASS,
+    CLEANUP_UNAVAILABLE_MESSAGE, CLEANUP_UNAVAILABLE_TESTID, CleanupOutcomeView, CleanupReportRow,
+    cleanup_outcome, cleanup_outcome_view, cleanup_report_rows,
+};
+use web_ui::core_screens::{
+    CleanupAction, CleanupEvent, CleanupOutcome, CleanupReport, CleanupState, CleanupStatus,
+    CleanupStep, cleanup_action_label, cleanup_disabled, cleanup_next, cleanup_status,
+};
 use web_ui::core_screens::{
     DailyStatsView, HealthStatus, MemoriesView, MemoryPage, ProfileScreen, ProfileView,
     SettingsScreen, ShardStatsView, StatsView, TagsPage, TagsView, active_shard_count, daily_peak,
@@ -784,4 +796,423 @@ fn test_active_shard_count_counts_is_active_flags() {
         ]),
         2
     );
+}
+
+// ---------------------------------------------------------------------------
+// Maintenance (issue 42 / W8.4)
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen_test]
+fn test_cleanup_spec_is_a_bodyless_post_to_the_pinned_template() {
+    // `POST /api/cleanup` is already pinned in `ENDPOINTS`; the screen-local
+    // spec must not re-type the path (no path-table change in this wave).
+    let spec = cleanup_spec();
+    assert_eq!(spec.method, method(EndpointId::Cleanup));
+    assert_eq!(spec.method, "POST");
+    assert_eq!(spec.path, template(EndpointId::Cleanup));
+    assert_eq!(spec.path, "/api/cleanup");
+    assert!(spec.query.is_empty());
+    assert!(spec.body.is_none());
+}
+
+/// A report with distinct, memorable counts.
+fn cleanup_report() -> CleanupReport {
+    CleanupReport {
+        deleted_count: 11,
+        user_count: 3,
+        project_count: 8,
+        prompts_deleted: 5,
+        protected_memories_skipped: 2,
+    }
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_next_never_runs_without_a_confirmed_arm() {
+    // The mount / first-click proof (D-1): a freshly mounted section is
+    // `CleanupState::default()`, and no single event — nor any sequence without
+    // an explicit Confirm from an armed state — may set `run`.
+    let start = CleanupState::default();
+    for event in [
+        CleanupEvent::Action(CleanupAction::Arm),
+        CleanupEvent::Action(CleanupAction::Cancel),
+        CleanupEvent::Action(CleanupAction::Confirm),
+    ] {
+        let step = cleanup_next(&start, event);
+        assert!(!step.run, "no unarmed action may start the cleanup");
+    }
+
+    let armed_once = cleanup_next(&start, CleanupEvent::Action(CleanupAction::Arm));
+    assert!(!armed_once.run);
+    assert!(armed_once.state.armed);
+
+    let armed_twice = cleanup_next(&armed_once.state, CleanupEvent::Action(CleanupAction::Arm));
+    assert!(!armed_twice.run, "arming twice still does not run");
+    assert!(armed_twice.state.armed);
+
+    let cancelled = cleanup_next(
+        &armed_once.state,
+        CleanupEvent::Action(CleanupAction::Cancel),
+    );
+    assert!(!cancelled.run);
+    assert!(!cancelled.state.armed);
+
+    let finished = cleanup_next(
+        &armed_once.state,
+        CleanupEvent::Finished(CleanupOutcome::Unavailable),
+    );
+    assert!(!finished.run, "finishing a run never starts another one");
+
+    let confirmed_after_finish = cleanup_next(
+        &finished.state,
+        CleanupEvent::Action(CleanupAction::Confirm),
+    );
+    assert!(
+        !confirmed_after_finish.run,
+        "a finished run must be re-armed before the next cleanup"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_next_runs_once_on_the_confirmed_action() {
+    let armed = cleanup_next(
+        &CleanupState::default(),
+        CleanupEvent::Action(CleanupAction::Arm),
+    );
+    assert!(!armed.run);
+    assert_eq!(
+        armed.state,
+        CleanupState {
+            armed: true,
+            running: false,
+            last: None,
+        }
+    );
+
+    let confirmed = cleanup_next(&armed.state, CleanupEvent::Action(CleanupAction::Confirm));
+    assert!(confirmed.run, "the confirmed action is the one that runs");
+    assert_eq!(
+        confirmed.state,
+        CleanupState {
+            armed: false,
+            running: true,
+            last: None,
+        },
+        "confirming disarms and enters the in-flight state"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_next_refuses_a_second_run_while_in_flight() {
+    let in_flight = CleanupState {
+        armed: false,
+        running: true,
+        last: None,
+    };
+    for event in [
+        CleanupEvent::Action(CleanupAction::Arm),
+        CleanupEvent::Action(CleanupAction::Cancel),
+        CleanupEvent::Action(CleanupAction::Confirm),
+    ] {
+        let step: CleanupStep = cleanup_next(&in_flight, event);
+        assert!(
+            !step.run,
+            "a queued or double click cannot start a second server run"
+        );
+        assert_eq!(step.state, in_flight, "the in-flight state is unchanged");
+    }
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_next_re_enables_after_every_outcome() {
+    let in_flight = CleanupState {
+        armed: false,
+        running: true,
+        last: None,
+    };
+    let outcomes = [
+        CleanupOutcome::Ran(cleanup_report()),
+        CleanupOutcome::Refused("cleanup is already running".to_string()),
+        CleanupOutcome::Unavailable,
+        CleanupOutcome::Failed("malformed request or response body".to_string()),
+    ];
+    for outcome in outcomes {
+        let step = cleanup_next(&in_flight, CleanupEvent::Finished(outcome.clone()));
+        assert!(!step.run);
+        assert!(!step.state.running, "every outcome re-enables the action");
+        assert!(!step.state.armed, "every outcome drops the arm");
+        assert_eq!(step.state.last, Some(outcome));
+        assert!(!cleanup_disabled(&step.state));
+    }
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_action_label_and_status_show_the_armed_step() {
+    let idle = CleanupState::default();
+    let armed = CleanupState {
+        armed: true,
+        running: false,
+        last: None,
+    };
+    let running = CleanupState {
+        armed: false,
+        running: true,
+        last: None,
+    };
+
+    assert_eq!(cleanup_status(&idle), CleanupStatus::Idle);
+    assert_eq!(cleanup_status(&armed), CleanupStatus::Armed);
+    assert_eq!(cleanup_status(&running), CleanupStatus::Running);
+
+    assert_eq!(cleanup_action_label(cleanup_status(&idle)), "Run cleanup…");
+    assert_eq!(
+        cleanup_action_label(cleanup_status(&armed)),
+        "Confirm cleanup"
+    );
+    assert_eq!(
+        cleanup_action_label(cleanup_status(&running)),
+        "Cleaning up…"
+    );
+
+    // The armed step must be readable, not just a state flag.
+    let labels = [
+        cleanup_action_label(CleanupStatus::Idle),
+        cleanup_action_label(CleanupStatus::Armed),
+        cleanup_action_label(CleanupStatus::Running),
+    ];
+    assert_ne!(labels[0], labels[1]);
+    assert_ne!(labels[1], labels[2]);
+    assert_ne!(labels[0], labels[2]);
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_disabled_tracks_the_in_flight_state() {
+    assert!(!cleanup_disabled(&CleanupState::default()));
+    assert!(
+        !cleanup_disabled(&CleanupState {
+            armed: true,
+            running: false,
+            last: None,
+        }),
+        "arming alone must not disable the confirmation button"
+    );
+    assert!(cleanup_disabled(&CleanupState {
+        armed: false,
+        running: true,
+        last: None,
+    }));
+
+    for outcome in [
+        CleanupOutcome::Ran(cleanup_report()),
+        CleanupOutcome::Failed("transport failure".to_string()),
+    ] {
+        let finished = cleanup_next(
+            &CleanupState {
+                armed: false,
+                running: true,
+                last: None,
+            },
+            CleanupEvent::Finished(outcome),
+        );
+        assert!(
+            !cleanup_disabled(&finished.state),
+            "the action re-enables after success and after failure"
+        );
+    }
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_outcome_reads_all_five_report_fields() {
+    // Distinct values, whole-struct equality: a field mapped to the wrong slot
+    // (or a swapped pair) fails here.
+    let body = br#"{"success":true,"data":{"deletedCount":11,"userCount":3,"projectCount":8,"promptsDeleted":5,"protectedMemoriesSkipped":2}}"#;
+    assert_eq!(
+        cleanup_outcome(200, body),
+        CleanupOutcome::Ran(cleanup_report())
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_outcome_501_is_unavailable_not_a_failure() {
+    // (a) the real degraded-server answer: 501 + the documented stub body.
+    let stub = br#"{"success":false,"error":"cleanup is not available in this build"}"#;
+    assert_eq!(cleanup_outcome(501, stub), CleanupOutcome::Unavailable);
+
+    // (b) status is classified BEFORE the body (D-2): a 501 that is not JSON
+    // (proxy page, truncated response) is still the unavailable state, never a
+    // decode failure.
+    assert_eq!(
+        cleanup_outcome(501, b"not json"),
+        CleanupOutcome::Unavailable
+    );
+
+    // (c) a `200 success:false` business refusal is not the unavailable state.
+    let refused = cleanup_outcome(
+        200,
+        br#"{"success":false,"error":"cleanup is already running"}"#,
+    );
+    assert_eq!(
+        refused,
+        CleanupOutcome::Refused("cleanup is already running".to_string())
+    );
+    assert_ne!(refused, CleanupOutcome::Unavailable);
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_outcome_business_refusal_keeps_the_server_message() {
+    assert_eq!(
+        cleanup_outcome(
+            200,
+            br#"{"success":false,"error":"retention window is not configured"}"#
+        ),
+        CleanupOutcome::Refused("retention window is not configured".to_string())
+    );
+
+    // The `message` field is the fallback when `error` is absent.
+    assert_eq!(
+        cleanup_outcome(200, br#"{"success":false,"message":"cleanup is disabled"}"#),
+        CleanupOutcome::Refused("cleanup is disabled".to_string())
+    );
+
+    // The server message is bounded to exactly 200 characters.
+    let long = "x".repeat(300);
+    let body = format!(r#"{{"success":false,"error":"{long}"}}"#);
+    assert_eq!(
+        cleanup_outcome(200, body.as_bytes()),
+        CleanupOutcome::Refused("x".repeat(200))
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_outcome_malformed_and_partial_reports_are_failures() {
+    // A missing required field is a malformed body, never a zero (D-3).
+    let partial = br#"{"success":true,"data":{"deletedCount":11,"userCount":3,"projectCount":8,"promptsDeleted":5}}"#;
+    assert_eq!(
+        cleanup_outcome(200, partial),
+        CleanupOutcome::Failed("malformed request or response body".to_string())
+    );
+
+    // A `null` field is equally a malformed body — no `#[serde(default)]`.
+    let nulled = br#"{"success":true,"data":{"deletedCount":11,"userCount":3,"projectCount":8,"promptsDeleted":5,"protectedMemoriesSkipped":null}}"#;
+    assert_eq!(
+        cleanup_outcome(200, nulled),
+        CleanupOutcome::Failed("malformed request or response body".to_string())
+    );
+
+    // A non-JSON 200 is a failure, and no body byte is surfaced.
+    assert_eq!(
+        cleanup_outcome(200, b"<html>"),
+        CleanupOutcome::Failed("malformed request or response body".to_string())
+    );
+
+    // Transport/auth failures use the existing health/stats wording.
+    assert_eq!(
+        cleanup_outcome(500, br#"{"success":false,"error":"boom"}"#),
+        CleanupOutcome::Failed("server error 500: boom".to_string())
+    );
+    assert_eq!(
+        cleanup_outcome(401, br#"{"success":false,"error":"unauthorized"}"#),
+        CleanupOutcome::Failed("server error 401: unauthorized".to_string())
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_report_rows_carry_human_labels() {
+    let rows: [CleanupReportRow; 5] = cleanup_report_rows(&cleanup_report());
+    assert_eq!(rows.len(), 5);
+    let triples: Vec<(&str, &str, u64)> = rows
+        .iter()
+        .map(|row| (row.testid, row.label, row.count))
+        .collect();
+    assert_eq!(
+        triples,
+        vec![
+            ("maintenance-deleted", "Memories deleted", 11),
+            ("maintenance-user", "User memories deleted", 3),
+            ("maintenance-project", "Project memories deleted", 8),
+            ("maintenance-prompts", "Prompts deleted", 5),
+            ("maintenance-protected", "Memories spared", 2),
+        ],
+        "issue-39 field order, with human labels and no UI arithmetic"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_protected_row_explains_the_skip() {
+    let rows = cleanup_report_rows(&cleanup_report());
+    let protected = &rows[4];
+    assert_eq!(protected.testid, "maintenance-protected");
+    assert_eq!(protected.label, "Memories spared");
+    assert_eq!(
+        protected.hint,
+        Some("Spared because a linked prompt expired recently."),
+        "the skip count carries its explanation (AC7)"
+    );
+    for row in &rows[..4] {
+        assert_eq!(row.hint, None, "only the spared row needs a hint");
+    }
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_unavailable_view_is_distinct_from_the_failure_view() {
+    assert_eq!(cleanup_outcome_view(None), CleanupOutcomeView::Nothing);
+
+    let unavailable = cleanup_outcome_view(Some(&CleanupOutcome::Unavailable));
+    assert_eq!(
+        unavailable,
+        CleanupOutcomeView::Unavailable(CLEANUP_UNAVAILABLE_MESSAGE)
+    );
+    assert_eq!(
+        CLEANUP_UNAVAILABLE_MESSAGE,
+        "Cleanup is not available in this build."
+    );
+
+    let report = cleanup_report();
+    assert_eq!(
+        cleanup_outcome_view(Some(&CleanupOutcome::Ran(report.clone()))),
+        CleanupOutcomeView::Report(cleanup_report_rows(&report))
+    );
+
+    let refused = CleanupOutcome::Refused("cleanup is already running".to_string());
+    assert_eq!(
+        cleanup_outcome_view(Some(&refused)),
+        CleanupOutcomeView::Refused("cleanup is already running".to_string())
+    );
+
+    let failed = CleanupOutcome::Failed("server error 500: boom".to_string());
+    assert_eq!(
+        cleanup_outcome_view(Some(&failed)),
+        CleanupOutcomeView::Failed("server error 500: boom".to_string())
+    );
+
+    // The rendered hooks must be non-empty and distinct WITHIN each family, so
+    // the unavailable state and the failure state cannot collide in the DOM.
+    // (A testid equals its class string by design: that is the same hook read
+    // by the DOM and by the stylesheet, so the two families are never compared
+    // with each other.)
+    let testids = [
+        CLEANUP_REPORT_TESTID,
+        CLEANUP_REFUSED_TESTID,
+        CLEANUP_UNAVAILABLE_TESTID,
+        CLEANUP_ERROR_TESTID,
+        CLEANUP_ARMED_TESTID,
+    ];
+    let classes = [
+        CLEANUP_REPORT_CLASS,
+        CLEANUP_REFUSED_CLASS,
+        CLEANUP_UNAVAILABLE_CLASS,
+        CLEANUP_ERROR_CLASS,
+    ];
+    assert!(testids.iter().all(|hook| !hook.is_empty()));
+    assert!(classes.iter().all(|hook| !hook.is_empty()));
+    for (index, hook) in testids.iter().enumerate() {
+        for other in &testids[index + 1..] {
+            assert_ne!(hook, other, "testids must be pairwise distinct");
+        }
+    }
+    for (index, hook) in classes.iter().enumerate() {
+        for other in &classes[index + 1..] {
+            assert_ne!(hook, other, "classes must be pairwise distinct");
+        }
+    }
+    assert_ne!(CLEANUP_UNAVAILABLE_CLASS, CLEANUP_ERROR_CLASS);
 }
