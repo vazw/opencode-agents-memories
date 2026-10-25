@@ -89,6 +89,23 @@ fn test_nav_marks_session_history_live() {
 }
 
 #[wasm_bindgen_test]
+fn test_nav_agents_entry_is_live_with_no_endpoints() {
+    // W6.6: the route is landed and renders its own panel, but its data path is
+    // deferred, so it consumes no endpoint and never renders the planned notice.
+    let entry = entry_for(RouteId::Agents);
+    assert_eq!(
+        entry.state,
+        ScreenState::Live {
+            owner: Owner::W6_6,
+            endpoints: &[],
+        }
+    );
+    assert_eq!(entry.owner, Owner::W6_6);
+    assert_eq!(entry.label, "Agents");
+    assert!(!matches!(entry.state, ScreenState::Planned { .. }));
+}
+
+#[wasm_bindgen_test]
 fn test_nav_stats_entry_is_live_with_stats_endpoint() {
     // The stats screen lands with this wave: Live, consuming only /api/stats.
     assert_eq!(
@@ -127,6 +144,8 @@ fn test_nav_only_marks_the_landed_routes_ready_or_live() {
             RouteId::SkillLibrary,
             // W6.3: the session timeline.
             RouteId::SessionHistory,
+            // W6.6: the agents view renders its documented unavailable state.
+            RouteId::Agents,
             // This wave: the stats screen.
             RouteId::Stats,
         ]

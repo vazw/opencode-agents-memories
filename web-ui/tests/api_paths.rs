@@ -6,7 +6,8 @@
 use std::collections::BTreeSet;
 
 use wasm_bindgen_test::wasm_bindgen_test;
-use web_ui::paths::{ENDPOINTS, endpoint, fill};
+use web_ui::paths::{ENDPOINTS, endpoint, endpoints_for, fill};
+use web_ui::routes::RouteId;
 
 #[wasm_bindgen_test]
 fn test_pinned_endpoints_are_all_upstream_rest_paths() {
@@ -85,4 +86,15 @@ fn test_endpoint_accessor_round_trips_every_table_row() {
     for spec in ENDPOINTS {
         assert_eq!(endpoint(spec.id), *spec, "{:?} did not round-trip", spec.id);
     }
+}
+
+#[wasm_bindgen_test]
+fn test_agents_route_adds_no_rest_endpoint() {
+    // The milestone REST route is deferred to the mem-web wave; the client
+    // route table grew by one, the pinned REST table must not have.
+    assert_eq!(ENDPOINTS.len(), 34, "the pinned REST table did not grow");
+    assert!(
+        endpoints_for(RouteId::Agents).is_empty(),
+        "the milestone route is deferred: Agents consumes no endpoint"
+    );
 }

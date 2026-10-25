@@ -18,13 +18,14 @@ fn test_route_table_declares_the_upstream_and_port_paths() {
         (RouteId::ExportImport, "/export-import"),
         (RouteId::SkillLibrary, "/skill-library"),
         (RouteId::SessionHistory, "/sessions"),
+        (RouteId::Agents, "/agents"),
         (RouteId::Stats, "/stats"),
     ];
 
     assert_eq!(
         ROUTES.len(),
         expected.len(),
-        "the route table has exactly nine entries"
+        "the route table has exactly ten entries"
     );
     assert_eq!(RouteId::ALL.len(), expected.len());
 
@@ -63,10 +64,10 @@ fn test_route_table_declares_no_api_path() {
 }
 
 #[wasm_bindgen_test]
-fn test_route_table_has_nine_entries_with_the_stats_route() {
-    // Baseline 8 + the stats route (upstream parity path `/stats`).
-    assert_eq!(RouteId::ALL.len(), 9, "baseline eight + stats");
-    assert_eq!(ROUTES.len(), 9);
+fn test_route_table_has_ten_entries_with_the_stats_route() {
+    // Baseline 9 + the stats route (upstream parity path `/stats`).
+    assert_eq!(RouteId::ALL.len(), 10, "baseline nine + stats");
+    assert_eq!(ROUTES.len(), 10);
     let spec = route(RouteId::Stats);
     assert_eq!(spec.path, "/stats");
     assert_eq!(spec.label, "Stats");
@@ -153,5 +154,55 @@ fn test_core_route_owners_are_w6_7() {
 fn test_route_accessor_is_total_for_every_declared_route() {
     for id in RouteId::ALL {
         assert_eq!(route(id).id, id, "{id:?} is not in the route table");
+    }
+}
+
+#[wasm_bindgen_test]
+fn test_agents_route_is_owned_by_w6_6_beside_sessions() {
+    let spec = route(RouteId::Agents);
+    assert_eq!(spec.path, "/agents");
+    assert_eq!(spec.label, "Agents");
+    assert_eq!(spec.owner, Owner::W6_6);
+    assert_eq!(spec.owner.label(), "W6.6");
+
+    let index = |id: RouteId| {
+        ROUTES
+            .iter()
+            .position(|spec| spec.id == id)
+            .unwrap_or_else(|| panic!("route table is missing {id:?}"))
+    };
+    assert_eq!(
+        index(RouteId::Agents),
+        index(RouteId::SessionHistory) + 1,
+        "Agents sits immediately after Sessions"
+    );
+    assert!(
+        index(RouteId::Agents) < index(RouteId::Stats),
+        "Agents stays before the stats row"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_no_route_names_a_closed_wave() {
+    // W6.2 and W6.4 are both closed (see `test_core_route_owners_are_w6_7` for
+    // the positive proof of the four re-homed rows); no row may name either.
+    let landed = ["this wave", "W6.3", "W6.5", "W6.6", "W6.7"];
+    for spec in ROUTES {
+        let label = spec.owner.label();
+        assert!(
+            landed.contains(&label),
+            "{:?} names a wave that is not landed: {label}",
+            spec.id
+        );
+        assert_ne!(
+            label, "W6.2",
+            "{:?} still names the closed W6.2 wave",
+            spec.id
+        );
+        assert_ne!(
+            label, "W6.4",
+            "{:?} still names the closed W6.4 wave",
+            spec.id
+        );
     }
 }

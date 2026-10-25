@@ -346,7 +346,12 @@ const SESSION_PATHS: &[&str] = &[
 
 const STATS_PATHS: &[&str] = &["/api/stats"];
 
-/// The path templates a planned screen will consume, in a stable order.
+/// The path templates a screen consumes, in a stable order.
+///
+/// `Home` and `Agents` consume no endpoint: `Home` is the shell's own landing
+/// screen, and the `Agents` milestone route is deferred to the `mem-web` wave
+/// (which grows `mem-web`'s `ROUTE_TABLE` from 37 to 38 there, not here), so
+/// `Agents` renders its documented unavailable state without issuing a request.
 pub fn endpoints_for(route: RouteId) -> &'static [&'static str] {
     match route {
         RouteId::Home => &[],
@@ -357,6 +362,7 @@ pub fn endpoints_for(route: RouteId) -> &'static [&'static str] {
         RouteId::ExportImport => EXPORT_IMPORT_PATHS,
         RouteId::SkillLibrary => SKILL_PATHS,
         RouteId::SessionHistory => SESSION_PATHS,
+        RouteId::Agents => &[],
         RouteId::Stats => STATS_PATHS,
     }
 }
