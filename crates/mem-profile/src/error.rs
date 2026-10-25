@@ -49,6 +49,21 @@ pub enum ProfileError {
     /// gate said no".
     #[error("{0}")]
     Analysis(String),
+    /// The profile erase failed, so the prompt was deliberately NOT deleted:
+    /// the source must survive so a retry still has an event that re-triggers
+    /// erasure (47.1-B2′ / E2 — fail toward privacy).
+    #[error("profile erasure failed for prompt {prompt_id}; the prompt was kept: {message}")]
+    ErasureFailed { prompt_id: String, message: String },
+    /// The profile is erased, then the prompt DELETE failed. Privacy is met; the
+    /// caller must know the source row survives.
+    #[error(
+        "profile erased ({profiles_erased} profile(s)) but deleting prompt {prompt_id} failed: {message}"
+    )]
+    PromptDeleteAfterErasure {
+        prompt_id: String,
+        profiles_erased: u64,
+        message: String,
+    },
     /// The daily decay stamp was poisoned (ADR-0013 D-2 `D2-c`): the stamp
     /// **gates** a side effect over on-disk profiles, so a poisoned gate must
     /// refuse rather than continue on a value its owner left behind.

@@ -12,6 +12,9 @@
 //! - [`learning_service`] — the lock → count → select → analyze → merge →
 //!   update → mark round behind injectable traits.
 //! - [`idle_scheduler`] — pure, clock-injected 10 s idle debounce.
+//! - [`erasure`] — the B2′ vocabulary: the watermark predicate, the
+//!   `ProfileEraser` seam `delete_prompt` calls before it deletes the source
+//!   row, and the two-table `EraseReport`.
 //!
 //! Upstream reference: `example/opencode-mem/src/services/user-prompt/*`,
 //! `src/services/user-profile/*`, `src/services/user-memory-learning.ts`
@@ -25,6 +28,7 @@ pub mod analysis_prompt;
 pub mod cleanup_apply;
 pub mod cold_buffer;
 pub mod decay;
+pub mod erasure;
 pub mod error;
 pub mod idle_scheduler;
 pub mod ids;

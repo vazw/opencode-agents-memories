@@ -38,7 +38,9 @@ pub struct ComposedRuntime {
     /// The user-prompt store the mem-web surface reads (W6.7). Nothing in
     /// mem-bridge or the root opened it before this wave; it is constructed
     /// exactly once here so the root composition root can hand it to
-    /// `ApiServices::production(...)`.
+    /// `ApiServices::production(...)`. Since issue 48 it carries the B2′
+    /// eraser (`with_eraser`) — the seam that makes a prompt delete
+    /// invalidate the profiles the prompt could have contributed to.
     pub prompts: Arc<UserPromptManager>,
     /// The user-profile store the mem-web surface reads (W6.7), constructed
     /// here for the same reason.
@@ -87,16 +89,22 @@ pub async fn build_composed_runtime(
     // the SAME storage root and the SAME derived store config, and both open
     // lazily — so constructing them here costs handles, not I/O. They are
     // built BEFORE `store_config` is moved into the shard manager.
-    let prompts = Arc::new(UserPromptManager::new(
-        storage_root.to_path_buf(),
-        store_config.clone(),
-        3,
-    ));
+    //
+    // Issue 48 (47.1-B2′): the profile store is built FIRST so the prompt
+    // store can be handed the eraser. This is the ONE production
+    // `with_eraser` site — forgetting it is exactly what
+    // `test_composed_runtime_wires_the_profile_eraser_into_prompt_delete`
+    // catches.
     let profile = Arc::new(ProfileStore::new(
         storage_root.to_path_buf(),
         store_config.clone(),
         ProfileConfig::default(),
     ));
+    let eraser: Arc<dyn mem_profile::erasure::ProfileEraser> = profile.clone();
+    let prompts = Arc::new(
+        UserPromptManager::new(storage_root.to_path_buf(), store_config.clone(), 3)
+            .with_eraser(eraser),
+    );
 
     let probe: Arc<dyn mem_store::platform::ProcessProbe> = Arc::new(SystemProcessProbe);
     // W7.1 — the facts store is constructed ONLY when the promotion pipeline
@@ -448,6 +456,84 @@ mod tests {
         assert_eq!(
             store_config.database_encryption_key.as_deref(),
             Some("a".repeat(64).as_str())
+        );
+
+        cleanup(&root);
+        cleanup(&home);
+    }
+
+    /// 48.6/48.11 — the seam exists AND production passes the eraser: a prompt
+    /// delete through the composed runtime erases the profile it contributed
+    /// to. This is the test that catches "the seam exists but the composition
+    /// root forgot to call `with_eraser`".
+    #[mem_store::tokio::test(crate = "mem_store::tokio")]
+    async fn test_composed_runtime_wires_the_profile_eraser_into_prompt_delete() {
+        use mem_profile::profile_store::{ProfileData, ProfileItem};
+
+        let root = temp_dir("composition-erasure");
+        let home = temp_dir("composition-erasure-home");
+        let env: BTreeMap<String, String> = [("HOME", home.to_string_lossy().to_string())]
+            .map(|(key, value)| (key.to_string(), value))
+            .into_iter()
+            .collect();
+        let mut config = Config::load(&mem_core::config::ConfigPaths::standard(&home), &env)
+            .expect("the default config loads");
+        config.storage_path = root.clone();
+        config.embedding_dimensions = 8;
+
+        let runtime = build_composed_runtime(&root, &config, Arc::new(NoopEmbedder), None)
+            .await
+            .expect("the runtime composes");
+
+        // Prompt first, profile second: the profile's watermark (= now) is >=
+        // the prompt's created_at, i.e. the prompt is a contributing one.
+        let prompt_id = runtime
+            .prompts
+            .save_prompt("session-48", "message-48", "/probe", "probe prompt")
+            .await
+            .expect("save the prompt");
+        let profile_id = runtime
+            .profile
+            .create_profile(
+                "probe@example.com",
+                "Probe",
+                "probe",
+                "probe@example.com",
+                &ProfileData {
+                    preferences: vec![ProfileItem {
+                        description: "probe preference".to_string(),
+                        ..ProfileItem::default()
+                    }],
+                    ..ProfileData::default()
+                },
+                1,
+            )
+            .await
+            .expect("create the profile");
+
+        runtime
+            .prompts
+            .delete_prompt(&prompt_id)
+            .await
+            .expect("delete the prompt through the wired seam");
+
+        assert!(
+            runtime
+                .profile
+                .get_active_profile("probe@example.com")
+                .await
+                .expect("read the profile")
+                .is_none(),
+            "the composed runtime's prompt delete erases the contributing profile"
+        );
+        assert!(
+            runtime
+                .profile
+                .get_profile_changelogs(&profile_id, 10)
+                .await
+                .expect("read the changelogs")
+                .is_empty(),
+            "the changelog snapshots are erased with the profile"
         );
 
         cleanup(&root);

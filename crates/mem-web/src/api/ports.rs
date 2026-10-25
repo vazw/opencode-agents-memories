@@ -203,6 +203,14 @@ pub struct ProfileChangelog {
     pub created_at: i64,
 }
 
+/// What one profile erase actually removed (issue 48 — `ExecResult.changes`
+/// sums from the two-table delete, never estimates).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ProfileErasure {
+    pub profiles_deleted: u64,
+    pub changelogs_deleted: u64,
+}
+
 /// The preview returned by `POST /api/user-profile/ai-cleanup`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CleanupPreview {
@@ -437,14 +445,17 @@ pub trait PromptPort: Send + Sync {
     async fn prompt_by_id(&self, id: &str) -> Result<Option<PromptRow>, PortError>;
 
     async fn delete_prompt(&self, id: &str) -> Result<(), PortError>;
-
-    async fn count_unanalyzed(&self) -> Result<i64, PortError>;
 }
 
 /// The user-profile store seam (including the AI-cleanup pending session).
 #[async_trait]
 pub trait ProfilePort: Send + Sync {
     async fn active_profile(&self, user_id: &str) -> Result<Option<ProfileRecord>, PortError>;
+
+    /// Erase one profile and its changelog snapshots (issue 48, B2′). The
+    /// handler resolves the profile first; a client never names a
+    /// `profile_id` directly.
+    async fn delete_profile(&self, profile_id: &str) -> Result<ProfileErasure, PortError>;
 
     async fn changelogs(
         &self,
@@ -759,15 +770,15 @@ impl PromptPort for UnavailablePort {
     async fn delete_prompt(&self, _id: &str) -> Result<(), PortError> {
         Err(PortError::Unavailable)
     }
-
-    async fn count_unanalyzed(&self) -> Result<i64, PortError> {
-        Err(PortError::Unavailable)
-    }
 }
 
 #[async_trait]
 impl ProfilePort for UnavailablePort {
     async fn active_profile(&self, _user_id: &str) -> Result<Option<ProfileRecord>, PortError> {
+        Err(PortError::Unavailable)
+    }
+
+    async fn delete_profile(&self, _profile_id: &str) -> Result<ProfileErasure, PortError> {
         Err(PortError::Unavailable)
     }
 
