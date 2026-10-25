@@ -136,11 +136,13 @@ engine's tie order is untestable. Do not "fix" the SQL, and do not restate the w
   `grep -rn 'production_deduplication_port' --include=*.rs` returns the definition
   (`crates/mem-web/src/api/deduplication/mod.rs`), a doc comment (`crates/mem-web/src/api/dto.rs`,
   `DedupDto`) and a test (`crates/mem-web/tests/dedup_endpoint.rs`) — **no production caller**.
-  `ProductionDeduplication::new` *is* called, one line below the factory's own definition, inside that
-  factory. The audit that reported "`ProductionDeduplication::new` uncalled" lost exactly this
+  `ProductionDeduplication::new` *is* called inside that factory (`deduplication/mod.rs:270`) and
+  nowhere else. The audit that reported "`ProductionDeduplication::new` uncalled" lost exactly this
   distinction; the true statement is **factory uncalled**, and the residual belongs to the factory. The
   wiring that would make it reachable is **issue 54**'s deliverable.
-- **Anchors are symbols; line numbers are a snapshot at `8a39e01`.** Every line number this issue is
-  quoted by — in issues 49 and 51 and in the audit brief — had drifted by 2026-10-25: the cleanup stub
-  sits at `maintenance.rs:234` (not `:229`), and the `/api/deduplicate` `RouteSpec` at `mod.rs:180-188`
-  (not `:180-186`). Re-locate by symbol before citing a line.
+- **Anchors are symbols; line numbers are a snapshot at `8a39e01`.** The two numbers this issue is most
+  often quoted by had drifted by 2026-10-25: the cleanup stub sits at `maintenance.rs:234` (not `:229`)
+  and the `/api/deduplicate` `RouteSpec` at `mod.rs:180-188` (not `:180-186`). Issue 51's copies were
+  re-derived and corrected by the 2026-10-25 tracker wave; issue 49's `mod.rs:180-186` and issue 37's
+  `maintenance.rs:221/229` still carry the stale pair — drift is per-anchor, not per-document. Re-locate
+  by symbol before citing a line.
