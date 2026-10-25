@@ -2063,6 +2063,7 @@ name = "mem-store"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "libc",
  "mem-core",
  "serde",
  "serde_json",

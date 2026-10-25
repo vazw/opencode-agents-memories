@@ -179,6 +179,7 @@ async fn real_store() -> RealStore {
         database_encryption_enabled: false,
         database_encryption_cipher: "aes256gcm".to_string(),
         database_encryption_key: None,
+        allow_unguarded_open: false,
     };
     let connections = Arc::new(ConnectionManager::new(
         config.storage_path.clone(),

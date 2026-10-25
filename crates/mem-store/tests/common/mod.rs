@@ -71,6 +71,7 @@ pub fn store_config(prefix: &str) -> StoreConfig {
         database_encryption_enabled: false,
         database_encryption_cipher: "aes256gcm".to_string(),
         database_encryption_key: None,
+        allow_unguarded_open: false,
     }
 }
 

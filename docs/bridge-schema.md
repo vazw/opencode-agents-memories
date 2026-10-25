@@ -82,7 +82,7 @@ never grants access to another session's rows.
 | `capture` | no (fire-and-forget ack) | `session_id` (req), `capture_id` (req), `project_id?`, `agent_id?`, `agent_name?`, `parent_session_id?`, `transcript?`, `summary?`, `metadata?` | `{"accepted":true}` |
 | `inject` | **yes** | `session_id` (req), `project_id?`, `agent_id?`, `token_budget?`, `include?` | `{"block":string\|null,"memory_count":int,"tokens":int,"truncated":bool,"handling_ms":int}` |
 | `recall` | no | `session_id` (req), `query` (req), `limit?`, `scope?`, `tags?` | `{"items":[…],"count":int}` |
-| `health` | no | `session_id` (req) | `{"ok":bool,"mode":"full"\|"degraded","degraded_reason":string\|null,"protocol":semver,"engine_version":semver,"db":{"path":string,"ready":bool},"uptime_ms":int,"sessions":int}` |
+| `health` | no | `session_id` (req) | `{"ok":bool,"mode":"full"\|"degraded","degraded_reason":string\|null,"protocol":semver,"engine_version":semver,"db":{"path":string,"ready":bool},"open_guard":{"override_active":bool},"uptime_ms":int,"sessions":int}` |
 | `shutdown` | teardown only | `session_id` (req) | `{"ok":true}` |
 
 W5.1 ships `capture`, `inject` and `recall` as **stubs**:

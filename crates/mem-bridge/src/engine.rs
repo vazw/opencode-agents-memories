@@ -110,6 +110,11 @@ pub struct EngineConfig {
     pub sessions: i64,
     /// `mode: "degraded"` switch W5.1 leaves off unless the caller knows better.
     pub degraded_reason: Option<String>,
+    /// Whether the mixed-version open guard is currently bypassed (issue 45 O4):
+    /// the env leg `OPENCODE_MEM_ALLOW_UNGUARDED_OPEN` or the config key
+    /// `allowUnguardedOpen`, env winning. Reported by `health` so an operator can
+    /// tell a guarded engine from an overridden one.
+    pub open_guard_override: bool,
 }
 
 impl Default for EngineConfig {
@@ -121,6 +126,7 @@ impl Default for EngineConfig {
             db_ready: true,
             sessions: 0,
             degraded_reason: None,
+            open_guard_override: false,
         }
     }
 }
@@ -408,6 +414,7 @@ impl Engine {
                 "protocol": self.config.protocol,
                 "engine_version": self.config.engine_version,
                 "db": { "path": self.config.db_path, "ready": self.config.db_ready },
+                "open_guard": { "override_active": self.config.open_guard_override },
                 "uptime_ms": self.elapsed_ms(),
                 "sessions": self.config.sessions,
             }),
@@ -970,12 +977,19 @@ pub async fn run_in_runtime(
         }
     };
 
+    // The override is read ONCE at startup: the env leg wins over the config key
+    // (O5), and `health` reports the resolved answer rather than re-reading env.
+    let open_guard_env = std::env::var(mem_store::open_guard::ALLOW_UNGUARDED_OPEN_ENV).ok();
     let engine_config = EngineConfig {
         db_path: config
             .storage_root
             .join("episodic.db")
             .to_string_lossy()
             .into_owned(),
+        open_guard_override: mem_store::open_guard::override_active(
+            open_guard_env.as_deref(),
+            core_config.allow_unguarded_open,
+        ),
         ..EngineConfig::default()
     };
 

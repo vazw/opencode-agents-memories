@@ -259,6 +259,41 @@ fn test_health_response_schema_equal_after_mask() {
     );
 }
 
+/// O4's `health` leg (issue 45): the engine reports whether the mixed-version
+/// guard is currently bypassed, so an operator can tell a guarded engine from an
+/// overridden one without reading env vars or config files.
+///
+/// The field is driven directly (the engine reads the process env once at
+/// `run_engine`), so no env mutation and no parallel-test race.
+#[test]
+fn test_health_reports_the_open_guard_override_state() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("health runtime");
+
+    let overridden = Engine::new(EngineConfig {
+        open_guard_override: true,
+        ..EngineConfig::default()
+    });
+    let response = rt.block_on(overridden.dispatch(&request("health-request.json")));
+    let value = serde_json::to_value(&response).expect("response serializes");
+    assert_eq!(
+        value["result"]["open_guard"]["override_active"],
+        serde_json::json!(true),
+        "the engine must report the override it was configured with: {value}"
+    );
+
+    let guarded = Engine::new(EngineConfig::default());
+    let response = rt.block_on(guarded.dispatch(&request("health-request.json")));
+    let value = serde_json::to_value(&response).expect("response serializes");
+    assert_eq!(
+        value["result"]["open_guard"]["override_active"],
+        serde_json::json!(false),
+        "a default engine reports a guarded database: {value}"
+    );
+}
+
 #[test]
 fn test_shutdown_response_schema_equal_after_mask() {
     assert_response_schema_equal_after_mask(

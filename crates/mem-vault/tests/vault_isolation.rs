@@ -41,14 +41,22 @@ fn store_config(dir: &Path) -> StoreConfig {
         database_encryption_enabled: true,
         database_encryption_cipher: CIPHER.to_string(),
         database_encryption_key: None,
+        allow_unguarded_open: false,
     }
 }
 
 /// Whether `vault_entries` can be read under `hexkey`.
-async fn table_is_readable(path: &Path, hexkey: Option<&str>) -> bool {
+async fn table_is_readable(
+    path: &Path,
+    hexkey: Option<&str>,
+) -> Result<bool, mem_store::error::StoreError> {
     let mut config = store_config(Path::new("."));
     config.database_encryption_enabled = false;
     let mut options = ConnectOptions::for_config(&config, Platform::current());
+    // The `"."` above is a placeholder: this helper inspects a database in the
+    // vault's own root and owns no storage root, so it must not write a `.wal-mode`
+    // marker into the package directory.
+    options.storage_root = None;
     options.encryption = hexkey.map(|key| EncryptionOptions {
         cipher: CIPHER.to_string(),
         hexkey: key.to_string(),
@@ -57,11 +65,14 @@ async fn table_is_readable(path: &Path, hexkey: Option<&str>) -> bool {
         .connect(path.to_path_buf(), options)
         .await
     {
-        Ok(db) => db
+        // A guard refusal is a diagnosis, not "unreadable": propagate it, or an
+        // `assert!(!table_is_readable(..))` passes vacuously on a refused open.
+        Err(error) if error.is_open_guard_refusal() => Err(error),
+        Err(_) => Ok(false),
+        Ok(db) => Ok(db
             .query("SELECT content_hash FROM vault_entries LIMIT 1", Vec::new())
             .await
-            .is_ok(),
-        Err(_) => false,
+            .is_ok()),
     }
 }
 
@@ -131,20 +142,28 @@ async fn test_two_scopes_get_distinct_keys_and_each_db_opens_only_with_its_own_k
     drop(store);
 
     assert!(
-        table_is_readable(&db_a_path, Some(&key_a)).await,
+        table_is_readable(&db_a_path, Some(&key_a))
+            .await
+            .expect("the probe answers (no guard refusal)"),
         "A's database opens with A's key"
     );
     assert!(
-        !table_is_readable(&db_a_path, Some(&key_b)).await,
+        !table_is_readable(&db_a_path, Some(&key_b))
+            .await
+            .expect("the probe answers (no guard refusal)"),
         "A's database must NOT open with B's key: a shared manager would have \
          encrypted A's file with B's key and made this assertion pass"
     );
     assert!(
-        table_is_readable(&db_b_path, Some(&key_b)).await,
+        table_is_readable(&db_b_path, Some(&key_b))
+            .await
+            .expect("the probe answers (no guard refusal)"),
         "B's database opens with B's key"
     );
     assert!(
-        !table_is_readable(&db_b_path, Some(&key_a)).await,
+        !table_is_readable(&db_b_path, Some(&key_a))
+            .await
+            .expect("the probe answers (no guard refusal)"),
         "B's database must NOT open with A's key"
     );
 }

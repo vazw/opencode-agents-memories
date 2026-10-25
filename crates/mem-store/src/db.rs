@@ -248,6 +248,17 @@ pub enum ExperimentalFeature {
 pub struct ConnectOptions {
     pub experimental: Vec<ExperimentalFeature>,
     pub encryption: Option<EncryptionOptions>,
+    /// Open the database read-only (`turso::Builder::read_only`, which the factory
+    /// applies). Writability is part of the open guard's contract, not a comment
+    /// (issue 45 `45.13` / `A3`): a read-only open skips the legacy-holder probe.
+    pub read_only: bool,
+    /// The config leg of the O4/O5 override. The env leg
+    /// (`OPENCODE_MEM_ALLOW_UNGUARDED_OPEN`) is read at the seam and wins.
+    pub allow_unguarded_open: bool,
+    /// The storage root whose [`.wal-mode`](crate::open_guard::WAL_MODE_MARKER_FILE)
+    /// marker the guard maintains. `None` for hand-built options ⇒ no marker is
+    /// written (a caller with no root has no marker to own).
+    pub storage_root: Option<PathBuf>,
 }
 
 impl ConnectOptions {
@@ -264,6 +275,9 @@ impl ConnectOptions {
         Self {
             experimental,
             encryption: None,
+            read_only: false,
+            allow_unguarded_open: config.allow_unguarded_open,
+            storage_root: Some(config.storage_path.clone()),
         }
     }
 }
@@ -323,31 +337,79 @@ impl ConnectFactory for TursoConnectFactory {
         path: PathBuf,
         opts: ConnectOptions,
     ) -> BoxFuture<'static, Result<DbHandle, StoreError>> {
-        Box::pin(async move {
-            let mut builder = turso::Builder::new_local(&path.to_string_lossy())
-                .experimental_encryption(opts.encryption.is_some());
-            let wants_multiprocess_wal = opts
-                .experimental
-                .iter()
-                .any(|feature| matches!(feature, ExperimentalFeature::MultiprocessWal));
-            if wants_multiprocess_wal {
-                builder = builder.experimental_multiprocess_wal(true);
-            }
-            if let Some(encryption) = opts.encryption {
-                builder = builder.with_encryption(turso::EncryptionOpts {
-                    cipher: encryption.cipher,
-                    hexkey: encryption.hexkey,
-                });
-            }
-            let database = builder.build().await?;
-            let connection = database.connect()?;
-            let db: DbHandle = Arc::new(TursoDb {
-                database,
-                connection,
-            });
-            Ok(db)
-        })
+        Box::pin(open_guarded(
+            path,
+            opts,
+            crate::open_guard::probe_database_file,
+        ))
     }
+}
+
+/// The guarded body behind [`TursoConnectFactory::connect`] (issue 45).
+///
+/// The probe is a **`fn` pointer injected here**, not reachable through
+/// [`ConnectFactory`]: production passes [`crate::open_guard::probe_database_file`],
+/// the unit tests inject a fixed answer to make the post-open refusal
+/// deterministic. That is the only injection point in the tree.
+///
+/// Order is the contract: preflight refusal happens *before* any turso call and
+/// never mutates the file; the post-open refusal drops the database before the
+/// handle is handed out (`45.5`: no owner left behind).
+async fn open_guarded(
+    path: PathBuf,
+    opts: ConnectOptions,
+    probe: crate::open_guard::ProbeFn,
+) -> Result<DbHandle, StoreError> {
+    let mode = crate::open_guard::WalMode::from_options(&opts);
+    let writability = crate::open_guard::Writability::from_options(&opts);
+    // Bound before the borrow: `Preflight` must not hold a temporary.
+    let env_override = std::env::var(crate::open_guard::ALLOW_UNGUARDED_OPEN_ENV).ok();
+    let clearance = crate::open_guard::preflight(
+        &crate::open_guard::Preflight {
+            storage_root: opts.storage_root.as_deref(),
+            db_path: &path,
+            mode,
+            writability,
+            allow_unguarded_open: opts.allow_unguarded_open,
+            env_override: env_override.as_deref(),
+            process_probe: &crate::platform::SystemProcessProbe,
+        },
+        probe,
+    )?;
+
+    let mut builder = turso::Builder::new_local(&path.to_string_lossy())
+        .experimental_encryption(opts.encryption.is_some());
+    if opts.read_only {
+        // B3: the flag must reach turso, or `Writability::ReadOnly` would classify
+        // an open as read-only while turso opens the file writable — the exact
+        // hole the guard closes.
+        builder = builder.read_only(true);
+    }
+    let wants_multiprocess_wal = opts
+        .experimental
+        .iter()
+        .any(|feature| matches!(feature, ExperimentalFeature::MultiprocessWal));
+    if wants_multiprocess_wal {
+        builder = builder.experimental_multiprocess_wal(true);
+    }
+    if let Some(encryption) = opts.encryption {
+        builder = builder.with_encryption(turso::EncryptionOpts {
+            cipher: encryption.cipher,
+            hexkey: encryption.hexkey,
+        });
+    }
+    let database = builder.build().await?;
+    if let Err(refusal) = crate::open_guard::postflight(&clearance, &path, probe) {
+        // 45.5: the handle never escapes — drop it before returning the refusal.
+        drop(database);
+        return Err(refusal);
+    }
+    let connection = database.connect()?;
+    let db: DbHandle = Arc::new(TursoDb {
+        database,
+        connection,
+    });
+    Ok(db)
 }
 
 /// The production [`Db`] over a real turso `Database` + `Connection`.
@@ -649,5 +711,200 @@ mod tests {
         let error = Value::try_from(u64::MAX).expect_err("u64::MAX exceeds i64::MAX");
         assert!(matches!(error, StoreError::Internal { .. }));
         assert!(Value::try_from(i64::MAX as u64 + 1).is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // 45.5 — the post-open re-probe: handle dropped, database unchanged
+    // -----------------------------------------------------------------------
+    //
+    // The probe is injected as a `fn` pointer, so these two tests are the only
+    // place a post-open refusal is deterministic without a racing child. Each test
+    // owns **its own** counter: a shared `static` would race under libtest's
+    // thread parallelism (Plan Gate residual 1).
+
+    use crate::error::OpenDirection;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static POSTFLIGHT_UNCHANGED_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static POSTFLIGHT_TYPED_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    fn free_then_held_unchanged(_path: &Path) -> crate::open_guard::ProbeOutcome {
+        match POSTFLIGHT_UNCHANGED_CALLS.fetch_add(1, Ordering::SeqCst) {
+            0 => crate::open_guard::ProbeOutcome::Free,
+            _ => crate::open_guard::ProbeOutcome::Held,
+        }
+    }
+
+    fn free_then_held_typed(_path: &Path) -> crate::open_guard::ProbeOutcome {
+        match POSTFLIGHT_TYPED_CALLS.fetch_add(1, Ordering::SeqCst) {
+            0 => crate::open_guard::ProbeOutcome::Free,
+            _ => crate::open_guard::ProbeOutcome::Held,
+        }
+    }
+
+    fn guard_config(prefix: &str) -> StoreConfig {
+        let dir = std::env::temp_dir().join(format!(
+            "mem-store-db-guard-{prefix}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.subsec_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).expect("create the temp dir");
+        StoreConfig {
+            storage_path: dir,
+            embedding_dimensions: 2,
+            embedding_model: "test-model".to_string(),
+            max_vectors_per_shard: 1000,
+            container_tag_prefix: "opencode".to_string(),
+            database_encryption_enabled: false,
+            database_encryption_cipher: "aes256gcm".to_string(),
+            database_encryption_key: None,
+            allow_unguarded_open: false,
+        }
+    }
+
+    /// `(ids, integrity_check)` through a **fresh, successfully guarded** open —
+    /// the pre/post snapshot the 45.5 assertion compares.
+    async fn snapshot(path: &Path, config: &StoreConfig) -> (Vec<i64>, String) {
+        let handle = turso_connect_factory()
+            .connect(
+                path.to_path_buf(),
+                ConnectOptions::for_config(config, Platform::current()),
+            )
+            .await
+            .expect("snapshot open");
+        let rows = handle
+            .query("SELECT id FROM guard_rows ORDER BY id", Vec::new())
+            .await
+            .expect("read the guard_rows ids");
+        let ids = rows.iter().filter_map(|row| row.i64("id")).collect();
+        let integrity = handle
+            .query("PRAGMA integrity_check", Vec::new())
+            .await
+            .expect("run integrity_check");
+        let verdict = integrity
+            .first()
+            .and_then(|row| row.text("integrity_check"))
+            .unwrap_or_default();
+        (ids, verdict)
+    }
+
+    async fn seed_database(path: &Path, config: &StoreConfig) {
+        let handle = open_guarded(
+            path.to_path_buf(),
+            ConnectOptions::for_config(config, Platform::current()),
+            crate::open_guard::probe_database_file,
+        )
+        .await
+        .expect("seed the database through the guarded seam");
+        handle
+            .execute(
+                "CREATE TABLE guard_rows (id INTEGER PRIMARY KEY, v TEXT)",
+                Vec::new(),
+            )
+            .await
+            .expect("create guard_rows");
+        for id in 1..=3_i64 {
+            handle
+                .execute(
+                    "INSERT INTO guard_rows (id, v) VALUES (?, ?)",
+                    vec![Value::Integer(id), Value::Text(format!("row-{id}"))],
+                )
+                .await
+                .expect("insert a row");
+        }
+    }
+
+    /// 45.5: a refusal **after** the database opened drops the handle (45.5: "no
+    /// owner left behind") and leaves every row and `integrity_check` exactly as
+    /// they were.
+    ///
+    /// Inverted world: if `open_guarded` returned the refusal without dropping the
+    /// database, the retry's open would race the abandoned one; if it wrote before
+    /// the post-probe, the row set would differ.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_postflight_refusal_drops_the_handle_and_leaves_the_database_unchanged() {
+        let config = guard_config("postflight-unchanged");
+        let path = config.storage_path.join("guarded.db");
+        seed_database(&path, &config).await;
+
+        let before = snapshot(&path, &config).await;
+        assert_eq!(
+            before.1, "ok",
+            "the fixture must start coherent: {before:?}"
+        );
+
+        POSTFLIGHT_UNCHANGED_CALLS.store(0, Ordering::SeqCst);
+        let refusal = match open_guarded(
+            path.clone(),
+            ConnectOptions::for_config(&config, Platform::current()),
+            free_then_held_unchanged,
+        )
+        .await
+        {
+            Ok(_) => panic!("the post-open re-probe answered Held ⇒ the open must be refused"),
+            Err(refusal) => refusal,
+        };
+        assert!(
+            matches!(
+                refusal,
+                StoreError::OpenBlocked {
+                    direction: OpenDirection::LegacyAuthority,
+                    ..
+                }
+            ),
+            "45.5: the post-open refusal carries the legacy-authority direction, got {refusal:?}"
+        );
+
+        let after = snapshot(&path, &config).await;
+        assert_eq!(
+            before, after,
+            "45.5: a refused post-open must leave the rows and integrity_check unchanged"
+        );
+        let _ = crate::sqlite_files::with_sqlite_file_lock_retry(
+            || std::fs::remove_dir_all(&config.storage_path),
+            1,
+            &crate::sqlite_files::system_retry_context(),
+        );
+    }
+
+    /// 45.5/45.7: the post-open refusal is typed, names the file, and is the same
+    /// shape the pre-open refusal uses (so `is_open_guard_refusal` covers both).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_postflight_refusal_is_a_typed_legacy_authority_error() {
+        let config = guard_config("postflight-typed");
+        let path = config.storage_path.join("guarded.db");
+        seed_database(&path, &config).await;
+
+        POSTFLIGHT_TYPED_CALLS.store(0, Ordering::SeqCst);
+        let refusal = match open_guarded(
+            path.clone(),
+            ConnectOptions::for_config(&config, Platform::current()),
+            free_then_held_typed,
+        )
+        .await
+        {
+            Ok(_) => panic!("the post-open re-probe answered Held ⇒ the open must be refused"),
+            Err(refusal) => refusal,
+        };
+        assert!(
+            refusal.is_open_guard_refusal(),
+            "the post-open refusal must be recognisable at the manager boundary: {refusal:?}"
+        );
+        assert!(
+            refusal
+                .to_string()
+                .contains(path.to_string_lossy().as_ref()),
+            "the refusal must name the database file: {refusal}"
+        );
+        let _ = crate::sqlite_files::with_sqlite_file_lock_retry(
+            || std::fs::remove_dir_all(&config.storage_path),
+            1,
+            &crate::sqlite_files::system_retry_context(),
+        );
     }
 }

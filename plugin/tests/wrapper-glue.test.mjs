@@ -134,6 +134,7 @@ process.env.OPENCODE_MEM_STORAGE_ROOT = process.env.DRIVER_STORAGE_ROOT;
 if (process.env.DRIVER_WEB_HOST !== undefined) process.env.OPENCODE_MEM_WEB_HOST = process.env.DRIVER_WEB_HOST;
 if (process.env.DRIVER_WEB_PORT !== undefined) process.env.OPENCODE_MEM_WEB_PORT = process.env.DRIVER_WEB_PORT;
 if (process.env.DRIVER_WEB_DIST !== undefined) process.env.OPENCODE_MEM_WEB_DIST = process.env.DRIVER_WEB_DIST;
+if (process.env.DRIVER_ALLOW_UNGUARDED !== undefined) process.env.OPENCODE_MEM_ALLOW_UNGUARDED_OPEN = process.env.DRIVER_ALLOW_UNGUARDED;
 if (process.env.DRIVER_MODE_OVERRIDE !== undefined) process.env.OPENCODE_MEM_MODE = process.env.DRIVER_MODE_OVERRIDE;
 
 const mod = await import(pathToFileURL(path.join(pkgDir, "dist", "plugin.js")));
@@ -306,6 +307,56 @@ async function runWebDistCase(distEnvValue) {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   return { wire, manifest };
 }
+
+// Issue 45 / O5: `childEnvironment()` is a WHITELIST, so without this forwarding
+// the override env var is silently dropped on the only production launch path.
+// Same shape as `runWebDistCase`: stage the package + stub engine, run the driver
+// once, and read the manifest the stub wrote for its own process.
+async function runAllowUnguardedCase(allowEnvValue) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-glue-unguarded-"));
+  const pkgDir = stagePackage(tmp);
+  const requestLogPath = path.join(tmp, "stub-requests.ndjson");
+  const manifestPath = path.join(tmp, "stub-manifest.json");
+  stageEngine(pkgDir, { linger: true, requestLogPath, manifestPath });
+  const driverPath = path.join(tmp, "driver.mjs");
+  fs.writeFileSync(driverPath, DRIVER_SOURCE);
+  const env = {
+    STUB_LOG: requestLogPath,
+    DRIVER_CTX_PATH: writeCtxFile(tmp, { client: null, project: null }),
+    DRIVER_STORAGE_ROOT: path.join(tmp, "storage"),
+    DRIVER_DONE_PATH: path.join(tmp, "driver-done.txt"),
+    DRIVER_EVENTS_PATH: writeEventsFile(tmp, [chatMessage()]),
+    DRIVER_WAIT_METHOD: "inject",
+  };
+  if (allowEnvValue !== undefined) env.DRIVER_ALLOW_UNGUARDED = allowEnvValue;
+  const driverResult = await runDriver(driverPath, [pkgDir], env);
+  assert.equal(
+    driverResult.code,
+    0,
+    `allow-unguarded driver failed: stderr=${driverResult.stderr}`
+  );
+  return JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+}
+
+test(
+  "test_wrapper_forwards_allow_unguarded_open_env_to_child_engine",
+  { timeout: 60000 },
+  async () => {
+    const enabled = await runAllowUnguardedCase("1");
+    assert.equal(
+      enabled.env.OPENCODE_MEM_ALLOW_UNGUARDED_OPEN,
+      "1",
+      "the wrapper's child-environment whitelist must forward OPENCODE_MEM_ALLOW_UNGUARDED_OPEN"
+    );
+
+    const unset = await runAllowUnguardedCase(undefined);
+    assert.equal(
+      unset.env.OPENCODE_MEM_ALLOW_UNGUARDED_OPEN,
+      undefined,
+      "an unset value must forward nothing"
+    );
+  }
+);
 
 test("test_wrapper_does_not_capture_on_every_chat_message", { timeout: 60000 }, async () => {
   const wire = await runGlueTest("om-glue-dc-", {

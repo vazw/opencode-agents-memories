@@ -1,8 +1,11 @@
 # 45 — Security · Pre-open mixed-version guard: the engine's oracle cannot fire on any open path we use
 
-Status: needs-triage — 2026-10-25. **The mixed-mode data-loss window is unguarded on the only
-production open path, so owner decision 7 (issue 43) is unimplemented by construction.** The premise is
-`needs_validation`, not confirmed — the gate in `## PREMISE` must pass before this issue is called done.
+Status: no triage label applies — this branch is **finished but uncommitted**, not landed. Branch
+`issue-45/mixed-version-guard`, base `8a39e01`, 45 dirty paths, and **no commit exists**: the tree goes
+back to a fresh reviewer before any commit, so no landing claim is available. (`ready-for-human` was wrong
+at both ends — it means "requires human implementation"; the implementation is here.) The one open
+residual is ADR-0025's *text*, owned by issue 43 (`43-database-base-hardening.md:159` gates it); issue 45's
+inputs to it are recorded under `## ADR-0025 inputs` below.
 
 ## PREMISE — `needs_validation` (read before implementing)
 
@@ -336,3 +339,224 @@ own handle. Its trigger binds the **first legacy opener** to land the clearance 
 - The architect's `45.6` (self-conflict) is an addition to the audit's scope, not a correction of it: the
   audit's two-directional probe is necessary but would brick the same-process double-open paths unless the
   self-reference rule is decided with it.
+
+## 45.1 — the open-path table (recorded before any code)
+
+Every path that opens a database in this tree, the lock it holds today, and the guard's disposition for
+it. Rows 9–10 are the two classes that make the seam *not* universal; row 12 is the Windows disposition.
+
+| # | path | what it opens | lock held today | disposition | reason |
+|---|---|---|---|---|---|
+| 1 | engine `run_engine` → `composition` → `ConnectionManager` | shards, `metadata.db`, `user-prompts.db`, `user-profiles.db`, `episodic.db`, `facts.db` | `.engine.lock` (D-39) | **covered** | every open is `ConnectionManager::open_database` (`connection.rs:201-234`) → `TursoConnectFactory::connect` |
+| 2 | `purge-session` (`src/main.rs` mode → `mem_bridge::purge::run:309-311` → `EpisodicStore`/`FactsStore` → their own `ConnectionManager`) | `episodic.db`, `facts.db` | `mem_episodic::gate::try_acquire` + `acquire_turso_operation_lock`; **no** engine lock | **covered** | same seam. It is the *legitimate second multiprocess opener* — O2 is what keeps it unrefused (probe B cannot see a multiprocess holder: `probe_b=Free`, `t1`). A refusal surfaces as `PurgeError::Failed` → exit 74. Decision 8's enqueue amendment is out of scope (45.9) |
+| 3 | ready steps (`ready.rs`: `legacy_migration_step`, `path_migrate_recovery_step`, `shard_warmup_step`, + the encryption step) | row 1's DBs | engine lock (same process) | **covered** | they open through the same `ConnectionManager`; two steps write (`ready.rs:226-246`) |
+| 4 | `encryption_migrator` — **5** connect sites in 3 functions: `is_already_encrypted:77`, `can_open_plain:93`, and inside `migrate_candidates`/`dump_and_reload_encrypted` the source open `:325`, the staged `*.encrypt-<millis>.tmp` open `:327`, the post-swap verify open `:363` | candidate DBs, source, staged temp file | engine lock; the staged path is a different file | **covered**, with a diagnosis gap fixed in Step 9 | the probe sees the path it is given; a fresh staged file is `Missing` ⇒ clear. `is_already_encrypted`/`can_open_plain` currently collapse **any** open error to `false`, so a guard refusal would be re-labelled "Cannot open … as plaintext" — Step 9 propagates it instead |
+| 5 | `mem-profile` `LearningLock::open_coordination` (`learning_lock.rs:779-793`, connect at `:790`) | the per-operation coordination DB (encryption forced off, multiprocess kept) | none; same-process, multi-handle, once per operation | **covered** | multiprocess ⇒ probe B `Free`; a refusal reaches the caller as `ProfileError::Store` (`error.rs:16`) |
+| 6 | `mem-vault` per-scope `vault.db` (`store.rs` `ready` → own `ConnectionManager`) | vault DBs | engine lock when in-engine | **covered** | always encrypted (`store.rs:112-114`, `:271`), i.e. permanently in issue 53's combination — do not assume it stays flag-on |
+| 7 | `mem-profile`/`mem-skills`/`mem-episodic`/`mem-facts` store constructors | their DBs | none of their own | **covered** | all construct a `ConnectionManager` over the shared factory |
+| 8 | tests opening through `TursoConnectFactory` (most suites) | fixtures | none | **covered** | same seam; no call-site change is needed for the guard to apply (45.2) |
+| 9 | `crates/mem-store/tests/turso_capabilities.rs` raw `turso::Builder` handles — `open_single_process:1613`, `open_with_vacuum`, `open_encrypted_vacuum`, the mixed-mode cell matrix, the crash-probe child | fixtures | none | **safe by construction / not covered, deliberately** | the largest test class bypasses the seam on purpose: it measures the engine, not the guard. Any future *production* `turso::Builder` call leaves this contract (draft A §10.2) |
+| 10 | three seam-based **legacy** test sites: `open_default` (`ConnectOptions::default()`, used by `test_new_database_defaults_to_wal_journal_mode`, AC1) and `open_single_process_db` (`single_process_options`, used at `:2550` and `:2840`) | fixtures | none | **refused by construction (O3)** | `UnsupportedOpenMode`. The issue names two sites; re-derived here as **three test functions through two helpers** (`grep -n 'open_single_process_db\|open_default('`). Step 5 moves them onto the raw builder; no test-only escape hatch is added to production code |
+| 11 | a future read-only opener (backup/export) | — | — | **covered by contract** | `Writability` is in the probe's signature; behaviour untested until such an opener exists (45.13) |
+| 12 | Windows | every open resolves to `WalMode::Legacy` (`for_config` never pushes `MultiprocessWal` there, `db.rs:258-269`) | `.engine.lock` where in-engine | **refused** (`UnsupportedOpenMode`) | O3 refuses legacy opens on every platform, so this is the Windows disposition — see the flagged consequence in the guard blueprint's SECURITY & EDGE CASES. The override is the escape |
+
+## ADR-0025 inputs (45.14 / 45.15) — recorded here, ADR text still gated by 43:159
+
+ADR-0025's text is gated by `43-database-base-hardening.md:159` (REPORT §9 blockers 4–12), so the inputs the
+ADR will need are recorded here instead. No `docs/adr/0025-*.md` file is created by issue 45.
+
+1. **A4's doc-vs-code contradiction.** Docs (`multiprocess-access.mdx:139-145`, `:78`, `:148` — *doc-sourced*,
+   the `.mdx` is not on disk in this tree) say the open path "probes for an incompatible live opener and
+   fails fast" and "mixing modes is rejected", with read-only opens "advisory". The code says the oracle is
+   unreachable from our path: `turso_core-0.8.3/database.rs:1153`, `:1163`, `:1173` (the probes), `:1222`
+   (`resolve_default_storage` only when `options.storage.is_none()`), `:991-993` (the read-only exemption),
+   `:939-945` (the legacy-open leg), and at HEAD `aa93d669` `core_database.rs:1283-1284`, `:1314-1328`,
+   `:1436`. A reader who trusts the docs believes the guard is redundant; the code says it is absent.
+2. **A5's marker location and format.** File name `.wal-mode` in the storage root (a file we own), body one
+   JSON record `{pid, timestamp, start_time, mode}` reusing the shipped `LockRecord` shape. It cannot live
+   in `.tshm`: that file is turso-owned, magic/version-tagged (`shared_wal_coordination.rs:39-43`),
+   version-checked on open (`:438-446`), and resized at runtime (`:944`), so a marker there would be
+   clobbered, invalidated by a version bump, or read back as `Corrupt`.
+3. **O2's direction matrix**, with A3's superseded "probe A every open" rule kept as history. Probe A (a live
+   multiprocess authority ⇒ refuse) applies only to a **legacy** opener; probe B (a live legacy DB-file lock
+   ⇒ refuse) applies only to a **writable multiprocess** opener (`0.8.3 :939`, `:991`). Under O3 probe A is
+   not implemented at all — a legacy open is refused by construction — so probe A's rule lives in the
+   decision table, not in a syscall.
+4. **The POSIX close-releases-locks finding and the two rules it forces.** `close()` on a database file
+   releases the process's own POSIX locks regardless of the fcntl variant (`t2 S4/S6/S7`); therefore (i) no
+   probe may open and close a database file this process holds a lock on, and (ii) the day an in-process
+   legacy handle exists, the identity-keyed clearance registry lands **before** the probe is allowed near it.
+5. **The O7 vacuity proof and its precondition.** `probe_b = Free` against our own live multiprocess handle
+   (`t1`) because a multiprocess handle holds no OS lock on the database file (A2). Precondition for the
+   proof to hold: **no production `turso::Builder` call outside the seam** — the day one appears, the
+   contract is void and the registry must land.
+6. **O4/O5's override.** One override, env `OPENCODE_MEM_ALLOW_UNGUARDED_OPEN` winning over config key
+   `allowUnguardedOpen`, bypassing both outcomes, logging path + bypassed outcome + override source, and
+   reported by `health` as `open_guard.override_active`.
+7. **The read-only divergence.** A read-only multiprocess opener skips probe B (it can be a victim, never an
+   aggressor — `0.8.3 :991-993`), and the skip is a `Divergence::ReadOnlySkipsLegacyProbe` value in the
+   decision core, not a comment. `turso::Builder::read_only` exists (`turso-0.8.3/src/lib.rs:284`) and the
+   factory must apply `ConnectOptions::read_only` for the divergence to be honest.
+8. **The G4 residual sentence, verbatim.** *What remains uncovered is a holder that arrives after the
+   post-open re-probe and before our first write; the window is narrowed twice and never closed, because
+   holding the lock ourselves would make us the holder the probe looks for.*
+9. **Design A §11's registry trigger.** The identity-keyed clearance registry is not shipped; its trigger —
+   a live legacy opener meeting a live multiprocess authority — cannot occur under O2+O3, and the first
+   legacy opener must land the clearance in the same change.
+
+## IMPLEMENTATION RECORD 2026-10-25 — dispositions, numbers, residuals
+
+Implemented from the approved blueprint (`20261025-1651-issue-45-guard`, `SYS-APPROVED`), with the six
+blocking Plan-Gate corrections applied — uncommitted, so nothing has landed. Every number below cites `measurement.md` / a raw log or the
+test that printed it.
+
+**45.3 — superseded by O3; not implemented.** The `.tshm` offset-0 probe ships in neither direction.
+`t2 S1 probe_a=Held` and `t2 S2 probe_a=Free` are the reasons it would have been both
+**self-conflicting** (our own live multiprocess handle holds that byte lock, so a second open of the
+same file would refuse itself) and **non-discriminating** (the same lock answers the same way for a
+foreign holder and for us). A legacy open is refused by construction with `UnsupportedOpenMode`
+instead, and that refusal **is** the tripwire: the first legacy opener fails
+`test_legacy_connect_options_are_refused_with_unsupported_open_mode` and must land design A §11's
+identity-keyed clearance registry in the same change.
+
+**45.6 — discharged by O7's vacuity proof, not by a mechanism.** `probe_b = Free` against our own
+**live multiprocess handle** (`t1`, and re-measured by
+`test_probe_reports_free_against_this_process_own_live_multiprocess_handle`), because a multiprocess
+handle holds **no** OS lock on the database file (A2). Plus
+`test_second_open_of_a_database_this_process_holds_is_not_refused` (the double open) and the
+`UnsupportedOpenMode` tripwire as the structural guard. No process-local registry ships: under O2+O3
+there is no self to conflict with.
+
+**45.12 — the measured cost.** Probe B (one byte, `F_OFD_SETLK`) mean **5.695 µs**, p95 **5.640**,
+max **25.458** (n=2000, debug profile); the lock+unlock syscalls alone **2.240 µs** (OFD) and
+**2.285 µs** (`F_SETLK`); bare open+close baseline **3.253 µs**; marker read+parse **7.115 µs** ⇒
+**≈12.8 µs per writable multiprocess open after the first**, **0** for read-only opens, **0** for legacy
+opens (refused before any syscall). The first open per root additionally pays the marker's staging write
+— `create_new` → write → `sync_all` → `rename` — not measured here.
+*Correction carried from the Plan Gate:* the Δ12.8 µs figure was derived with the `F_SETLK` syscall
+number while the shipped Linux path uses the OFD pair, so it is **≈1 % conservative** (2.240 vs
+2.285 µs). Re-measure in a release profile before ADR-0025 quotes any absolute.
+
+*Marker cost and failure mode (review round 3, scoped in round 4):* a writable open that must **create or
+rewrite** the marker, or **cannot read** it, is refused when this process cannot write the storage root —
+typed `OpenBlocked { Unknown { errno } }`, override the only escape. The exception is the live-marker reuse
+path: a root whose marker this process already wrote and can still read returns `Ok` (measured: a writable
+multiprocess open in a 0555 root with our own live marker succeeded, no override), so an unwritable root is
+fatal only to the opens that must touch the marker. The marker write performs a blocking `sync_all` on the
+calling (runtime) thread, once per marker write — the ≈12.8 µs figure does **not** include it.
+
+**45.10 — the platform matrix, stated and tested.** Linux: `F_OFD_SETLK`
+(`test_probe_reports_held_for_a_live_legacy_holder`, measured in both directions).
+Other Unix: `F_SETLK`; the **syscall path is exercised on Linux** through `LockKind::Posix`
+(`test_probe_posix_variant_reports_held_for_a_live_legacy_holder`,
+`..._free_for_an_unheld_database_file`), while the platform *selection* is **untested** — no runner.
+Windows: **refused by construction** (`db.rs:258-269`: `for_config` never pushes `MultiprocessWal`
+there, so every open is `WalMode::Legacy`), with `OPENCODE_MEM_ALLOW_UNGUARDED_OPEN=1` /
+`allowUnguardedOpen: true` as the documented escape; the Windows runtime is **untested**.
+
+**45.8 / G1 — recorded, not re-run.** The pre-fix unguarded open *succeeds* and the opener's committed
+row is silently lost with `integrity_check = ok`: `opener_before=[1,2] final=[1,3] lost_row_2=true`
+(`.scratch/rust-port/issue-45/scratch/t1.log`). It is not re-run because the fix removes the state it
+observes. G2 is the pairing of `test_factory_open_refuses_a_live_legacy_holder` (control) and
+`test_override_opens_the_same_mixed_configuration_the_guard_refuses` (inversion arm), plus the
+recorded manual mutation check: with the factory's probe replaced by a constant `Free` (`// INVERT`),
+**exactly** the control goes red (`Ok` instead of `OpenBlocked`) and the suite is green again after the
+revert.
+
+**Which direction the shipped probe guards.** It is the **legacy-holder-vs-writable-multiprocess**
+direction (`t3`'s), *not* `t1`'s. `t1`'s loss is the legacy-opener-vs-live-multiprocess-authority
+direction, which O3 removes by construction (a legacy open never happens). Saying "the guard detects
+`t1`" would be false.
+
+**G4 residual sentence (verbatim).** *What remains uncovered is a holder that arrives after the
+post-open re-probe and before our first write; the window is narrowed twice and never closed, because
+holding the lock ourselves would make us the holder the probe looks for.*
+
+Adjacent, also uncovered and stated wherever the seam is described: (i) a legacy handle created
+**outside the seam** (a future production `turso::Builder` call) — outside the contract and destructive
+to probe; (ii) a `.tshm`-only multiprocess authority is not detected, because probe A is not
+implemented (O3: only the first legacy opener needs it, and `UnsupportedOpenMode` is the barrier until
+then); (iii) read-only opens skip probe B — they can be victims, never aggressors (mirrors
+`0.8.3 :991-993`), and the divergence is a `Divergence::ReadOnlySkipsLegacyProbe` value, not a comment;
+(iv) a caller with no `storage_root` (`ConnectOptions::default()`, hand-built options) writes no marker;
+(v) the marker's own liveness inherits issue 43's `hidepid=2` fail-open — a live foreign marker can read
+dead and be replaced, so the marker is mode *truth*, never a clearance input; (vi) no holder identity is
+claimed, ever.
+
+**Probe-vs-in-process-legacy residual (round 4, measured at the public seam — documented, NOT fixed).**
+An overridden legacy handle is a legitimate in-process legacy opener, because `allow_unguarded_open` is a
+public per-call field (`ConnectOptions`, `config.rs:28` / `db.rs:257`). Measured sequence:
+`probe_database_file` on that live path = **`Held`**; the probe's own open+close then releases *this
+process's* POSIX lock (`t2 S4/S6/S7`), so the next probe = **`Free`**, and a subsequent **guarded** writable
+multiprocess open therefore **proceeds** while the legacy handle is still live — the mixed-mode row loss this
+guard exists to prevent. Pinned by
+`test_probe_releases_an_in_process_overridden_legacy_lock_and_the_guarded_open_then_proceeds`, which must
+**fail** if either remedy below lands, forcing the decision instead of a silent behaviour change.
+*Seam:* reachable only through the per-call `ConnectOptions.allow_unguarded_open` field. *Why the engine
+cannot reach it:* the engine resolves one `StoreConfig` per process and derives every `ConnectOptions` from
+it (`for_config`), so no per-open divergence between legacy and multiprocess exists there; the sequence needs
+a caller that builds two different option sets against the same root in one process. *Remedies left to the
+owner:* (a) constrain the override to the process-wide legs only (env var + config key, no per-call field),
+or (b) land design A §11's identity-keyed clearance registry before the probe may meet an in-process legacy
+handle. Neither is taken here — both are design/API decisions outside this issue's approved scope.
+
+**Marker footgun (Plan Gate residual 6, recorded in `open_guard.rs`'s module doc).** An *overridden*
+legacy open writes `{"mode":"legacy"}` into the root's `.wal-mode` marker; a later **guarded** writable
+multiprocess open **from another live process** then refuses with `ModeMarkerConflict` for the lifetime of
+the process that wrote it. Two scoping exceptions, both measured, which is why the rule is not "every later
+open": a later writable multiprocess open **in the same process** reuses its own marker and returns `Ok`
+(`ensure_mode_marker`'s same-pid short-circuit), and an **overridden** reader demotes the conflict like any
+other marker failure (the RC2 rule below). Reachable only when the override is used
+(`OPENCODE_MEM_ALLOW_UNGUARDED_OPEN` / `allowUnguardedOpen`) and the writing process outlives the next
+writable open — which is why it is a footgun and not a clearance input.
+
+## REVIEW ROUND 2026-10-26 — three P0 blockers, fixed
+
+The `code-reviewer` returned `STATUS: REJECTED`; a `debugger` measured each blocker and the fixes below
+were applied in its prescribed order. **The code was the defect, not the records**, in all three.
+
+**RC1 (security, P0) — the marker's staging write followed a planted symlink.** The staging file was
+opened with `create(true).truncate(true)`, whose `O_CREAT|O_TRUNC` **follows** a symlink: a victim file was
+cut to the marker body (`shipped truncate shape: victim bytes = b'X'`, a 24-byte victim reduced to 1) and
+the following `rename` installed the symlink as `.wal-mode`. Fixed by `O_EXCL` (`create_new`) with the
+`MARKER_STAGE` counter and `MARKER_STAGE_ATTEMPTS = 16`, cleanup **only** for a staging file this call
+created (on `EEXIST` the file is another process's), and exhaustion as the **typed**
+`OpenBlocked { Unknown { errno: Some(EEXIST) } }`. Measured counterpart: `create_new` on a planted symlink
+→ `errno 17 EEXIST`, victim after: `b"ORIGINAL"`. A directory-relative `openat` was **not** added: the same
+actor who can plant a symlink can write `.wal-mode` outright, and the marker is never a clearance input.
+
+**RC2 (contract, P0) — the override skipped the marker, making `ModeMarkerConflict` unreachable.**
+Measured at the public seam: an overridden legacy open returned `Ok` with `marker_exists = false`. The
+blueprint conditions the marker on `Writability::Writable` only, and "failures are refusals subject to the
+same override" presupposes a failure was produced. Fixed: the marker is attempted for **every writable**
+open, refused while the guard is active, and **demoted to a warning** under the override. `Clearance
+{ guarded: !override_on }` and `postflight` are untouched: the override skips the probe **both pre and
+post** — the post-open one via `postflight`'s early return, the pre-open one via the `!override_on` gate
+round 3 added to `preflight` (round 2 removed only the marker gate here and left the pre-probe firing).
+
+**RC3 (diagnostics, P0) — marker failures escaped as `StoreError::Io`.** `create_dir_all` was fatal and
+`read_marker`'s non-`NotFound` arm returned `Io`, which `connection.rs:216` launders into
+`StoreError::Turso` — measured `Turso { message: "Is a directory (os error 21)" }` with
+`is_open_guard_refusal() == false`, naming neither `.wal-mode` nor the override (and with encryption on,
+the actively wrong "Check databaseEncryptionKey"). Fixed: one `marker_refusal()` for the marker's whole
+surface, `create_dir_all` best-effort with a `tracing::warn!` (Step 7.1's "best-effort"), and
+`OpenDirection::Unknown`'s Display now names `.wal-mode` and **both** override legs. No new variant; no
+widening of `is_open_guard_refusal`.
+
+**Five `.`-rooted test sites** in four files (`mem-bridge/tests/vault_feeder.rs` ×2,
+`mem-vault/tests/{vault_store,vault_custody,vault_isolation}.rs`) no longer claim `.` as a storage root (`options.storage_root = None`),
+so no test writes a marker into a package directory and `.gitignore` needs no entry for it. The three
+`table_is_readable` copies now return `Result<bool, StoreError>` with the Step-9 three-arm classifier, so
+`assert!(!table_is_readable(..))` can no longer pass vacuously on a guard refusal.
+
+**45.9's proof now exists**: `test_purge_session_option_set_stays_multiprocess` (option classification
+plus the behavioural half against a live engine-shaped handle). It was missing *evidence*, not a
+regression test — it is green by construction.
+
+**Residual added** (also in `open_guard.rs`'s module doc): *the reclaim path is last-writer-wins: a marker
+installed inside the `read_marker` → `rename` window can be replaced. The marker is mode truth, never a
+clearance input — the database-file probe is the enforcement.*
+
+**45.12 cost correction:** the first-open marker cost is not `create_new` + `sync_all`; the shipped
+protocol is staging `create_new` → write → `sync_all` → `rename`, i.e. one extra `rename` (same
+directory) beyond what the record says. Unmeasured, still unmeasured here.

@@ -136,6 +136,72 @@ pub enum StoreError {
         id: String,
         message: Box<str>,
     },
+    /// The mixed-version open guard refused the open **before** turso touched the
+    /// file (or, for the post-open re-probe, after it and with the handle dropped).
+    ///
+    /// Sized to fit the budget: `PathBuf + OpenDirection` = 48 bytes
+    /// (`OpenDirection` is 24 — `PathBuf` 24 + the wider `Unknown` payload), far
+    /// under the 112-byte high-water mark set by
+    /// [`StoreError::ScopeShardUnreadable`]. No pid, no holder identity: an OFD
+    /// lock carries none.
+    #[error("Refusing to open database {db_path}: {direction}")]
+    OpenBlocked {
+        db_path: PathBuf,
+        direction: OpenDirection,
+    },
+    /// A legacy (single-process) WAL option set was refused by construction
+    /// (owner decision O3): this build opens only in multiprocess WAL mode. The
+    /// trailing positional arguments are the constants from
+    /// [`crate::open_guard`] — the spelling lives in one place.
+    #[error(
+        "Refusing to open database {db_path} in {mode} WAL mode: this build opens only in \
+         multiprocess WAL mode (owner decision O3). Set {}=1 (or the config key {}) to bypass \
+         the mixed-version guard",
+        crate::open_guard::ALLOW_UNGUARDED_OPEN_ENV,
+        crate::open_guard::allow_unguarded_open_key()
+    )]
+    UnsupportedOpenMode {
+        db_path: PathBuf,
+        mode: &'static str,
+    },
+}
+
+/// The direction the open guard saw, never the holder's identity: an OFD lock
+/// carries no `l_pid` (`turso_core-0.8.3/io/unix.rs:125-180` sets `l_pid: 0`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OpenDirection {
+    /// A live single-process (legacy) opener holds an exclusive lock on the file.
+    LegacyAuthority,
+    /// The probe or the marker could not answer. `errno` is `None` when there is
+    /// no OS error to name (a platform without a probe, a defensive default).
+    Unknown { errno: Option<i32> },
+    /// A live opener recorded a different WAL mode for this storage root.
+    ModeMarkerConflict { recorded: &'static str },
+}
+
+impl std::fmt::Display for OpenDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LegacyAuthority => f.write_str(
+                "a live single-process (legacy) opener holds an exclusive lock on this database \
+                 file; mixing WAL modes silently loses rows",
+            ),
+            Self::Unknown { errno } => write!(
+                f,
+                "the WAL-mode probe or the `{}` marker could not determine whether another \
+                 opener holds this database (errno {errno:?}); the guard refuses rather than \
+                 guess. Set {}=1 (or the config key {}) to bypass the mixed-version guard",
+                crate::open_guard::WAL_MODE_MARKER_FILE,
+                crate::open_guard::ALLOW_UNGUARDED_OPEN_ENV,
+                crate::open_guard::allow_unguarded_open_key()
+            ),
+            Self::ModeMarkerConflict { recorded } => write!(
+                f,
+                "a live opener recorded `{recorded}` WAL mode for this storage root"
+            ),
+        }
+    }
 }
 
 impl StoreError {
@@ -186,6 +252,20 @@ impl StoreError {
             | Self::Internal { message } => message.clone(),
             other => other.to_string(),
         }
+    }
+
+    /// `true` for exactly the two open-guard refusals.
+    ///
+    /// `ConnectionManager::open_database` rewrites every factory error through
+    /// `wrap_turso_open_error`; without this classifier the engine's paths would
+    /// see a generic [`StoreError::Turso`] and issue 45's "typed refusal" contract
+    /// would be false in production while green at the factory.
+    #[must_use]
+    pub fn is_open_guard_refusal(&self) -> bool {
+        matches!(
+            self,
+            Self::OpenBlocked { .. } | Self::UnsupportedOpenMode { .. }
+        )
     }
 }
 
