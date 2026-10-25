@@ -37,6 +37,7 @@ fn store_config(dir: &Path) -> StoreConfig {
         database_encryption_enabled: true,
         database_encryption_cipher: CIPHER.to_string(),
         database_encryption_key: None,
+        allow_unguarded_open: false,
     }
 }
 
@@ -138,12 +139,19 @@ fn options_config() -> StoreConfig {
 /// Whether `vault_entries` can be read under `hexkey`. Open failure **and**
 /// query failure both mean "unreadable" (turso may defer a codec error to the
 /// first query); only a successful read is a failure of the encryption claim.
-async fn table_is_readable(path: &Path, hexkey: Option<&str>) -> bool {
+async fn table_is_readable(
+    path: &Path,
+    hexkey: Option<&str>,
+) -> Result<bool, mem_store::error::StoreError> {
     use mem_store::db::{ConnectFactory, ConnectOptions, EncryptionOptions, turso_connect_factory};
     use mem_store::platform::Platform;
 
     let config = options_config();
     let mut options = ConnectOptions::for_config(&config, Platform::current());
+    // `options_config()`'s root is the placeholder `"."`: this helper inspects a
+    // database in the vault's own root and owns no storage root, so it must not
+    // write a `.wal-mode` marker into the package directory.
+    options.storage_root = None;
     options.encryption = hexkey.map(|key| EncryptionOptions {
         cipher: CIPHER.to_string(),
         hexkey: key.to_string(),
@@ -152,11 +160,14 @@ async fn table_is_readable(path: &Path, hexkey: Option<&str>) -> bool {
         .connect(path.to_path_buf(), options)
         .await
     {
-        Ok(db) => db
+        // A guard refusal is a diagnosis, not "unreadable": propagate it, or an
+        // `assert!(!table_is_readable(..))` passes vacuously on a refused open.
+        Err(error) if error.is_open_guard_refusal() => Err(error),
+        Err(_) => Ok(false),
+        Ok(db) => Ok(db
             .query("SELECT content_hash FROM vault_entries LIMIT 1", Vec::new())
             .await
-            .is_ok(),
-        Err(_) => false,
+            .is_ok()),
     }
 }
 
@@ -335,7 +346,9 @@ async fn test_vault_wrong_key_fails_closed_and_leaves_the_file_untouched() {
     );
     assert!(!db_bytes.is_empty(), "the fixture really has ciphertext");
     assert!(
-        !table_is_readable(&db_path, Some(other_key)).await,
+        !table_is_readable(&db_path, Some(other_key))
+            .await
+            .expect("the probe answers (no guard refusal)"),
         "the wrong key cannot read the vault table"
     );
 }

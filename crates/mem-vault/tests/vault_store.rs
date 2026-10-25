@@ -43,6 +43,7 @@ fn store_config(dir: &Path, enabled: bool, key: Option<&str>) -> StoreConfig {
         database_encryption_enabled: enabled,
         database_encryption_cipher: CIPHER.to_string(),
         database_encryption_key: key.map(str::to_string),
+        allow_unguarded_open: false,
     }
 }
 
@@ -56,9 +57,17 @@ fn options_config() -> StoreConfig {
 /// a plaintext open). Open failure **and** query failure both mean
 /// "unreadable": turso may defer a codec error to the first query, and only a
 /// successful read is a failure of the encryption claim.
-async fn table_is_readable(path: &Path, cipher: &str, hexkey: Option<&str>) -> bool {
+async fn table_is_readable(
+    path: &Path,
+    cipher: &str,
+    hexkey: Option<&str>,
+) -> Result<bool, mem_store::error::StoreError> {
     let config = options_config();
     let mut options = ConnectOptions::for_config(&config, Platform::current());
+    // `options_config()`'s root is the placeholder `"."`: this helper inspects a
+    // database in the vault's own root and owns no storage root, so it must not
+    // write a `.wal-mode` marker into the package directory.
+    options.storage_root = None;
     options.encryption = hexkey.map(|key| EncryptionOptions {
         cipher: cipher.to_string(),
         hexkey: key.to_string(),
@@ -67,11 +76,14 @@ async fn table_is_readable(path: &Path, cipher: &str, hexkey: Option<&str>) -> b
         .connect(path.to_path_buf(), options)
         .await
     {
-        Ok(db) => db
+        // A guard refusal is a diagnosis, not "unreadable": propagate it, or an
+        // `assert!(!table_is_readable(..))` passes vacuously on a refused open.
+        Err(error) if error.is_open_guard_refusal() => Err(error),
+        Err(_) => Ok(false),
+        Ok(db) => Ok(db
             .query("SELECT content_hash FROM vault_entries LIMIT 1", Vec::new())
             .await
-            .is_ok(),
-        Err(_) => false,
+            .is_ok()),
     }
 }
 
@@ -204,7 +216,9 @@ async fn test_vault_mint_creates_one_key_file_of_64_lowercase_hex() {
     drop(handle);
     drop(caller_store);
     assert!(
-        !table_is_readable(&caller_db_path, CIPHER, Some(CALLER_KEY)).await,
+        !table_is_readable(&caller_db_path, CIPHER, Some(CALLER_KEY))
+            .await
+            .expect("the probe answers (no guard refusal)"),
         "the vault never uses the caller's database_encryption_key"
     );
 }
@@ -342,7 +356,9 @@ async fn test_vault_db_is_not_readable_as_a_plaintext_database() {
     let length = std::fs::metadata(&db_path).expect("stat vault.db").len();
     assert!(length > 0, "the encrypted file is non-empty on disk");
     assert!(
-        !table_is_readable(&db_path, &config.database_encryption_cipher, None).await,
+        !table_is_readable(&db_path, &config.database_encryption_cipher, None)
+            .await
+            .expect("the probe answers (no guard refusal)"),
         "a plaintext open must not read the vault table — a success here is a \
          finding about the encryption claim, not a test to relax"
     );

@@ -21,6 +21,7 @@ fn enabled_config(dir: &std::path::Path) -> StoreConfig {
         database_encryption_enabled: true,
         database_encryption_cipher: "aes256gcm".to_string(),
         database_encryption_key: None,
+        allow_unguarded_open: false,
     }
 }
 
@@ -57,6 +58,10 @@ async fn vault_row_contents(store: &mem_vault::VaultStore, scope_hash: &str) -> 
     let db_path = store.db_path(scope_hash).expect("db path");
     let config = common::store_config(std::path::PathBuf::from("."));
     let mut options = ConnectOptions::for_config(&config, Platform::current());
+    // This helper has no storage root of its own (the config's `"."` is a
+    // placeholder): hand-built options with `storage_root: None` write no
+    // `.wal-mode` marker, which is exactly right for a read-only inspection.
+    options.storage_root = None;
     options.encryption = Some(EncryptionOptions {
         cipher: "aes256gcm".to_string(),
         hexkey: key_hex,
@@ -263,6 +268,10 @@ async fn test_vault_feeder_verbatim_round_trip_byte_identical() {
     let db_path = vault.db_path(&s.scope_hash).unwrap();
     let cfg = common::store_config(std::path::PathBuf::from("."));
     let mut opts = ConnectOptions::for_config(&cfg, Platform::current());
+    // The `"."` above is a placeholder: this helper inspects a database in the
+    // vault's own root and owns no storage root, so it must not write a `.wal-mode`
+    // marker into the package directory.
+    opts.storage_root = None;
     opts.encryption = Some(EncryptionOptions {
         cipher: "aes256gcm".to_string(),
         hexkey: key_str.trim().to_string(),

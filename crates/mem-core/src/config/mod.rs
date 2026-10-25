@@ -565,6 +565,9 @@ impl Config {
             database_encryption_cipher: file
                 .database_encryption_cipher
                 .unwrap_or(DEFAULTS.database_encryption_cipher),
+            allow_unguarded_open: file
+                .allow_unguarded_open
+                .unwrap_or(DEFAULTS.allow_unguarded_open),
             auto_update: file.auto_update.unwrap_or(DEFAULTS.auto_update),
             memory,
             compaction,

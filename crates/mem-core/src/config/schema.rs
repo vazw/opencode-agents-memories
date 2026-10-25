@@ -406,6 +406,8 @@ pub struct FileConfig {
     pub database_encryption_key: Option<String>,
     pub database_encryption_enabled: Option<bool>,
     pub database_encryption_cipher: Option<DatabaseEncryptionCipher>,
+    /// Top-level switch that disables the mixed-version open guard (issue 45 O4/O5).
+    pub allow_unguarded_open: Option<bool>,
     pub auto_update: Option<bool>,
     pub compaction: Option<FileCompactionConfig>,
     pub chat_message: Option<FileChatMessageConfig>,
@@ -533,6 +535,7 @@ pub struct Defaults {
     pub show_error_toasts: bool,
     pub database_encryption_enabled: bool,
     pub database_encryption_cipher: DatabaseEncryptionCipher,
+    pub allow_unguarded_open: bool,
     pub auto_update: bool,
     pub memory_default_scope: MemoryDefaultScope,
     pub compaction_enabled: bool,
@@ -601,6 +604,7 @@ pub static DEFAULTS: Defaults = Defaults {
     show_error_toasts: true,
     database_encryption_enabled: false,
     database_encryption_cipher: DatabaseEncryptionCipher::Aes256Gcm,
+    allow_unguarded_open: false,
     auto_update: true,
     memory_default_scope: MemoryDefaultScope::Project,
     compaction_enabled: true,
@@ -714,6 +718,11 @@ pub struct Config {
     /// Kept raw (env:// / file:// / hex); resolved lazily by the encryption wave.
     pub database_encryption_key: Option<String>,
     pub database_encryption_cipher: DatabaseEncryptionCipher,
+
+    /// Disables the mixed-version open guard (issue 45 O4/O5). `false` by default:
+    /// the guard is on unless the user turns it off. The env var
+    /// `OPENCODE_MEM_ALLOW_UNGUARDED_OPEN` wins over this key when both are set.
+    pub allow_unguarded_open: bool,
 
     pub auto_update: bool,
 

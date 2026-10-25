@@ -1,1 +1,1 @@
-{"id":"health-1","jsonrpc":"2.0","result":{"db":{"path":"~/.opencode-mem/data/episodic.db","ready":true},"degraded_reason":null,"engine_version":"0.1.0","mode":"full","ok":true,"protocol":"1.0.0","sessions":0,"uptime_ms":0}}
+{"id":"health-1","jsonrpc":"2.0","result":{"db":{"path":"~/.opencode-mem/data/episodic.db","ready":true},"degraded_reason":null,"engine_version":"0.1.0","mode":"full","ok":true,"open_guard":{"override_active":false},"protocol":"1.0.0","sessions":0,"uptime_ms":0}}

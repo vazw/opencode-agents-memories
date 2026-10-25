@@ -149,7 +149,17 @@ function engineExecutablePath() {
 
 function childEnvironment() {
   const env = {};
-  for (const name of ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "OPENCODE_MEM_WEB_DIST"]) {
+  for (const name of [
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "OPENCODE_MEM_WEB_DIST",
+    // Issue 45 (O5): the mixed-version open guard's override. Without this entry the
+    // variable is dropped here and the override would never reach the engine.
+    "OPENCODE_MEM_ALLOW_UNGUARDED_OPEN",
+  ]) {
     const value = process.env[name];
     if (typeof value === "string" && value.length > 0) env[name] = value;
   }

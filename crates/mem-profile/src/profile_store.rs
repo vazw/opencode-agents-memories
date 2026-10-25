@@ -1555,6 +1555,7 @@ mod tests {
             database_encryption_enabled: false,
             database_encryption_cipher: "aes256gcm".to_string(),
             database_encryption_key: None,
+            allow_unguarded_open: false,
         };
         let store = ProfileStore::new(storage_path, store_config, ProfileConfig::default());
         let _ = catch_unwind(AssertUnwindSafe(|| {

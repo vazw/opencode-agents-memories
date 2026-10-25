@@ -20,6 +20,7 @@ pub mod error;
 pub mod legacy_migrator;
 pub mod lifecycle;
 pub mod migration_service;
+pub mod open_guard;
 pub mod operation_lock;
 pub mod platform;
 pub mod project_tags;

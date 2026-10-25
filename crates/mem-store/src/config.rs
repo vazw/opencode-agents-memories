@@ -24,6 +24,8 @@ pub struct StoreConfig {
     /// a bare path, or the auto-created default key file when encryption is
     /// enabled without an explicit key).
     pub database_encryption_key: Option<String>,
+    /// The config leg of the mixed-version open guard's override (issue 45 O4/O5).
+    pub allow_unguarded_open: bool,
 }
 
 pub use crate::platform::Platform;
@@ -41,6 +43,7 @@ pub fn from_core(config: &mem_core::config::Config) -> StoreConfig {
         database_encryption_enabled: config.database_encryption_enabled,
         database_encryption_cipher: config.database_encryption_cipher.as_str().to_string(),
         database_encryption_key: config.database_encryption_key.clone(),
+        allow_unguarded_open: config.allow_unguarded_open,
     }
 }
 

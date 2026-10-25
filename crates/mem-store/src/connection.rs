@@ -210,6 +210,10 @@ impl ConnectionManager {
         opts.encryption = encryption.clone();
         let handle = match self.factory.connect(db_path.to_path_buf(), opts).await {
             Ok(handle) => handle,
+            // An open-guard refusal is a typed decision about *this* open; wrapping
+            // it would relabel it as a generic turso failure (45.7 would then be
+            // false in production while green at the factory).
+            Err(error) if error.is_open_guard_refusal() => return Err(error),
             Err(error) => {
                 return Err(wrap_turso_open_error(
                     db_path,
@@ -464,6 +468,7 @@ mod tests {
             database_encryption_enabled: false,
             database_encryption_cipher: "aes256gcm".to_string(),
             database_encryption_key: None,
+            allow_unguarded_open: false,
         };
         ConnectionManager::new(
             storage_path,

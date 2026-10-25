@@ -374,7 +374,9 @@ async fn test_is_already_encrypted_probe_does_not_mint_a_key_file() {
     create_plaintext_shard(&config, &db_path).await;
 
     assert!(
-        !is_already_encrypted(&db_path, &config).await,
+        !is_already_encrypted(&db_path, &config)
+            .await
+            .expect("the probe answers (no guard refusal here)"),
         "a plaintext shard is not already encrypted"
     );
     assert!(

@@ -59,46 +59,59 @@ pub fn collect_candidate_dbs(storage_path: &Path) -> Vec<PathBuf> {
     candidates
 }
 
-/// True when the shard opens with the configured encryption options (i.e. it
-/// is already encrypted with the active key).
-pub async fn is_already_encrypted(db_path: &Path, config: &StoreConfig) -> bool {
+/// The one classifier both probes use: a guard refusal is a **diagnosis** and
+/// must reach the caller; any other open failure is "not openable with these
+/// options", which is the caller's decision; a successful open is `true` (and the
+/// handle is dropped here — a probe holds nothing).
+///
+/// Without the first arm a guard refusal is re-labelled "Cannot open … as
+/// plaintext for encryption migration", which is the mis-diagnosis issue 45's
+/// `45.1` row 4 flags.
+fn probe_opened(result: Result<DbHandle, StoreError>) -> Result<bool, StoreError> {
+    match result {
+        Ok(handle) => {
+            drop(handle);
+            Ok(true)
+        }
+        Err(error) if error.is_open_guard_refusal() => Err(error),
+        Err(_) => Ok(false),
+    }
+}
+
+/// `true` when the shard opens with the configured encryption options (i.e. it
+/// is already encrypted with the active key). A guard refusal is `Err`.
+pub async fn is_already_encrypted(
+    db_path: &Path,
+    config: &StoreConfig,
+) -> Result<bool, StoreError> {
     // Use the non-provisioning resolver so probing candidate shards never
     // mints a key file as a side effect.
     let Some(hexkey) = crate::encryption_key::resolve_database_encryption_key_if_present(config)
     else {
-        return false;
+        return Ok(false);
     };
     let mut options = ConnectOptions::for_config(config, Platform::current());
     options.encryption = Some(EncryptionOptions {
         cipher: config.database_encryption_cipher.clone(),
         hexkey,
     });
-    match crate::db::turso_connect_factory()
-        .connect(db_path.to_path_buf(), options)
-        .await
-    {
-        Ok(handle) => {
-            drop(handle);
-            true
-        }
-        Err(_) => false,
-    }
+    probe_opened(
+        crate::db::turso_connect_factory()
+            .connect(db_path.to_path_buf(), options)
+            .await,
+    )
 }
 
-/// True when the shard still opens as plaintext (the migration precondition).
-pub async fn can_open_plain(db_path: &Path, config: &StoreConfig) -> bool {
+/// `true` when the shard still opens as plaintext (the migration precondition).
+/// A guard refusal is `Err`.
+pub async fn can_open_plain(db_path: &Path, config: &StoreConfig) -> Result<bool, StoreError> {
     let mut options = ConnectOptions::for_config(config, Platform::current());
     options.encryption = None;
-    match crate::db::turso_connect_factory()
-        .connect(db_path.to_path_buf(), options)
-        .await
-    {
-        Ok(handle) => {
-            drop(handle);
-            true
-        }
-        Err(_) => false,
-    }
+    probe_opened(
+        crate::db::turso_connect_factory()
+            .connect(db_path.to_path_buf(), options)
+            .await,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -427,10 +440,10 @@ async fn migrate_candidates(
     encryption: &EncryptionOptions,
 ) -> Result<(), StoreError> {
     for db_path in candidates {
-        if is_already_encrypted(db_path, config).await {
+        if is_already_encrypted(db_path, config).await? {
             continue;
         }
-        if !can_open_plain(db_path, config).await {
+        if !can_open_plain(db_path, config).await? {
             return Err(StoreError::internal(format!(
                 "Cannot open {} as plaintext for encryption migration. \
                  If it is already encrypted with a different key, update databaseEncryptionKey.",
@@ -485,4 +498,67 @@ pub static FORCE_VERIFY_FAIL: std::sync::atomic::AtomicBool =
 #[doc(hidden)]
 pub fn set_force_verify_fail(value: bool) {
     FORCE_VERIFY_FAIL.store(value, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::OpenDirection;
+
+    /// 45.1 row 4's diagnosis gap: a guard refusal must **propagate**, not be
+    /// relabelled "Cannot open … as plaintext" (the mis-diagnosis O4's grounds call
+    /// unacceptable); any other open error is "not openable with these options",
+    /// which is the caller's decision, and a successful open is `true`.
+    ///
+    /// Inverted world: collapsing every error to `false` (the pre-fix behaviour)
+    /// makes the first assertion fail, and the operator is told the wrong cause.
+    #[tokio::test]
+    async fn test_encryption_probe_propagates_a_guard_refusal() {
+        let blocked = probe_opened(Err(StoreError::OpenBlocked {
+            db_path: PathBuf::from("/tmp/guard-refused.db"),
+            direction: OpenDirection::LegacyAuthority,
+        }));
+        assert!(
+            matches!(blocked, Err(StoreError::OpenBlocked { .. })),
+            "a guard refusal must survive the encryption probe: {blocked:?}"
+        );
+
+        let plain_failure = probe_opened(Err(StoreError::turso_message("file is not a database")));
+        assert_eq!(
+            plain_failure.ok(),
+            Some(false),
+            "a non-guard open error stays 'not openable with these options'"
+        );
+
+        // `Ok(handle)` ⇒ `Ok(true)`, through a real handle so the drop path is real.
+        let dir = std::env::temp_dir().join(format!(
+            "mem-store-encryption-probe-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.subsec_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).expect("create the temp dir");
+        let options = ConnectOptions {
+            experimental: vec![
+                crate::db::ExperimentalFeature::Encryption,
+                crate::db::ExperimentalFeature::MultiprocessWal,
+            ],
+            encryption: None,
+            read_only: false,
+            allow_unguarded_open: false,
+            storage_root: Some(dir.clone()),
+        };
+        let handle = crate::db::turso_connect_factory()
+            .connect(dir.join("opens.db"), options)
+            .await
+            .expect("open through the guarded seam");
+        assert_eq!(
+            probe_opened(Ok(handle)).ok(),
+            Some(true),
+            "a handle that opened is `true` (and is dropped inside the classifier)"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

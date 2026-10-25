@@ -302,6 +302,7 @@ mod tests {
             database_encryption_enabled: true,
             database_encryption_cipher: "aes256gcm".to_string(),
             database_encryption_key: None,
+            allow_unguarded_open: false,
         };
         let store = VaultStore::new(config);
         let _ = catch_unwind(AssertUnwindSafe(|| {

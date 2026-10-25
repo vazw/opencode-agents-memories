@@ -14,10 +14,12 @@
 //! **Option set.** AC11–AC15, AC18, AC19, AC21 and AC22 open through the
 //! shipping option set — `ConnectOptions::for_config(config, Platform::current())`,
 //! i.e. multiprocess WAL on non-Windows and the encryption flag off when
-//! encryption is disabled. `ConnectOptions::default()` survives only in AC1,
-//! as an explicitly labelled engine-baseline handle, because that claim is
-//! about the engine default rather than about the shipping open. AC16/AC17
-//! necessarily reach `turso::Builder` directly: `ConnectOptions` cannot
+//! encryption is disabled. AC1's second, explicitly labelled engine-baseline
+//! handle goes through `turso::Builder` directly, because that claim is about
+//! the engine default rather than about the shipping open — and since issue 45
+//! the factory refuses a legacy option set (`UnsupportedOpenMode`, owner
+//! decision O3), so no seam-based way to open one remains. AC16/AC17
+//! necessarily reach `turso::Builder` directly too: `ConnectOptions` cannot
 //! express `experimental_vacuum`, and this wave may not extend it. AC16 is the
 //! explicitly non-production capability probe, labelled as such in its doc;
 //! AC17 is the configuration W6's remedy would create, and its refusal is the
@@ -47,8 +49,8 @@ use std::path::{Path, PathBuf};
 
 use mem_store::config::StoreConfig;
 use mem_store::db::{
-    BatchMode, ConnectFactory, ConnectOptions, Db, DbHandle, EncryptionOptions, ExecResult,
-    ExperimentalFeature, Row, Statement, Value, turso_connect_factory,
+    BatchMode, ConnectFactory, ConnectOptions, Db, DbHandle, EncryptionOptions, ExecResult, Row,
+    Statement, Value, turso_connect_factory,
 };
 use mem_store::error::StoreError;
 use mem_store::platform::Platform;
@@ -116,15 +118,149 @@ async fn open_production(config: &StoreConfig, name: &str) -> DbHandle {
         .expect("open database through the production option set")
 }
 
-/// A handle opened with `ConnectOptions::default()` — the plain builder, with
-/// no experimental feature at all. Used **only** by AC1 as a labelled
-/// engine-baseline handle (the claim there is about the engine's default
+/// A handle opened with the **plain builder** — no experimental feature at all,
+/// i.e. turso's single-process (legacy) WAL mode. Used **only** by AC1 as a
+/// labelled engine-baseline handle (the claim there is about the engine's default
 /// journal mode, not about the shipping open).
+///
+/// Reaches `turso::Builder` directly by design: since issue 45 the production
+/// factory **refuses** a legacy option set with `UnsupportedOpenMode` (owner
+/// decision O3), and production code must not grow a test-only escape hatch
+/// through the seam. This is the same class as AC16/AC17's raw handles.
 async fn open_default(dir: &Path, name: &str) -> DbHandle {
-    turso_connect_factory()
-        .connect(dir.join(name), ConnectOptions::default())
+    let database = turso::Builder::new_local(&dir.join(name).to_string_lossy())
+        .build()
         .await
-        .expect("open database with default connect options")
+        .expect("open the engine-default database");
+    let connection = database
+        .connect()
+        .expect("connect to the engine-default db");
+    let db: DbHandle = std::sync::Arc::new(RawDb {
+        database,
+        connection,
+    });
+    db
+}
+
+/// A `Db` over a raw `turso::Connection` — the test-local mirror of
+/// `mem_store::db::TursoDb` for the handles that must bypass the guard.
+///
+/// Why it exists: after issue 45 three tests that measure the *engine* on a
+/// flag-off handle cannot open through `TursoConnectFactory`, because that seam
+/// refuses a legacy option set by construction. Rather than add a production
+/// backdoor, they build the same builder AC16/AC17 already use and wrap it here.
+struct RawDb {
+    /// Retained so the file resources live as long as the connection (turso has
+    /// no `close`; release is Drop).
+    #[allow(dead_code)]
+    database: turso::Database,
+    connection: turso::Connection,
+}
+
+fn raw_value_into(value: Value) -> turso::Value {
+    match value {
+        Value::Null => turso::Value::Null,
+        Value::Integer(value) => turso::Value::Integer(value),
+        Value::Real(value) => turso::Value::Real(value),
+        Value::Text(text) => turso::Value::Text(text),
+        Value::Blob(bytes) => turso::Value::Blob(bytes),
+    }
+}
+
+fn raw_value_from(value: turso::Value) -> Value {
+    match value {
+        turso::Value::Null => Value::Null,
+        turso::Value::Integer(value) => Value::Integer(value),
+        turso::Value::Real(value) => Value::Real(value),
+        turso::Value::Text(text) => Value::Text(text),
+        turso::Value::Blob(bytes) => Value::Blob(bytes),
+    }
+}
+
+async fn raw_rows(mut rows: turso::Rows) -> Result<Vec<Row>, StoreError> {
+    let columns = std::sync::Arc::new(rows.column_names());
+    let mut collected = Vec::new();
+    while let Some(raw) = rows.next().await? {
+        let mut values = Vec::with_capacity(columns.len());
+        for index in 0..columns.len() {
+            values.push(raw_value_from(raw.get_value(index)?));
+        }
+        collected.push(Row::new(columns.clone(), values));
+    }
+    Ok(collected)
+}
+
+impl Db for RawDb {
+    fn execute(
+        &self,
+        sql: &str,
+        params: Vec<Value>,
+    ) -> mem_store::db::BoxFuture<'_, Result<ExecResult, StoreError>> {
+        let params: Vec<turso::Value> = params.into_iter().map(raw_value_into).collect();
+        let sql = sql.to_string();
+        Box::pin(async move {
+            let changes = self
+                .connection
+                .execute(sql.as_str(), params)
+                .await
+                .map_err(StoreError::from)?;
+            Ok(ExecResult {
+                changes,
+                last_insert_rowid: self.connection.last_insert_rowid(),
+            })
+        })
+    }
+
+    fn query(
+        &self,
+        sql: &str,
+        params: Vec<Value>,
+    ) -> mem_store::db::BoxFuture<'_, Result<Vec<Row>, StoreError>> {
+        let params: Vec<turso::Value> = params.into_iter().map(raw_value_into).collect();
+        let sql = sql.to_string();
+        Box::pin(async move {
+            let rows = self
+                .connection
+                .query(sql.as_str(), params)
+                .await
+                .map_err(StoreError::from)?;
+            raw_rows(rows).await
+        })
+    }
+
+    fn batch(
+        &self,
+        statements: Vec<Statement>,
+        mode: BatchMode,
+    ) -> mem_store::db::BoxFuture<'_, Result<Vec<ExecResult>, StoreError>> {
+        let behavior = match mode {
+            BatchMode::Write => turso::transaction::TransactionBehavior::Immediate,
+            BatchMode::Read => turso::transaction::TransactionBehavior::Deferred,
+        };
+        let batched: Vec<(String, Vec<turso::Value>)> = statements
+            .into_iter()
+            .map(|statement| {
+                (
+                    statement.sql,
+                    statement.params.into_iter().map(raw_value_into).collect(),
+                )
+            })
+            .collect();
+        Box::pin(async move {
+            let results = self
+                .connection
+                .transactional_batch(batched, behavior)
+                .await
+                .map_err(StoreError::from)?;
+            Ok(results
+                .into_iter()
+                .map(|result| ExecResult {
+                    changes: result.rows_affected(),
+                    last_insert_rowid: result.last_insert_rowid().unwrap_or(0),
+                })
+                .collect())
+        })
+    }
 }
 
 /// Raw builder handles for the `experimental_vacuum` probes. `ConnectOptions`
@@ -435,9 +571,9 @@ async fn column_names(db: &dyn Db, sql: &str, column: &str) -> Vec<String> {
 ///
 /// The premise every "deleted text lives in the WAL" argument rests on. Two
 /// handles, deliberately labelled: `production.db` through the shipping option
-/// set, `default.db` through the plain builder (this is the only place
-/// `ConnectOptions::default()` appears, because the claim is about the engine's
-/// default, not about the shipping open).
+/// set, `default.db` through the plain raw builder ([`open_default`]), because
+/// the claim is about the engine's default, not about the shipping open. The
+/// factory cannot open a legacy handle any more (issue 45 / O3).
 #[tokio::test]
 async fn test_new_database_defaults_to_wal_journal_mode() {
     let production_db_config = production_config("cap-journal-production");
@@ -2002,34 +2138,24 @@ async fn test_flag_on_database_reopens_with_the_flag_off() {
     common::cleanup_temp_dir(&config.storage_path).expect("cleanup temp dir");
 }
 
-/// The `Db` seam opened through the production factory with ONE element of the
-/// production option list removed: `ExperimentalFeature::MultiprocessWal`.
+/// The `Db` seam opened through the **raw builder** with the multiprocess-WAL
+/// feature removed — the handle every `Db`-layer probe (`wal_checkpoint` through
+/// the seam, concurrent tasks) must use.
 ///
-/// Built by subtraction from `ConnectOptions::for_config` rather than by hand,
-/// so a future change to the shipping option set (another feature, a cipher
-/// change) is inherited here instead of being silently dropped. The encryption
-/// material is attached exactly where the connection manager attaches it.
-fn single_process_options(config: &StoreConfig) -> ConnectOptions {
-    let mut options = ConnectOptions::for_config(config, Platform::current());
-    options
-        .experimental
-        .retain(|feature| !matches!(feature, ExperimentalFeature::MultiprocessWal));
-    options.encryption =
-        mem_store::db::resolve_database_encryption(config).expect("resolve encryption options");
-    options
-}
-
-/// A production `DbHandle` with the multiprocess-WAL feature removed — the
-/// handle every `Db`-layer probe (`wal_checkpoint` through the seam, concurrent
-/// tasks) must use.
+/// Not the factory: since issue 45 `TursoConnectFactory::connect` refuses a legacy
+/// option set with `UnsupportedOpenMode` (owner decision O3), and these tests
+/// measure the *engine* on a flag-off database, so they build the same builder
+/// AC16/AC17 use and wrap it in [`RawDb`].
 async fn open_single_process_db(config: &StoreConfig, name: &str) -> DbHandle {
-    turso_connect_factory()
-        .connect(
-            config.storage_path.join(name),
-            single_process_options(config),
-        )
-        .await
-        .expect("open through the factory without the multiprocess-WAL feature")
+    let encryption =
+        mem_store::db::resolve_database_encryption(config).expect("resolve encryption options");
+    let (database, connection) =
+        open_single_process(&config.storage_path.join(name), false, encryption.as_ref()).await;
+    let db: DbHandle = std::sync::Arc::new(RawDb {
+        database,
+        connection,
+    });
+    db
 }
 
 /// The `experimental_vacuum` handle **with encryption on and the flag off** —

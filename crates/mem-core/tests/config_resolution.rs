@@ -517,3 +517,26 @@ fn test_display_lists_global_path_in_project_error() {
         "display must carry the global config path: {result}"
     );
 }
+
+/// O5 / issue 45: `allowUnguardedOpen` is a top-level camelCase boolean and its
+/// default is `false` — the guard is on unless the user turns it off.
+///
+/// Inverted world: a key spelled `allow_unguarded_open` in the file would resolve
+/// `false` here (serde `rename_all = "camelCase"` ignores it) and the test fails.
+#[test]
+fn test_allow_unguarded_open_resolves_from_the_camel_case_key() {
+    let enabled = run_ok(Some(r#"{"allowUnguardedOpen": true}"#), None, &Env::new());
+    assert!(
+        enabled.allow_unguarded_open,
+        "`allowUnguardedOpen: true` must resolve to `true`"
+    );
+
+    let defaulted = run_ok(None, None, &Env::new());
+    assert!(
+        !defaulted.allow_unguarded_open,
+        "the default must be `false`: the mixed-version guard is on unless asked otherwise"
+    );
+
+    let explicit_off = run_ok(Some(r#"{"allowUnguardedOpen": false}"#), None, &Env::new());
+    assert!(!explicit_off.allow_unguarded_open);
+}
