@@ -14,12 +14,12 @@ use mem_core::sha256;
 
 use mem_embed::embedder::BoxFuture;
 use mem_episodic::error::EpisodicError;
-use mem_episodic::inbox::{CaptureInbox, DRAIN_BATCH_LIMIT, InboxNewEntry};
+use mem_episodic::inbox::{CaptureInbox, DRAIN_BATCH_LIMIT, InboxEntry, InboxNewEntry};
 use mem_episodic::raw_context::MAX_RAW_CONTEXT_BYTES;
 use mem_episodic::record::NewAgentSession;
 use mem_episodic::record::{Decision, WorkItem};
 
-use mem_store::db::{BatchMode, Value, query_one};
+use mem_store::db::{BatchMode, Value};
 use mem_store::serde_json::Value as Json;
 use mem_store::shard_manager::ShardManager;
 use mem_store::vector::{MemoryInsert, insert_vector_statement};
@@ -96,13 +96,13 @@ pub enum Tier1WriteOutcome {
 
 /// Why a tier-1 write could not complete.
 ///
-/// `Deferred` is CRITICAL for the inbox contract: a lock deferral (own OR
-/// foreign pid) must NOT consume a bounded inbox attempt — the caller
-/// distinguishes it structurally (A1).
+/// `Deferred` is CRITICAL for the inbox contract: a live lock deferral (own OR
+/// foreign pid) **or a scope shard that cannot be read** must NOT consume a
+/// bounded inbox attempt — the caller distinguishes it structurally (A1).
 #[derive(Debug, Clone)]
 pub enum CaptureWriterError {
-    /// A live operation lock is held by ANOTHER process; retry later
-    /// without consuming an attempt.
+    /// A live operation lock is held by ANOTHER process, or a shard of the
+    /// scope could not be read; retry later without consuming an attempt.
     Deferred(mem_store::error::StoreError),
     /// A real failure that consumed the attempt.
     Failed(mem_store::error::StoreError),
@@ -111,7 +111,7 @@ pub enum CaptureWriterError {
 impl std::fmt::Display for CaptureWriterError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Deferred(error) => write!(f, "tier-1 write deferred (live lock): {error}"),
+            Self::Deferred(error) => write!(f, "tier-1 write deferred: {error}"),
             Self::Failed(error) => write!(f, "tier-1 write failed: {error}"),
         }
     }
@@ -134,9 +134,11 @@ fn now_millis() -> i64 {
 /// `get_write_shard_allowing_own_lock` (own tolerated, foreign refused).
 /// A foreign live pid is a DEFER: no write, no attempt consumed.
 ///
-/// The row id is deterministic; an existing id means REPLAY (verify the
-/// row actually belongs to this scope/session before treating it as a
-/// replay — a mismatch is a collision and must NOT be overwritten).
+/// The row id is deterministic; an existing id means REPLAY (the id is looked
+/// up across EVERY shard of the scope — active and retired — and the row it
+/// resolves to must belong to this scope/session before it is accepted as a
+/// replay; a mismatch is a collision and must NOT be overwritten). A failed
+/// scope-wide lookup is a DEFER, never a "no existing row".
 pub async fn write_capture_summary(
     deps: &CaptureWriterDeps,
     scope: &ResolvedProjectScope,
@@ -207,28 +209,37 @@ pub async fn write_capture_summary(
                         )
                     };
 
-                    // Existence check: existing id = replay candidate; verify
-                    // scope/session identity before accepting it.
-                    if let Some(row) = query_one(
-                        db.as_ref(),
-                        "SELECT id, container_tag, session_id FROM memories WHERE id = ?",
-                        vec![Value::Text(row_id.clone())],
-                    )
-                    .await
-                    .map_err(CaptureWriterError::Failed)?
+                    // Existence check ACROSS every shard of the scope: the
+                    // deterministic id may live in a retired shard, so a
+                    // shard-local lookup is exactly the duplicate bug. An
+                    // error is NOT "no existing row" — every `Err` defers the
+                    // write (no attempt consumed), because capture has no
+                    // unique-violation backstop behind this check.
+                    match deps
+                        .shards
+                        .find_memory_in_scope(Scope::Project, &scope_hash, &row_id)
+                        .await
                     {
-                        let same_scope =
-                            row.text("container_tag").as_deref() == Some(&container_tag);
-                        let same_session =
-                            row.text("session_id").as_deref() == Some(input.session_id.as_str());
-                        return if same_scope && same_session {
-                            Ok(Tier1WriteOutcome::Replayed)
-                        } else {
-                            // Collision: never overwrite; structured failure.
-                            Err(CaptureWriterError::Failed(failed_store_with(
-                                "deterministic capture id collision (different scope/session)",
-                            )))
-                        };
+                        Ok(Some(scoped)) => {
+                            let same_scope =
+                                scoped.container_tag.as_deref() == Some(&container_tag);
+                            let same_session =
+                                scoped.session_id.as_deref() == Some(input.session_id.as_str());
+                            return if same_scope && same_session {
+                                Ok(Tier1WriteOutcome::Replayed)
+                            } else {
+                                // Collision: never overwrite; structured failure.
+                                Err(CaptureWriterError::Failed(failed_store_with(
+                                    "deterministic capture id collision (different scope/session)",
+                                )))
+                            };
+                        }
+                        Ok(None) => {}
+                        // Variant-blind on purpose: a registry-read failure
+                        // and an unreadable shard are the same "not now"
+                        // class, and `Failed` would consume a bounded attempt
+                        // for an environmental fault.
+                        Err(error) => return Err(CaptureWriterError::Deferred(error)),
                     }
 
                     // The write: `insert_vector_statement` in ONE
@@ -332,6 +343,26 @@ fn failed_store_with(message: &str) -> mem_store::error::StoreError {
     mem_store::error::StoreError::Internal {
         message: message.to_string(),
     }
+}
+
+/// The ONE operational record of a tier-1 deferral.
+///
+/// `reason` is a fixed literal from the closed set below — never the
+/// `StoreError` Display, which carries the scope hash and a filesystem path.
+/// The label is the only place that may look at the error variant; the
+/// deferred/failed mapping above is variant-blind by design. No test asserts
+/// this line (it is the wave's named, deliberate observation gap).
+fn log_tier1_deferred(entry: &InboxEntry, reason: &'static str) {
+    crate::engine::structured_stderr(
+        "capture.tier1_deferred",
+        "warn",
+        "capture",
+        serde_json::json!({
+            "capture_id": entry.capture_id,
+            "project_id": entry.project_id,
+            "reason": reason,
+        }),
+    );
 }
 
 /// Classifies a store error on the write leg: a live lock (any pid) is a
@@ -485,7 +516,8 @@ pub enum EntryOutcome {
     /// The bounded retry budget was consumed: dead-lettered to an
     /// episodic-only row.
     Dead,
-    /// A lock deferral (own OR foreign) — NO attempt was consumed.
+    /// A live lock (own OR foreign) **or a scope shard that cannot be read** —
+    /// NO attempt was consumed.
     Deferred,
 }
 
@@ -736,7 +768,19 @@ impl CaptureService {
                 let _ = self.inbox.mark_done(&entry.capture_id).await;
                 EntryOutcome::Done
             }
-            Err(CaptureWriterError::Deferred(_)) => EntryOutcome::Deferred,
+            Err(CaptureWriterError::Deferred(error)) => {
+                // The label may look at the variant; the mapping may not.
+                let reason = if matches!(
+                    error,
+                    mem_store::error::StoreError::ScopeShardUnreadable { .. }
+                ) {
+                    "scope_shard_unreadable"
+                } else {
+                    "store_error"
+                };
+                log_tier1_deferred(entry, reason);
+                EntryOutcome::Deferred
+            }
             Err(CaptureWriterError::Failed(_)) => self.retryable_or_dead(entry).await,
         }
     }
@@ -841,7 +885,19 @@ impl CaptureService {
                 let _ = self.inbox.mark_done(&entry.capture_id).await;
                 EntryOutcome::Done
             }
-            Err(CaptureWriterError::Deferred(_)) => EntryOutcome::Deferred,
+            Err(CaptureWriterError::Deferred(error)) => {
+                // The label may look at the variant; the mapping may not.
+                let reason = if matches!(
+                    error,
+                    mem_store::error::StoreError::ScopeShardUnreadable { .. }
+                ) {
+                    "scope_shard_unreadable"
+                } else {
+                    "store_error"
+                };
+                log_tier1_deferred(entry, reason);
+                EntryOutcome::Deferred
+            }
             Err(CaptureWriterError::Failed(_)) => self.retryable_or_dead(entry).await,
         }
     }

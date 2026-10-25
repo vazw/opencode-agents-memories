@@ -24,6 +24,7 @@ use mem_bridge::capture::{
 };
 use mem_bridge::project_scope::resolve_project_scope;
 use mem_store::serde_json::json;
+use mem_store::shard_manager::{ShardInfo, ShardManager};
 use mem_store::vector::get_memories_by_session_id;
 
 // The tag resolver fixture (real git repo, hermetic temp dir).
@@ -488,4 +489,196 @@ async fn test_capture_drain_persists_provider_type_and_extension_fields() {
     );
     assert_eq!(row.text("tags").as_deref(), Some("auth"));
     assert_eq!(row.text("container_tag").as_deref(), Some(TAG));
+}
+
+// ---------------------------------------------------------------------------
+// W1 (issue 43.1) — the deterministic id is resolved across the WHOLE scope
+// ---------------------------------------------------------------------------
+
+/// A cap-1 / 2-dim store config: one row fills a shard, so the very next
+/// write resolves a rotated (new) shard. The `FakeEmbedder` must therefore
+/// return 2-dim vectors (`rotation_deps`).
+fn rotation_config(dir: &TestDir) -> mem_store::config::StoreConfig {
+    let mut config = dir.store_config();
+    config.embedding_dimensions = 2;
+    config.max_vectors_per_shard = 1;
+    config
+}
+
+/// Capture writer deps over `shards` with 2-dim embeddings.
+fn rotation_deps(shards: &Arc<ShardManager>) -> mem_bridge::capture::CaptureWriterDeps {
+    mem_bridge::capture::CaptureWriterDeps {
+        shards: shards.clone(),
+        embedder: Arc::new(FakeEmbedder::with_vector(vec![1.0, 0.0])),
+    }
+}
+
+/// The registry rows of one project scope, ascending by `shard_index`.
+async fn shards_in_scope(shards: &ShardManager, scope_hash: &str) -> Vec<ShardInfo> {
+    shards
+        .get_all_shards(mem_core::scope::Scope::Project, Some(scope_hash))
+        .await
+        .expect("registry rows")
+}
+
+/// `SELECT COUNT(*) FROM memories WHERE id = ?` inside ONE shard file.
+async fn count_in_shard(shards: &ShardManager, info: &ShardInfo, id: &str) -> i64 {
+    let db = shards.open_shard(&info.db_path).await.expect("open shard");
+    let row = mem_store::db::query_one(
+        db.as_ref(),
+        "SELECT COUNT(*) AS count FROM memories WHERE id = ?",
+        vec![mem_store::db::Value::Text(id.to_string())],
+    )
+    .await
+    .expect("count query")
+    .expect("a count row");
+    row.i64("count").unwrap_or(0)
+}
+
+/// The same count summed over every shard of the scope whose FILE still
+/// exists: a removed shard holds no rows, and opening it would re-create it.
+async fn count_across_live_shards(shards: &ShardManager, scope_hash: &str, id: &str) -> i64 {
+    let mut total = 0;
+    for info in shards_in_scope(shards, scope_hash).await {
+        if !info.db_path.exists() {
+            continue;
+        }
+        total += count_in_shard(shards, &info, id).await;
+    }
+    total
+}
+
+/// AC4 — the defect, reproduced: after a rotation the deterministic id lives
+/// in the RETIRED shard, so the second write must REPLAY there instead of
+/// inserting a duplicate into the active shard.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_capture_replay_after_rotation_is_replayed_and_leaves_one_row_in_the_scope() {
+    const TAG: &str = "opencode_project_0123456789abcdef";
+    const HASH: &str = "0123456789abcdef";
+    const CAPTURE_ID: &str = "019a0000-0000-7f00-8000-0000000000e1";
+
+    let dir = TestDir::new("w53-tier1-rotation-replay");
+    let config = rotation_config(&dir);
+    let shards = Arc::new(common::shard_manager(config));
+    let deps = rotation_deps(&shards);
+    let scope =
+        mem_bridge::project_scope::apply_resolved_scope("/srv/proj", TAG, HASH).expect("scope");
+    let row_id = capture_summary_row_id(TAG, CAPTURE_ID);
+
+    let first = write_capture_summary(&deps, &scope, &input(CAPTURE_ID, "sess-1"))
+        .await
+        .expect("the first tier-1 write succeeds");
+    assert_eq!(first, Tier1WriteOutcome::Written);
+
+    // The second write resolves a shard that ALREADY rotated (cap = 1): the
+    // row it must find lives in the retired shard 0.
+    let replay = write_capture_summary(&deps, &scope, &input(CAPTURE_ID, "sess-1"))
+        .await
+        .expect("the replay must not fail");
+    assert_eq!(
+        replay,
+        Tier1WriteOutcome::Replayed,
+        "the id exists in the retired shard: this is a replay, not a second insert"
+    );
+
+    let registry = shards_in_scope(&shards, HASH).await;
+    assert_eq!(
+        registry.len(),
+        2,
+        "the rotation really happened (non-vacuity): {registry:?}"
+    );
+    assert_eq!(
+        count_in_shard(&shards, &registry[0], &row_id).await,
+        1,
+        "the row sits in the retired shard 0"
+    );
+    assert_eq!(
+        count_in_shard(&shards, &registry[1], &row_id).await,
+        0,
+        "shard 1 never received a copy"
+    );
+    assert_eq!(
+        count_across_live_shards(&shards, HASH, &row_id).await,
+        1,
+        "exactly one row with the deterministic id across the whole scope"
+    );
+}
+
+/// AC5 — capture DEFERS and writes nothing when a scope shard is unreadable.
+///
+/// The ONE mechanism able to produce the deferral in this fixture: shard 0 is
+/// registered in the metadata registry and its `.db` was deliberately removed.
+/// Everything else the write needs (the active shard's file, the embeddings,
+/// the registry) is healthy.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_capture_is_deferred_and_writes_nothing_when_a_registered_shard_is_unreadable() {
+    const TAG: &str = "opencode_project_0123456789abcdef";
+    const HASH: &str = "0123456789abcdef";
+
+    let dir = TestDir::new("w53-tier1-scope-shard-missing");
+    let config = rotation_config(&dir);
+    let shards = Arc::new(common::shard_manager(config.clone()));
+    let scope =
+        mem_bridge::project_scope::apply_resolved_scope("/srv/proj", TAG, HASH).expect("scope");
+
+    // A lands in shard 0; B's resolution retires the full shard 0 and lands
+    // in shard 1.
+    for capture_id in [
+        "019a0000-0000-7f00-8000-0000000000e2",
+        "019a0000-0000-7f00-8000-0000000000e3",
+    ] {
+        let deps = rotation_deps(&shards);
+        let outcome = write_capture_summary(&deps, &scope, &input(capture_id, "sess-1"))
+            .await
+            .expect("an ordinary tier-1 write succeeds");
+        assert_eq!(outcome, Tier1WriteOutcome::Written);
+    }
+
+    let registry = shards_in_scope(&shards, HASH).await;
+    assert_eq!(
+        registry.len(),
+        2,
+        "A in shard 0, B in shard 1: {registry:?}"
+    );
+    let shard_zero = registry[0].db_path.clone();
+    assert!(shard_zero.exists());
+
+    // Drop every handle to shard 0 (a cached connection would still read the
+    // unlinked file), delete its database, then build a FRESH manager over
+    // the same root.
+    drop(shards);
+    std::fs::remove_file(&shard_zero).expect("remove shard 0's database");
+
+    let fresh = Arc::new(common::shard_manager(config));
+    let deps = rotation_deps(&fresh);
+    let capture_id = "019a0000-0000-7f00-8000-0000000000e4";
+    let row_id = capture_summary_row_id(TAG, capture_id);
+
+    let outcome = write_capture_summary(&deps, &scope, &input(capture_id, "sess-1")).await;
+    match outcome {
+        Err(mem_bridge::capture::CaptureWriterError::Deferred(_)) => {}
+        other => panic!(
+            "an unreadable scope shard must DEFER (never `Failed`, never a write), got {other:?}"
+        ),
+    }
+
+    let registry = shards_in_scope(&fresh, HASH).await;
+    assert_eq!(
+        registry.len(),
+        3,
+        "the write's resolution retired the full shard 1 and created shard 2 BEFORE the scan: {registry:?}"
+    );
+    assert!(registry[2].is_active, "shard 2 is the active shard");
+    // AC5's "0 rows across all three shards", realised: shard 0's file is gone
+    // (0 rows by construction, absence asserted below), so the countable set
+    // is the two surviving shards.
+    assert!(
+        !shard_zero.exists(),
+        "the scan must never re-create a missing shard file"
+    );
+    assert_eq!(
+        count_across_live_shards(&fresh, HASH, &row_id).await,
+        0,
+        "no row with C's id in the two surviving shards"
+    );
 }

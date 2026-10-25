@@ -298,14 +298,16 @@ impl PermanentMemorySink for ShardPermanentMemorySink {
         record: &'a PromotionRecord,
     ) -> mem_embed::embedder::BoxFuture<'a, Result<PromoteOutcome, EpisodicError>> {
         Box::pin(async move {
-            // (1) The scope hash is validated before anything is touched.
+            // (1) The scope hash is validated before anything is touched (pure
+            // and cheap, so it stays OUTSIDE the scope lock).
             if !is_valid_scope_hash(scope_hash) {
                 return Err(EpisodicError::validation(
                     "scope_hash",
                     "must be 16 lowercase hex characters",
                 ));
             }
-            // (2) The embedding must match the store's dimensions.
+            // (2) The embedding must match the store's dimensions (pure; also
+            // outside the lock).
             if record.vector.len() != self.dimensions as usize {
                 return Err(EpisodicError::validation(
                     "embedding",
@@ -316,70 +318,117 @@ impl PermanentMemorySink for ShardPermanentMemorySink {
                     ),
                 ));
             }
-            // (3) The write shard for the caller's scope.
+
+            // (3)-(7) under the SAME per-scope write lock capture takes.
             //
-            // `get_write_shard` refuses to resolve a shard while a live
-            // operation lock exists. The consolidation run HOLDS that lock
-            // itself for its whole duration (ADR-0006 D-25), so the lock it
-            // sees is its own — the lock-tolerant path resolves the shard
-            // then. A lock held by ANOTHER process still fails the
-            // promotion (the run aborts).
-            let info = match self
-                .shards
-                .get_write_shard(Scope::Project, scope_hash)
+            // (3) is load-bearing: `get_write_shard` may mark the full shard
+            // read-only (registry UPDATE), sync its count (`SET_VECTOR_COUNT`)
+            // and create the next shard (new file + registry INSERT). With
+            // resolution OUTSIDE the lock, another writer of the scope could
+            // retire the resolved shard between resolution and insert, so the
+            // row would land in a retired shard.
+            self.shards
+                .with_scope_write_lock(Scope::Project, scope_hash, move || {
+                    Box::pin(async move {
+                        let body = async move {
+                            // (3) The write shard for the caller's scope.
+                            //
+                            // `get_write_shard` refuses to resolve a shard while a live
+                            // operation lock exists. The consolidation run HOLDS that lock
+                            // itself for its whole duration (ADR-0006 D-25), so the lock it
+                            // sees is its own — the lock-tolerant path resolves the shard
+                            // then. A lock held by ANOTHER process still fails the
+                            // promotion (the run aborts).
+                            let info = match self
+                                .shards
+                                .get_write_shard(Scope::Project, scope_hash)
+                                .await
+                            {
+                                Ok(info) => info,
+                                Err(error) if is_own_operation_lock(&error) => {
+                                    self.shards
+                                        .get_write_shard_allowing_own_lock(
+                                            Scope::Project,
+                                            scope_hash,
+                                        )
+                                        .await?
+                                }
+                                Err(error) => return Err(EpisodicError::Store(error)),
+                            };
+                            let db = self.shards.open_shard(&info.db_path).await?;
+
+                            // (4) Existence check across EVERY shard of the scope
+                            // (active and retired): an existing row is never
+                            // re-inserted and never bumps the count. The `?` is the
+                            // fail-closed mapping for EVERY variant —
+                            // `From<StoreError> for EpisodicError` makes it
+                            // `EpisodicError::Store`, which aborts the run; the
+                            // scheduler re-ticks (`engine.rs:1307-1320`), so the abort
+                            // is genuinely retried. Promotion is step (e) and the
+                            // episodic write batch is step (f), so an abort here has
+                            // written nothing; `select_promotable_facts` is
+                            // deterministic (`project_id`, normalized key), so the
+                            // retry re-derives the same fact.
+                            if self
+                                .shards
+                                .find_memory_in_scope(Scope::Project, scope_hash, &record.id)
+                                .await?
+                                .is_some()
+                            {
+                                return Ok(PromoteOutcome::AlreadyPresent);
+                            }
+
+                            // (5) The insert.
+                            let metadata = promotion_metadata(record);
+                            let insert = MemoryInsert {
+                                id: record.id.clone(),
+                                content: record.content.clone(),
+                                vector: record.vector.clone(),
+                                tags_vector: None,
+                                container_tag: record.container_tag.clone(),
+                                tags: None,
+                                memory_type: Some(record.memory_type.clone()),
+                                created_at: record.created_at,
+                                updated_at: record.created_at,
+                                metadata: Some(metadata),
+                                session_id: None,
+                                display_name: None,
+                                user_name: None,
+                                user_email: None,
+                                project_path: None,
+                                project_name: None,
+                                git_repo_url: None,
+                            };
+                            // The unique-violation fallback below is the second
+                            // line of defence behind the seam, and it works ONLY
+                            // because this insert is a single `db.execute`
+                            // (`vector.rs:142-146`), not a `BatchMode::Write`
+                            // batch: a constraint raised inside a batch surfaces
+                            // as `BatchStatementFailed` with `is_constraint ==
+                            // false` (W0 AC7), which this classifier cannot see.
+                            // W2 must not move this insert into a batch without
+                            // re-checking the classifier. (Capture has no such
+                            // fallback — its only duplicate defence is the seam.)
+                            match insert_vector_handle(&db, &insert).await {
+                                Ok(()) => {}
+                                Err(error) if is_unique_violation(&error) => {
+                                    // A concurrent writer inserted the same deterministic id.
+                                    return Ok(PromoteOutcome::AlreadyPresent);
+                                }
+                                Err(error) => return Err(EpisodicError::Store(error)),
+                            }
+
+                            // (6) The count bump — exactly once, on the insert path only.
+                            self.bump.bump(info.id).await?;
+
+                            // (7) Inserted.
+                            Ok::<PromoteOutcome, EpisodicError>(PromoteOutcome::Inserted)
+                        };
+                        Ok::<_, StoreError>(body.await)
+                    })
+                })
                 .await
-            {
-                Ok(info) => info,
-                Err(error) if is_own_operation_lock(&error) => {
-                    self.shards
-                        .get_write_shard_allowing_own_lock(Scope::Project, scope_hash)
-                        .await?
-                }
-                Err(error) => return Err(EpisodicError::Store(error)),
-            };
-            let db = self.shards.open_shard(&info.db_path).await?;
-
-            // (4) Existence check: an existing row is never re-inserted and
-            // never bumps the count.
-            if memory_row_exists(db.as_ref(), &record.id).await? {
-                return Ok(PromoteOutcome::AlreadyPresent);
-            }
-
-            // (5) The insert.
-            let metadata = promotion_metadata(record);
-            let insert = MemoryInsert {
-                id: record.id.clone(),
-                content: record.content.clone(),
-                vector: record.vector.clone(),
-                tags_vector: None,
-                container_tag: record.container_tag.clone(),
-                tags: None,
-                memory_type: Some(record.memory_type.clone()),
-                created_at: record.created_at,
-                updated_at: record.created_at,
-                metadata: Some(metadata),
-                session_id: None,
-                display_name: None,
-                user_name: None,
-                user_email: None,
-                project_path: None,
-                project_name: None,
-                git_repo_url: None,
-            };
-            match insert_vector_handle(&db, &insert).await {
-                Ok(()) => {}
-                Err(error) if is_unique_violation(&error) => {
-                    // A concurrent writer inserted the same deterministic id.
-                    return Ok(PromoteOutcome::AlreadyPresent);
-                }
-                Err(error) => return Err(EpisodicError::Store(error)),
-            }
-
-            // (6) The count bump — exactly once, on the insert path only.
-            self.bump.bump(info.id).await?;
-
-            // (7) Inserted.
-            Ok(PromoteOutcome::Inserted)
+                .map_err(EpisodicError::Store)?
         })
     }
 }
@@ -389,17 +438,6 @@ fn promotion_metadata(record: &PromotionRecord) -> String {
     let source_row_ids = mem_store::serde_json::to_string(&record.source_row_ids)
         .unwrap_or_else(|_| "[]".to_string());
     format!("{{\"source\":\"episodic-consolidation\",\"sourceRowIds\":{source_row_ids}}}")
-}
-
-/// Whether a memory row with `id` already exists.
-async fn memory_row_exists(db: &dyn mem_store::db::Db, id: &str) -> Result<bool, EpisodicError> {
-    let row = mem_store::db::query_one(
-        db,
-        "SELECT id FROM memories WHERE id = ?",
-        vec![mem_store::db::Value::Text(id.to_string())],
-    )
-    .await?;
-    Ok(row.is_some())
 }
 
 /// Whether the error is an operation lock held by THIS process.

@@ -15,7 +15,7 @@ use mem_episodic::promotion::{
 };
 use mem_store::db::Value;
 use mem_store::scope::Scope;
-use mem_store::shard_manager::ShardManager;
+use mem_store::shard_manager::{ShardInfo, ShardManager};
 
 /// The project scope hash the promoted facts land under.
 const SCOPE_HASH: &str = "0123456789abcdef";
@@ -462,5 +462,176 @@ async fn test_shard_vector_count_drift_is_reconciled_on_next_write() {
         registry.first().map(|info| info.vector_count),
         Some(1),
         "the registry row carries the reconciled count"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// W1 (issue 43.1) — the deterministic fact id is resolved across the scope
+// ---------------------------------------------------------------------------
+
+/// `SELECT COUNT(*) FROM memories WHERE id = ?` inside ONE shard file.
+async fn count_rows_in_shard(shards: &ShardManager, info: &ShardInfo, id: &str) -> i64 {
+    let db = shards.open_shard(&info.db_path).await.expect("open shard");
+    let row = mem_store::db::query_one(
+        db.as_ref(),
+        "SELECT COUNT(*) AS count FROM memories WHERE id = ?",
+        vec![Value::Text(id.to_string())],
+    )
+    .await
+    .expect("count query")
+    .expect("a count row");
+    row.i64("count").unwrap_or(0)
+}
+
+/// The same count summed over every registered shard of the scope whose FILE
+/// still exists: a removed shard holds no rows, and opening it would
+/// re-create it.
+async fn count_rows_across_shards(shards: &ShardManager, scope_hash: &str, id: &str) -> i64 {
+    let mut total = 0;
+    for info in registry_rows(shards, scope_hash).await {
+        if !info.db_path.exists() {
+            continue;
+        }
+        total += count_rows_in_shard(shards, &info, id).await;
+    }
+    total
+}
+
+/// AC6 — promotion after a rotation reports `AlreadyPresent` instead of
+/// re-inserting, and the replay's own resolution rotates before the scan.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_promotion_replay_after_rotation_is_already_present_and_leaves_one_row_in_the_scope() {
+    let dir = TestDir::new("promotion-rotation-replay");
+    let mut config = dir.store_config();
+    config.embedding_dimensions = 2;
+    config.max_vectors_per_shard = 1;
+    let shards = shard_manager(config);
+    let sink = ShardPermanentMemorySink::new(shards.clone(), 2);
+
+    let fact_a = record("fact-a", "use redis", 2);
+    let fact_b = record("fact-b", "use postgres", 2);
+
+    assert_eq!(
+        sink.promote(SCOPE_HASH, &fact_a).await.expect("promote A"),
+        PromoteOutcome::Inserted
+    );
+    assert_eq!(
+        sink.promote(SCOPE_HASH, &fact_b).await.expect("promote B"),
+        PromoteOutcome::Inserted
+    );
+    assert_eq!(
+        registry_rows(&shards, SCOPE_HASH).await.len(),
+        2,
+        "B's resolution retired the full shard 0 and created shard 1 (non-vacuity)"
+    );
+
+    assert_eq!(
+        sink.promote(SCOPE_HASH, &fact_a)
+            .await
+            .expect("the replay must not fail"),
+        PromoteOutcome::AlreadyPresent,
+        "A lives in the retired shard 0: `AlreadyPresent`, not a second insert"
+    );
+
+    let registry = registry_rows(&shards, SCOPE_HASH).await;
+    assert_eq!(
+        registry.len(),
+        3,
+        "the replay's own resolution rotated shard 1 → shard 2 BEFORE the scan: {registry:?}"
+    );
+    assert_eq!(
+        count_rows_in_shard(&shards, &registry[0], &fact_a.id).await,
+        1,
+        "shard 0 holds A"
+    );
+    assert_eq!(
+        count_rows_in_shard(&shards, &registry[1], &fact_b.id).await,
+        1,
+        "shard 1 holds B"
+    );
+    assert!(registry[2].is_active, "shard 2 is the active shard");
+    assert_eq!(
+        count_rows_in_shard(&shards, &registry[2], &fact_a.id).await,
+        0,
+        "shard 2 is empty"
+    );
+    assert_eq!(
+        count_rows_across_shards(&shards, SCOPE_HASH, &fact_a.id).await,
+        1,
+        "exactly one copy of A across the whole scope"
+    );
+}
+
+/// AC7 — promotion fails the run closed and writes nothing.
+///
+/// The ONE mechanism able to produce the `Err` in this fixture: shard 0 is
+/// registered in the metadata registry and its `.db` was deliberately
+/// removed. Every other step of the promote (validation, dimensions, the
+/// active shard's file, the insert target) is healthy.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_promotion_fails_the_run_and_writes_nothing_when_a_registered_shard_is_unreadable() {
+    let dir = TestDir::new("promotion-scope-shard-missing");
+    let mut config = dir.store_config();
+    config.embedding_dimensions = 2;
+    config.max_vectors_per_shard = 1;
+    let shards = shard_manager(config.clone());
+    let sink = ShardPermanentMemorySink::new(shards.clone(), 2);
+
+    let fact_a = record("fact-a", "use redis", 2);
+    let fact_b = record("fact-b", "use postgres", 2);
+    for fact in [&fact_a, &fact_b] {
+        assert_eq!(
+            sink.promote(SCOPE_HASH, fact).await.expect("promote"),
+            PromoteOutcome::Inserted
+        );
+    }
+
+    let registry = registry_rows(&shards, SCOPE_HASH).await;
+    assert_eq!(
+        registry.len(),
+        2,
+        "A in shard 0, B in shard 1: {registry:?}"
+    );
+    let shard_zero = registry[0].db_path.clone();
+    assert!(shard_zero.exists());
+
+    // Drop every handle to shard 0 (a cached connection would still read the
+    // unlinked file), delete its database, then build a FRESH manager over
+    // the same root.
+    drop(sink);
+    drop(shards);
+    std::fs::remove_file(&shard_zero).expect("remove shard 0's database");
+
+    let fresh = shard_manager(config);
+    let sink = ShardPermanentMemorySink::new(fresh.clone(), 2);
+    let fact_c = record("fact-c", "use sqlite", 2);
+
+    let error = sink
+        .promote(SCOPE_HASH, &fact_c)
+        .await
+        .expect_err("an unreadable scope shard aborts the run");
+    assert!(
+        matches!(error, mem_episodic::EpisodicError::Store(_)),
+        "the seam's error must surface as `EpisodicError::Store`: {error}"
+    );
+
+    let registry = registry_rows(&fresh, SCOPE_HASH).await;
+    assert_eq!(
+        registry.len(),
+        3,
+        "the resolution retired the full shard 1 and created shard 2 BEFORE the scan: {registry:?}"
+    );
+    assert!(registry[2].is_active, "shard 2 is the active shard");
+    // AC7's "0 rows across all three shards", realised: shard 0's file is gone
+    // (0 rows by construction, absence asserted below), so the countable set
+    // is the two surviving shards.
+    assert!(
+        !shard_zero.exists(),
+        "the scan must never re-create a missing shard file"
+    );
+    assert_eq!(
+        count_rows_across_shards(&fresh, SCOPE_HASH, &fact_c.id).await,
+        0,
+        "no row with C's id in the two surviving shards"
     );
 }

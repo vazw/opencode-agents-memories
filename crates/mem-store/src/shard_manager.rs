@@ -141,6 +141,19 @@ pub fn get_shard_path(
     ShardManager::shard_path(storage_path, scope, scope_hash, shard_index)
 }
 
+/// One memory row located somewhere in a scope — projected to identity only.
+///
+/// Deliberately does NOT carry `content`, `metadata`, `tags` or either vector:
+/// the write-path callers need the shard it lives in and the two identity
+/// columns, and nothing else may leave the store. `Row` is consumed inside
+/// [`ShardManager::find_memory_in_scope`] and never escapes.
+#[derive(Debug, Clone)]
+pub struct ScopedMemory {
+    pub shard: ShardInfo,
+    pub container_tag: Option<String>,
+    pub session_id: Option<String>,
+}
+
 impl ShardManager {
     pub fn new(
         storage_path: PathBuf,
@@ -441,6 +454,80 @@ impl ShardManager {
             .into_iter()
             .map(|row| self.row_to_shard_info(row))
             .collect())
+    }
+
+    /// Find `id` in ANY shard of `(scope, scope_hash)` — active or retired.
+    ///
+    /// PRECONDITION (documented, not type-enforced): on the write path the
+    /// caller holds [`with_scope_write_lock`](Self::with_scope_write_lock).
+    ///
+    /// `Ok(Some(_))` = the copy in the HIGHEST `shard_index`; `Ok(None)` = the
+    /// id is in no shard of the scope; `Err(StoreError::ScopeShardUnreadable)`
+    /// = some shard of the scope could not be stat'ed / opened / queried (an
+    /// enumeration failure is NOT wrapped — `get_all_shards` errors propagate
+    /// as their own variant, see [`StoreError::ScopeShardUnreadable`]).
+    ///
+    /// It never creates a shard file, never writes, never bumps a count.
+    ///
+    /// Loop invariant: before iteration *i*, the id is absent from every shard
+    /// already visited, and every visited shard opened cleanly. Termination:
+    /// the `get_all_shards` vector is finite and the loop consumes exactly one
+    /// entry per iteration.
+    pub async fn find_memory_in_scope(
+        &self,
+        scope: Scope,
+        scope_hash: &str,
+        id: &str,
+    ) -> Result<Option<ScopedMemory>, StoreError> {
+        let mut shards = self.get_all_shards(scope, Some(scope_hash)).await?;
+        // DESC by shard_index: the highest index is the latest row the scope
+        // has written — the latest truth (and the copy W1b will make
+        // `find_memory` prefer). "Any hit" would make the verdict depend on
+        // scan order; `UNIQUE(scope, scope_hash, shard_index)` makes DESC a
+        // total order, so the answer is deterministic.
+        shards.sort_by_key(|shard| std::cmp::Reverse(shard.shard_index));
+
+        for info in shards {
+            let unreadable = |message: String| StoreError::ScopeShardUnreadable {
+                scope: scope.as_str(),
+                scope_hash: scope_hash.to_string(),
+                shard_index: u64::from(info.shard_index),
+                db_path: info.db_path.clone(),
+                id: id.to_string(),
+                message: message.into(),
+            };
+
+            // Stat BEFORE opening: `ConnectionManager::open_database` CREATES
+            // a missing database file, so opening first would resurrect a dead
+            // shard and yield `Ok(None)` — the fail-open shape this seam
+            // exists to prevent.
+            if let Err(error) = std::fs::metadata(&info.db_path) {
+                return Err(unreadable(format!(
+                    "shard file is missing or unreadable ({error})"
+                )));
+            }
+
+            let db = self
+                .open_shard(&info.db_path)
+                .await
+                .map_err(|error| unreadable(error.message()))?;
+
+            let row = crate::vector::get_memory_by_id(db.as_ref(), id)
+                .await
+                .map_err(|error| unreadable(error.message()))?;
+            if let Some(row) = row {
+                let container_tag = row.text("container_tag");
+                let session_id = row.text("session_id");
+                // `row` — content, metadata, tags, vectors — is dropped HERE:
+                // nothing but identity leaves the store.
+                return Ok(Some(ScopedMemory {
+                    shard: info.clone(),
+                    container_tag,
+                    session_id,
+                }));
+            }
+        }
+        Ok(None)
     }
 
     /// Upstream `createShard`: init the shard FILE first (orphan-row guard):

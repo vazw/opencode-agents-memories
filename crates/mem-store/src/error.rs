@@ -112,6 +112,30 @@ pub enum StoreError {
         /// The operation that found the lock poisoned.
         operation: &'static str,
     },
+    /// A shard of the scope could not be read during a scope-wide memory-id
+    /// lookup, so the deterministic write was deferred rather than risk a
+    /// duplicate. Never a "not found".
+    ///
+    /// Field types (a recorded deviation from the wave blueprint's declared
+    /// `String`s): `scope` is a closed literal set (`Scope::as_str` is
+    /// `&'static str`, exactly like `LockPoisoned`'s fields) and `message` is
+    /// an immutable diagnostic, so `Box<str>` serves it. The plain-`String`
+    /// shape made `StoreError` 136 bytes, which trips
+    /// `clippy::result_large_err` on every `Result<_, StoreError>` in the
+    /// workspace under the commit gate's `-D warnings`; every field name,
+    /// field order, the variant name and the exact Display text are unchanged.
+    #[error(
+        "Shard {scope}/{scope_hash}#{shard_index} could not be read at {db_path} while \
+         resolving memory id {id} across the scope ({message}); the write was deferred"
+    )]
+    ScopeShardUnreadable {
+        scope: &'static str,
+        scope_hash: String,
+        shard_index: u64,
+        db_path: PathBuf,
+        id: String,
+        message: Box<str>,
+    },
 }
 
 impl StoreError {
