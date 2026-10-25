@@ -160,3 +160,77 @@ because capture does not write prompts. 48.9 → unchanged, and it is the reason
   line, gated by its own §9 blockers); the sweep's retention rules (issue 39, paused).
 - Provenance for every cited line is in issue 47's measured-state table; this issue deliberately does not
   restate the measurements, so a correction has one home.
+
+## IMPLEMENTATION RECORD 2026-10-25 — erasure leg landed (`A2` / `B2′`)
+
+**Landing.** Implementation `86ff7d7`; merge `fddffe3` (`--no-ff`, parents `af1408d` + `86ff7d7`):
+19 files, 1779 insertions, 67 deletions. Gate: r3 blueprint `c538e00c2fa9`, `SYS-APPROVED`
+(2026-10-25T17:21Z); reviewer `STATUS: APPROVED` on all six asks.
+
+**What shipped.**
+
+- Ruling 47.1 Leg B / `B2′` at one seam: `ProfileEraser` (`crates/mem-profile/src/erasure.rs:55`) is injected
+  into `UserPromptManager::delete_prompt` (`prompt.rs:327`) through `with_eraser` (`:115`); production's only
+  construction site (`crates/mem-bridge/src/composition.rs`) builds the profile store first and always
+  injects it.
+- **Profile erased before prompt deleted.** On erase failure the prompt survives with the typed
+  `ProfileError::ErasureFailed`, so a retry still has an event; a failed prompt DELETE after a successful
+  erase reports `PromptDeleteAfterErasure { profiles_erased, .. }` carrying the real count. The erase reuses
+  `ProfileStore::erase_profiles_derived_from` (`profile_store.rs:613`) over **all** rows — inactive ones
+  included — and the two-table delete (`profile_store.rs:570`) removes changelogs first because their
+  snapshots carry the profile text.
+- `DELETE /api/user-profile` (`crates/mem-web/src/api/profile.rs:122`) — the prompt-free root's surface and
+  the first user-invocable caller of `delete_profile`. `unanalyzedPrompts` was removed from the refresh DTO
+  together with `PromptPort::count_unanalyzed`; that removal is a **tightening, not an acceptance criterion**
+  (no other consumer existed).
+
+**The canary measurement (48.10).** Verbatim from
+`cargo test -p mem-profile --test profile_erasure_canary -- --nocapture`:
+
+```
+RESIDUAL-48: db=2 wal=2 db_bytes=40960 wal_bytes=37112 wal_state=present
+```
+
+The number is not the proof; the pair is: `PRAGMA wal_checkpoint(TRUNCATE)` → `file_len(-wal) == Some(0)`
+asserted → main-file positive control `hits >= 1` asserted **before** the erase → erase (logical erasure
+asserted, including through a fresh `ProfileStore`) → residue measured, never asserted. `busy == 0` is not
+acceptable as proof: turso 0.8.3's success path hardcodes `set_int(0)` (`vdbe/execute.rs` ~`:769`/`:788`)
+while a refused checkpoint does `set_int(1)` and still returns `Ok` (~`:799-806`), truncating nothing.
+
+**The peer-DDL arm** (`test_prompt_delete_failure_after_erase_reports_a_partial_outcome`). The saboteur runs
+the **real** eraser first (`?`-propagated), then a second live connection issues `DROP TABLE user_prompts`,
+then returns the real `EraseReport`. The test asserts `PromptDeleteAfterErasure { profiles_erased: 1 }` and
+that both `user_profiles` and `user_profile_changelogs` read 0 through `ready()`. It also pins
+erase-before-delete ordering: a delete-first implementation would return `Deleted` and fail the test.
+Observed on the wave tree: exactly the typed partial error — no refused DROP, no 0-change success.
+
+**Settled claim — `purge_cli` is not a 48 regression.** `cargo test -p mem-bridge --test purge_cli` with
+`CARGO_TARGET_DIR` unset gives **9 passed / 7 failed identically at `8a39e01` and on the wave tree** — same
+seven test names, same panic; `crates/mem-bridge/tests/purge_cli.rs` is blob-identical at both revisions
+(`862b207ea2e44970a056b4feb7f7865c291b2a85`). Cause: `binary_path()` derives `target/debug/deps/` from
+`current_exe().parent()`, while the root binary is written to `target/debug/`. The workspace suite therefore
+needs `CARGO_TARGET_DIR=$PWD/target`.
+
+**Blueprint defect for the record.** The r3 file list marked `crates/mem-web/tests/api_route_auth.rs` "No
+edit", but its walks iterate `ROUTE_TABLE`, so the new row makes its hard-coded literals fail by
+construction. The edit was forced: literal counts only (token walk 34→35; Host/Basic/reachability 36→37),
+no walk logic. Same class in `api_endpoint_contract.rs` (rows 37→38, api rows 35→36).
+
+**Route arithmetic as landed.** `ROUTE_TABLE` 37→38 rows; method registrations 38→39; contract rows 37→38;
+api rows 35→36; **path counts unchanged at 36** — the row adds a method to an existing path. The new row is
+appended **last** because the shared-router envelope walk deletes the fake profile.
+
+**Accepted residuals (named so they are not rediscovered as defects).**
+
+- `DELETE /api/user-profile` resolves only the **active** profile: a root whose only row is `is_active = 0`
+  is erasable through the prompt path but not through the route.
+- The canary walks only `{user-profiles.db, user-profiles.db-wal}`; `-tshm`, `cold-buffer.json`, `.bak`
+  families, the vault and logs/exports/media remain 47.4's other residual classes.
+- Scan-then-delete over profiles is not atomic: a concurrent watermark advance over-erases, never
+  under-erases.
+- `delete_old_prompts` is deliberately untouched and deferred to **issue 39**; its own test asserts it does
+  *not* erase, so the deferral cannot reverse silently.
+
+**Open nit, not an AC gap.** D-6 (an existing row whose stored `created_at` is non-integer → `i64::MIN`, so it
+contributes) is the one matrix row proven by reading, not by running: no test writes `created_at = 'x'`
+through a raw peer connection. A one-statement `UPDATE user_prompts SET created_at='x'` arm would close it.
