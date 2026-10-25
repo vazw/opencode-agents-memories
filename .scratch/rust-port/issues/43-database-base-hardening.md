@@ -81,6 +81,34 @@ wish.
 - Constraint from `AGENTS.md`: no new feature flags without an issue mandating one — so this needs its own
   issue when it is scheduled, not a silent addition to a wave.
 
+### Decisions 8–9, 2026-10-25 (from the consultation + the two probes)
+
+| # | decision | consequence |
+|---|---|---|
+| 8 | **Amend `purge-session`.** Owner: *"Q1+Q3 (c) amends purge"*. The drop makes a flag-off open take an exclusive `fcntl` lock on the database file, so `purge-session` **provably cannot open a database the engine holds** (measured, idle *and* mid-transaction: `File is locked by another process`). It stops being a second opener: it **enqueues**, and the engine — the only engine-lock holder — performs the purge. | Removes an entire opener row and two holder columns from the guard's collision matrix. The queue is engine-owned and request-revalidated against a live row (not the consultant's free-form spool, which was an unauthenticated deletion oracle). User-visible CLI change: `purge-session` becomes a request, not a synchronous delete. |
+| 9 | **Amend the purge's milestone handling — option (c).** Today a session purge deletes the whole `episodic_milestones` row, destroying **every co-contributor's** retained verbatim text as collateral. The purge must **rewrite the contributor set** instead of deleting the row. | This is the reconciliation ADR-0019 needed. `Contributor.summary` is class **V** — verbatim source text retained by design (D-27) — so "text follows text" is satisfiable only by removing *that* contributor's entry, not by deleting the milestone. It also settles that the milestone is **not** class C, so "memories are a separate promise" does not cover it. |
+
+**Decisions 8 and 9 compose**: one purge rewrite carries both, which is why they are recorded together.
+
+### Routed to the orchestrator (owner: *"the rest go on you recommend"*)
+
+- **`-tshm` disposal: retain permanently.** It is not debris — it is the **sensor**. A live multiprocess holder
+  holds a shared lock on `-tshm` byte 0, which is the only reliable legacy-liveness oracle. The consultant's
+  tripwire-and-delete would unlink the file under a live holder, leaving it on the old inode while the next
+  opener initialises a **new** one — two disjoint coordination regions over one WAL. Never delete it outside a
+  documented "engine stopped, no hooks in flight" migration.
+- **Delete-surface shape: a separate status endpoint** (`GET /api/prompts/{id}/erasure`), not a field on the
+  delete response. The frozen DTOs keep their single boolean, and erasure is state that **outlives** the call —
+  a status read is the honest shape for it, where a delete-response field would freeze a transient into a
+  response contract.
+- **Guard retirement:** *permanent until ADR-0021/43.8 (`SchemaNewerThanBuild`) ships in every fielded build
+  and W6 bumps `user_version`* — then defence-in-depth, not the only defence. Not "permanent" unconditionally:
+  that discards owner decision 2.
+- **Non-Linux liveness:** **fix `SystemProcessProbe`, not the guard.** It reports "alive" unconditionally off
+  Linux, which makes a crashed holder brick every open — a latent bug in the **existing** engine lock (D-39),
+  now amplified. No `--force-take-lock`: a flag that forces a lock is a footgun for a bug with a real fix.
+
+
 ---
 
 ## W0 LANDED 2026-10-25 — `af01156` (engine facts pinned)
