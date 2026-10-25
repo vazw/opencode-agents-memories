@@ -48,6 +48,18 @@ shard is a constraint · 0023 retired-shard reaping · 0024 brute-force scan cos
 
 Decision 3 is the cheapest: it deletes a whole compatibility dimension from W2 and W5.
 
+### Decisions 6–7, 2026-10-25 (W6 erasure — both taken after the single-process measurement)
+
+| # | decision | consequence |
+|---|---|---|
+| 6 | **The promise is artefact-split, with a typed outcome.** Owner: *"1 your rec"* — i.e. Framing 1. Prompt text is erased on the next successful sweep; when the sweep cannot finish the tool reports `PendingErase` and names the residual. **Memories are a separate promise** — derived knowledge that outlives its source by design. | ADR-0019 is now writable with this scope. It must **reconcile** the two artefacts rather than cite a single rule: issue 32 scrubs *forward* into derived text on session delete; issue 39 lets the derived row *outlive* the prompt by a retention window. Opposite directions, both already accepted. |
+| 7 | **Guard the mixed-version window.** Owner: *"2 guard it"* — an open-path guard, not only a release-note deploy rule. | ADR-0025 grows a design item. **Scope caveat, load-bearing:** a second *engine* process already exits 75 under D-39, so the engine path is guarded. The reachable surface is any path that opens a database **without** the engine lock — today that is `purge-session`, a **mode of the same binary** (`src/main.rs`, `mode == "purge-session"`), which takes `mem_episodic::gate::try_acquire` plus `acquire_turso_operation_lock` but **not** the engine lock (`crates/mem-bridge/src/purge.rs` module doc). It is *not* a separate process; an earlier draft of this note said it was. The guard's first job is to enumerate those paths and cover or refuse them; a guard that only re-checks the engine path guards nothing new. |
+
+**What decision 6 does not decide:** the `PendingErase` wording, whether the sweep reports per-prompt or per-sweep, and what "the residual" names. Those are ADR-0019's to specify — but the *scope* is now fixed, which is what the deferral was waiting for.
+
+**What decision 7 does not decide:** the mechanism. Detection cannot rely on turso's OS file lock (the flag-on holder holds none), and `-tshm` presence is permanent debris and therefore not a liveness signal. The architect owns the mechanism.
+
+
 
 ## W0 LANDED 2026-10-25 — `af01156` (engine facts pinned)
 
