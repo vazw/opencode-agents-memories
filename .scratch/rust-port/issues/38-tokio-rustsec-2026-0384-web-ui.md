@@ -1,6 +1,6 @@
 # 38 — Security · Upgrade tokio 1.54.0 in `web-ui` (RUSTSEC-2026-0384)
 
-Status: needs-triage
+Status: ready-for-agent — 2026-10-25 (triage closed: patch bump only; the two unmaintained warnings come from the frozen leptos/thaw stack and are accepted, not fixed here)
 
 ## What to build
 
@@ -49,10 +49,24 @@ recorded as accepted — do not leave them silently unaddressed.
 - No new dependencies. This is a version resolution change, not a feature.
 - `example/opencode-mem/` is read-only reference.
 
+## Triage decisions (2026-10-25)
+
+- **Fix:** patch bump only — `cd web-ui && cargo update -p tokio --precise 1.54.1` (or the newest
+  1.54.x), then re-run `cargo audit`. No other crate moves.
+- **`paste` and `proc-macro-error2` unmaintained warnings: accepted, not fixed.** Both arrive through
+  the **frozen** leptos 0.7.x / thaw 0.4.8 pairing (ADR-0003). Clearing them means moving the UI
+  stack, which is a separate decision with its own ADR amendment — do not attempt it here.
+- **Yanked tokio: cleared by the same bump.** A yanked version cannot be newly resolved; pinning
+  above it removes the warning.
+- **Exposure:** `cargo tree -i tokio` returns nothing for host and `wasm32-unknown-unknown`, so the
+  crate is not compiled into either built tree. **Re-measure and record the result** rather than
+  repeating this sentence — if a future change makes tokio actually compile, the advisory becomes
+  live and the wave's priority changes.
+
 ## Acceptance criteria
 
-- [ ] `cd web-ui && cargo audit` reports **0 vulnerabilities** (warnings may remain only if each is
-      explicitly recorded here with a reason).
+- [ ] `cd web-ui && cargo audit` reports **0 vulnerabilities**; the two unmaintained warnings remain,
+      recorded above with their reason.
 - [ ] `web-ui/Cargo.lock` pins `tokio >= 1.54.1`; `cargo tree -i tokio` result recorded before and
       after, so the "not compiled" claim is re-measured rather than assumed.
 - [ ] leptos and thaw versions byte-identical before and after (frozen pairing, ADR-0003).
