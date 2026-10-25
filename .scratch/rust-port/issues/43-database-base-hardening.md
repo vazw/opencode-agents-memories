@@ -81,6 +81,55 @@ deliberately left unamended so the evidence that the design was wrong survives.
 
 ---
 
+## W1 LANDED 2026-10-25 — `3d5e940` (43.1 write side)
+
+`fix(memory): resolve deterministic ids across every shard of a scope (43.1)`. Seven paths, all inside
+`crates/{mem-store,mem-bridge,mem-episodic}`: `error.rs` (+`ScopeShardUnreadable`), `shard_manager.rs`
+(+`ScopedMemory`, `find_memory_in_scope`), a new `tests/scope_wide_memory_ids.rs` (3), `capture.rs` +
+`capture_tier1.rs` (+2), `promotion.rs` + `fact_promotion.rs` (+2). No manifest, no `mem-web`, no `web-ui`,
+no `sql.rs`/`golden_sql.rs`. Gate: fmt + both clippy gates rc 0; counts **219 / 162 / 247**; merged-workspace
+suite afterwards **1713 passed, 0 failed** (221 result lines, rc 0).
+
+Both inversion arms were reproduced independently by the reviewer in throwaway copies, not merely narrated:
+arm A (`shards.truncate(1)`, i.e. the old active-shard-only check) fails the capture and promotion replay
+tests with `Written`/`Inserted`; arm B (seam `continue` instead of `Err`) fails all three fail-closed tests.
+
+### The shipped error variant differs from the approved blueprint — **W2/W4/W5 must plan against this**
+
+| field | blueprint | shipped |
+|---|---|---|
+| `scope` | `String` | **`&'static str`** |
+| `message` | `String` | **`Box<str>`** |
+
+Variant name, all six field names, their order, the `#[error]` Display text, the "appended last" position and
+`#[non_exhaustive]` are unchanged. The reason: the approved shape makes `StoreError` **128 bytes**, which
+fails clippy gate 2 with **131 `clippy::result_large_err`** errors across three crates — the wave could not
+have committed as approved. Shipped size is **112 bytes**. A crate-level `allow` was rejected as suppressing
+a true positive.
+
+- **`scope: &'static str` is sound**: `Scope::as_str(self) -> &'static str` (`crates/mem-core/src/scope.rs`),
+  the same shape `LockPoisoned` already uses.
+- **Do not re-widen these to `String`**, and when adding variants keep `StoreError` under the gate's 128-byte
+  threshold. `From<StoreError> for EpisodicError` and `CaptureWriterError::Deferred(StoreError)` both wrap by
+  value and are unaffected.
+- **Figures recorded elsewhere are wrong and need correcting on the next touch** (commit message, ledger,
+  `error.rs` prose): measured `size_of::<StoreError>()` = **112** (not 120), blueprint shape **128** (not
+  136), **131** errors in `mem-store` (not 130). The decision and conclusion are unaffected — only the
+  numbers. Not worth a commit of its own.
+
+### What W1 does not close
+
+- **43.1 stays OPEN.** W1 closes the *write* side only. **W1b is now unblocked** — `#40 dedup` merged as
+  `6bf7b28` — and still owes: `find_memory` preferring the highest `shard_index`, global search deduping by
+  id, and delete-by-id removing every copy across the scope.
+- **The `capture.tier1_deferred` log line is untested by design** — a named gap, not evidence. It carries
+  `capture_id`/`project_id`/`reason` only: no `StoreError` Display, no path, no scope hash, and it is not one
+  of the nine `mem_core::logging::signatures` constants scraped by `/api/stats`.
+- Pre-existing nit, untouched: `shard_manager.rs`'s module header still calls `withScopeWriteLock` "DEFERRED
+  to W1.3 with its first caller" — fix when that file is next opened.
+
+---
+
 ## W6 ERASURE — PRIOR ART, AND A CONTRADICTION IN THE DESIGN (2026-10-25, vault research)
 
 Before deciding W6, know that the owner's own ADR already ruled on this — and that the design
