@@ -30,6 +30,15 @@ Implement memory deduplication behind `MaintenancePort::deduplicate()` and rewri
 6. **Run guard:** `AtomicBool`, mirroring issue 39's cleanup guard. Two concurrent runs would
    otherwise double-count.
 
+**Correction 2026-10-25 (verified against both trees).** Decision 1's *justification* is partly
+false: "upstream's iteration order is an accident of a `SELECT` with no `ORDER BY`" is wrong on
+both sides — `crates/mem-store/src/sql.rs:213` is `SELECT * FROM memories ORDER BY created_at
+DESC`, and upstream `vector-search.ts:399` also carries `ORDER BY created_at DESC`. What is
+genuinely unspecified is the **tie** order among rows with equal `created_at`. **The decision
+stands on the real justification:** the tie-break `id ASC` is ours; a spec that depends on the
+engine's tie order is untestable. Do not "fix" the SQL, and do not restate the withdrawn claim.
+
+
 ## Upstream behaviour (`example/opencode-mem/src/services/deduplication-service.ts`)
 
 1. Refuse when `CONFIG.deduplicationEnabled` is false.
