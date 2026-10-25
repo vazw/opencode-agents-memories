@@ -127,6 +127,21 @@ stated product position, not merely with a preference.
 
 ---
 
+## BOOKKEEPING 2026-10-25 (from the vault project setup)
+
+- **ADR numbering is settled:** this issue owns **0017–0024**. Issue 39's planned
+  `0017-linked-memory-retention-restart.md` renumbers when 39 is re-planned; its decision is unaffected.
+- **ADR-0020 (cross-file backup ordering, 43.5) has no wave** in design §2 because 43.5 is record-only.
+  It is written **alongside W5's planning**, not as a wave of its own — confirm at that point rather than
+  inventing a wave for it.
+- **W1b must not call `decrement_vector_count` once W3 lands.** W1b's delete-by-id (deletes every copy in
+  the scope, decrementing per shard) drafts exactly the call W3 removes; after W3 it must use the same
+  **absolute** in-shard recount that dedup's `store.rs` needs (issue 40's M4). The W1 blueprint's W1b
+  section still drafts the decrement — recorded here because that blueprint is mid-gate and must not be
+  edited under its stamp.
+
+---
+
 ## Why this exists
 
 Two independent reviews of `.tmp/drafts/20261025-database-design-handover.md` (2026-10-25) found defects in

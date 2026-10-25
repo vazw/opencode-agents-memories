@@ -206,7 +206,13 @@ degrade 501; the migration-endpoint 501; the dangling-link clear; and the run gu
 
 ## ADR
 
-**`docs/adr/0017-linked-memory-retention-restart.md`** (rewritten, not amended — the earlier draft described
+
+**ADR numbering resolved 2026-10-25.** Hardening (issue 43) owns **ADR-0017 through ADR-0024** — it is
+the active effort and its waves are in flight. The `docs/adr/0017-linked-memory-retention-restart.md`
+named below therefore **renumbers when this issue is re-planned**; do not create it as 0017. The
+decision it records (retention restarts at prompt death) is unchanged — only its number moves.
+
+**`docs/adr/00XX-linked-memory-retention-restart.md`** (rewritten, not amended — the earlier draft described
 a table). Status Accepted. The decision sentence names the **column** and the **ordering invariant**, and
 the Grounds section records A and C as rejected with the reasons above.
 
