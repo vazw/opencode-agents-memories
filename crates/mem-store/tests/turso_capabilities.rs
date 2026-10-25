@@ -42,12 +42,13 @@
 
 mod common;
 
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use mem_store::config::StoreConfig;
 use mem_store::db::{
-    BatchMode, ConnectFactory, ConnectOptions, Db, DbHandle, ExecResult, Row, Statement, Value,
-    turso_connect_factory,
+    BatchMode, ConnectFactory, ConnectOptions, Db, DbHandle, EncryptionOptions, ExecResult,
+    ExperimentalFeature, Row, Statement, Value, turso_connect_factory,
 };
 use mem_store::error::StoreError;
 use mem_store::platform::Platform;
@@ -80,6 +81,15 @@ const CREATE_SHARDS: &str = concat!(
 const CREATE_ONE_ACTIVE_SHARD_INDEX: &str = concat!(
     "CREATE UNIQUE INDEX one_active_shard ON shards(scope, scope_hash) ",
     "WHERE is_active = 1"
+);
+
+/// The `user_prompts` table the erasure helpers seed. `IF NOT EXISTS` because
+/// the upgrade probe creates it itself: its kept row must be written BEFORE the
+/// canary, so the canary's `DELETE` is the last write to the table (see
+/// [`seed_probe_database`]).
+const CREATE_USER_PROMPTS: &str = concat!(
+    "CREATE TABLE IF NOT EXISTS user_prompts (",
+    "id TEXT PRIMARY KEY, content TEXT NOT NULL)"
 );
 
 // ---------------------------------------------------------------------------
@@ -315,17 +325,14 @@ async fn seed_shard(db: &dyn Db, shard_index: i64, is_active: i64) {
     .expect("seed shard row");
 }
 
-/// Production-side erasure fixture: create `user_prompts`, insert the canary,
-/// prove the marker reached disk (what stops the later absence from being
-/// vacuous), then delete the row. The bytes stay in the WAL; the caller
-/// checkpoints.
+/// Production-side erasure fixture: create `user_prompts` (unless the caller
+/// already did), insert the canary, prove the marker reached disk (what stops
+/// the later absence from being vacuous), then delete the row. The bytes stay
+/// in the WAL; the caller checkpoints.
 async fn seed_and_delete_canary(db: &dyn Db, storage: &Path) {
-    db.execute(
-        "CREATE TABLE user_prompts (id TEXT PRIMARY KEY, content TEXT NOT NULL)",
-        vec![],
-    )
-    .await
-    .expect("create user_prompts");
+    db.execute(CREATE_USER_PROMPTS, vec![])
+        .await
+        .expect("create user_prompts");
     db.execute(
         "INSERT INTO user_prompts (id, content) VALUES ('p1', ?)",
         vec![Value::Text(CANARY.to_string())],
@@ -345,10 +352,7 @@ async fn seed_and_delete_canary(db: &dyn Db, storage: &Path) {
 /// `turso::Connection`, not a `Db`).
 async fn raw_seed_and_delete_canary(connection: &turso::Connection, storage: &Path) {
     connection
-        .execute(
-            "CREATE TABLE user_prompts (id TEXT PRIMARY KEY, content TEXT NOT NULL)",
-            (),
-        )
+        .execute(CREATE_USER_PROMPTS, ())
         .await
         .expect("create user_prompts");
     let insert = format!("INSERT INTO user_prompts (id, content) VALUES ('p1', '{CANARY}')");
@@ -1563,4 +1567,1567 @@ async fn test_attach_is_refused() {
 
     drop(db);
     common::cleanup_temp_dir(&config.storage_path).expect("cleanup temp dir");
+}
+
+// ===========================================================================
+// Step 8 — W6 probe: the single-process path (multiprocess WAL OFF)
+// ===========================================================================
+//
+// This section answers one question the erasure decision is waiting on: can
+// the port run with `experimental_multiprocess_wal` disabled? It is a
+// **measurement**, not a port: no production file is touched, and the only
+// new code is test-local plumbing that mirrors production minus that one
+// feature.
+//
+// Why the flag is the question at all: `VACUUM` is refused at translation
+// while multiprocess WAL is on (AC17), and `VACUUM` is the only mechanism the
+// port has that erases deleted bytes. The erasure capability itself is already
+// proven (AC16). What is unproven is *ship safety*: every existing user's
+// storage root currently holds databases written WITH the flag, so a flag-off
+// build must reopen them.
+
+/// Production's builder, minus the multiprocess-WAL feature.
+///
+/// Fidelity, spelled out because it is the whole point:
+/// - `experimental_encryption` is set exactly as `TursoConnectFactory` sets it
+///   (on iff key material was resolved, i.e. iff `encryption.is_some()`);
+/// - `experimental_multiprocess_wal(true)` is set ONLY when `multiprocess_wal`
+///   says so — the flag-off arm is the shipping candidate;
+/// - `experimental_vacuum` is NEVER set, because production never sets it.
+///   [`open_with_vacuum`] would answer a different question.
+///
+/// The caller keeps the `Database` alive next to the `Connection`.
+async fn open_single_process(
+    path: &Path,
+    multiprocess_wal: bool,
+    encryption: Option<&EncryptionOptions>,
+) -> (turso::Database, turso::Connection) {
+    let mut builder = turso::Builder::new_local(&path.to_string_lossy())
+        .experimental_encryption(encryption.is_some());
+    if multiprocess_wal {
+        builder = builder.experimental_multiprocess_wal(true);
+    }
+    if let Some(encryption) = encryption {
+        builder = builder.with_encryption(turso::EncryptionOpts {
+            cipher: encryption.cipher.clone(),
+            hexkey: encryption.hexkey.clone(),
+        });
+    }
+    let database = builder.build().await.unwrap_or_else(|error| {
+        panic!(
+            "open {} with multiprocess_wal={multiprocess_wal}: {error}",
+            path.display()
+        )
+    });
+    let connection = database.connect().unwrap_or_else(|error| {
+        panic!(
+            "connect {} with multiprocess_wal={multiprocess_wal}: {error}",
+            path.display()
+        )
+    });
+    (database, connection)
+}
+
+/// Sorted `(path relative to `dir`, byte length)` inventory of every regular
+/// file under `dir`. This is the probe's file-set observable: which sidecars
+/// exist at each phase, and whether a stale one survives a reopen.
+fn file_inventory(dir: &Path) -> Vec<(String, u64)> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, u64)>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(root, &path, out);
+            } else if let Ok(metadata) = std::fs::metadata(&path) {
+                let name = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .display()
+                    .to_string();
+                out.push((name, metadata.len()));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, &mut out);
+    out.sort();
+    out
+}
+
+/// Text values of one named column from a raw-connection query, in result
+/// order. Positional access needs the engine's own column list, so the index
+/// is looked up rather than hard-coded.
+async fn raw_text_column(connection: &turso::Connection, sql: &str, column: &str) -> Vec<String> {
+    let mut rows = connection
+        .query(sql, ())
+        .await
+        .unwrap_or_else(|error| panic!("raw query `{sql}`: {error}"));
+    let names = rows.column_names();
+    let index = names
+        .iter()
+        .position(|name| name == column)
+        .unwrap_or_else(|| panic!("`{sql}` has no column `{column}`, columns: {names:?}"));
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.expect("read a raw result row") {
+        match row.get_value(index).expect("read a raw column value") {
+            turso::Value::Text(text) => out.push(text),
+            other => panic!("column `{column}` of `{sql}` is not TEXT: {other:?}"),
+        }
+    }
+    out
+}
+
+/// Integer values of one named column from a raw-connection query, in result
+/// order (the raw twin of [`query_integers`]).
+async fn raw_integer_column(connection: &turso::Connection, sql: &str, column: &str) -> Vec<i64> {
+    let mut rows = connection
+        .query(sql, ())
+        .await
+        .unwrap_or_else(|error| panic!("raw query `{sql}`: {error}"));
+    let names = rows.column_names();
+    let index = names
+        .iter()
+        .position(|name| name == column)
+        .unwrap_or_else(|| panic!("`{sql}` has no column `{column}`, columns: {names:?}"));
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.expect("read a raw result row") {
+        match row.get_value(index).expect("read a raw column value") {
+            turso::Value::Integer(value) => out.push(value),
+            other => panic!("column `{column}` of `{sql}` is not an INTEGER: {other:?}"),
+        }
+    }
+    out
+}
+
+/// Text of the raw row's OWN first column — the raw-connection twin of
+/// [`first_column_text`], for single-value pragmas whose column name is
+/// engine-defined (`PRAGMA journal_mode`, `PRAGMA integrity_check`).
+async fn raw_first_column_text(connection: &turso::Connection, sql: &str) -> Option<String> {
+    let mut rows = connection
+        .query(sql, ())
+        .await
+        .unwrap_or_else(|error| panic!("raw query `{sql}`: {error}"));
+    let row = rows.next().await.expect("read a raw result row")?;
+    match row.get_value(0).expect("read a raw first column") {
+        turso::Value::Text(text) => Some(text),
+        other => panic!("the first column of `{sql}` is not TEXT: {other:?}"),
+    }
+}
+
+/// The fixture written by every probe arm: three shards (one active), a kept
+/// prompt row, and a deleted canary. Under the flag-on option set this is what
+/// a real storage root looks like.
+async fn seed_probe_database(db: &dyn Db, storage: &Path) {
+    db.execute(CREATE_SHARDS, vec![])
+        .await
+        .expect("create the shards fixture table");
+    let index = install_one_active_shard_index(db).await;
+    assert!(
+        index.is_ok(),
+        "the one_active_shard partial unique index must install: {index:?}"
+    );
+    seed_shard(db, 0, 1).await;
+    seed_shard(db, 1, 0).await;
+    seed_shard(db, 2, 0).await;
+    // Order is load-bearing: the kept row is written FIRST, so the canary's
+    // `DELETE` is the last write to `user_prompts`. Writing `keep` after the
+    // delete makes the insert reuse the cell the delete just freed, overwrite
+    // the marker's bytes, and erase the canary from the page image — which
+    // leaves the flag-off probe's "not yet in the main file" assertion green
+    // even after a checkpoint, i.e. under exactly the regression it names.
+    db.execute(CREATE_USER_PROMPTS, vec![])
+        .await
+        .expect("create user_prompts");
+    db.execute(
+        "INSERT INTO user_prompts (id, content) VALUES ('keep', 'survives-the-upgrade')",
+        vec![],
+    )
+    .await
+    .expect("insert the row that must survive the reopen");
+    seed_and_delete_canary(db, storage).await;
+}
+
+/// Item 1 — the stale-`-tshm` upgrade path. **The go/no-go for dropping the
+/// flag.**
+///
+/// Shape: write a database through the SHIPPING option set (multiprocess WAL
+/// on, i.e. exactly what every current user's storage root holds), close it
+/// cleanly, then reopen the SAME file through
+/// [`open_single_process`]`(.., false, None)` — production minus the flag.
+///
+/// Assertions are on data, not on absence of a panic: every row readable, the
+/// schema and its index intact, the deleted canary still present (proving the
+/// reopen neither erased nor silently rebuilt the file), and the file set
+/// coherent at each phase. The inventories are printed so the report can quote
+/// them. The closed shape is pinned as a *triple* (main file still ~one page,
+/// `-wal` still ~107 KB, the canary in the `-wal` and not in the main file)
+/// rather than as a sidecar list: the list is a measurement, but the triple is
+/// the premise the erasure recipe rests on, and it must fail if turso ever
+/// starts checkpointing on clean close. The third leg only holds because
+/// [`seed_probe_database`] writes its kept row *before* the canary, so the
+/// delete is the last write and the marker's bytes are still in the page image.
+#[tokio::test]
+async fn test_flag_on_database_reopens_with_the_flag_off() {
+    let config = production_config("cap-single-process-upgrade");
+    let db_path = config.storage_path.join("carry.db");
+    let tshm = sidecar(&db_path, "-tshm");
+    let wal = sidecar(&db_path, "-wal");
+
+    // -- Phase 1: written under the shipping (flag-ON) option set.
+    {
+        let db = open_production(&config, "carry.db").await;
+        seed_probe_database(db.as_ref(), &config.storage_path).await;
+        println!(
+            "[phase 1 flag-on, open] {:?}",
+            file_inventory(&config.storage_path)
+        );
+        drop(db); // clean close: no crash, no kill
+    }
+    let closed_inventory = file_inventory(&config.storage_path);
+    println!("[phase 1 flag-on, closed] {closed_inventory:?}");
+    assert!(
+        dir_contains_canary(&config.storage_path),
+        "the fixture must be on disk after the clean close, otherwise the reopen assertions are vacuous; files: {closed_inventory:?}"
+    );
+
+    // The CLOSED SHAPE, pinned — not merely printed. Without this triple the
+    // rest of this test stays green even if turso starts checkpointing on
+    // clean close: the reopen would still read every row, but from a main file
+    // that already holds the whole database, i.e. the probe would silently be
+    // measuring a different (easier) shape and claim 2 — "the deleted bytes
+    // live in the `-wal`, and a checkpoint is what moves them into the main
+    // file" — would be false while every assertion still passed.
+    //
+    // Measured on turso 0.8.3: main `carry.db` 4096 (one header page), `-wal`
+    // 107 152, `-tshm` 86 016. The bound `< 8192` allows for a page-size or
+    // header-page change but not for the fixture: the seeded database cannot
+    // fit in one page.
+    let main_len =
+        file_len(&db_path).expect("the main database file must exist after the clean close");
+    assert!(
+        main_len < 8192,
+        "the main file must still be ~one page after the clean close, i.e. NOTHING was checkpointed into it; got {main_len} bytes, files: {closed_inventory:?}"
+    );
+    let closed_wal_len = file_len(&wal).expect(
+        "the -wal must still exist after the clean close: an absent -wal means the database was checkpointed and the erasure recipe's premise is void",
+    );
+    assert!(
+        closed_wal_len > 100_000,
+        "the whole seeded database must still be in the -wal after the clean close (measured 107 152); got {closed_wal_len} bytes, files: {closed_inventory:?}"
+    );
+    assert!(
+        file_contains(&wal, CANARY),
+        "the deleted canary's bytes must be IN THE -WAL after the clean close: that is the fact the erasure recipe acts on; files: {closed_inventory:?}"
+    );
+    assert!(
+        !file_contains(&db_path, CANARY),
+        "the canary's bytes must NOT yet be in the main file: if a clean close checkpointed, the delete's last-write cell image would have been copied here and this probe would be measuring the post-checkpoint shape without saying so; files: {closed_inventory:?}"
+    );
+
+    // -- Phase 2: reopen the SAME file with the flag OFF.
+    let (database, connection) = open_single_process(&db_path, false, None).await;
+    let open_inventory = file_inventory(&config.storage_path);
+    println!("[phase 2 flag-off, open] {open_inventory:?}");
+
+    let journal_mode = raw_first_column_text(&connection, "PRAGMA journal_mode").await;
+    println!("[phase 2 flag-off] journal_mode={journal_mode:?}");
+    assert_eq!(
+        journal_mode.as_deref(),
+        Some("wal"),
+        "the flag-off open must still be WAL: the erasure recipe is a WAL checkpoint, and a rollback-journal mode would change it"
+    );
+
+    // The rows are all readable — the exact fixture, not a count that a
+    // partial recovery could also satisfy.
+    assert_eq!(
+        raw_integer_column(
+            &connection,
+            "SELECT shard_index, is_active FROM shards ORDER BY shard_index",
+            "shard_index"
+        )
+        .await,
+        vec![0, 1, 2],
+        "every shard row must be readable with the flag off"
+    );
+    assert_eq!(
+        raw_integer_column(
+            &connection,
+            "SELECT shard_index, is_active FROM shards ORDER BY shard_index",
+            "is_active"
+        )
+        .await,
+        vec![1, 0, 0],
+        "every shard's active flag must survive the reopen"
+    );
+    assert_eq!(
+        raw_count(&connection, "user_prompts").await,
+        1,
+        "the kept prompt row must be readable (the deleted canary row is gone as a row)"
+    );
+    assert_eq!(
+        raw_text_column(
+            &connection,
+            "SELECT id, content FROM user_prompts",
+            "content"
+        )
+        .await,
+        vec!["survives-the-upgrade".to_string()],
+        "the kept row's content must be intact, not just its count"
+    );
+
+    // The schema is intact: columns and the partial index, both read through
+    // the engine's own catalogue.
+    assert_eq!(
+        raw_text_column(&connection, "PRAGMA table_info(shards)", "name").await,
+        vec![
+            "id".to_string(),
+            "scope".to_string(),
+            "scope_hash".to_string(),
+            "shard_index".to_string(),
+            "is_active".to_string(),
+        ],
+        "the shards schema must be intact after the flag-off reopen"
+    );
+    assert!(
+        raw_text_column(
+            &connection,
+            "SELECT name FROM sqlite_master WHERE type = 'index'",
+            "name"
+        )
+        .await
+        .contains(&"one_active_shard".to_string()),
+        "the one_active_shard partial unique index must survive the reopen"
+    );
+
+    // The engine's own corruption check. Hard-asserted, like every other
+    // arm in this file: a zero-row answer is a FAILURE here, not a recorded
+    // non-answer, because a pragma that stops answering would otherwise make
+    // the check vacuous while the test stayed green.
+    let integrity = raw_first_column_text(&connection, "PRAGMA integrity_check").await;
+    assert_eq!(
+        integrity.as_deref(),
+        Some("ok"),
+        "PRAGMA integrity_check must report the reopened file as ok, got {integrity:?}"
+    );
+
+    // The delete is still only a logical delete: the reopen must not have
+    // rebuilt the file behind our back.
+    assert!(
+        dir_contains_canary(&config.storage_path),
+        "the deleted canary's bytes must still be present after the flag-off reopen; files: {open_inventory:?}"
+    );
+
+    // The reopen must also accept WRITES, not just reads: an upgrade path that
+    // only reads would be useless to a running engine.
+    connection
+        .execute(
+            "INSERT INTO shards (scope, scope_hash, shard_index, is_active) VALUES ('project', 'abc', 3, 0)",
+            (),
+        )
+        .await
+        .expect("write a shard row through the flag-off reopen");
+    connection
+        .execute(
+            "INSERT INTO user_prompts (id, content) VALUES ('after-upgrade', 'written-with-the-flag-off')",
+            (),
+        )
+        .await
+        .expect("write a prompt row through the flag-off reopen");
+
+    drop(connection);
+    drop(database);
+    let closed_again = file_inventory(&config.storage_path);
+    println!("[phase 2 flag-off, closed] {closed_again:?}");
+
+    // Coherence: a rollback journal must never coexist with the WAL, and a
+    // `-tshm` left behind must not stop the file reopening (asserted below by
+    // the third open).
+    assert!(
+        !sidecar(&db_path, "-journal").exists(),
+        "no rollback journal may coexist with the WAL; files: {closed_again:?}"
+    );
+    println!(
+        "[phase 2] tshm_exists={} wal_len={:?}",
+        tshm.exists(),
+        file_len(&wal)
+    );
+
+    // -- Phase 3: the file set the flag-off close left must still be a valid
+    // database for the flag-off build (a stale sidecar that poisoned the next
+    // open would show up here), and the writes made through the reopened
+    // handle must be durable.
+    let (database, connection) = open_single_process(&db_path, false, None).await;
+    assert_eq!(
+        raw_count(&connection, "shards").await,
+        4,
+        "a second flag-off open must read the fixture PLUS the shard written through the reopened handle"
+    );
+    assert_eq!(
+        raw_text_column(
+            &connection,
+            "SELECT id, content FROM user_prompts ORDER BY id",
+            "id"
+        )
+        .await,
+        vec!["after-upgrade".to_string(), "keep".to_string()],
+        "both the pre-upgrade and the post-upgrade prompt rows must be readable"
+    );
+    drop(connection);
+    drop(database);
+
+    common::cleanup_temp_dir(&config.storage_path).expect("cleanup temp dir");
+}
+
+/// The `Db` seam opened through the production factory with ONE element of the
+/// production option list removed: `ExperimentalFeature::MultiprocessWal`.
+///
+/// Built by subtraction from `ConnectOptions::for_config` rather than by hand,
+/// so a future change to the shipping option set (another feature, a cipher
+/// change) is inherited here instead of being silently dropped. The encryption
+/// material is attached exactly where the connection manager attaches it.
+fn single_process_options(config: &StoreConfig) -> ConnectOptions {
+    let mut options = ConnectOptions::for_config(config, Platform::current());
+    options
+        .experimental
+        .retain(|feature| !matches!(feature, ExperimentalFeature::MultiprocessWal));
+    options.encryption =
+        mem_store::db::resolve_database_encryption(config).expect("resolve encryption options");
+    options
+}
+
+/// A production `DbHandle` with the multiprocess-WAL feature removed — the
+/// handle every `Db`-layer probe (`wal_checkpoint` through the seam, concurrent
+/// tasks) must use.
+async fn open_single_process_db(config: &StoreConfig, name: &str) -> DbHandle {
+    turso_connect_factory()
+        .connect(
+            config.storage_path.join(name),
+            single_process_options(config),
+        )
+        .await
+        .expect("open through the factory without the multiprocess-WAL feature")
+}
+
+/// The `experimental_vacuum` handle **with encryption on and the flag off** —
+/// the option-3 combination. Deliberately raw (`ConnectOptions` cannot express
+/// the vacuum flag), deliberately NOT the shipping handle, and named apart from
+/// [`open_single_process`] so the vacuum-free fidelity of that helper is not
+/// diluted.
+async fn open_encrypted_vacuum(
+    path: &Path,
+    encryption: &EncryptionOptions,
+    multiprocess_wal: bool,
+) -> (turso::Database, turso::Connection) {
+    let mut builder = turso::Builder::new_local(&path.to_string_lossy())
+        .experimental_encryption(true)
+        .with_encryption(turso::EncryptionOpts {
+            cipher: encryption.cipher.clone(),
+            hexkey: encryption.hexkey.clone(),
+        })
+        .experimental_vacuum(true);
+    if multiprocess_wal {
+        builder = builder.experimental_multiprocess_wal(true);
+    }
+    let database = builder.build().await.unwrap_or_else(|error| {
+        panic!(
+            "open encrypted-vacuum {} (multiprocess_wal={multiprocess_wal}): {error}",
+            path.display()
+        )
+    });
+    let connection = database
+        .connect()
+        .expect("connect encrypted-vacuum database");
+    (database, connection)
+}
+
+/// The row the crash-probe child writes inside an open, never-committed
+/// transaction. Distinct from [`CRASH_POST_UPGRADE_ID`] so the absence half and
+/// the post-upgrade write can never be confused for one another, and offset far
+/// past the committed ids so the whole uncommitted band is one range test.
+const CRASH_UNCOMMITTED_ID: i64 = 10_000;
+
+/// The uncommitted row's `v` value. Its presence **on disk** is asserted by the
+/// parent while the child is still blocked, which is what makes the later
+/// absence assertion non-vacuous (this file's doctrine: an absence assertion
+/// only counts after the same helper proved the byte pattern present).
+const CRASH_UNCOMMITTED_VALUE: &str = "uncommitted-row-10000-must-not-survive";
+
+/// Filler rows inside the same uncommitted transaction. A small uncommitted
+/// write stays in the pager's page cache, where "absent after the crash" proves
+/// nothing; enough of them spill frames into the `-wal`, so recovery has
+/// uncommitted frames to (wrongly) apply.
+///
+/// Measured on turso 0.8.3 (this machine, 4096-byte pages): 128 × 8 KiB filler
+/// is NOT enough — the marker never reaches a file and the parent's
+/// `uncommitted_on_disk` assertion fails, which is the loud signal that the
+/// absence half has gone vacuous. 1024 × 8 KiB spills: `-wal` 4 251 872 bytes
+/// with the marker present while the child is still blocked on its barrier.
+const CRASH_UNCOMMITTED_FILLER_ROWS: i64 = 1024;
+
+/// Payload size of each filler row: comfortably above any plausible page-cache
+/// entry, so the spill is dominated by volume rather than by row count.
+const CRASH_UNCOMMITTED_FILLER_BYTES: usize = 8192;
+
+/// The row the flag-off parent writes into the crashed flag-on file, proving the
+/// upgraded database takes writes. Its id is past every id the child reaches, so
+/// a reopened file containing it is unambiguous.
+const CRASH_POST_UPGRADE_ID: i64 = 1_000_000;
+
+/// Item 2's writer child. It is INERT unless the parent hands it a database
+/// path through `MEM_STORE_CRASH_PROBE_DB`, so a normal suite run pays one
+/// no-op test. The protocol is deliberate and has **two** phases:
+///
+/// 1. `MEM_STORE_CRASH_PROBE_COMMITS` autocommit inserts, announcing each with
+///    `COMMITTED <id>` on stdout — the parent's only per-commit synchronisation.
+/// 2. `BEGIN; INSERT <uncommitted id>; <filler rows>;` then `OPEN <id>` on
+///    stdout, and then it **blocks on stdin**. That is the absence half: at kill
+///    time the child holds a row that was written but never committed, and the
+///    filler has pushed its frames out to the file set, so a recovery that
+///    resurrected uncommitted state is caught. No sleeps anywhere; both barriers
+///    are pipes.
+///
+/// The stdin barrier is only ever released by a bug (the parent kills instead):
+/// it then prints `BARRIER-RELEASED` and leaves with code 3, which the parent
+/// asserts against, so "the child exited by itself" can never be mistaken for a
+/// successful kill.
+#[test]
+fn test_crash_probe_writer_child() {
+    let Some(path) = std::env::var_os("MEM_STORE_CRASH_PROBE_DB") else {
+        return;
+    };
+    let path = PathBuf::from(path);
+    let commits: i64 = std::env::var("MEM_STORE_CRASH_PROBE_COMMITS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .expect(
+            "MEM_STORE_CRASH_PROBE_COMMITS must be set alongside MEM_STORE_CRASH_PROBE_DB: the parent, not the child, decides where the kill lands",
+        );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("child runtime");
+    // `MEM_STORE_CRASH_PROBE_MULTIPROCESS=1` makes the child write under the
+    // SHIPPING (flag-on) option set, which is how the upgrade-after-crash case
+    // gets its dirty WAL and its possibly-inconsistent `-tshm`.
+    let multiprocess_wal =
+        std::env::var("MEM_STORE_CRASH_PROBE_MULTIPROCESS").as_deref() == Ok("1");
+    runtime.block_on(async move {
+        let (_database, connection) = open_single_process(&path, multiprocess_wal, None).await;
+        connection
+            .execute(
+                "CREATE TABLE crash_rows (id INTEGER PRIMARY KEY, v TEXT NOT NULL)",
+                (),
+            )
+            .await
+            .expect("create crash_rows");
+        for id in 0..commits {
+            let insert = format!("INSERT INTO crash_rows (id, v) VALUES ({id}, 'row-{id}')");
+            connection
+                .execute(insert.as_str(), ())
+                .await
+                .expect("insert a crash-probe row");
+            println!("COMMITTED {id}");
+        }
+
+        // -- The absence half: written, NOT committed, at the moment of death.
+        // The transaction is deliberately large enough to spill into the `-wal`
+        // (the parent asserts the marker really is on disk while this read is
+        // still pending), because uncommitted frames that reached the file are
+        // exactly what a recovery bug would apply.
+        connection
+            .execute("BEGIN", ())
+            .await
+            .expect("begin the uncommitted transaction");
+        connection
+            .execute(
+                format!(
+                    "INSERT INTO crash_rows (id, v) VALUES ({CRASH_UNCOMMITTED_ID}, '{CRASH_UNCOMMITTED_VALUE}')"
+                )
+                .as_str(),
+                (),
+            )
+            .await
+            .expect("insert the uncommitted row");
+        let filler = "u".repeat(CRASH_UNCOMMITTED_FILLER_BYTES);
+        for offset in 1..=CRASH_UNCOMMITTED_FILLER_ROWS {
+            connection
+                .execute(
+                    "INSERT INTO crash_rows (id, v) VALUES (?, ?)",
+                    vec![
+                        turso::Value::Integer(CRASH_UNCOMMITTED_ID + offset),
+                        turso::Value::Text(filler.clone()),
+                    ],
+                )
+                .await
+                .expect("insert an uncommitted filler row");
+        }
+        println!("OPEN {CRASH_UNCOMMITTED_ID}");
+
+        // The barrier: the parent kills us while this read is pending.
+        let mut released = String::new();
+        let _ = std::io::stdin().read_line(&mut released);
+        println!("BARRIER-RELEASED");
+        std::process::exit(3);
+    });
+}
+
+/// What [`kill_writer_child_with_an_open_transaction`] observed about the child
+/// it killed. A struct rather than a tuple because the last assertion in the
+/// upgrade probe needs two of these fields at once and a bare 4-tuple is where
+/// "which `i64` was that" bugs come from.
+struct CrashedWriter {
+    /// Rows `0..acknowledged` are exactly the ones the child committed and
+    /// announced — exact because the child stops committing before it opens its
+    /// transaction. Item 2 asserts on that exact set. The upgrade probe still
+    /// derives its post-write count from the first reopen's own row set
+    /// (`recovered.len() + 1`) rather than from this number, so that assertion
+    /// does not depend on the pipe protocol at all — even though the barrier
+    /// now makes `acknowledged` exact.
+    acknowledged: i64,
+    /// The id the child inserted inside an open, never-committed transaction.
+    uncommitted: i64,
+    /// The killed child's exit status.
+    status: std::process::ExitStatus,
+    /// The file set captured while the child was still alive.
+    before_kill: Vec<(String, u64)>,
+}
+
+/// Runs [`test_crash_probe_writer_child`] as a separate process over `path`,
+/// lets it commit `commits` rows, waits for it to announce its open uncommitted
+/// transaction, then `SIGKILL`s it.
+///
+/// Synchronisation is the child's own two-line protocol on stdout: the parent
+/// blocks on `read_line` for `OPEN <id>`, so there is no sleep and no timeout
+/// race, and the kill lands on a child that provably holds an uncommitted row.
+/// `acknowledged` is therefore exact (the child stops committing before it
+/// opens the transaction), which is why item 2's row-set assertion can be an
+/// equality rather than a containment.
+async fn kill_writer_child_with_an_open_transaction(
+    path: &Path,
+    multiprocess_wal: bool,
+    commits: i64,
+) -> CrashedWriter {
+    let mut command =
+        std::process::Command::new(std::env::current_exe().expect("the running test binary path"));
+    command
+        .arg("--exact")
+        .arg("test_crash_probe_writer_child")
+        .arg("--nocapture")
+        .arg("--test-threads=1")
+        .env("MEM_STORE_CRASH_PROBE_DB", path)
+        .env("MEM_STORE_CRASH_PROBE_COMMITS", commits.to_string())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped());
+    if multiprocess_wal {
+        command.env("MEM_STORE_CRASH_PROBE_MULTIPROCESS", "1");
+    }
+    let mut child = command.spawn().expect("spawn the crash-probe writer child");
+
+    let stdout = child.stdout.take().expect("piped child stdout");
+    let mut lines = std::io::BufReader::new(stdout).lines();
+    let mut acknowledged = 0_i64;
+    let mut uncommitted = None;
+    for line in lines.by_ref() {
+        let line = line.expect("read a child protocol line");
+        if let Some(rest) = line.strip_prefix("COMMITTED ") {
+            let id: i64 = rest.trim().parse().expect("a commit id");
+            acknowledged = id + 1;
+        } else if let Some(rest) = line.strip_prefix("OPEN ") {
+            uncommitted = Some(rest.trim().parse().expect("an uncommitted row id"));
+            break;
+        }
+    }
+    let uncommitted = uncommitted.expect(
+        "the child must announce its open uncommitted transaction (`OPEN <id>`) before the parent kills it; without that line there is no absence half and the kill point is a race",
+    );
+    let dir = path.parent().expect("the database has a parent directory");
+    let before_kill = file_inventory(dir);
+    // The absence half's non-vacuity proof: the marker's bytes must really be on
+    // disk while the child is still blocked inside the open transaction, so the
+    // later "the row is absent" assertion is about bytes recovery had to discard
+    // rather than about bytes that never left the process.
+    let uncommitted_on_disk = before_kill
+        .iter()
+        .any(|(name, _)| file_contains(&dir.join(name), CRASH_UNCOMMITTED_VALUE));
+    child.kill().expect("SIGKILL the writer child");
+    let status = child.wait().expect("reap the killed child");
+    // A released barrier means the child left on its own and this was not a
+    // kill; the parent's assertions would then pass for the wrong reason.
+    let released = lines.any(|line| line.map(|line| line == "BARRIER-RELEASED").unwrap_or(false));
+    assert!(
+        !released,
+        "the child released its stdin barrier instead of being SIGKILLed; the kill did not land and this arm measures nothing"
+    );
+    println!(
+        "[crash] acknowledged={acknowledged} uncommitted={uncommitted} uncommitted_on_disk={uncommitted_on_disk} status={status:?} before_kill={before_kill:?}"
+    );
+    // Asserted after the kill so a failure cannot leave a blocked child behind.
+    assert!(
+        uncommitted_on_disk,
+        "the uncommitted transaction's marker must have reached the file set while the child was still blocked (measured on disk? {uncommitted_on_disk}); if it did not, the absence half of this probe would be about bytes that never left the process. files: {before_kill:?}"
+    );
+    CrashedWriter {
+        acknowledged,
+        uncommitted,
+        status,
+        before_kill,
+    }
+}
+
+/// Item 2 — committed rows survive a `SIGKILL` on the flag-off path, and the
+/// uncommitted row does not.
+///
+/// Shape: a child process (this test binary re-executed, filtered to
+/// [`test_crash_probe_writer_child`]) opens the database with the flag off,
+/// commits six rows announcing each on the pipe, then opens a transaction,
+/// inserts one row plus [`CRASH_UNCOMMITTED_FILLER_ROWS`] filler rows whose
+/// frames the parent proves reached the file set, announces `OPEN` and blocks on
+/// stdin. The parent `SIGKILL`s it on that line — never after a coordinated
+/// shutdown — while the written-but-uncommitted rows are held open. Then the
+/// parent reopens the same file with the flag off.
+///
+/// Which rows may be asserted on, precisely: the child commits exactly
+/// `acknowledged` rows and then stops committing, so the recovered row set must
+/// be **exactly** `0..acknowledged`. That is stronger than "the prefix is
+/// present" in both directions — a lost commit fails it, and a recovery that
+/// resurrected the open transaction's row ([`CRASH_UNCOMMITTED_ID`]) fails it
+/// too. The upgrade probe still derives its post-write count from the reopen's
+/// own row set, so that assertion does not depend on the pipe protocol at all —
+/// even though the barrier now makes `acknowledged` exact there as well.
+///
+/// Scope of the claim, stated honestly: `SIGKILL` kills the process, not the
+/// kernel, so this measures *process-crash* durability (the frames reached the
+/// OS), not power-loss durability (fsync). The comment in the assertion says so
+/// rather than implying more.
+#[tokio::test]
+async fn test_committed_rows_survive_a_sigkill_with_the_flag_off() {
+    let dir = common::temp_dir("cap-crash-flag-off");
+    let path = dir.join("crash.db");
+
+    let crashed = kill_writer_child_with_an_open_transaction(&path, false, 6).await;
+    let CrashedWriter {
+        acknowledged,
+        uncommitted,
+        status,
+        before_kill,
+    } = crashed;
+    assert!(
+        acknowledged >= 6,
+        "the child must have acknowledged at least 6 commits before the kill, got {acknowledged}"
+    );
+    assert_eq!(
+        uncommitted, CRASH_UNCOMMITTED_ID,
+        "the killed child must have announced the uncommitted row's id, otherwise this arm has no absence half"
+    );
+    assert!(
+        !status.success(),
+        "a SIGKILLed child must not exit successfully, got {status:?}"
+    );
+    let after_kill = file_inventory(&dir);
+    println!("[crash] after_kill={after_kill:?}");
+
+    let (database, connection) = open_single_process(&path, false, None).await;
+    println!("[crash] reopened={:?}", file_inventory(&dir));
+    let recovered =
+        raw_integer_column(&connection, "SELECT id FROM crash_rows ORDER BY id", "id").await;
+    println!(
+        "[crash] recovered={} rows, max={:?}",
+        recovered.len(),
+        recovered.last()
+    );
+    // The presence half: every committed row, against the durability claim.
+    for id in 0..acknowledged {
+        assert!(
+            recovered.contains(&id),
+            "committed row {id} must survive a process kill (process-crash durability, not power loss); recovered: {recovered:?}, files before kill: {before_kill:?}"
+        );
+    }
+    // The absence half: the row that was in an OPEN transaction when the
+    // process died is not a committed row, so recovery must discard it.
+    assert!(
+        !recovered.contains(&uncommitted),
+        "row {uncommitted} was written inside an uncommitted transaction, so recovering it would mean the reopen applied uncommitted state; recovered: {recovered:?}"
+    );
+    // …and nothing else at all, which is the strongest form of both halves: the
+    // child stops committing before it opens the transaction, so any extra row
+    // here is either a resurrected uncommitted write or an invention.
+    assert_eq!(
+        recovered,
+        (0..acknowledged).collect::<Vec<i64>>(),
+        "the recovered rows must be EXACTLY the committed prefix 0..{acknowledged}: a missing row is lost durability, an extra row is resurrected uncommitted state"
+    );
+    let integrity = raw_first_column_text(&connection, "PRAGMA integrity_check").await;
+    assert_eq!(
+        integrity.as_deref(),
+        Some("ok"),
+        "the SIGKILLed file must reopen clean, integrity_check said {integrity:?}"
+    );
+
+    drop(connection);
+    drop(database);
+    common::cleanup_temp_dir(&dir).expect("cleanup temp dir");
+}
+
+/// Item 3 — the exact sidecar file set per phase, flag on versus flag off.
+///
+/// Two arms, because "what a flag-off close leaves behind" and "what a
+/// flag-on-built file looks like to a flag-off build" are different questions:
+/// - arm A: fresh database created and closed through the FLAG-OFF builder;
+/// - arm B: fresh database created and closed through the SHIPPING (flag-on)
+///   builder, then reopened and closed with the flag off.
+///
+/// The inventories are printed for the report; the assertions pin the
+/// discrimination that matters (`-tshm` vs `-shm`) and that a stale `-tshm`
+/// neither breaks the flag-off open nor gets reaped behind the reader's back.
+#[tokio::test]
+async fn test_sidecar_inventory_per_phase() {
+    // -- Arm A: fresh, flag off, from creation to close.
+    let dir_a = common::temp_dir("cap-sidecars-flag-off");
+    let path_a = dir_a.join("fresh.db");
+    {
+        let (_database, connection) = open_single_process(&path_a, false, None).await;
+        connection
+            .execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", ())
+            .await
+            .expect("create t");
+        connection
+            .execute("INSERT INTO t (v) VALUES ('x')", ())
+            .await
+            .expect("insert into t");
+        println!("[A flag-off, open+written] {:?}", file_inventory(&dir_a));
+    }
+    println!("[A flag-off, closed] {:?}", file_inventory(&dir_a));
+    let a_closed = file_inventory(&dir_a);
+    // Measured: the flag-off path creates NO shared-memory sidecar at all
+    // (neither `-shm` nor `-tshm`) — only the main file and `-wal`. Asserting
+    // the absence of both is the pin: if a future turso ever mmaps a `-shm`
+    // here, this probe's file-set story changes and this test says so.
+    assert!(
+        !sidecar(&path_a, "-tshm").exists(),
+        "a database created with the flag off must not grow a -tshm: {a_closed:?}"
+    );
+    assert!(
+        !sidecar(&path_a, "-shm").exists(),
+        "the flag-off path was measured to need no -shm sidecar; if it grew one, the sidecar story changed: {a_closed:?}"
+    );
+    assert!(
+        a_closed.iter().any(|(name, _)| name.ends_with("-wal")),
+        "a flag-off database must still be WAL-journalled: {a_closed:?}"
+    );
+    // …and that `-wal` must be NON-ZERO: existence alone would also be
+    // satisfied by a clean close that checkpointed everything into the main
+    // file, which is the shape the erasure recipe depends on NOT happening.
+    // Measured: main 4096, `-wal` 12 392.
+    let a_wal =
+        file_len(&sidecar(&path_a, "-wal")).expect("the flag-off -wal exists: asserted above");
+    assert!(
+        a_wal > 0,
+        "the flag-off -wal must be non-empty after a clean close (measured 12 392 bytes): a 0-byte -wal means the close checkpointed, and the recipe's premise changed; {a_closed:?}"
+    );
+
+    // -- Arm B: fresh, flag on, then the flag-off upgrade transition.
+    let dir_b = common::temp_dir("cap-sidecars-flag-on");
+    let path_b = dir_b.join("upgraded.db");
+    let config_b = common::store_config("cap-sidecars-flag-on-config");
+    // The shipping builder writes straight into arm B's directory.
+    {
+        let db = turso_connect_factory()
+            .connect(
+                path_b.clone(),
+                ConnectOptions::for_config(&config_b, Platform::current()),
+            )
+            .await
+            .expect("open the shipping handle");
+        db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", vec![])
+            .await
+            .expect("create t");
+        db.execute("INSERT INTO t (v) VALUES ('x')", vec![])
+            .await
+            .expect("insert into t");
+        println!("[B flag-on, open+written] {:?}", file_inventory(&dir_b));
+        drop(db);
+    }
+    let b_closed = file_inventory(&dir_b);
+    println!("[B flag-on, closed] {b_closed:?}");
+    assert!(
+        b_closed.iter().any(|(name, _)| name.ends_with("-tshm")),
+        "a database written under the flag must carry a -tshm: {b_closed:?}"
+    );
+
+    let tshm_before = std::fs::read(sidecar(&path_b, "-tshm")).expect("read the stale -tshm");
+    {
+        let (_database, connection) = open_single_process(&path_b, false, None).await;
+        println!("[B flag-off, open] {:?}", file_inventory(&dir_b));
+        assert_eq!(
+            raw_count(&connection, "t").await,
+            1,
+            "the flag-off open must read the row written under the flag"
+        );
+        assert!(
+            sidecar(&path_b, "-tshm").exists(),
+            "the stale -tshm must still be there while the flag-off handle is open: {:?}",
+            file_inventory(&dir_b)
+        );
+    }
+    let b_upgraded = file_inventory(&dir_b);
+    println!("[B flag-off, closed] {b_upgraded:?}");
+    assert_eq!(
+        std::fs::read(sidecar(&path_b, "-tshm")).ok(),
+        Some(tshm_before),
+        "closing the flag-off handle must not truncate or rewrite the stale -tshm: {b_upgraded:?}"
+    );
+    assert_eq!(
+        b_upgraded
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>(),
+        b_closed
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>(),
+        "the flag-off open+close of an upgraded database must leave the SAME file set: it must not add a sidecar (there is no -shm on this path) nor reap the stale -tshm"
+    );
+
+    // Can a one-time migration simply DELETE the stale -tshm? Under D-39's
+    // engine lock no flag-on process is running, so this is the reaping a
+    // migration would do. Measured, not assumed: the file must reopen with all
+    // rows readable afterwards.
+    std::fs::remove_file(sidecar(&path_b, "-tshm")).expect("reap the stale -tshm");
+    {
+        let (_database, connection) = open_single_process(&path_b, false, None).await;
+        assert_eq!(
+            raw_count(&connection, "t").await,
+            1,
+            "after reaping the stale -tshm, the flag-off build must still read every row"
+        );
+        assert!(
+            !sidecar(&path_b, "-tshm").exists(),
+            "the flag-off build must not recreate a -tshm: {:?}",
+            file_inventory(&dir_b)
+        );
+    }
+    println!("[B flag-off, tshm reaped] {:?}", file_inventory(&dir_b));
+
+    common::cleanup_temp_dir(&dir_a).expect("cleanup arm A");
+    common::cleanup_temp_dir(&dir_b).expect("cleanup arm B");
+    common::cleanup_temp_dir(&config_b.storage_path).expect("cleanup arm B config");
+}
+
+/// Item 4 — `wal_checkpoint(TRUNCATE)` on the flag-off path, through the `Db`
+/// seam (not raw turso): it is step one of the erasure recipe.
+///
+/// Mirrors AC18's shape so the two are directly comparable: a non-empty `-wal`
+/// first (otherwise truncation passes vacuously), rows intact afterwards, and
+/// the deleted canary still in the main file (checkpoint alone never erases —
+/// that is VACUUM's job, and it is what makes the two steps distinguishable).
+#[tokio::test]
+async fn test_checkpoint_truncate_on_the_flag_off_db_seam() {
+    let config = production_config("cap-single-process-checkpoint");
+    let db = open_single_process_db(&config, "pad.db").await;
+    let db_path = config.storage_path.join("pad.db");
+    let wal = sidecar(&db_path, "-wal");
+
+    db.execute(
+        "CREATE TABLE probe_pad (id INTEGER PRIMARY KEY, v TEXT)",
+        vec![],
+    )
+    .await
+    .expect("create probe_pad");
+    for index in 0..50_i64 {
+        db.execute(
+            "INSERT INTO probe_pad (id, v) VALUES (?, ?)",
+            vec![Value::Integer(index), Value::Text("p".repeat(200))],
+        )
+        .await
+        .expect("insert a pad row");
+    }
+    seed_and_delete_canary(db.as_ref(), &config.storage_path).await;
+    println!(
+        "[checkpoint flag-off, written] {:?}",
+        file_inventory(&config.storage_path)
+    );
+
+    let before = file_len(&wal);
+    assert!(
+        before.is_some_and(|len| len > 0),
+        "the -wal must exist with a non-zero length before the checkpoint, got {before:?}"
+    );
+
+    checkpoint_truncate(db.as_ref()).await;
+
+    assert_eq!(
+        file_len(&wal),
+        Some(0),
+        "wal_checkpoint(TRUNCATE) must truncate the -wal to 0 bytes with the flag off (an absent -wal is a failure, not a pass)"
+    );
+    assert_eq!(
+        count_rows(db.as_ref(), "probe_pad").await,
+        50,
+        "the checkpoint must keep every inserted row"
+    );
+    assert_eq!(
+        count_rows(db.as_ref(), "user_prompts").await,
+        0,
+        "the canary row stays deleted"
+    );
+    assert!(
+        file_contains(&db_path, CANARY),
+        "a checkpoint alone must not erase: the deleted canary's bytes are now in the main file, which is exactly why VACUUM is the second step"
+    );
+    println!(
+        "[checkpoint flag-off, after] {:?}",
+        file_inventory(&config.storage_path)
+    );
+
+    // Scope question this closes: AC15 refuses VACUUM in the production option
+    // set, but that set has BOTH the multiprocess flag on AND
+    // `experimental_vacuum` off. Which one does the refusing? Measured here on
+    // the flag-off handle through the same `Db` seam.
+    //
+    // The classifier alone is NOT specific — `is_plain_turso_error` is the
+    // shape of any translation-level refusal, identical to the `SELEC 1`
+    // parse-error control — so the conclusion is carried by the four-arm
+    // matrix, not by the error shape:
+    //
+    //   | arm            | multiprocess WAL | experimental_vacuum | VACUUM      |
+    //   |----------------|------------------|---------------------|-------------|
+    //   | AC15           | ON               | OFF                 | refused     |
+    //   | AC17           | ON               | ON                  | refused     |
+    //   | AC16           | OFF              | ON                  | runs, erases|
+    //   | this test      | OFF              | OFF                 | refused     |
+    //
+    // Read down the last two rows: with multiprocess WAL off, the vacuum flag
+    // is the only difference between a working VACUUM and this refusal. Read
+    // across the first two: enabling the vacuum flag does not help while
+    // multiprocess WAL is on. Both facts together are what says "the flag-off
+    // open still needs `experimental_vacuum(true)` for erasure, so dropping
+    // the multiprocess flag alone rejects the one-flag remedy" — the shape
+    // assert only pins that the refusal is a plain engine error rather than a
+    // constraint error.
+    let control = db
+        .execute("SELEC 1", vec![])
+        .await
+        .expect_err("SELEC 1 is a parse error (the shape control)");
+    assert!(
+        is_plain_turso_error(&control),
+        "the parse-error control must be a plain Turso error, got {control:?}"
+    );
+
+    let vacuum = db.execute("VACUUM", vec![]).await.expect_err(
+        "VACUUM must be refused on the flag-off path while the experimental_vacuum feature is off: dropping the multiprocess flag alone does NOT enable erasure, and if this assertion starts failing then it does and the erasure recipe no longer needs the per-open vacuum flag",
+    );
+    assert!(
+        is_plain_turso_error(&vacuum),
+        "the flag-off VACUUM refusal must have the same StoreError shape as SELEC 1, got {vacuum:?}"
+    );
+    println!("[checkpoint flag-off] vacuum_refusal={vacuum:?}");
+    assert!(
+        file_contains(&db_path, CANARY),
+        "a refused VACUUM must not touch the file: the canary is still in the main file"
+    );
+
+    drop(db);
+    common::cleanup_temp_dir(&config.storage_path).expect("cleanup temp dir");
+}
+
+/// Item 5a — encryption on, flag off: open, write, read, reopen.
+///
+/// Production always enables the encryption *feature*
+/// (`ConnectOptions::for_config` pushes `ExperimentalFeature::Encryption`
+/// unconditionally) and passes key material whenever the config resolves a
+/// key. This arm uses the real resolver (`resolve_database_encryption`) with an
+/// explicit hermetic hex key, so no production key path is touched and no key
+/// material is faked.
+#[tokio::test]
+async fn test_encrypted_database_opens_writes_and_reads_with_the_flag_off() {
+    let key_hex = common::hex_key_64();
+    let config = common::encrypted_store_config("cap-single-process-enc", &key_hex);
+    let db_path = config.storage_path.join("sealed.db");
+    let encryption =
+        mem_store::db::resolve_database_encryption(&config).expect("resolve the encryption key");
+    assert!(
+        encryption.is_some(),
+        "the encrypted fixture must resolve key material, otherwise this test measures nothing"
+    );
+    let encryption = encryption.expect("encryption options");
+
+    {
+        let (database, connection) = open_single_process(&db_path, false, Some(&encryption)).await;
+        connection
+            .execute(
+                "CREATE TABLE prompts (id TEXT PRIMARY KEY, content TEXT NOT NULL)",
+                (),
+            )
+            .await
+            .expect("create prompts");
+        connection
+            .execute(
+                "INSERT INTO prompts (id, content) VALUES ('p1', ?)",
+                vec![turso::Value::Text(CANARY.to_string())],
+            )
+            .await
+            .expect("insert the canary as an encrypted payload");
+        assert_eq!(
+            raw_text_column(&connection, "SELECT id, content FROM prompts", "content").await,
+            vec![CANARY.to_string()],
+            "the encrypted flag-off handle must read back its own write"
+        );
+        drop(connection);
+        drop(database);
+    }
+
+    assert!(
+        !dir_contains_canary(&config.storage_path),
+        "the payload must not be readable in ANY file: encryption is on and the flag-off path must not bypass it"
+    );
+
+    let (database, connection) = open_single_process(&db_path, false, Some(&encryption)).await;
+    assert_eq!(
+        raw_text_column(&connection, "SELECT id, content FROM prompts", "content").await,
+        vec![CANARY.to_string()],
+        "a second flag-off open with the same key must read the row back"
+    );
+    let integrity = raw_first_column_text(&connection, "PRAGMA integrity_check").await;
+    assert_eq!(
+        integrity.as_deref(),
+        Some("ok"),
+        "the encrypted flag-off file must be intact, integrity_check said {integrity:?}"
+    );
+    println!(
+        "[encryption flag-off, closed] {:?}",
+        file_inventory(&config.storage_path)
+    );
+
+    drop(connection);
+    drop(database);
+    common::cleanup_temp_dir(&config.storage_path).expect("cleanup temp dir");
+}
+
+/// Item 5b — VACUUM runs under **encryption on and the flag off**: the
+/// option-3 combination, i.e. the erasure recipe as it would ship for an
+/// encrypted storage root.
+///
+/// Observable, stated honestly: on an encrypted database the plaintext marker
+/// is unsearchable (that is the point of encryption, and it is what forced the
+/// shape below). The byte-level erasure claim is already pinned by AC16 on the
+/// unencrypted path; what is *new* here is whether the rewrite even runs with a
+/// key. So the observable is the physical image: a large payload is written and
+/// checkpointed (file grows), deleted and checkpointed (file does NOT shrink —
+/// `secure_delete` is unimplemented, so the pages are retained), then VACUUM
+/// must rewrite the file to materially fewer bytes and the database must still
+/// answer. A refused VACUUM, or a VACUUM that left the payload's pages in
+/// place, both fail.
+///
+/// Non-production handle by construction (`experimental_vacuum(true)`, which
+/// `ConnectOptions` cannot express), labelled exactly like AC16.
+#[tokio::test]
+async fn test_encrypted_vacuum_rewrites_the_file_with_the_flag_off() {
+    let key_hex = common::hex_key_64();
+    let config = common::encrypted_store_config("cap-single-process-enc-vacuum", &key_hex);
+    let dir = config.storage_path.clone();
+    let path = dir.join("sealed.db");
+    let encryption = mem_store::db::resolve_database_encryption(&config)
+        .expect("resolve the encryption key")
+        .expect("the encrypted fixture resolves key material");
+
+    let (database, connection) = open_encrypted_vacuum(&path, &encryption, false).await;
+    connection
+        .execute(
+            "CREATE TABLE payload (id INTEGER PRIMARY KEY, v TEXT NOT NULL)",
+            (),
+        )
+        .await
+        .expect("create payload");
+    raw_checkpoint(&connection).await;
+    let base = file_len(&path).expect("the main file exists after the DDL");
+
+    // 40 x 8 KiB rows: comfortably more than the 4 KiB page size, so a
+    // rewritten image differs from the deleted one by hundreds of KiB.
+    let chunk = "q".repeat(8192);
+    for id in 0..40_i64 {
+        connection
+            .execute(
+                "INSERT INTO payload (id, v) VALUES (?, ?)",
+                vec![turso::Value::Integer(id), turso::Value::Text(chunk.clone())],
+            )
+            .await
+            .expect("insert a payload row");
+    }
+    raw_checkpoint(&connection).await;
+    let filled = file_len(&path).expect("the main file exists after the writes");
+    assert!(
+        filled > base + 200_000,
+        "the payload must reach the main file before the delete, otherwise the erasure measurement is vacuous: base={base} filled={filled}"
+    );
+
+    connection
+        .execute("DELETE FROM payload", ())
+        .await
+        .expect("delete every payload row");
+    raw_checkpoint(&connection).await;
+    let after_delete = file_len(&path).expect("the main file exists after the delete");
+    assert!(
+        after_delete + 4096 >= filled,
+        "the delete alone must not shrink the file (secure_delete is unimplemented): filled={filled} after_delete={after_delete}"
+    );
+
+    let vacuum = connection.execute("VACUUM", ()).await;
+    assert!(
+        vacuum.is_ok(),
+        "VACUUM must run with encryption on and the flag off: {vacuum:?}"
+    );
+    let vacuumed = file_len(&path).expect("the main file exists after VACUUM");
+    println!(
+        "[encrypted vacuum] base={base} filled={filled} after_delete={after_delete} vacuumed={vacuumed} files={:?}",
+        file_inventory(&dir)
+    );
+    assert!(
+        after_delete.saturating_sub(vacuumed) > 200_000,
+        "VACUUM must rewrite the encrypted image without the deleted payload's pages: after_delete={after_delete} vacuumed={vacuumed}"
+    );
+    assert_eq!(
+        raw_count(&connection, "payload").await,
+        0,
+        "the encrypted database must still answer after VACUUM"
+    );
+
+    drop(connection);
+    drop(database);
+    common::cleanup_temp_dir(&dir).expect("cleanup temp dir");
+}
+
+/// Item 6 — concurrent tasks on ONE flag-off pool, on a `current_thread`
+/// runtime (the engine's shape: `mem-bridge`'s single runtime).
+///
+/// Every task shares the same `Arc<dyn Db>`, exactly as the production services
+/// do; no task owns a private connection. The assertions are the total row
+/// count after every task joined and the absence of any join failure — a
+/// serialisation bug shows up as a lost row or a task panic, not as a timing
+/// difference, so nothing here is timing-dependent.
+#[tokio::test(flavor = "current_thread")]
+async fn test_concurrent_tasks_share_one_flag_off_connection() {
+    assert_eq!(
+        tokio::runtime::Handle::current().runtime_flavor(),
+        tokio::runtime::RuntimeFlavor::CurrentThread,
+        "the engine runs a current_thread runtime; this probe must measure that shape"
+    );
+
+    let config = production_config("cap-single-process-concurrency");
+    let db = open_single_process_db(&config, "shared.db").await;
+    db.execute(
+        "CREATE TABLE concurrent_rows (id INTEGER PRIMARY KEY AUTOINCREMENT, worker INTEGER NOT NULL, seq INTEGER NOT NULL)",
+        vec![],
+    )
+    .await
+    .expect("create concurrent_rows");
+
+    const WORKERS: i64 = 8;
+    const ROWS_PER_WORKER: i64 = 20;
+    let mut handles = Vec::new();
+    for worker in 0..WORKERS {
+        let db = db.clone();
+        handles.push(tokio::spawn(async move {
+            for seq in 0..ROWS_PER_WORKER {
+                db.execute(
+                    "INSERT INTO concurrent_rows (worker, seq) VALUES (?, ?)",
+                    vec![Value::Integer(worker), Value::Integer(seq)],
+                )
+                .await
+                .unwrap_or_else(|error| {
+                    panic!("worker {worker} insert {seq} failed on the shared pool: {error:?}")
+                });
+                let rows = db
+                    .query(
+                        "SELECT COUNT(*) AS written FROM concurrent_rows WHERE worker = ?",
+                        vec![Value::Integer(worker)],
+                    )
+                    .await
+                    .unwrap_or_else(|error| {
+                        panic!("worker {worker} read {seq} failed on the shared pool: {error:?}")
+                    });
+                let written = rows
+                    .first()
+                    .and_then(|row| row.i64("written"))
+                    .expect("COUNT(*) yields a row");
+                assert_eq!(
+                    written,
+                    seq + 1,
+                    "worker {worker} must see exactly its own committed rows"
+                );
+            }
+        }));
+    }
+    for (index, handle) in handles.into_iter().enumerate() {
+        handle
+            .await
+            .unwrap_or_else(|error| panic!("worker task {index} panicked: {error:?}"));
+    }
+
+    assert_eq!(
+        count_rows(db.as_ref(), "concurrent_rows").await,
+        WORKERS * ROWS_PER_WORKER,
+        "every concurrently inserted row must be present exactly once"
+    );
+    let per_worker = query_integers(
+        db.as_ref(),
+        "SELECT COUNT(*) FROM concurrent_rows GROUP BY worker ORDER BY worker",
+    )
+    .await;
+    assert_eq!(
+        per_worker,
+        vec![ROWS_PER_WORKER; WORKERS as usize],
+        "each worker's rows must be complete"
+    );
+
+    // The shared pool must also leave a coherent file behind: the same
+    // checkpoint the erasure recipe would run, then the engine's own check.
+    checkpoint_truncate(db.as_ref()).await;
+    let integrity = db
+        .query("PRAGMA integrity_check", vec![])
+        .await
+        .expect("integrity_check is not an error");
+    let verdict = integrity.first().and_then(first_column_text);
+    assert_eq!(
+        verdict.as_deref(),
+        Some("ok"),
+        "the file after 160 concurrent inserts must be intact, integrity_check said {verdict:?}"
+    );
+
+    drop(db);
+    common::cleanup_temp_dir(&config.storage_path).expect("cleanup temp dir");
+}
+
+/// Extra probe (not one of the seven) — the **reverse** direction: an old
+/// flag-ON build opening a database that a flag-OFF build has written, with the
+/// stale `-tshm` still lying next to it.
+///
+/// Nothing in the brief asks for this, but it is the failure mode a user hits
+/// by rolling back a release: upgrade (flag off), write, then downgrade (flag
+/// on). If the two WAL bookkeeping eras do not interoperate, dropping the flag
+/// makes downgrade destructive — a ship risk of the same family as item 1, in
+/// the direction nobody would test by accident.
+///
+/// The cycle is run twice so a one-way fluke cannot pass: flag on → flag off →
+/// flag on → flag off, with a row written in each era and every earlier row
+/// re-asserted after each transition.
+#[tokio::test]
+async fn test_round_trip_between_the_flag_on_and_flag_off_paths() {
+    let config = production_config("cap-single-process-round-trip");
+    let db_path = config.storage_path.join("round-trip.db");
+
+    // -- Era 1: the shipping (flag-on) build creates the database.
+    {
+        let db = open_production(&config, "round-trip.db").await;
+        db.execute(
+            "CREATE TABLE rounds (id INTEGER PRIMARY KEY, era TEXT NOT NULL)",
+            vec![],
+        )
+        .await
+        .expect("create rounds");
+        db.execute(
+            "INSERT INTO rounds (id, era) VALUES (1, 'flag-on-1')",
+            vec![],
+        )
+        .await
+        .expect("write era 1");
+        drop(db);
+    }
+    println!(
+        "[round trip, era 1 closed] {:?}",
+        file_inventory(&config.storage_path)
+    );
+
+    // -- Era 2: the flag-off build reads era 1 and writes its own row.
+    {
+        let (_database, connection) = open_single_process(&db_path, false, None).await;
+        assert_eq!(
+            raw_integer_column(&connection, "SELECT id FROM rounds ORDER BY id", "id").await,
+            vec![1],
+            "the flag-off build must read the row written by the flag-on build"
+        );
+        connection
+            .execute("INSERT INTO rounds (id, era) VALUES (2, 'flag-off')", ())
+            .await
+            .expect("write era 2");
+        drop(connection);
+        drop(_database);
+    }
+    println!(
+        "[round trip, era 2 closed] {:?}",
+        file_inventory(&config.storage_path)
+    );
+
+    // -- Era 3: a DOWNGRADE to the flag-on build must see both rows.
+    {
+        let db = open_production(&config, "round-trip.db").await;
+        assert_eq!(
+            count_rows(db.as_ref(), "rounds").await,
+            2,
+            "the downgraded flag-on build must read the row the flag-off build committed"
+        );
+        db.execute(
+            "INSERT INTO rounds (id, era) VALUES (3, 'flag-on-2')",
+            vec![],
+        )
+        .await
+        .expect("write era 3");
+        drop(db);
+    }
+    println!(
+        "[round trip, era 3 closed] {:?}",
+        file_inventory(&config.storage_path)
+    );
+
+    // -- Era 4: back to flag off; every row from every era is readable.
+    let (database, connection) = open_single_process(&db_path, false, None).await;
+    assert_eq!(
+        raw_text_column(&connection, "SELECT id, era FROM rounds ORDER BY id", "era").await,
+        vec![
+            "flag-on-1".to_string(),
+            "flag-off".to_string(),
+            "flag-on-2".to_string(),
+        ],
+        "every era's row must survive every transition"
+    );
+    let integrity = raw_first_column_text(&connection, "PRAGMA integrity_check").await;
+    assert_eq!(
+        integrity.as_deref(),
+        Some("ok"),
+        "the round-tripped file must be intact, integrity_check said {integrity:?}"
+    );
+    drop(connection);
+    drop(database);
+    println!(
+        "[round trip, era 4 closed] {:?}",
+        file_inventory(&config.storage_path)
+    );
+
+    common::cleanup_temp_dir(&config.storage_path).expect("cleanup temp dir");
+}
+
+/// Extra probe — **the upgrade as it will actually be experienced**: a flag-ON
+/// process crashes (dirty WAL plus a `-tshm` whose shared-memory state was
+/// never closed), and the next build opens that file with the flag OFF.
+///
+/// Item 1 tests the clean-close transition; this tests the dirty one, which is
+/// strictly harder: the flag-off engine must replay a WAL produced by the
+/// multiprocess writer *and* ignore a shared-memory file that was never
+/// coherently unmapped. The child is killed by the same pipe protocol as item 2
+/// (no sleeps) while it holds an uncommitted row open, so `before_kill` really
+/// is the file set of a live multiprocess writer and the absence half is
+/// measured here too.
+///
+/// Bound discipline: the count after the post-upgrade write is pinned to
+/// `recovered.len() + 1`, where `recovered` is the row set the first flag-off
+/// reopen actually returned on this run. The bound is derived from the reopen's
+/// own row set, so the assertion does not depend on the pipe protocol at all —
+/// even though the barrier now makes `acknowledged` exact (the child stops
+/// committing before it opens its transaction, so no commit can land between
+/// the last line the parent read and the kill).
+#[tokio::test]
+async fn test_flag_on_crash_then_flag_off_upgrade() {
+    let dir = common::temp_dir("cap-crash-then-upgrade");
+    let path = dir.join("upgraded.db");
+
+    let crashed = kill_writer_child_with_an_open_transaction(&path, true, 6).await;
+    let CrashedWriter {
+        acknowledged,
+        uncommitted,
+        status,
+        before_kill,
+    } = crashed;
+    println!("[upgrade after crash] before_kill={before_kill:?}");
+    assert!(
+        acknowledged >= 6,
+        "the flag-on child must have acknowledged at least 6 commits, got {acknowledged}"
+    );
+    assert_eq!(
+        uncommitted, CRASH_UNCOMMITTED_ID,
+        "the killed flag-on child must have announced the uncommitted row's id"
+    );
+    assert!(
+        !status.success(),
+        "a SIGKILLed flag-on child must not exit successfully, got {status:?}"
+    );
+    let after_kill = file_inventory(&dir);
+    println!("[upgrade after crash] after_kill={after_kill:?}");
+    assert!(
+        after_kill.iter().any(|(name, _)| name.ends_with("-tshm")),
+        "a flag-on child must have left its -tshm behind; without it this is not the dirty-upgrade case: {after_kill:?}"
+    );
+
+    // The upgrade itself: flag off, over the dirty file.
+    let (database, connection) = open_single_process(&path, false, None).await;
+    println!("[upgrade after crash] reopened={:?}", file_inventory(&dir));
+    let recovered =
+        raw_integer_column(&connection, "SELECT id FROM crash_rows ORDER BY id", "id").await;
+    // The presence half: every commit the child announced must have survived.
+    for id in 0..acknowledged {
+        assert!(
+            recovered.contains(&id),
+            "row {id} committed by the flag-on engine must survive the crash AND the flag-off reopen; recovered={recovered:?}"
+        );
+    }
+    // The absence half: the rows held in an open transaction survive the crash
+    // only if recovery applies uncommitted WAL frames, which it must not. The
+    // band covers all of them — the announced row plus the filler whose frames
+    // the parent proved were on disk — and the post-upgrade id is a million, so
+    // "inside the band" can never be confused with the later write.
+    let uncommitted_band =
+        CRASH_UNCOMMITTED_ID..=CRASH_UNCOMMITTED_ID + CRASH_UNCOMMITTED_FILLER_ROWS;
+    assert!(
+        recovered.iter().all(|id| !uncommitted_band.contains(id)),
+        "no row of the open transaction (ids {uncommitted_band:?}, announced {uncommitted}) may be recovered: they were uncommitted at the kill; recovered={recovered:?}"
+    );
+    let integrity = raw_first_column_text(&connection, "PRAGMA integrity_check").await;
+    assert_eq!(
+        integrity.as_deref(),
+        Some("ok"),
+        "the crashed flag-on file must open clean under the flag-off build, integrity_check said {integrity:?}"
+    );
+
+    // And the upgraded file must still take writes from the flag-off engine.
+    // `CRASH_POST_UPGRADE_ID` is past every id the child ever reaches, so the row
+    // is genuinely new rather than a PK collision.
+    connection
+        .execute(
+            format!(
+                "INSERT INTO crash_rows (id, v) VALUES ({CRASH_POST_UPGRADE_ID}, 'post-upgrade')"
+            )
+            .as_str(),
+            (),
+        )
+        .await
+        .expect("the flag-off build must be able to write over the crashed flag-on file");
+    drop(connection);
+    drop(database);
+
+    let (database, connection) = open_single_process(&path, false, None).await;
+    let after =
+        raw_integer_column(&connection, "SELECT id FROM crash_rows ORDER BY id", "id").await;
+    // `recovered.len()` — measured on THIS run by the first reopen — is the
+    // baseline for "plus one": the bound is derived from the reopen's own row
+    // set, so the assertion does not depend on the pipe protocol at all, even
+    // though the barrier now makes `acknowledged` exact.
+    assert_eq!(
+        after.len(),
+        recovered.len() + 1,
+        "the post-upgrade write must be durable: expected the {} rows the first reopen actually returned, plus one; got {after:?}",
+        recovered.len()
+    );
+    assert!(
+        after.contains(&CRASH_POST_UPGRADE_ID),
+        "the post-upgrade row {CRASH_POST_UPGRADE_ID} must be readable after the reopen; got {after:?}"
+    );
+    assert!(
+        !after.contains(&uncommitted),
+        "the uncommitted row {uncommitted} must still be absent after the post-upgrade write; got {after:?}"
+    );
+    drop(connection);
+    drop(database);
+    println!("[upgrade after crash] final={:?}", file_inventory(&dir));
+
+    common::cleanup_temp_dir(&dir).expect("cleanup temp dir");
 }
