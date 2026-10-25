@@ -1,0 +1,167 @@
+# 47 — Profile · One ruling, two legs: does anything learn, and is the profile erasable?
+
+Status: needs-triage — 2026-10-25. **The user-profile tier has no production learner and no erasure class,
+and those are the same question asked twice — so they are decided here, together, before either leg's code
+is planned.** This issue is an owner decision; it writes no code.
+
+## Why these two cannot be separate issues
+
+Concerns C2 and C3 of the design-concerns audit read as two findings and are one:
+
+- **If nothing learns**, the erasure hole is **latent** for fresh installs (no profile row is created, so
+  there is nothing derived to erase).
+- **If the learner ships**, the hole is **live** the moment the first row is written: `profile_data` is
+  model output derived from raw prompt text, and it is re-injected into future prompts (issue 44).
+- **Either way**, the hole is already **live for migrated roots** — a storage root that carries a
+  `user-profiles.db` from the TypeScript plugin has derived rows today, whether or not this binary ever
+  writes one.
+
+So the pair is decided in one place, and the enforcement is structural rather than editorial:
+
+1. This issue records **both** answers in one ruling block (**47.1**). There is no tracker item that can
+   carry one without the other, because they are the same field set.
+2. **No code that creates a profile row may land before 47.4 is recorded.** Issue 48 (the implementation)
+   is blocked by this issue; a blueprint for 48 that has no `47.x` to cite is out of order.
+3. **The erasure class must be sufficient under *both* answers** (**47.5**) — so a later change of mind on
+   the learner leg cannot silently invalidate it. That is the anti-drift clause: the class is not
+   conditioned on the learner, it is conditioned on the derivation existing.
+
+## Measured state — do not re-derive this
+
+| fact | evidence |
+|---|---|
+| the learner type is `LearningRound`; **`LearningService` does not exist** in this tree | `crates/mem-profile/src/learning_service.rs:190`; `grep -rn LearningService crates src --include=*.rs` → **0** |
+| it has **zero production constructors** — constructed only in 8 test files under `crates/mem-profile/tests/` | `LearningRound::new` at `learning_service.rs:210`; test-only sites include `tests/learning_round.rs:179`, `tests/profile_learning_idle.rs` family |
+| `create_profile` has no production caller outside the unconstructed learner | `profile_store.rs:592`; only call sites `learning_service.rs:478`,`:677` (trait def `:72`, adapter impl `:666`) |
+| **nothing writes the prompts the learner reads** — a fourth link in the same chain, found 2026-10-25 | `save_prompt` (`prompt.rs:174`, the `INSERT` at `:220`) has **zero production callers**; every call site is a test. So on a **fresh** root a wired learner would read an empty `user_prompts` table (a migrated root may already carry rows — see 48.9). |
+| the production adapters and gateway **already exist** — this is wiring, not construction | `PromptLedgerAdapter` `learning_service.rs:591`, `ProfileWriterAdapter` `:625`, `ProviderAnalysisGateway` `provider_gateway.rs:122` |
+| the idle debounce exists and is **pure**; nothing drives it | `crates/mem-profile/src/idle_scheduler.rs:1-16`, `IdleJob::Learn` `:23`; `on_session_idle`/`poll_due` have zero callers outside tests |
+| `ProfileStore` **is** constructed, for the mem-web **read** surface only | `crates/mem-bridge/src/composition.rs:95`, comment `:43-45` |
+| the erasure path does not touch the profile | `prompt.rs:286` (`delete_prompt`, bare `DELETE`), `:384` (`delete_old_prompts`, same); the web cascade `crates/mem-web/src/api/prompts.rs:79-111` reaches only the linked **memory** |
+| the profile deleter exists and has **zero callers** | `profile_store.rs:547` |
+| the derivation is **model-mediated, not verbatim** — raw prompt content (capped) plus the existing profile goes to the model, and its output becomes `profile_data` | `crates/mem-profile/src/analysis_prompt.rs:77-117` |
+| there is no erasure ADR yet | `docs/adr/` stops at `0016`; ADR-0019 is issue 43's (`43:400`) |
+
+**Attribution, corrected.** Issue 33 line 41 defers *"Upstream's `session.idle` auto-capture and profile
+learning — W5.3's lane"* (`33-compaction-hook.md:41`), and issue 44 repeats it as *"issue 13/14"*
+(`44-user-profile-injection-renderer.md:114`). **Issue 21 never contained profile learning** (its scope is
+US 1.1/1.2/1.3 capture and injection), issue 13 is `done` and deliberately shipped the service with no
+timer, and issue 14 is confidence decay. The defect is a **deferral chain pointing at a lane that never
+existed** — not an epic marked complete. Do not write it the other way.
+
+## What to build
+
+This issue builds a **decision**, not code: one ruling block with two legs, recorded where a blueprint for
+issue 48 can cite it. The measured state below is the input; the options are the choice.
+
+**Leg A — the learner.**
+
+- **(A1) Ship it this release.** `LearningRound` is constructed at a named composition site, driven by a
+  named trigger, behind the identity gate 44.12 already defines. Consequence: the tier is live, and the
+  erasure class becomes load-bearing immediately.
+- **(A2) Read-only this release.** No learner; the renderer (issue 44) still ships and renders whatever row
+  exists — including a migrated one. Consequence: the erasure hole stays live **only** for migrated roots,
+  which is not nothing and must be said out loud.
+
+**Leg B — the erasure class.** The three candidates ADR-0019 must choose between:
+
+- **(B1) Regenerate at sweep** — derived text is refreshed from what remains, so erased prompts stop
+  contributing. Cost: needs a sweep that touches `user-profiles.db`, and a rule for the profile's own
+  version/changelog rows.
+- **(B2) Invalidate on prompt delete** — a prompt delete marks the profile stale (or deletes it) rather
+  than editing it. Cheap, honest, loses the profile more often than necessary.
+- **(B3) Explicit exclusion, by name, with a stated rationale** — the promise says derived profiles
+  outlive their sources, and the user is told. Acceptable only with the rationale written down, because
+  the whole W6 line exists to keep the promise honest (`43:55`, decision 6) and the profile is the most
+  direct derivative of prompt text.
+
+The audit's framing of why B3 cannot be waved through: the promise in decision 6 is **artefact-split** —
+prompt text versus memories — and the profile is a **third artefact** that appears in neither leg
+(`REPORT.md` §3.4).
+
+## Acceptance criteria
+
+- [ ] **47.1** **One ruling block** in this issue records both legs: `Leg A = A1 | A2` and
+      `Leg B = B1 | B2 | B3`, each with a one-paragraph rationale. Neither may be recorded without the
+      other; an issue revision that fills one field and leaves the other empty fails review.
+- [ ] **47.2** **If A1:** the ruling names (a) the exact composition site that constructs `LearningRound`,
+      (b) what drives it — `idle_scheduler`'s debounce plus who calls `on_session_idle`, or a different
+      trigger with a reason, (c) the provider/model config source, (d) that no identity ⇒ neither learn
+      nor inject (44.12's symmetric refusal), and (e) **whether prompt recording is part of A1 or a separate
+      step** — `save_prompt` (`prompt.rs:174`) has no production caller, so on a **fresh** root a learner with
+      no prompts learns nothing (a migrated root may already carry rows; 48.9 seeds one), and A1 that omits
+      this link is a chain of five unconstructed pieces pretending to be one feature.
+- [ ] **47.3** **If A2:** the ruling states what happens to a profile row that already exists — rendered,
+      ignored, or erased — and why that is or is not consistent with the promise. Silence is not an
+      option: migrated roots are exactly the population the audit left live.
+- [ ] **47.4** **The erasure class is recorded as ADR-0019 input**, in the shape ADR-0019 needs: the class
+      (B1/B2/B3), the reason, the derivation path (`analysis_prompt.rs:77-117`) and the re-injection path
+      (issue 44) named explicitly, and the residual **itemised as a table of named classes**, not as a
+      sentence. This satisfies the opsec report's ADR-0019 blocker item 8, *"the profile assigned a class"*
+      (`.tmp/scratch/opsec-opencode-agents-memory-run-1/REPORT.md` §9). The table carries the three classes
+      that item already names — the `.bak` families, the vault, and logs/exports/media — plus this issue's
+      profile class, plus **one this set found**:
+      **VACUUM's temporary rebuild.** In-place `VACUUM` writes a full copy to
+      `{temp_dir}/etilqs_{source_db_name}` (source: the archived ingest quoting `core/vdbe/vacuum.rs:300-306`
+      — **not** verified from source by us), i.e. every live row of a plaintext `user-prompts.db`, **outside
+      the storage root**, for the duration. A canary that walks the storage root cannot see it, so W6's
+      VACUUM option must either name it as a residual or delete it after the rebuild. It is **conditional**:
+      today's configuration refuses `VACUUM` at translation (issue 43's W0), so this class is reachable only
+      if W6 chooses the flag-off option.
+- [ ] **47.4b** **The claim states what it rests on: our canary measurement, not a vendor guarantee.**
+      turso promises only that *"Unused pages from deleted rows and dropped objects are removed, shrinking
+      the file"* (`vacuum.mdx:42`, doc-sourced); a search for erase/forensic/residue across its docs finds
+      nothing but a `VACUUM INTO` encryption warning. SQLite's stronger *"cleans all traces of deleted
+      content"* is **not** turso's sentence and must not be borrowed. No issue in this set may lean on an
+      upstream promise, because there is not one — the erasure evidence is the canary in 48.10.
+- [ ] **47.5** **One paragraph states why the class is sufficient under both A1 and A2.** If the paragraph
+      cannot be written, the class is wrong — that is the test.
+- [ ] **47.6** The deferral chain is corrected in the tracker: `33-compaction-hook.md:41` and
+      `44-user-profile-injection-renderer.md:114` are annotated to point at **47/48**, not at "W5.3's lane"
+      and not at "issue 13/14". `44-user-profile-injection-renderer.md:120` is corrected too — it still
+      names the phantom `LearningService`, which this issue's own measured table shows has **0** matches
+      tree-wide; the sentence must name `LearningRound`. A future reader must not be able to follow any of
+      the three pointers into a closed door or a symbol that does not exist.
+- [ ] **47.7** **The follow-up is named.** If A1, this issue records that **48** carries both legs (learner
+      wiring *and* the erasure mechanism) and that 48 may not merge one without the other. If A2, this
+      issue records that 48 carries the erasure leg only, and why that leg cannot be dropped.
+- [ ] **47.8** No code changes in this issue: no `crates/` or `src/` diff, no schema change, no new ADR
+      file (ADR-0019 is written by issue 43's line once its gate opens — `43:159`).
+
+## Blocked by / Blocks
+
+- **Blocked by:** nothing. This is the cheapest item in the set and it unblocks the most.
+- **Blocks:** issue **48** (all of it). Also feeds **ADR-0019** (issue 43's, gated separately) via 47.4,
+  and is a precondition for treating issue 44's tier as anything other than a renderer for an always-empty
+  row.
+- **Cross-reference:** if A1 ships a learner, **issue 52** must land first or alongside — the prompts that
+  would be recorded are captured from a transcript that carries other plugins' injected blocks, and a
+  learner over unfiltered prompts produces a profile describing orchestration boilerplate
+  (`crates/mem-ai/src/privacy/injection.rs:3-7` is that consequence in the filter's own words). This issue
+  does not re-scope 52; it records the edge.
+- **Cross-reference, not scope:** the renderer, the identity gate and the escaping belong to **issue 44**
+  (`44.1`–`44.13`). This issue does not touch them, and 47.2(d) reuses 44.12's ruling rather than
+  re-deciding it.
+
+## Comments
+
+- Filed 2026-10-25 from the opsec design-concerns audit (concerns C2 and C3, both `SOUND`;
+  C2's evidence corrected), merging the audit's §6 recommendations 2 and 6 into one decision.
+- **Corrections carried in, per the brief's AUDIT RESULT block**
+  (`20261025-design-concerns-audit-brief.md:35-36`): the type is **`LearningRound`**
+  (`learning_service.rs:190`), not `LearningService`; it has **zero production constructors anywhere**, not
+  "zero outside `mem-profile`"; and the misattribution is in issues **33/44**, not issue 21. The phrase
+  "an epic was marked done but its feature is a table nothing writes" is **not** used here, because it is
+  not what the tracker says.
+- **Why a decision issue and not an implementation issue.** The audit's own recommendation 2 offers
+  "construct `LearningRound` … **or** state that profiles are read-only this release" — those are not two
+  scopes, they are two answers to one question, and picking one by filing code would be deciding it
+  implicitly. The coupling rule in the header is what keeps that from happening: 48 is blocked here, and
+  the class must survive both answers.
+- **Deviations from the audit's grouping** (recorded in `.tmp/drafts/20261025-concerns-issue-map.md`):
+  C2 and C3 become **two issues, not one** — this one decides, **48** implements — because a decision and
+  a wave have different review gates. The coupling is structural (48 is blocked by 47, and 48 carries both
+  legs), not editorial.
+- Derivation is model-mediated and abstracted (categories/descriptions), **not a verbatim copy** — but it
+  can contain specifics and it is re-injected, which is why it is not a neutral summary
+  (`REPORT.md` §3.4).
