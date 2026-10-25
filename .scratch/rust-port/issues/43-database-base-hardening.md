@@ -104,9 +104,62 @@ wish.
 - **Guard retirement:** *permanent until ADR-0021/43.8 (`SchemaNewerThanBuild`) ships in every fielded build
   and W6 bumps `user_version`* — then defence-in-depth, not the only defence. Not "permanent" unconditionally:
   that discards owner decision 2.
-- **Non-Linux liveness:** **fix `SystemProcessProbe`, not the guard.** It reports "alive" unconditionally off
-  Linux, which makes a crashed holder brick every open — a latent bug in the **existing** engine lock (D-39),
-  now amplified. No `--force-take-lock`: a flag that forces a lock is a footgun for a bug with a real fix.
+- **Non-Linux liveness:** **fix `SystemProcessProbe`, not the guard.** Corrected 2026-10-25 after the
+  `opsec` audit — an earlier version of this bullet described the probe's *doc comment* instead of its code,
+  and inverted the failure. `platform.rs:47-53` checks `Path::new("/proc").join(pid).exists()` on **every**
+  platform with no `cfg` branch, while the doc above it claims *"On other platforms the probe is deliberately
+  conservative — answers `true`"*. So off Linux, `/proc/<pid>` never exists and the probe answers **dead** for
+  a **live** holder ⇒ the lock is reclaimed ⇒ two owners. It **fails open**, which is the dangerous direction;
+  it does not brick anything. On Linux it works but is **PID-reuse-vulnerable**: `LockState` carries
+  `{pid, timestamp, operation}` and no process start time. Fix the probe per platform, add the start-time
+  token, and test both directions per platform — **before ADR-0025**, per `opsec`
+  (`w6/liveness/platform-probe-fails-open`, high). No `--force-take-lock`: a flag that forces a lock is a
+  footgun for a bug with a real fix.
+
+### SECURITY GATE 2026-10-25 — `opsec` audit: **REJECTED** (10 confirmed, 2 high)
+
+The W6 *design* was audited as target code — decisions 6–9, the routed defaults and the consultant response,
+against the pinned probes and the turso 0.8.3 sources. Output:
+`.tmp/scratch/opsec-opencode-agents-memory-run-1/` (REPORT.md, FINDINGS-DETAIL.md, coverage ledger 21/21,
+validators PASS).
+
+**Two high findings, both fail-open, both before ADR-0025:**
+
+1. **`w6/liveness/platform-probe-fails-open`** — see the corrected bullet above. `SystemProcessProbe` reads
+   `/proc/<pid>` on every platform with no `cfg`; the doc claims a conservative `true` off Linux. Off Linux it
+   answers **dead for a live holder and the lock is reclaimed**. Plus PID-reuse: `LockState` has no process
+   start time.
+2. **`w6/guard/oracle-failopen`** — the guard's oracle is fixed *by description only*. The dependency source
+   shows a **1-byte shared `fcntl` lock** (`F_OFD_SETLK` on Linux, `F_SETLK` elsewhere) carrying **no `l_pid`**,
+   so it can establish liveness but **not identity**. The sink is pinned and measured: row gone,
+   `integrity_check` ok (`turso_capabilities.rs:4285`). The ADR must specify primitive + platform matrix +
+   *unknown means refuse* + a **post-open re-probe** + a **positive control** (a real flag-on child must make
+   the guard refuse).
+
+**A framing fact the audit established:** turso *already implements* this oracle
+(`reject_live_multiprocess_wal_for_legacy_open`) but it is **dead code on this tool's open path** —
+`Builder` → `rsapi` supplies `OpenOptions::storage`, so `resolve_default_storage` (the only caller of the
+cross-mode probes) never runs. That is the mechanism behind the pinned mixed-mode measurement, and it is why
+the guard is load-bearing rather than decorative.
+
+**Notable medium findings:** the purge **queue automates erasure** (a start-up drain contradicts
+`mem-episodic/src/purge.rs:11` "never automatic" and bypasses the `--confirm` gate) — recommendation: **no
+queue**, refuse with a typed `PendingErase{EngineRunning}` and let the owner retry; six never-reaped **`.bak`**
+families carrying full database copies (see the artefact inventory); the **disclosure is unreachable** where
+the promise bites (frozen DTOs + a 501 cleanup stub); "the agent's view" is undefined while session transcripts
+are verbatim; decision 9's rewrite leaves `summary`/`embedding` carrying the text and `UPDATE` needs the same
+sweep as `DELETE`; the purge report **omits the vault** (`purge.rs:114` vs a self-documented false report in
+`mem-vault/src/lib.rs:45`).
+
+**Rejected by the audit, do not re-file:** "the queue is a deletion oracle across a user boundary" (same-uid
+only; the root is umask-created, not group-writable), "`-tshm` cannot detect a live holder" (it can — turso's
+check exists and is simply unreachable), "`-tshm` carries content" (header counters + page→frame index only),
+"`-tshm` presence is liveness" (pinned: inert debris).
+
+**Gate:** ADR-0025 and ADR-0019 may not be written from this material until REPORT.md §9's twelve blockers are
+settled — items 1–3 are code/probe work that can land now, items 4–12 are ADR text. Not one requires
+re-litigating a pinned measurement.
+
 
 
 ---
