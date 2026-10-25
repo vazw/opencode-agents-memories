@@ -310,11 +310,35 @@ pub struct CleanupReport {
     pub project_count: u64,
 }
 
-/// `POST /api/deduplicate` answer.
+/// `POST /api/deduplicate` answer (upstream `IDeduplicationResult`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DedupReport {
     pub exact_duplicates_deleted: u64,
-    pub near_duplicate_groups: Vec<Value>,
+    pub near_duplicate_groups: Vec<NearDuplicateGroup>,
+}
+
+/// One reported near-duplicate group (upstream `DuplicateGroup`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct NearDuplicateGroup {
+    pub representative: DedupMemoryRef,
+    pub duplicates: Vec<DedupDuplicate>,
+}
+
+/// The survivor of an exact group (upstream `representative`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DedupMemoryRef {
+    pub id: String,
+    pub content: String,
+    pub container_tag: String,
+    pub created_at: i64,
+}
+
+/// One reported near-duplicate (upstream `duplicates[]`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DedupDuplicate {
+    pub id: String,
+    pub content: String,
+    pub similarity: f64,
 }
 
 /// The single port error. `Invalid` carries an upstream business message

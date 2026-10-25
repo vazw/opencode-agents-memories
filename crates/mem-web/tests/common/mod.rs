@@ -18,6 +18,7 @@
 //!   would starve the spawned server task).
 
 pub mod fakes;
+pub mod real_store;
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};

@@ -7,10 +7,17 @@
 //! - the tag-migration group (`GET /api/migration/tags/detect`,
 //!   `POST /api/migration/tags/run-batch`, `GET /api/migration/tags/progress`)
 //!   over the already-ported sync `TagMigrator` (W1.1);
-//! - the `POST /api/cleanup` / `POST /api/deduplicate` **501 stubs** (D-15 —
-//!   the port ships neither service; the `MaintenancePort` seam is pre-wired
-//!   for the fill, and `mem_core::dedup` is the profile-conflict kernel, not
-//!   upstream's memory-deduplication service).
+//! - `POST /api/cleanup` (the documented 501 stub, D-15) and
+//!   `POST /api/deduplicate`, which is a **real handler** over
+//!   `MaintenancePort::deduplicate()`: it answers 200 with the typed report
+//!   when the injected port implements the pass, answers the upstream
+//!   business message at 200 when deduplication is disabled, and still
+//!   answers the documented 501 when the port is the default
+//!   `UnavailablePort`.
+//!
+//! `mem_core::dedup` is the **profile-conflict** grouping kernel, not
+//! upstream's memory-deduplication service; it must not be wired here. The
+//! memory-shard pass lives in [`super::deduplication`].
 //!
 //! **D-B / D-22 / D-23 (the bridge):** the handler pre-computes the batch
 //! window's tag-generation calls **asynchronously** (`generate_tags`), then
@@ -32,7 +39,7 @@ use axum::response::Response;
 use serde::Deserialize;
 
 use super::dto::{
-    MigrationDetectDto, MigrationRunDto, TagMigrationBatchDto, TagMigrationDetectDto,
+    DedupDto, MigrationDetectDto, MigrationRunDto, TagMigrationBatchDto, TagMigrationDetectDto,
     TagMigrationProgressDto,
 };
 use super::envelope;
@@ -46,7 +53,8 @@ const DEFAULT_BATCH_SIZE: usize = 5;
 const STRATEGIES: [&str; 2] = ["fresh-start", "re-embed"];
 /// D-15: the cleanup stub's fixed message.
 const CLEANUP_UNAVAILABLE: &str = "cleanup is not available in this build";
-/// D-15: the deduplication stub's fixed message.
+/// The documented 501 of a real handler whose port is unavailable in this
+/// build (issue 37 injects a real maintenance port).
 const DEDUPLICATE_UNAVAILABLE: &str = "deduplicate is not available in this build";
 
 /// `POST /api/migration/run` body.
@@ -227,12 +235,20 @@ pub async fn cleanup() -> Response {
     envelope::not_implemented(CLEANUP_UNAVAILABLE)
 }
 
-/// `POST /api/deduplicate` — the documented 501 stub (D-15).
+/// `POST /api/deduplicate` — upstream `handleRunDeduplication`.
 ///
-/// `mem_core::dedup` is the **profile-conflict** grouping kernel, not
-/// upstream's memory-deduplication service; it must not be wired here.
-pub async fn deduplicate() -> Response {
-    envelope::not_implemented(DEDUPLICATE_UNAVAILABLE)
+/// Four arms inline: the typed report, the unavailable-port 501, the upstream
+/// business message at 200 (`Deduplication is disabled in config`), and the
+/// D-9 500 for everything else. The match is inline on purpose — the shared
+/// `maintenance_failure` helper belongs to the migration handlers, whose
+/// arity another wave is changing.
+pub async fn deduplicate(State(state): State<Arc<AppState>>) -> Response {
+    match state.api.maintenance.deduplicate().await {
+        Ok(report) => envelope::ok(&DedupDto::from(report)),
+        Err(PortError::Unavailable) => envelope::not_implemented(DEDUPLICATE_UNAVAILABLE),
+        Err(PortError::Invalid(message)) => envelope::business_error(&message),
+        Err(other) => port_failure("POST /api/deduplicate", other),
+    }
 }
 
 #[cfg(test)]
