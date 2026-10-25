@@ -506,8 +506,11 @@ pub struct CleanupDto {
 ///
 /// Served whenever a `MaintenancePort` with a real `deduplicate()` is
 /// injected (`api::deduplication::production_deduplication_port`); the
-/// default wiring's `UnavailablePort` is what still answers the documented
-/// 501.
+/// contract suite's `fake_services()` injects `FakeBackend`, whose
+/// `deduplicate()` answers `PortError::Unavailable`; the D-38 no-composed-stores
+/// degrade path installs `ApiServices::unavailable()`'s `UnavailablePort`.
+/// Those two are what pin the documented 501 now that production injects the
+/// real port.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DedupDto {

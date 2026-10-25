@@ -601,10 +601,11 @@ impl ApiServices {
     /// unavailable until W6.4, and sessions keep the `UnavailablePort` until
     /// the W5.x composition root calls
     /// `.with_sessions(episodic_session_port(store))` — production answers the
-    /// documented `501` by design until then. Maintenance stays unavailable
-    /// until the W5.x readiness gate supplies a `MigrationService`; the
-    /// `with_skills` / `with_sessions` / `with_maintenance` builders are the
-    /// injection points.
+    /// documented `501` by design until then. The composition root injects the
+    /// deduplication port through `.with_maintenance(..)`; every migration
+    /// method keeps answering `Unavailable` until the W5.x readiness gate
+    /// supplies a `MigrationService`. The `with_skills` / `with_sessions` /
+    /// `with_maintenance` builders are the injection points.
     pub fn production(deps: super::store_adapter::ProductionDeps) -> Self {
         Self {
             memory: Arc::new(super::store_adapter::ProductionMemory::new(deps.shards)),

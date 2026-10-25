@@ -43,6 +43,7 @@ use mem_skills::SkillsManager;
 use mem_store::CRATE_NAME as MEM_STORE;
 use mem_vault::CRATE_NAME as MEM_VAULT;
 use mem_web::CRATE_NAME as MEM_WEB;
+use mem_web::api::deduplication::production_deduplication_port;
 use mem_web::api::ports::ApiServices;
 use mem_web::api::store_adapter::{ProductionDeps, ProductionEmbed, production_skill_port};
 use opencode_agents_memory::web_dist::{self, ResolvedDist};
@@ -162,7 +163,12 @@ impl WebLauncher for RootWebLauncher {
                             profile: deps.profile.clone(),
                             embed: Arc::new(ProductionEmbed::new(Arc::new(service))),
                         })
-                        .with_skills(skills_port),
+                        .with_skills(skills_port)
+                        .with_maintenance(production_deduplication_port(
+                            deps.shards.clone(),
+                            core_config.deduplication_enabled,
+                            core_config.deduplication_similarity_threshold,
+                        )),
                     )
                 }
                 // The documented degrade path: no composed stores means the

@@ -255,8 +255,8 @@ impl MaintenancePort for ProductionDeduplication {
     }
 }
 
-/// The composition-root injection point (issue 37 calls this; this wave does
-/// not).
+/// The composition-root injection point: `src/main.rs` calls it with the
+/// resolved `deduplication_enabled` / `deduplication_similarity_threshold`.
 ///
 /// One `MaintenancePort` whose `deduplicate()` delegates to [`DedupService`];
 /// 37/39 fuse their own ports around it rather than adding a second
