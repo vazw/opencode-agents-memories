@@ -1,9 +1,43 @@
 # 39 — W8.1 · Make `POST /api/cleanup` real (retention cleanup)
 
-Status: ready-for-agent — 2026-10-25 (re-scoped to **design B** after the architecture re-ruling; see
-"STORAGE DESIGN — B, RATIFIED")
+Status: **PAUSED** — 2026-10-25 (owner: "Pause everything, fix the base first"). Blocked on issue 43
+(43.1 duplicate ids, 43.2 vector_count), and its storage design is re-opening: two independent reviews
+converged on the finding below.
 
-## What to build
+## PAUSE NOTE — 2026-10-25 (read before resuming)
+
+**Two independent reviews of the database design handover converged on the same finding: as specified, this
+feature does nothing today.** `linked_memory_id` has **zero writers**, so phase 1 reads an empty set, phase 2
+stamps nothing, and every memory expires on `updated_at` alone. Shipping a v3 migration, an ordering
+invariant and a new eligibility term for a guaranteed no-op is the "specification that does nothing" failure
+this repo has already paid for.
+
+**Both reviewers independently proposed the same replacement:** record the prompt's creation time on the
+memory row **at capture time** (capture already has its source prompt in hand), then compute eligibility
+entirely inside the shard:
+
+```
+updated_at < cutoff AND (source_prompt_created_at IS NULL OR source_prompt_created_at < cutoff - retention)
+```
+
+That removes phase 1, the stamp, `max()`, the ordering invariant and the dependency on `linked_memory_id` —
+and it stores a fact rather than a computed deadline, so it survives a `retention_days` change. Prompt
+deletion then stays exactly as upstream does it.
+
+**The trade-off the owner must settle before any blueprint:** after an offline gap longer than 2× retention,
+prompt and memory are deleted in the same run, which literally violates "should not die at the same moment".
+The event-based design rescues that case; the capture-time design does not. Is the requirement a *wall-clock
+window* or an *observed event*? For a local-first tool that may not run for months, this is a product
+decision, not an implementation detail.
+
+**One defect in the ratified design, confirmed by both reviewers:** stamping to `now` means every failed run
+pushes the window further out — repeated crashes make a memory immortal. Any revised design must stamp a
+deterministic function of the prompt (`created_at + retention`), never wall-clock time.
+
+The three-phase content below is retained as the record of what was decided and why; it is **not** approved
+for implementation.
+
+## What to build (SUPERSEDED — see pause note)
 
 `POST /api/cleanup` is an unconditional 501 stub taking no `State`
 (`crates/mem-web/src/api/maintenance.rs`, `pub async fn cleanup() -> Response`). Implement retention
