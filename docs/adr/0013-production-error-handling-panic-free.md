@@ -8,7 +8,9 @@
 - **Extends:** ADR-0002 (typed, per-crate `thiserror` errors) from error *shape* to **panic
   policy**. ADR-0002's bans stay in force: no `anyhow`, no `Box<dyn Error>`/`String` payloads in
   public signatures, sources always preserved. **Supersedes:** nothing.
-- **Binding on:** every crate in the workspace, production code only (D-1).
+- **Binding on:** every crate in the workspace, production code only (D-1). Here "the workspace" is
+  the root workspace's 13 packages; `web-ui/` is `exclude`d (ADR-0001 wasm exception) and was outside
+  D-5's gate until 2026-10-25 (see the 2026-10-25 amendment).
 
 ## Context
 
@@ -305,6 +307,28 @@ Two further limits, stated rather than implied:
   not installed the hook; where it is installed, the hook runs the identical command and a failing
   commit is refused. The rejection bullet's other grounds (a repository write outside this decision's
   scope) are supplied by ADR-0016, not withdrawn here.
+
+**Amendment (2026-10-25, `web-ui` panic repair).**
+
+- **Compile-time checks are not discharges.** A `const`-context `assert!` does not violate D-3's ban
+  *when the fallible expression it certifies is deleted in the same edit*: a `const` item's body is
+  evaluated by the compiler and contributes no code to the binary, so nothing was moved and the
+  disposition is D-3's **Eliminate**, not retention. The condition a reviewer checks is mechanical —
+  every repaired site shows a **net deletion** of its `find(..).expect(..)` / `unwrap()` expression.
+  A diff that adds a `const` assertion and keeps the `expect`, or swaps a runtime `unwrap` for
+  `assert!`, is the banned move and must be rejected. The runtime ban is unchanged.
+  **What such a check proves, at the strength it was measured:** every row insert, delete or
+  duplicate, every length error, every order error, and every variant absent from the tripwire is a
+  build error; the coordinated-edit corner — variant appended, added to the tripwire, row omitted,
+  anchor left stale — compiles and panics at first use, and is a documented residue, not a proof.
+  Indexing a `&'static` table by an enum discriminant is lawful here for the same reason and with
+  the same bound: the panic that existed (the `expect`) is gone, and the residue is reachable only by
+  a table edit that satisfies the tripwire while skipping the row (measured, ADR-0016 Limitations).
+- **`web-ui` scope, stated.** `web-ui/` is a separate one-package workspace excluded from the root
+  (`exclude = ["web-ui"]`), so the 7 panic sites it carried were never linted by D-5: the gate read
+  **101** (7 errors) when run there. Repaired on 2026-10-25 — **101 → 0**, 7 → 0 errors, same 7
+  spans — and the pre-commit hook now runs both gates in that workspace (ADR-0016 D-3, second
+  amendment).
 
 **Rejected:** `--all-targets` (lints the exempt test surface and inherits the red baseline);
 `RUSTFLAGS="-D clippy::unwrap_used"` (applies to dependencies too, and is invisible in the command);

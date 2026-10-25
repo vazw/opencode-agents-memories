@@ -43,14 +43,20 @@ cargo clippy --workspace --all-targets -- -D warnings -A clippy::await_holding_l
 
 and, for staged `.rs` files only, `rustfmt --check` over the **index blobs** (`--edition 2024` is
 hardcoded; all 434 tracked `.rs` files are edition 2024 — 407 outside `web-ui/`, 27 inside). A
-staged `web-ui/` Rust or manifest change also runs that separate workspace's `--all-targets` gate
-(`cd web-ui && cargo clippy --workspace --all-targets -- -D warnings`). The panic-family gate does
-**not** cover `web-ui/` yet — it is excluded from the root workspace and carries 7 pre-existing
-sites (ADR-0016 D-3). A `web-ui/README.md`-only commit never invokes cargo. A commit that stages no
+staged `web-ui/` Rust or manifest change also runs **both** gates in that separate workspace
+(`exclude = ["web-ui"]`, ADR-0001 wasm exception), in the root's order:
+
+```sh
+cd web-ui && cargo clippy --workspace --lib -- -A clippy::all -D clippy::unwrap_used -D clippy::expect_used
+cd web-ui && cargo clippy --workspace --all-targets -- -D warnings
+```
+
+(the panic-family gap closed 2026-10-25: 7 sites → 0, ADR-0016 D-3). A `web-ui/README.md`-only
+commit never invokes cargo. A commit that stages no
 `.rs`, `Cargo.toml` or `Cargo.lock` exits before cargo is invoked.
 
-Cost: **≈35 s warm** for a Rust-touching commit; a staged `web-ui/` change adds one all-targets
-gate (sub-second warm, tens of seconds on a cold `web-ui/target`); a cold `CARGO_TARGET_DIR` pays a
+Cost: **≈35 s warm** for a Rust-touching commit; a staged `web-ui/` change adds both web-ui gates
+(≈2.5 s warm total on top of the ≈35 s); a cold `CARGO_TARGET_DIR` pays a
 full workspace build. The first run on a fresh clone creates `.tmp/scratch` itself (it is gitignored
 and may not exist), so the `git config` command above is the only setup step.
 

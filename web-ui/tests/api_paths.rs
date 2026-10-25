@@ -6,7 +6,7 @@
 use std::collections::BTreeSet;
 
 use wasm_bindgen_test::wasm_bindgen_test;
-use web_ui::paths::{ENDPOINTS, fill};
+use web_ui::paths::{ENDPOINTS, endpoint, fill};
 
 #[wasm_bindgen_test]
 fn test_pinned_endpoints_are_all_upstream_rest_paths() {
@@ -78,4 +78,11 @@ fn test_fill_percent_encodes_the_path_parameter() {
         fill("/api/memories/{id}", "a b/c"),
         "/api/memories/a%20b%2Fc"
     );
+}
+
+#[wasm_bindgen_test]
+fn test_endpoint_accessor_round_trips_every_table_row() {
+    for spec in ENDPOINTS {
+        assert_eq!(endpoint(spec.id), *spec, "{:?} did not round-trip", spec.id);
+    }
 }

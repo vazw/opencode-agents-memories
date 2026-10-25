@@ -148,3 +148,10 @@ fn test_core_route_owners_are_w6_7() {
     assert_eq!(route(RouteId::ExportImport).owner, Owner::W6_5);
     assert_eq!(route(RouteId::SkillLibrary).owner, Owner::W6_5);
 }
+
+#[wasm_bindgen_test]
+fn test_route_accessor_is_total_for_every_declared_route() {
+    for id in RouteId::ALL {
+        assert_eq!(route(id).id, id, "{id:?} is not in the route table");
+    }
+}

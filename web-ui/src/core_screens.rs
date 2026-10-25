@@ -30,16 +30,8 @@ use serde::Deserialize;
 use crate::api::auth::{AuthContext, read_marker_token};
 use crate::api::envelope::ApiError;
 use crate::api_request::{self, RequestSpec};
-use crate::paths::{ENDPOINTS, EndpointId, EndpointSpec, fill};
+use crate::paths::{EndpointId, endpoint, fill};
 use crate::screens::format_created_at;
-
-/// One pinned endpoint spec, for the templates the screens build.
-fn endpoint(id: EndpointId) -> EndpointSpec {
-    *ENDPOINTS
-        .iter()
-        .find(|spec| spec.id == id)
-        .expect("the endpoint table has a row for every EndpointId")
-}
 
 /// Render a timestamp the endpoint supplied.
 ///

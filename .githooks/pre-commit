@@ -138,13 +138,15 @@ clippy_gate "gate 2/2: all-targets warnings — root workspace" "$toplevel" "$CA
     cargo clippy --workspace --all-targets -- -D warnings -A clippy::await_holding_lock -A clippy::assertions_on_constants -A clippy::doc_lazy_continuation
 
 # web-ui is a separate workspace (root Cargo.toml: `exclude = ["web-ui"]`) with
-# its own ≈7.2G cache; the root target dir must not absorb a second workspace.
-# Only the measured-green all-targets gate runs here. The panic-family gate does
-# not cover web-ui yet: it is red on 7 pre-existing sites the root workspace has
-# never linted (ADR-0016 D-3, recorded follow-up).
+# its own ≈13G cache; the root target dir must not absorb a second workspace.
+# Both gates run here in the root's order (ADR-0016 D-3). The panic-family gate
+# was withheld 2026-10-24→2026-10-25 while 7 pre-existing sites existed; they are
+# repaired, so it is restored and no longer defers anything.
 if [ "$webui" -eq 1 ] && [ -f "$toplevel/web-ui/Cargo.toml" ]; then
     clippy_scope="root+web-ui"
-    clippy_gate "gate 1/1: all-targets warnings — web-ui" "$toplevel/web-ui" "$toplevel/web-ui/target" \
+    clippy_gate "gate 1/2: panic families — web-ui" "$toplevel/web-ui" "$toplevel/web-ui/target" \
+        cargo clippy --workspace --lib -- -A clippy::all -D clippy::unwrap_used -D clippy::expect_used
+    clippy_gate "gate 2/2: all-targets warnings — web-ui" "$toplevel/web-ui" "$toplevel/web-ui/target" \
         cargo clippy --workspace --all-targets -- -D warnings
 fi
 

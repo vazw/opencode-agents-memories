@@ -7,23 +7,11 @@ use crate::api_request::{self, RequestSpec};
 use crate::core_screens::{
     MemoryItem, MemoryPage, ProfileData, ProfileItem, ProfileView, TagInfo, TagsPage,
 };
-use crate::paths::{ENDPOINTS, EndpointId, EndpointSpec};
+use crate::paths::{EndpointId, endpoint};
 
 pub const EXPLORER_EXPORT_KIND: &str = "opencode-mem-explorer-export";
 pub const MAX_IMPORT_BYTES: usize = 100 * 1024 * 1024;
 pub const IMPORT_APPLY_SUPPORTED: bool = false;
-
-/// The pinned endpoint spec for an [`EndpointId`].
-///
-/// The three readable tiers and the memory page are read through this, never
-/// through a literal path: the path table is the single contract, so a typo
-/// here is a test failure rather than a request to a nonexistent route.
-fn endpoint(id: EndpointId) -> EndpointSpec {
-    *ENDPOINTS
-        .iter()
-        .find(|spec| spec.id == id)
-        .expect("the endpoint table has a row for every EndpointId")
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportFormat {

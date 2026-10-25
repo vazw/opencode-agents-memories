@@ -8,7 +8,7 @@
 //!
 //! Security: the notice interpolates only compile-time constants from the route
 //! table and the path table. The session screen builds its two paths from the
-//! pinned [`ENDPOINTS`] templates with [`encode_component`], so a project id or
+//! pinned [`crate::paths::ENDPOINTS`] templates with [`encode_component`], so a project id or
 //! session id is always one percent-encoded segment and can never become a
 //! path, a scope or an authority. The crate has no unsanitised-HTML path at
 //! all.
@@ -23,7 +23,7 @@ use crate::api_request::{self, RequestSpec};
 use crate::core_screens::{MemoriesPanel, ProfilePanel, SettingsPanel, StatsPanel, TagsPanel};
 use crate::export_import::ExportImportPanel;
 use crate::nav::ScreenState;
-use crate::paths::{ENDPOINTS, EndpointId, EndpointSpec, encode_component};
+use crate::paths::{EndpointId, encode_component, endpoint};
 use crate::routes::{Owner, RouteId};
 use crate::skill_library::SkillLibraryPanel;
 
@@ -122,22 +122,14 @@ pub struct SessionRow {
     pub orphaned: bool,
 }
 
-/// The pinned endpoint spec for an [`EndpointId`].
-fn endpoint_spec(id: EndpointId) -> EndpointSpec {
-    *ENDPOINTS
-        .iter()
-        .find(|spec| spec.id == id)
-        .expect("the endpoint table has a row for every EndpointId")
-}
-
 /// Fill `{project_id}` (and, when given, `{session_id}`) of a pinned template
 /// with percent-encoded components.
 ///
 /// [`crate::paths::fill`] only knows `{id}`, so the two W6.3 templates get
 /// their own filler — the values still go through [`encode_component`], the
 /// same RFC 3986 encoder the single-parameter templates use.
-pub fn session_path(endpoint: EndpointId, project_id: &str, session_id: Option<&str>) -> String {
-    let spec = endpoint_spec(endpoint);
+pub fn session_path(endpoint_id: EndpointId, project_id: &str, session_id: Option<&str>) -> String {
+    let spec = endpoint(endpoint_id);
     let mut path = spec
         .template
         .replace("{project_id}", &encode_component(project_id));

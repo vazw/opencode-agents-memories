@@ -23,11 +23,7 @@ use serde::Deserialize;
 use crate::api::auth::{AuthContext, read_marker_token};
 use crate::api::envelope::ApiError;
 use crate::api_request::{self, RequestSpec};
-use crate::paths::{ENDPOINTS, EndpointId, EndpointSpec, fill};
-
-fn endpoint(id: EndpointId) -> EndpointSpec {
-    *ENDPOINTS.iter().find(|s| s.id == id).expect("endpoint")
-}
+use crate::paths::{EndpointId, endpoint, fill};
 
 fn default_true() -> bool {
     true
@@ -149,20 +145,34 @@ pub fn validate_draft(draft: &SkillDraft) -> Result<(), DraftError> {
 }
 
 pub fn skill_body(draft: &SkillDraft, include_id: bool) -> serde_json::Value {
-    let mut body = serde_json::json!({
-        "name": draft.name.trim(),
-        "description": draft.description.trim(),
-        "content": draft.content,
-        "autoinvoke": draft.autoinvoke,
-        "enabled": draft.enabled,
-    });
+    let mut body = serde_json::Map::new();
+    body.insert(
+        "name".to_string(),
+        serde_json::Value::String(draft.name.trim().to_string()),
+    );
+    body.insert(
+        "description".to_string(),
+        serde_json::Value::String(draft.description.trim().to_string()),
+    );
+    body.insert(
+        "content".to_string(),
+        serde_json::Value::String(draft.content.clone()),
+    );
+    body.insert(
+        "autoinvoke".to_string(),
+        serde_json::Value::Bool(draft.autoinvoke),
+    );
+    body.insert(
+        "enabled".to_string(),
+        serde_json::Value::Bool(draft.enabled),
+    );
     if include_id {
-        body.as_object_mut().unwrap().insert(
+        body.insert(
             "id".to_string(),
             serde_json::Value::String(draft.id.clone()),
         );
     }
-    body
+    serde_json::Value::Object(body)
 }
 
 pub fn slugify_skill_id(name: &str) -> String {
@@ -420,11 +430,11 @@ pub fn SkillLibraryPanel() -> impl IntoView {
                 .iter()
                 .map(|r| r.id.clone())
                 .collect::<Vec<_>>();
-            let is_edit = editing_id.get_untracked().is_some();
-            let id = if is_edit {
-                editing_id.get_untracked().clone().unwrap()
-            } else {
-                allocate_skill_id(&draft_name.get_untracked(), &taken)
+            let editing = editing_id.get_untracked();
+            let is_edit = editing.is_some();
+            let id = match editing {
+                Some(existing) => existing,
+                None => allocate_skill_id(&draft_name.get_untracked(), &taken),
             };
             let draft = SkillDraft {
                 id: id.clone(),

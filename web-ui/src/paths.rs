@@ -232,6 +232,69 @@ pub const ENDPOINTS: &[EndpointSpec] = &[
     },
 ];
 
+/// Compile-time totality: one row per `EndpointId`, in declaration order.
+///
+/// The `match` is exhaustive, so a variant missing from this list is `E0004`;
+/// the length assert catches a forgotten row and the loop catches a reordered
+/// table (which a length check alone cannot see). What it does NOT catch: a
+/// variant added here *and* to the enum with its row still missing — that edit
+/// compiles and fails at the first use of the id (see ADR-0016, Limitations).
+const _: () = {
+    match EndpointId::Health {
+        EndpointId::Health
+        | EndpointId::ListTags
+        | EndpointId::ListMemories
+        | EndpointId::CreateMemory
+        | EndpointId::UpdateMemory
+        | EndpointId::DeleteMemory
+        | EndpointId::BulkDeleteMemories
+        | EndpointId::PinMemory
+        | EndpointId::UnpinMemory
+        | EndpointId::Search
+        | EndpointId::Stats
+        | EndpointId::Cleanup
+        | EndpointId::Deduplicate
+        | EndpointId::DetectMigration
+        | EndpointId::DetectTagMigration
+        | EndpointId::RunTagMigrationBatch
+        | EndpointId::TagMigrationProgress
+        | EndpointId::RunMigration
+        | EndpointId::DeletePrompt
+        | EndpointId::BulkDeletePrompts
+        | EndpointId::UserProfile
+        | EndpointId::UserProfileChangelog
+        | EndpointId::UserProfileSnapshot
+        | EndpointId::RefreshUserProfile
+        | EndpointId::AiCleanupUserProfile
+        | EndpointId::ApplyAiCleanupUserProfile
+        | EndpointId::UpdateUserProfileItem
+        | EndpointId::ListSkills
+        | EndpointId::CreateSkill
+        | EndpointId::GetSkill
+        | EndpointId::UpdateSkill
+        | EndpointId::DeleteSkill
+        | EndpointId::ListProjectSessions
+        | EndpointId::DeleteProjectSession => {}
+    }
+    assert!(ENDPOINTS.len() == EndpointId::DeleteProjectSession as usize + 1);
+    let mut i: usize = 0;
+    while i < ENDPOINTS.len() {
+        assert!(ENDPOINTS[i].id as usize == i);
+        i += 1;
+    }
+};
+
+/// The pinned spec for an id.
+///
+/// In range for every variant that has a row: `ENDPOINTS` holds one row per
+/// variant in declaration order, so `id as usize` is a valid index there. The
+/// check does not cover a variant added to the enum *and* to the tripwire with
+/// no row — that edit compiles and panics at the first use of the id
+/// (Limitation 1, probe P5).
+pub fn endpoint(id: EndpointId) -> EndpointSpec {
+    ENDPOINTS[id as usize]
+}
+
 const MEMORY_PATHS: &[&str] = &[
     "/api/memories",
     "/api/memories/{id}",

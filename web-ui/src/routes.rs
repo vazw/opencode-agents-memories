@@ -147,12 +147,30 @@ pub const ROUTES: &[RouteSpec] = &[
     },
 ];
 
-/// The route spec for an id. Every `RouteId` has exactly one row.
+/// Compile-time totality: one row per `RouteId`, in declaration order, and
+/// `RouteId::ALL` in discriminant order. A new variant is already a compile
+/// error in `paths::endpoints_for` and `nav::state_for` (both match
+/// exhaustively), so no separate tripwire is needed here.
+const _: () = {
+    assert!(ROUTES.len() == RouteId::Stats as usize + 1);
+    assert!(RouteId::ALL.len() == ROUTES.len());
+    let mut i: usize = 0;
+    while i < ROUTES.len() {
+        assert!(RouteId::ALL[i] as usize == i);
+        assert!(ROUTES[i].id as usize == i);
+        i += 1;
+    }
+};
+
+/// The route spec for an id.
+///
+/// In range for every `RouteId` that has a row: length, `RouteId::ALL` and
+/// declaration order are pinned by the `const` block above, and a new variant is
+/// a compile error in `paths::endpoints_for` and `nav::state_for` until both are
+/// updated. The edit that updates both and adds no row compiles and panics at
+/// the first use (Limitation 6, probe P6).
 pub fn route(id: RouteId) -> &'static RouteSpec {
-    ROUTES
-        .iter()
-        .find(|spec| spec.id == id)
-        .expect("every RouteId has a route-table row")
+    &ROUTES[id as usize]
 }
 
 /// Resolve a browser pathname to a declared client route.

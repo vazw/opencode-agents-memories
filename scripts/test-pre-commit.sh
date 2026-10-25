@@ -512,7 +512,7 @@ case_14_hook_does_not_modify_the_tree() {
     }
     return 0
 }
-case_15_webui_change_runs_webui_clippy() {
+case_15_webui_change_runs_both_webui_gates() {
     mk_repo || return 1
     mk_workspace "$repo" || return 1
     mkdir -p "$repo/web-ui/src"
@@ -523,6 +523,25 @@ name = "web-ui"
 version = "0.0.0"
 edition = "2024"
 MANIFEST
+
+    # Commit 1: a panic-family site. gate 1/2 must refuse the commit.
+    cat > "$repo/web-ui/src/lib.rs" <<'RUST'
+//! Web UI fixture.
+
+/// Returns the first lane.
+pub fn first_lane(v: Option<u8>) -> u8 {
+    v.unwrap()
+}
+RUST
+    git -C "$repo" add web-ui/Cargo.toml web-ui/src/lib.rs
+    run_commit "$repo" "case 15 web-ui panic gate"
+    [ "$commit_rc" -ne 0 ] || {
+        fail "the commit was accepted; the web-ui panic gate never ran"
+        return 1
+    }
+    assert_contains "FAIL clippy [gate 1/2: panic families — web-ui]" || return 1
+
+    # Commit 2: panic-free but all-targets-dirty. gate 1/2 must pass and 2/2 must refuse.
     cat > "$repo/web-ui/src/lib.rs" <<'RUST'
 //! Web UI fixture.
 
@@ -531,14 +550,13 @@ pub fn add_eight(a: u8, b: u8, c: u8, d: u8, e: u8, f: u8, g: u8, h: u8) -> u8 {
     a + b + c + d + e + f + g + h
 }
 RUST
-    git -C "$repo" add web-ui/Cargo.toml web-ui/src/lib.rs
-    run_commit "$repo" "case 15 web-ui"
+    git -C "$repo" add web-ui/src/lib.rs
+    run_commit "$repo" "case 15 web-ui all-targets gate"
     [ "$commit_rc" -ne 0 ] || {
-        fail "the commit was accepted; the web-ui gate never ran"
+        fail "the commit was accepted; the web-ui all-targets gate never ran"
         return 1
     }
-    assert_contains "web-ui" || return 1
-    assert_contains "FAIL clippy [gate 1/1: all-targets warnings — web-ui]" || return 1
+    assert_contains "FAIL clippy [gate 2/2: all-targets warnings — web-ui]" || return 1
     assert_contains "too many arguments" || return 1
     return 0
 }
@@ -565,10 +583,11 @@ case_16_docs_name_the_installed_configuration() {
         fail "docs absent: ADR-0016 does not carry gate 2 verbatim"
         return 1
     }
-    # The web-ui phase runs one gate (ADR-0016 D-3). Pin it in three forms: the
-    # bare string the adr must carry, the invocation with its directory (the bare
-    # string alone is a prefix of the root gate-2 line above, so it cannot pin the
-    # web-ui phase by itself), and the failure label the hook actually prints.
+    # The web-ui phase runs both gates, panic families first (ADR-0016 D-3, second
+    # amendment). Pin them in all four forms: each bare string the adr must carry,
+    # each invocation with its directory (a bare string alone can be a prefix of the
+    # root gate-2 line above, so it cannot pin the web-ui phase by itself), and the
+    # two failure labels the hook actually prints.
     grep -F -q 'cargo clippy --workspace --all-targets -- -D warnings' "$adr" || {
         fail "docs absent: ADR-0016 does not carry the web-ui gate verbatim"
         return 1
@@ -577,8 +596,16 @@ case_16_docs_name_the_installed_configuration() {
         fail "docs absent: ADR-0016 does not attribute the all-targets command to web-ui"
         return 1
     }
-    grep -F -q 'gate 1/1: all-targets warnings — web-ui' "$adr" || {
-        fail "docs absent: ADR-0016 does not name the web-ui gate label"
+    grep -F -q 'cd web-ui && cargo clippy --workspace --lib -- -A clippy::all -D clippy::unwrap_used -D clippy::expect_used' "$adr" || {
+        fail "docs absent: ADR-0016 does not attribute the panic-family command to web-ui"
+        return 1
+    }
+    grep -F -q 'gate 1/2: panic families — web-ui' "$adr" || {
+        fail "docs absent: ADR-0016 does not name the web-ui panic-family gate label"
+        return 1
+    }
+    grep -F -q 'gate 2/2: all-targets warnings — web-ui' "$adr" || {
+        fail "docs absent: ADR-0016 does not name the web-ui all-targets gate label"
         return 1
     }
     return 0
@@ -619,7 +646,7 @@ run case_11_missing_cargo_fails_loudly
 run case_12_missing_rustfmt_fails_loudly
 run case_13_commit_from_subdirectory_is_gated
 run case_14_hook_does_not_modify_the_tree
-run case_15_webui_change_runs_webui_clippy
+run case_15_webui_change_runs_both_webui_gates
 run case_16_docs_name_the_installed_configuration
 
 printf 'wall time: %ss\n' "$SECONDS"

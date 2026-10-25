@@ -3,8 +3,12 @@
 - **Status:** Proposed
 - **Date:** 2026-10-24 — measured on HEAD `1f66f08`, blueprint
   `20261024-2106-precommit-gate-r3` (SYS-APPROVED 2026-10-24T21:32Z).
-- **Amended:** 2026-10-25, after review F1–F3 — the `web-ui/` phase runs one gate (D-3), and the
-  root workspace's `exclude = ["web-ui"]` boundary is recorded. See Context and Limitations.
+- **Amended:** 2026-10-25, after review F1–F3 — the `web-ui/` phase **ran one gate until the
+  2026-10-25 repair** (D-3; superseded by the second amendment below), and the root workspace's
+  `exclude = ["web-ui"]` boundary is recorded. See Context and Limitations.
+- **Amended:** 2026-10-25 (second amendment) — the `web-ui` panic-family gate is restored; the
+  7-site carry-over is closed (D-3, Limitations). The 'one gate' line above records the interim
+  state, not the current gate.
 - **Binding on:** `.githooks/pre-commit` (the gate) and `scripts/test-pre-commit.sh` (its
   behavioural self-test). No Rust source, manifest or dependency is touched.
 - **Supersedes / amends:** amends ADR-0013 D-5's *"no enforcement"* consequence by adding an
@@ -35,7 +39,7 @@ Measured at `1f66f08` before this wave:
   crate and no `web-ui`, and a root-gate log carries 0 `web-ui` units. ADR-0013's "97 sites today,
   0 at close" was therefore **root-workspace-scoped** — the string `web-ui` appears nowhere in it —
   and that boundary was undocumented until this amendment.
-- **The `web-ui` panic-family gate is red.** `cd web-ui && cargo clippy --workspace --lib -- -A
+- **The `web-ui` panic-family gate was red until the 2026-10-25 repair.** `cd web-ui && cargo clippy --workspace --lib -- -A
   clippy::all -D clippy::unwrap_used -D clippy::expect_used` → **exit 101**, 7 pre-existing errors
   (reviewer-measured 2026-10-25 at `1f66f08`, ≈1.9 s warm, reproduced twice; all 7 are production
   code under `web-ui/src/`, `#[cfg(test)]` occurs 0 times in that tree because `web-ui` tests live
@@ -45,8 +49,10 @@ Measured at `1f66f08` before this wave:
   `as_object_mut().unwrap()`; `:425` is `get_untracked().clone().unwrap()`. (Clippy reports the
   span start, 38/22/152/127/29/160/425; both line sets name the same 7 sites.) Every blame commit
   predates ADR-0013's enforcement commit `3136c97`, so the panic-free wave neither added nor saw
-  them.
-- Consequence, and the reason D-3 is narrower than "both gates everywhere": a hook running both
+  them. **Closed 2026-10-25:** after the repair wave the same command exits **0** with **0**
+  errors — **101 → 0** (7 → 0 errors, the same 7 spans), measured on HEAD `c128fc1` + repair.
+- Consequence, and the reason D-3 was narrower than "both gates everywhere" **until the
+  2026-10-25 repair — historical, no longer true** (the gate passes on the clean tree): a hook running both
   gates in `web-ui/` refuses **every** commit staging a `web-ui/**/*.rs`, `web-ui/Cargo.toml` or
   `web-ui/Cargo.lock` path — on files its author may never have touched — and the only way through
   is `git commit --no-verify`, which skips the fmt phase and both root gates as well.
@@ -102,23 +108,24 @@ Measured on the clean tree: exit 0 in 8 s and exit 0 in 25 s. Gate 1 is ADR-0013
 byte-for-byte; gate 2 is the all-targets form recorded in `AGENTS.md` §Gates and
 `docs/agents/testing.md` — D-5 carries the `--lib` command only, not this one.
 
-When a staged path is under `web-ui/` (and `web-ui/Cargo.toml` exists) **one** gate runs inside that
-separate workspace, with `CARGO_TARGET_DIR=<toplevel>/web-ui/target` so the root target dir never
-absorbs a second workspace:
+When a staged path is under `web-ui/` (and `web-ui/Cargo.toml` exists) **both** gates run inside
+that separate workspace — panic families first, then all-targets, the root's order — with
+`CARGO_TARGET_DIR=<toplevel>/web-ui/target` so the root target dir never absorbs a second workspace:
 
 ```
-cd web-ui && cargo clippy --workspace --all-targets -- -D warnings          # exit 0, 0.22 s warm
+cd web-ui && cargo clippy --workspace --lib -- -A clippy::all -D clippy::unwrap_used -D clippy::expect_used
+cd web-ui && cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-The panic-family gate does **not** run there. It exits 101 on the 7 pre-existing sites recorded in
-Context — code the root workspace has never linted — so running it would refuse every commit that
-stages a `web-ui/` Rust source or manifest regardless of what that commit changed. This loses no
-coverage that ever existed (the root gates cannot see `web-ui`: `exclude = ["web-ui"]`); it defers
-one gate until the sites are repaired, which is the recorded follow-up in Limitations.
+Both pass on the clean tree. Warm cost on top of the root pair: ≈1.9 s for the panic gate
+(ADR-0016's own measurement, reproduced twice) plus 0.57 s for all-targets — ≈2.5 s total. The gap
+is closed history: from 2026-10-21 to 2026-10-25 the panic-family gate ran nowhere in `web-ui/`,
+because it exited 101 on the 7 pre-existing sites (Context); those sites are repaired, so the
+deferral is withdrawn rather than carried.
 
-Published cost: **≈35 s warm** for a Rust-touching commit; a staged `web-ui/` change adds one
-all-targets gate (0.22 s warm measured; 42.88 s gate-measured on 2026-10-24 against a cold
-`web-ui/target`). A cold `CARGO_TARGET_DIR` pays a full build. The hook is therefore also a compile
+Published cost: **≈35 s warm** for a Rust-touching commit; a staged `web-ui/` change adds both
+web-ui gates — ≈2.5 s warm total (≈1.9 s panic families + 0.57 s all-targets; 42.88 s was
+gate-measured on 2026-10-24 against a cold `web-ui/target`). A cold `CARGO_TARGET_DIR` pays a full build. The hook is therefore also a compile
 check for the **worktree**: a worktree that does not compile is blocked. An index-only breakage
 (staged blob broken, worktree fixed) is caught by the fmt phase's parse error or not at all — cargo
 cannot lint an index blob without checking it out.
@@ -130,9 +137,9 @@ collide on `mem-portability` scratch dirs keyed by test label under `CARGO_TARGE
 **D-5 — Fast path before any cargo work.** A staged set with no `.rs`, no `Cargo.toml` and no
 `Cargo.lock` (at any depth) exits 0 without invoking cargo; proven by a `cargo` shim that writes a
 marker and exits 1, not by assertion. Splitting the two workspaces into separate flags would save
-≈33 s of root clippy on a web-ui-only commit (the web-ui gate itself is sub-second warm);
-**explicitly declined** as added surface — one gate everywhere, and under-running a gate is worse
-than 33 s.
+≈33 s of root clippy on a web-ui-only commit (both web-ui gates together are ≈2.5 s warm);
+**explicitly declined** as added surface — every workspace the commit touches is gated in full, and
+under-running a gate is worse than 33 s.
 
 **D-6 — One scratch root, created on first use.** The hook exports
 `CARGO_TARGET_DIR=<toplevel>/.tmp/scratch/cargo-target` and `TMPDIR=<toplevel>/.tmp/scratch`,
@@ -175,9 +182,9 @@ the measured whole-harness wall time is recorded per run.
 
 - A commit whose staged Rust is unformatted, or whose worktree fails either root clippy gate, is
   refused with the failing gate, the offending path and a reproduce command.
-- A commit staging a `web-ui/` Rust source or manifest runs that workspace's all-targets gate
-  (exit 0 on today's tree), so the previously ungated second workspace now has the one gate it can
-  pass.
+- A commit staging a `web-ui/` Rust source or manifest runs **both** gates in that workspace —
+  panic families then all-targets, both exit 0 on today's tree — so the previously ungated second
+  workspace is now gated exactly like the root.
 - Existing gates are not weakened: the hook runs the same two root commands, and its fmt scope is
   narrower than `cargo fmt --all -- --check`, which remains the wave-close battery check. The
   hook is a **floor under the commit**, not the battery.
@@ -185,13 +192,14 @@ the measured whole-harness wall time is recorded per run.
 
 **Negative**
 
-- Warm Rust-touching commits pay ≈35 s; a staged `web-ui/` change adds one all-targets gate
-  (sub-second warm, tens of seconds on a cold `web-ui/target`), and a cold `CARGO_TARGET_DIR` pays
+- Warm Rust-touching commits pay ≈35 s; a staged `web-ui/` change adds both web-ui gates
+  (≈2.5 s warm total, tens of seconds on a cold `web-ui/target`), and a cold `CARGO_TARGET_DIR` pays
   a full build.
-- **`web-ui` panic families are not gated.** 7 pre-existing sites remain (Context). The root law
-  gate never covered them either — `web-ui` is `exclude`d from the root workspace — so this is the
-  status quo since 2026-10-21, now documented instead of silently blocking every `web-ui/` commit.
-  ADR-0013's "0 at close" is root-workspace-scoped, and this ADR is where that scope is stated.
+- **`web-ui` panic families are gated as of 2026-10-25.** The 7 pre-existing sites that made the
+  gate red (Context) are repaired — the gate exits 0 on the clean tree — so the second amendment
+  restores it. Historically (2026-10-21→2026-10-25) the root law gate never covered them either:
+  `web-ui` is `exclude`d from the root workspace. ADR-0013's "0 at close" is root-workspace-scoped,
+  and this ADR is where that scope is stated.
 - The clippy phase lints the whole **worktree**, so a concurrent wave with a non-compiling or
   lint-failing edit can block a commit for reasons that are not that commit's own. The correct
   response is to wait for the other wave to land, not to reach for `--no-verify`.
@@ -203,8 +211,8 @@ the measured whole-harness wall time is recorded per run.
 diff bounded to 60 lines, clippy log tail 40 lines), a
 `pre-commit: reproduce: cd <dir> && CARGO_TARGET_DIR=<dir> <command>` line and the `--no-verify`
 note. The gate numbering is per workspace: root publishes `gate 1/2` (panic families) and
-`gate 2/2` (all-targets warnings); `web-ui` publishes `gate 1/1: all-targets warnings — web-ui`,
-one gate, because D-3 runs one there. Success is silent except the index/worktree `WARN` and
+`gate 2/2` (all-targets warnings); `web-ui` publishes `gate 1/2: panic families — web-ui` and
+`gate 2/2: all-targets warnings — web-ui`. Success is silent except the index/worktree `WARN` and
 `PRECOMMIT_VERBOSE=1`. The hook always exits 1 on failure and never passes a tool's exit code
 through.
 
@@ -231,30 +239,60 @@ fix). Cargo may still write the worktree: `cargo clippy` can create or rewrite `
 staged manifest changes resolution — the hook cannot prevent that and does not try; the fmt phase
 runs before cargo, so a fmt failure leaves the tree untouched.
 
-**Recorded follow-up — restore the `web-ui` panic-family gate (carry-over).** Deferred out of this
-wave; a separate Rust wave owns it. Both `web-ui` lookup tables are exact bijections today
-(`EndpointId` 34 variants ↔ `ENDPOINTS` 34 rows, `RouteId` 9 ↔ `ROUTES` 9, no duplicates and no
-gaps), so the five `find(...).expect(...)` sites become infallible by construction:
+**CLOSED 2026-10-25 — the `web-ui` panic-family gate is restored (carry-over).** The repair wave
+repaired all 7 sites and the second amendment re-enabled the gate; both `web-ui` commands exit 0 on
+the clean tree (**101 → 0**, 7 → 0 errors). As built:
 
 ```rust
-// paths.rs, after ENDPOINTS
-const _: () = assert!(ENDPOINTS.len() == EndpointId::DeleteProjectSession as usize + 1);
+// paths.rs, after ENDPOINTS — as built: anchor + order loop + exhaustiveness tripwire
+const _: () = {
+    match EndpointId::Health {
+        EndpointId::Health | … | EndpointId::DeleteProjectSession => {}
+    }
+    assert!(ENDPOINTS.len() == EndpointId::DeleteProjectSession as usize + 1);
+    let mut i: usize = 0;
+    while i < ENDPOINTS.len() {
+        assert!(ENDPOINTS[i].id as usize == i);
+        i += 1;
+    }
+};
 pub fn endpoint(id: EndpointId) -> EndpointSpec { ENDPOINTS[id as usize] }
 
-// routes.rs, after ROUTES
-const _: () = assert!(ROUTES.len() == RouteId::Stats as usize + 1);
+// routes.rs, after ROUTES — as built
+const _: () = {
+    assert!(ROUTES.len() == RouteId::Stats as usize + 1);
+    assert!(RouteId::ALL.len() == ROUTES.len());
+    let mut i: usize = 0;
+    while i < ROUTES.len() {
+        assert!(RouteId::ALL[i] as usize == i);
+        assert!(ROUTES[i].id as usize == i);
+        i += 1;
+    }
+};
 pub fn route(id: RouteId) -> &'static RouteSpec { &ROUTES[id as usize] }
 ```
 
-Drift then becomes a build failure (`error[E0080]` on a length mismatch), never a runtime panic.
-The remaining two sites are local: `skill_library.rs:160` builds the object directly with `Map`
-instead of `as_object_mut().unwrap()` (the `if let Some(map)` form silently drops `id`), and `:425`
-reads the signal once — `match editing { Some(id) => id, None => allocate_skill_id(..) }`. Total:
-7 edits in 5 files, 2 const assertions, 1 new public accessor, 4 duplicated local helpers deleted,
-no call-site signature change. When it lands, D-3 regains the second `web-ui` gate and the failure
-contract returns to `1/2`–`2/2` for both workspaces. Re-measure both `web-ui` commands first,
-including whether every target under `web-ui/tests/**` lints on the host target (that tree is
-outside `src/`), and record the rcs.
+The as-built form diverges from the anchor-only draft this block carried because the draft's corner
+was **measured**, not assumed: a variant appended **and** added to the tripwire, with its row
+omitted and the anchor left stale, compiles clean under `-D warnings` and panics at first use
+(`index out of bounds: the len is 34 but the index is 34`, probe P5). The tripwire therefore closes
+the *uncoordinated* append (`E0004`, probe P4) and the order/length classes (`E0080`, P2/P3), and
+leaves only the coordinated edit as a documented residue.
+
+**What the check proves, at the strength it was measured:** every row insert, delete or duplicate,
+every length error, every order error, and every variant absent from the tripwire is a build error;
+the coordinated-edit corner — variant appended, added to the tripwire, row omitted, anchor left
+stale — compiles and panics at first use, and is a documented residue, not a proof. It is not a
+totality proof, and the `RouteId` side has the same residue four edits wide (probe P6).
+
+The two remaining sites were local: `skill_library.rs:160` now builds the object directly with
+`Map` instead of `as_object_mut().unwrap()` (the `if let Some(map)` form silently drops `id`), and
+`:425` reads the signal once — `match editing { Some(id) => id, None => allocate_skill_id(..) }`.
+As built: 7 edits in 5 files, 2 const assertions, 1 new public accessor, 4 duplicated local helpers
+deleted, no call-site signature change. D-3 regained the second `web-ui` gate, so the failure
+contract is `1/2`–`2/2` in both workspaces. Both `web-ui` commands were re-measured first, including
+every target under `web-ui/tests/**` (that tree is outside `src/`): `--lib` rc 0 and `--all-targets`
+rc 0, and the wasm suite 121 passed / 0 failed.
 
 **`--edition 2024` is hardcoded** in the rustfmt invocation and correct for all **434 tracked
 `.rs` files** today (407 outside `web-ui/`, 27 under `web-ui/`). An edition change must revisit
