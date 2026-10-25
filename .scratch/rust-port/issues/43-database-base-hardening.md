@@ -61,6 +61,28 @@ Decision 3 is the cheapest: it deletes a whole compatibility dimension from W2 a
 
 
 
+**Owner intent (post-ship, recorded 2026-10-25): selectable WAL behaviour.** *"I also wish we could use Rust's
+features to pick which behaviour database to use freely after this project shipped a working version."* Not
+scheduled — but it constrains ADR-0025's marker design **now**, so it is recorded here rather than left as a
+wish.
+
+- **The mode marker must record `{pid, start_time, mode}` — the active WAL behaviour, not the build version.**
+  Every build from the guard's introduction onward writes it regardless of which mode it selects. That is what
+  keeps *"live owner + absent marker = legacy"* sound once more than one mode can be selected: a flag-on build
+  and a flag-off build are both "new", and the guard reads the truth instead of inferring it. A
+  version-stamped marker would break the guard's only reliable signal the moment a second mode appeared.
+- **Selectability argues for a runtime mode, not Cargo features.** `#[cfg(feature)]`, generics or typestate
+  each yield a distinct binary per combination, which multiplies the guard's "new vs legacy" axis *and* the
+  test matrix by the number of behaviours. A single binary with `enum WalMode` resolved from config at start
+  and dispatched behind one internal seam keeps the matrix linear (parameterise over the enum) and keeps the
+  marker truthful.
+- **It makes decision 7 more necessary, not less.** Free mode selection widens the collision matrix the guard
+  exists to close; it does not buy an exemption from the guard.
+- Constraint from `AGENTS.md`: no new feature flags without an issue mandating one — so this needs its own
+  issue when it is scheduled, not a silent addition to a wave.
+
+---
+
 ## W0 LANDED 2026-10-25 — `af01156` (engine facts pinned)
 
 `crates/mem-store/tests/turso_capabilities.rs`, 22 tests, `mem-store` 194 -> 216. Test-only; no
