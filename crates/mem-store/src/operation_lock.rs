@@ -8,6 +8,11 @@
 //! kept as [`TursoOperationLock::release`] plus a `Drop` fallback
 //! (reviewer note: upstream NEEDS the explicit call; Rust tolerates a
 //! forgotten one).
+//!
+//! The record on disk is a [`LockRecord`]: the TS-compatible [`LockState`]
+//! fields plus a Linux start-time token, so a recycled pid cannot validate the
+//! previous owner's lock (`read_live_lock`). Where the token is unobservable
+//! the verdict stays conservative — see `platform::decide_liveness`.
 
 #![allow(dead_code)]
 
@@ -30,6 +35,10 @@ pub const METADATA_DB_NAME: &str = "metadata.db";
 
 /// `LockState` — TS-written locks parse (upstream `interface LockState` with
 /// `operation?`).
+///
+/// **No `deny_unknown_fields`** (verified) and `operation` is `#[serde(default)]`,
+/// so serde ignores keys it does not know: a newer record that carries extra
+/// fields (today: the on-disk [`LockRecord::start_time`]) still parses here.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockState {
     pub pid: u32,
@@ -38,13 +47,61 @@ pub struct LockState {
     pub operation: Option<String>,
 }
 
+/// The on-disk lock record: [`LockState`] plus the start-time token that
+/// defeats PID reuse.
+///
+/// The token is a **sibling** of the `LockState` fields in the JSON object
+/// (`#[serde(flatten)]`), which is what keeps the wire format exactly
+/// `{"pid":…,"timestamp":…,"operation":…,"start_time":…}` while leaving
+/// `LockState`'s three-field shape alone — other crates' tests build
+/// `LockState` with a struct literal, and a fourth field would be a
+/// source-breaking change for files this fix must not touch.
+///
+/// Compatibility both directions rests on serde's default behaviour:
+///
+/// * old record (no `start_time`) read here -> `#[serde(default)]` makes it
+///   `None` -> the liveness verdict stays conservative (`Alive`);
+/// * new record read by an **old** binary -> neither `LockState` nor this type
+///   denies unknown fields, so the extra key is ignored and the three known
+///   fields parse.
+///
+/// The token is `None` off Linux (`/proc` is the only source) and is then
+/// written as `null`, which reads back as `None` — the same conservative cell.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LockRecord {
+    #[serde(flatten)]
+    pub state: LockState,
+    #[serde(default)]
+    pub start_time: Option<u64>,
+}
+
+impl LockRecord {
+    /// This process's record for `operation` — the only writer in this crate.
+    pub(crate) fn for_this_process(pid: u32, operation: Option<String>) -> Self {
+        Self {
+            state: LockState {
+                pid,
+                timestamp: now_rfc3339_millis(),
+                operation,
+            },
+            start_time: crate::platform::process_start_time(pid),
+        }
+    }
+}
+
 /// Upstream `isProcessAlive`.
 fn is_process_alive(pid: u32, probe: &dyn ProcessProbe) -> bool {
     probe.is_alive(pid)
 }
 
 /// Filesystem lock reading + stale cleanup (missing -> `None`; corrupt /
-/// non-positive / dead-pid locks are removed best-effort and dropped).
+/// non-positive / dead-owner locks are removed best-effort and dropped).
+///
+/// "Dead owner" is the probe's token-aware verdict: the pid is gone, **or** the
+/// pid exists but its start-time token differs from the one recorded when the
+/// lock was taken (PID reuse). A record without a token, and any non-procfs
+/// host, can never prove a reuse and therefore reads `Alive` — the owner's lock
+/// is never stolen on a guess.
 pub fn read_live_lock(
     storage_path: &Path,
     file: &str,
@@ -63,13 +120,17 @@ pub fn read_live_lock(
         let _ = fs::remove_file(&path);
         return None;
     }
-    match serde_json::from_str::<LockState>(&contents) {
-        Ok(state) if state.pid > 0 && is_process_alive(state.pid, probe) => return Some(state),
-        _ => {
-            // Corrupt JSON, non-positive pid, or dead owner: try to remove.
-            // (A live-pid lock is never stolen — it returns above.)
-        }
+    if let Ok(record) = serde_json::from_str::<LockRecord>(&contents)
+        && record.state.pid > 0
+        && probe
+            .liveness(record.state.pid, record.start_time)
+            .is_alive()
+    {
+        return Some(record.state);
     }
+    // Corrupt JSON, non-positive pid, or a dead owner (absent pid, or a
+    // recycled pid per the start-time token): try to remove. A live-owner lock
+    // is never stolen — it returns above.
     let _ = fs::remove_file(&path);
     None
 }
@@ -132,12 +193,8 @@ pub fn acquire_turso_operation_lock(
     assert_no_turso_migration_in_progress(storage_path, probe.as_ref())?;
     let path = operation_lock_path(storage_path);
     let pid = std::process::id();
-    let state = LockState {
-        pid,
-        timestamp: now_rfc3339_millis(),
-        operation: Some(operation.to_string()),
-    };
-    let body = serde_json::to_string(&state).map_err(|error| StoreError::Json {
+    let record = LockRecord::for_this_process(pid, Some(operation.to_string()));
+    let body = serde_json::to_string(&record).map_err(|error| StoreError::Json {
         message: error.to_string(),
     })?;
     match fs::OpenOptions::new()
@@ -315,4 +372,251 @@ pub(crate) fn now_rfc3339_millis() -> String {
         .map(|elapsed| elapsed.as_millis() as i64)
         .unwrap_or(0);
     to_iso_millis(now_millis)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::platform::{Liveness, SystemProcessProbe, process_start_time};
+    use std::sync::Mutex;
+
+    /// A fresh, uniquely named directory under `TMPDIR` (the house temp-dir
+    /// pattern from `crates/mem-store/tests/engine_lock.rs`).
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "mem-store-oplock-unit-{prefix}-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    fn write_lock(storage_path: &Path, body: &str) -> PathBuf {
+        let path = storage_path.join(OPERATION_LOCK_FILE);
+        fs::write(&path, body).expect("write lock body");
+        path
+    }
+
+    /// A hand-built record body: `start_time` present only when asked for, so
+    /// the "old record" fixture is byte-identical to what a pre-token writer
+    /// (upstream TS) leaves behind.
+    fn record_json(pid: u32, start_time: Option<u64>) -> String {
+        let token = match start_time {
+            Some(token) => format!(r#","start_time":{token}"#),
+            None => String::new(),
+        };
+        format!(
+            r#"{{"pid":{pid},"timestamp":"2026-10-20T00:00:00.000Z","operation":"test"{token}}}"#
+        )
+    }
+
+    /// The pre-fix probe shape: a fixed existence answer, token-blind through
+    /// the trait's default `liveness`.
+    struct FixedProbe(bool);
+
+    impl ProcessProbe for FixedProbe {
+        fn is_alive(&self, _pid: u32) -> bool {
+            self.0
+        }
+    }
+
+    /// Answers alive and records the token `read_live_lock` handed over.
+    #[derive(Default)]
+    struct RecordingProbe {
+        seen: Mutex<Vec<Option<u64>>>,
+    }
+
+    impl ProcessProbe for RecordingProbe {
+        fn is_alive(&self, _pid: u32) -> bool {
+            true
+        }
+
+        fn liveness(&self, _pid: u32, recorded_start: Option<u64>) -> Liveness {
+            self.seen.lock().expect("probe mutex").push(recorded_start);
+            Liveness::Alive
+        }
+    }
+
+    /// A live holder's lock file must survive `read_live_lock`.
+    ///
+    /// Inverted world: if the live branch unlinked (or the verdict flipped to
+    /// `Dead` for an alive pid), the file would be gone and a second process
+    /// would acquire a lock another session still owns.
+    #[test]
+    fn test_live_holder_lock_is_not_unlinked() {
+        let dir = temp_dir("live-holder");
+        let path = write_lock(&dir, &record_json(4242, Some(1_000)));
+
+        let state = read_live_lock(&dir, OPERATION_LOCK_FILE, &FixedProbe(true))
+            .expect("a live holder's lock is returned");
+
+        assert_eq!(state.pid, 4242);
+        assert_eq!(state.operation.as_deref(), Some("test"));
+        assert!(path.exists(), "a live holder's lock file must survive");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A dead holder's lock file is stale and must be unlinked.
+    ///
+    /// Inverted world: if the dead branch stopped unlinking, every later
+    /// acquire in this directory fails with `MigrationLocked` forever.
+    #[test]
+    fn test_dead_holder_lock_is_unlinked() {
+        let dir = temp_dir("dead-holder");
+        let path = write_lock(&dir, &record_json(4242, Some(1_000)));
+
+        let state = read_live_lock(&dir, OPERATION_LOCK_FILE, &FixedProbe(false));
+
+        assert!(state.is_none(), "a dead holder's lock reads as no lock");
+        assert!(!path.exists(), "a dead holder's lock file is removed");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The recorded token reaches the probe, present and absent.
+    ///
+    /// Inverted world: if `read_live_lock` parsed `LockState` (no token) or
+    /// passed `None`, the first cell would record `None` and the PID-reuse
+    /// defence would be dead code that no test notices.
+    #[test]
+    fn test_recorded_start_time_reaches_the_probe() {
+        let dir = temp_dir("token-passthrough");
+        let probe = RecordingProbe::default();
+
+        write_lock(&dir, &record_json(4242, Some(777)));
+        assert!(read_live_lock(&dir, OPERATION_LOCK_FILE, &probe).is_some());
+
+        write_lock(&dir, &record_json(4242, None));
+        assert!(read_live_lock(&dir, OPERATION_LOCK_FILE, &probe).is_some());
+
+        let seen = probe.seen.lock().expect("probe mutex").clone();
+        assert_eq!(
+            seen,
+            vec![Some(777), None],
+            "the on-disk token is handed to the probe, and its absence is None"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// An old record (no `start_time`) still parses and stays conservative: the
+    /// real probe reports this process alive, so the lock must be kept.
+    ///
+    /// Inverted world: if an absent token were read as a mismatch (or the old
+    /// shape failed to parse), the file would be unlinked — the backward
+    /// compatibility break that would steal a live pre-upgrade holder's lock.
+    #[test]
+    fn test_legacy_record_without_token_is_kept() {
+        let dir = temp_dir("legacy-record");
+        let me = std::process::id();
+        let path = write_lock(&dir, &record_json(me, None));
+
+        let state = read_live_lock(&dir, OPERATION_LOCK_FILE, &SystemProcessProbe)
+            .expect("a token-less record from a live pid parses and reads alive");
+
+        assert_eq!(state.pid, me);
+        assert!(
+            path.exists(),
+            "the legacy record is never stolen on a guess"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A record carrying a field this binary does not know still parses: the
+    /// forward-compatibility half of the compatibility contract (no
+    /// `deny_unknown_fields` on `LockState`/`LockRecord`).
+    ///
+    /// Inverted world: with `deny_unknown_fields`, the body would fail to parse,
+    /// `read_live_lock` would unlink it and report `None` — the new binary would
+    /// steal a live holder's lock written by a future version.
+    #[test]
+    fn test_newer_record_with_unknown_field_still_parses() {
+        let dir = temp_dir("unknown-field");
+        let me = std::process::id();
+        let path = write_lock(
+            &dir,
+            &format!(
+                r#"{{"pid":{me},"timestamp":"2026-10-20T00:00:00.000Z","operation":"test","future_field":1}}"#
+            ),
+        );
+
+        let state = read_live_lock(&dir, OPERATION_LOCK_FILE, &SystemProcessProbe)
+            .expect("unknown fields are ignored, the known ones parse");
+
+        assert_eq!(state.pid, me);
+        assert!(path.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// **The blast radius of the audit finding**: a record whose pid is reused
+    /// by another process must be reclaimed, because the start-time token no
+    /// longer matches. The real probe is used, so the whole chain
+    /// `/proc` -> token -> verdict -> unlink is exercised.
+    ///
+    /// Inverted world: without the token check the pid is "alive", the lock is
+    /// returned, the file survives, and the storage root is locked out forever
+    /// by a process that long since exited.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_reused_pid_record_is_unlinked() {
+        let dir = temp_dir("pid-reuse");
+        let me = std::process::id();
+        let own = process_start_time(me).expect("own start-time token");
+        let path = write_lock(&dir, &record_json(me, Some(own.wrapping_add(1))));
+
+        let state = read_live_lock(&dir, OPERATION_LOCK_FILE, &SystemProcessProbe);
+
+        assert!(
+            state.is_none(),
+            "a pid whose start time changed is a different process"
+        );
+        assert!(
+            !path.exists(),
+            "the recycled-pid lock is stale and is unlinked"
+        );
+
+        // Same pid, correct token: the very same file is now a live lock.
+        let path = write_lock(&dir, &record_json(me, Some(own)));
+        assert!(
+            read_live_lock(&dir, OPERATION_LOCK_FILE, &SystemProcessProbe).is_some(),
+            "the matching token validates the holder"
+        );
+        assert!(path.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Acquisition records its own start-time token, so the record it leaves
+    /// behind is the one the token check can validate.
+    ///
+    /// Inverted world: if the writer omitted the token, `start_time` would be
+    /// `None` and every fresh lock would rely on the legacy conservative path
+    /// instead of defeating PID reuse.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_acquired_record_carries_the_owner_start_time() {
+        let dir = temp_dir("record-token");
+        let lock = acquire_turso_operation_lock(&dir, Arc::new(SystemProcessProbe), "unit-op")
+            .expect("acquire over a free directory");
+
+        let body = fs::read_to_string(dir.join(OPERATION_LOCK_FILE)).expect("read lock body");
+        let record: LockRecord = serde_json::from_str(&body).expect("body is a LockRecord");
+        let me = std::process::id();
+        assert_eq!(record.state.pid, me);
+        assert_eq!(record.state.operation.as_deref(), Some("unit-op"));
+        assert_eq!(
+            record.start_time,
+            process_start_time(me),
+            "the writer records its own start-time token"
+        );
+        assert!(record.start_time.is_some(), "Linux always observes it");
+
+        drop(lock);
+        assert!(
+            !dir.join(OPERATION_LOCK_FILE).exists(),
+            "release still unlinks the lock it owns"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

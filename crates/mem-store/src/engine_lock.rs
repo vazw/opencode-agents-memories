@@ -11,11 +11,14 @@
 //!   consolidation run.
 //! * `.turso-migrate.lock` is the legacy migration lock, also asserted.
 //!
-//! The body is [`LockState`] JSON, **not** a bare pid: `read_live_lock` parses
-//! `serde_json::from_str::<LockState>` and unlinks anything it cannot parse, so
+//! The body is a [`LockRecord`] — the [`LockState`] fields (`pid`, `timestamp`,
+//! `operation`) plus the writer's start-time token — **not** a bare pid:
+//! `read_live_lock` parses the record and unlinks anything it cannot parse, so
 //! a plain-pid body would be read as corrupt and stolen — two DB owners. That
 //! is the single most dangerous failure this module can have, and
-//! `test_engine_lock_body_is_read_live_lock_parseable` pins it.
+//! `test_engine_lock_body_is_read_live_lock_parseable` (integration suite) pins
+//! it. The token makes a recycled pid read as the *previous* owner, so a lock
+//! left behind by an exited engine is reclaimed instead of blocking forever.
 //!
 //! The loser never opens the DB: it reports the **holder's** pid (read from the
 //! live lock), writes the one-line status file, and exits with
@@ -30,7 +33,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::error::StoreError;
-use crate::operation_lock::{LockState, now_rfc3339_millis, read_live_lock};
+use crate::operation_lock::{LockRecord, LockState, now_rfc3339_millis, read_live_lock};
 use crate::platform::ProcessProbe;
 
 /// The lifetime lock file name.
@@ -107,17 +110,13 @@ fn engine_lock_path(storage_path: &Path) -> PathBuf {
     storage_path.join(ENGINE_LOCK_FILE)
 }
 
-/// Creates the lock file exclusively and writes the `LockState` body.
+/// Creates the lock file exclusively and writes the `LockRecord` body.
 ///
 /// Returns `Ok(false)` when the file already exists.
 fn try_create(storage_path: &Path, pid: u32) -> Result<bool, StoreError> {
     let path = engine_lock_path(storage_path);
-    let state = LockState {
-        pid,
-        timestamp: now_rfc3339_millis(),
-        operation: Some(ENGINE_LOCK_OPERATION.to_string()),
-    };
-    let body = serde_json::to_string(&state).map_err(|error| StoreError::Json {
+    let record = LockRecord::for_this_process(pid, Some(ENGINE_LOCK_OPERATION.to_string()));
+    let body = serde_json::to_string(&record).map_err(|error| StoreError::Json {
         message: error.to_string(),
     })?;
     match fs::OpenOptions::new()
@@ -210,6 +209,8 @@ pub fn write_status_file(storage_path: &Path, reason: &str, pid: u32) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operation_lock::OPERATION_LOCK_FILE;
+    use crate::platform::process_start_time;
 
     #[test]
     fn status_line_is_bounded_one_line_and_carries_pid_and_timestamp() {
@@ -221,5 +222,102 @@ mod tests {
         assert!(line.contains("pid=4242"));
         assert!(line.contains("ts="));
         assert!(line.ends_with(')'));
+    }
+
+    /// A fresh, uniquely named directory under `TMPDIR`.
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "mem-store-engine-lock-unit-{prefix}-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    /// The engine lock's body carries the owner's start-time token, and
+    /// `read_live_lock` validates it against `/proc`.
+    ///
+    /// Inverted world: if `try_create` wrote a token-less `LockState` body, the
+    /// `start_time` assertion would see `None` and the record would fall back to
+    /// the conservative legacy path instead of defeating PID reuse.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_engine_lock_body_carries_the_owner_start_time() {
+        let dir = temp_dir("body-token");
+        let EngineLockOutcome::Acquired(lock) =
+            acquire_engine_lock(&dir, Arc::new(crate::platform::SystemProcessProbe))
+                .expect("acquire over a free directory")
+        else {
+            panic!("a free storage root must be acquired");
+        };
+
+        let body = fs::read_to_string(engine_lock_path(&dir)).expect("read engine lock body");
+        let record: LockRecord = serde_json::from_str(&body).expect("body is a LockRecord");
+        let me = std::process::id();
+        assert_eq!(record.state.pid, me);
+        assert_eq!(
+            record.state.operation.as_deref(),
+            Some(ENGINE_LOCK_OPERATION)
+        );
+        assert_eq!(record.start_time, process_start_time(me));
+        assert!(record.start_time.is_some(), "Linux observes the token");
+
+        drop(lock);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A record naming **this** pid with a stale token is a recycled pid, so the
+    /// engine lock is stale and must be reclaimed rather than blocking this
+    /// process forever.
+    ///
+    /// Inverted world: if the token were ignored, the pid would read alive and
+    /// `acquire_engine_lock` would answer `Lost` — an engine locked out of its
+    /// own storage root by a dead predecessor.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_engine_lock_reclaims_a_reused_pid_record() {
+        let dir = temp_dir("reused-pid");
+        let path = engine_lock_path(&dir);
+        let me = std::process::id();
+        let own = process_start_time(me).expect("own start-time token");
+        let stale = LockRecord {
+            state: LockState {
+                pid: me,
+                timestamp: "2026-10-20T00:00:00.000Z".to_string(),
+                operation: Some(ENGINE_LOCK_OPERATION.to_string()),
+            },
+            start_time: Some(own.wrapping_add(1)),
+        };
+        fs::write(&path, serde_json::to_string(&stale).expect("serialize"))
+            .expect("write stale engine lock");
+
+        let outcome = acquire_engine_lock(&dir, Arc::new(crate::platform::SystemProcessProbe))
+            .expect("acquire does not fail on io");
+        let EngineLockOutcome::Acquired(lock) = outcome else {
+            panic!("a recycled pid's lock must be reclaimed, got {outcome:?}");
+        };
+
+        let body = fs::read_to_string(&path).expect("read reclaimed body");
+        let record: LockRecord = serde_json::from_str(&body).expect("reclaimed body parses");
+        assert_eq!(
+            record.start_time,
+            Some(own),
+            "the reclaimed record belongs to this process"
+        );
+        drop(lock);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Sanity: the operation-lock constant is not the engine lock's file, so a
+    /// reclaimed engine lock never touches another session's operation lock.
+    ///
+    /// Inverted world: if the two names collided, the assertion fails.
+    #[test]
+    fn test_engine_lock_file_is_distinct_from_the_operation_lock() {
+        assert_ne!(ENGINE_LOCK_FILE, OPERATION_LOCK_FILE);
     }
 }
