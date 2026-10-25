@@ -19,8 +19,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::dto::{
-    ChangelogDto, CleanupPreviewDto, ProfileDto, ProfileMissingDto, ProfileMutationDto,
-    ProfileSnapshotDto, RefreshProfileDto, safe_to_iso_string,
+    ChangelogDto, CleanupPreviewDto, ProfileDto, ProfileErasureDto, ProfileMissingDto,
+    ProfileMutationDto, ProfileSnapshotDto, RefreshProfileDto, safe_to_iso_string,
 };
 use super::envelope;
 use super::ports::PortError;
@@ -29,8 +29,9 @@ use crate::server::AppState;
 
 /// The message of the no-profile answer (upstream's literal).
 const NO_PROFILE_MESSAGE: &str = "No profile found. Keep chatting to build your profile.";
-/// The refresh note (upstream's literal).
-const REFRESH_NOTE: &str = "Confidence decay runs immediately; AI profile learning still runs when the prompt threshold is reached";
+/// The refresh note (issue 48.13 — D-4).
+const REFRESH_NOTE: &str =
+    "Confidence decay runs immediately. Automatic profile learning is disabled in this release.";
 
 /// `{userId?}` — the optional body of `POST /api/user-profile/refresh`.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -98,6 +99,51 @@ pub async fn get_user_profile(
         total_prompts_analyzed: profile.total_prompts_analyzed,
         profile_data: to_public_profile_data(&data),
     })
+}
+
+/// `DELETE /api/user-profile` — the port-only erasure route (issue 48.14,
+/// 47.1-B2′).
+///
+/// Why it exists: B2′ fires on a **prompt** delete, which can never happen on
+/// the population the audit left live — a migrated root with a profile and
+/// **zero prompts**. This is also the first user-invocable caller of
+/// `delete_profile` (D-2: `mem-portability`'s import rollback already called
+/// the store method, but only as an internal compensation).
+///
+/// Idempotent by construction: the underlying two-table delete reports 0 rows
+/// for an already-absent profile, so a retry after a partial profile-DB
+/// failure finishes the job rather than failing.
+///
+/// Residual (accepted for this wave, documented rather than fixed): the route
+/// resolves only the **active** profile, so a root whose only `user_profiles`
+/// row has `is_active = 0` is erasable through the prompt path (which scans
+/// every row) but not through this route. A future route taking a `profileId`
+/// would close it; widening this one would put the client in charge of the id.
+pub async fn delete_user_profile(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<Vec<(String, String)>>,
+) -> Response {
+    let user_id = resolved_user_id(query_first(&query, "userId"), &state);
+    let profile = match state.api.profile.active_profile(&user_id).await {
+        Ok(profile) => profile,
+        Err(error) => return profile_failure("DELETE /api/user-profile", error),
+    };
+    // Mirrors `PATCH …/item`'s literal; the GET answer keeps its
+    // `ProfileMissingDto` shape on purpose — a DELETE has no "successfully
+    // nothing" payload to describe.
+    let Some(profile) = profile else {
+        return envelope::business_error("No profile found");
+    };
+
+    match state.api.profile.delete_profile(&profile.id).await {
+        Ok(erasure) => envelope::ok(&ProfileErasureDto {
+            message: "Profile erased",
+            profile_id: profile.id,
+            profiles_deleted: erasure.profiles_deleted,
+            changelogs_deleted: erasure.changelogs_deleted,
+        }),
+        Err(error) => profile_failure("DELETE /api/user-profile", error),
+    }
 }
 
 /// `GET /api/user-profile/changelog` — upstream `handleGetProfileChangelog`.
@@ -202,11 +248,6 @@ pub async fn refresh_profile(State(state): State<Arc<AppState>>, body: Bytes) ->
         }
     }
 
-    let unanalyzed_prompts = match state.api.prompts.count_unanalyzed().await {
-        Ok(count) => count,
-        Err(error) => return profile_failure("POST /api/user-profile/refresh", error),
-    };
-
     envelope::ok(&RefreshProfileDto {
         message: if decay_applied {
             "Profile confidence decay applied"
@@ -215,7 +256,6 @@ pub async fn refresh_profile(State(state): State<Arc<AppState>>, body: Bytes) ->
         },
         profile_exists: profile.is_some(),
         decay_applied,
-        unanalyzed_prompts,
         note: REFRESH_NOTE,
     })
 }

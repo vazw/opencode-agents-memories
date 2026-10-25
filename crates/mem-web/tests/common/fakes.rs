@@ -27,9 +27,9 @@ use serde_json::{Value, json};
 use mem_web::api::ports::{
     ApiServices, CatalogEntry, CleanupApplied, CleanupPreview, DedupReport, EmbedPort,
     MaintenancePort, MemoryPort, MemoryRow, MemoryUpdate, MigrationReport, MigrationRunReport,
-    NewMemory, NewSkill, PortError, ProfileChangelog, ProfilePort, ProfileRecord, PromptPort,
-    PromptRow, SearchHit, SessionPort, ShardRef, Skill, SkillPatch, SkillPort, TagMigrationReport,
-    TagRow,
+    NewMemory, NewSkill, PortError, ProfileChangelog, ProfileErasure, ProfilePort, ProfileRecord,
+    PromptPort, PromptRow, SearchHit, SessionPort, ShardRef, Skill, SkillPatch, SkillPort,
+    TagMigrationReport, TagRow,
 };
 
 /// The seeded project scope hash (16 lowercase hex).
@@ -774,10 +774,6 @@ impl PromptPort for FakeBackend {
         state.prompts.retain(|prompt| prompt.id != id);
         Ok(())
     }
-
-    async fn count_unanalyzed(&self) -> Result<i64, PortError> {
-        Ok(3)
-    }
 }
 
 #[async_trait]
@@ -793,6 +789,33 @@ impl ProfilePort for FakeBackend {
             .as_ref()
             .filter(|profile| profile.user_id == user_id)
             .cloned())
+    }
+
+    async fn delete_profile(&self, profile_id: &str) -> Result<ProfileErasure, PortError> {
+        self.record(format!("delete_profile:{profile_id}"));
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| PortError::Store("lock".into()))?;
+        let before = state.changelogs.len();
+        state
+            .changelogs
+            .retain(|changelog| changelog.profile_id != profile_id);
+        let changelogs_deleted = (before - state.changelogs.len()) as u64;
+        let profiles_deleted = if state
+            .profile
+            .as_ref()
+            .is_some_and(|profile| profile.id == profile_id)
+        {
+            state.profile = None;
+            1
+        } else {
+            0
+        };
+        Ok(ProfileErasure {
+            profiles_deleted,
+            changelogs_deleted,
+        })
     }
 
     async fn changelogs(

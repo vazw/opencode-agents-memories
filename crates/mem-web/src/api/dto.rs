@@ -356,13 +356,18 @@ pub struct ProfileSnapshotDto {
 }
 
 /// `POST /api/user-profile/refresh` data.
+///
+/// D-4 (issue 48.13): `unanalyzedPrompts` was **removed**, not relabelled.
+/// Upstream's response carried it; nothing consumes it in this tree (the
+/// shipped Leptos UI never references it, and this release ships no automatic
+/// profile learning), so the readout no longer advertises a backlog nothing
+/// consumes.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RefreshProfileDto {
     pub message: &'static str,
     pub profile_exists: bool,
     pub decay_applied: bool,
-    pub unanalyzed_prompts: i64,
     pub note: &'static str,
 }
 
@@ -381,6 +386,16 @@ pub struct CleanupPreviewDto {
 pub struct ProfileMutationDto {
     pub message: String,
     pub version: i64,
+}
+
+/// `DELETE /api/user-profile` data (issue 48.14 — the port-only erasure route).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileErasureDto {
+    pub message: &'static str,
+    pub profile_id: String,
+    pub profiles_deleted: u64,
+    pub changelogs_deleted: u64,
 }
 
 /// One skill of `skillToApi`.

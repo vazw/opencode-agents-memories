@@ -29,7 +29,7 @@ fn router_with_fakes() -> (std::sync::Arc<common::fakes::FakeBackend>, axum::Rou
 
 #[tokio::test]
 async fn test_the_pinned_route_table_lists_every_upstream_endpoint() {
-    assert_eq!(ROUTE_TABLE.len(), 37, "the pinned table is 37 rows");
+    assert_eq!(ROUTE_TABLE.len(), 38, "the pinned table is 38 rows");
 
     let mut keys: Vec<(&str, &str)> = ROUTE_TABLE
         .iter()
@@ -47,7 +47,10 @@ async fn test_the_pinned_route_table_lists_every_upstream_endpoint() {
         .iter()
         .filter(|row| row.path.starts_with("/api/"))
         .count();
-    assert_eq!(api_rows, 35, "33 upstream API entries + 2 session stubs");
+    assert_eq!(
+        api_rows, 36,
+        "33 upstream API entries + 2 session stubs + 1 port-only row"
+    );
 
     let catalog_rows = ROUTE_TABLE
         .iter()

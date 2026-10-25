@@ -63,8 +63,9 @@ use serde_json::{Value as JsonValue, json};
 
 use super::ports::{
     CatalogEntry, CleanupApplied, CleanupPreview, EmbedPort, MemoryPort, MemoryRow, MemoryUpdate,
-    NewMemory, NewSkill, PortError, ProfileChangelog as ChangelogDto, ProfilePort, ProfileRecord,
-    PromptPort, PromptRow, SearchHit, SessionPort, ShardRef, Skill, SkillPatch, TagRow,
+    NewMemory, NewSkill, PortError, ProfileChangelog as ChangelogDto, ProfileErasure, ProfilePort,
+    ProfileRecord, PromptPort, PromptRow, SearchHit, SessionPort, ShardRef, Skill, SkillPatch,
+    TagRow,
 };
 
 /// The dependencies the production wiring needs (the W5.x composition root
@@ -485,16 +486,13 @@ impl PromptPort for ProductionPrompts {
     }
 
     async fn delete_prompt(&self, id: &str) -> Result<(), PortError> {
+        // Issue 48: the manager erases the contributing profiles and only then
+        // deletes the prompt (E2). The REST surface reports nothing about the
+        // erasure — `DELETE /api/user-profile` is the surface that reports counts.
         self.manager
             .delete_prompt(id)
             .await
-            .map_err(profile_failure)
-    }
-
-    async fn count_unanalyzed(&self) -> Result<i64, PortError> {
-        self.manager
-            .count_unanalyzed_for_user_learning()
-            .await
+            .map(|_deletion| ())
             .map_err(profile_failure)
     }
 }
@@ -544,6 +542,17 @@ impl ProfilePort for ProductionProfile {
             .get_active_profile(user_id)
             .await
             .map(|profile| profile.map(profile_record))
+            .map_err(profile_failure)
+    }
+
+    async fn delete_profile(&self, profile_id: &str) -> Result<ProfileErasure, PortError> {
+        self.store
+            .delete_profile(profile_id)
+            .await
+            .map(|report| ProfileErasure {
+                profiles_deleted: report.profiles_deleted,
+                changelogs_deleted: report.changelogs_deleted,
+            })
             .map_err(profile_failure)
     }
 

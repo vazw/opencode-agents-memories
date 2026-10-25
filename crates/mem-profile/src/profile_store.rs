@@ -30,6 +30,7 @@ use mem_store::schema_migrations::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::erasure::{EraseReport, could_have_contributed};
 use crate::error::ProfileError;
 use crate::ids::{next_changelog_id, next_profile_id, now_millis};
 
@@ -541,16 +542,45 @@ impl ProfileStore {
         lock_or_recover(&self.cold_state).buffers.clone()
     }
 
-    /// Upstream `deleteProfile`: delete the row, then re-read the current
-    /// on-disk snapshot before removing the bucket — a stale in-memory map
-    /// (a peer wrote meanwhile) would resurrect the deleted profile's bucket.
-    pub async fn delete_profile(&self, profile_id: &str) -> Result<(), ProfileError> {
+    /// Upstream `deleteProfile` — the B2′ two-table erase, returning what it
+    /// actually removed (`ExecResult.changes`, never estimates).
+    ///
+    /// Statement order is load-bearing:
+    /// 1. `user_profile_changelogs` first — every row carries a full profile
+    ///    snapshot in `profile_data_snapshot`, so deleting the profile alone
+    ///    would erase nothing;
+    /// 2. `user_profiles`;
+    /// 3. the cold-buffer round + bucket removal — a bucket left behind
+    ///    resurrects the deleted profile's buffered observations.
+    ///
+    /// The declared `ON DELETE CASCADE` on `user_profile_changelogs` is **not**
+    /// relied on: the table is created with `CREATE TABLE IF NOT EXISTS`,
+    /// which cannot add an FK to a table a migrated root already has, and no
+    /// test exercises the cascade. The explicit delete is the contract.
+    ///
+    /// Two call-site consequences, both deliberate:
+    /// - D-3: `mem-portability`'s `compensate()` rollback now also removes the
+    ///   just-created profile's changelog rows (they would otherwise be
+    ///   orphans);
+    /// - D-2 corollary: `EraseReport` is **not** `#[must_use]`, so that
+    ///   rollback's `let _ = …` line compiles unchanged.
+    ///
+    /// A concurrent peer deleting the same profile first makes both statements
+    /// change 0 rows — idempotent success, not an error.
+    pub async fn delete_profile(&self, profile_id: &str) -> Result<EraseReport, ProfileError> {
         let db = self.ready().await?;
-        db.execute(
-            "DELETE FROM user_profiles WHERE id = ?",
-            vec![Value::Text(profile_id.to_string())],
-        )
-        .await?;
+        let changelogs = db
+            .execute(
+                "DELETE FROM user_profile_changelogs WHERE profile_id = ?",
+                vec![Value::Text(profile_id.to_string())],
+            )
+            .await?;
+        let profiles = db
+            .execute(
+                "DELETE FROM user_profiles WHERE id = ?",
+                vec![Value::Text(profile_id.to_string())],
+            )
+            .await?;
         self.begin_cold_buffer_round()?;
         let removed = {
             // cold_state: single bucket remove after the on-disk re-read (ADR-0013 D-2 D2-R)
@@ -560,7 +590,54 @@ impl ProfileStore {
         if removed {
             self.save_cold_buffers()?;
         }
-        Ok(())
+        Ok(EraseReport {
+            profiles_considered: 1,
+            profiles_deleted: profiles.changes,
+            changelogs_deleted: changelogs.changes,
+        })
+    }
+
+    /// The B2′ scan (47.1-B2′): erase every profile whose watermark says the
+    /// prompt created at `prompt_created_at` could have contributed to it.
+    ///
+    /// **All** `user_profiles` rows are considered, not only `is_active = 1`:
+    /// an inactive row still holds derived text (`get_all_active_profiles` is
+    /// deliberately not reused for exactly that reason). An unreadable
+    /// watermark reads as `0`, which contributes — the direction is
+    /// conservative.
+    ///
+    /// Scan-then-delete is not atomic: a profile whose watermark advances
+    /// between the scan and the delete is over-erased, never under-erased.
+    /// Accepted — the direction is conservative, and under A2 no learner can
+    /// move the watermark (D-5 records that the write paths *would*).
+    pub async fn erase_profiles_derived_from(
+        &self,
+        prompt_created_at: i64,
+    ) -> Result<EraseReport, ProfileError> {
+        let db = self.ready().await?;
+        let rows = db
+            .query("SELECT id, last_analyzed_at FROM user_profiles", Vec::new())
+            .await?;
+        let mut report = EraseReport::default();
+        for row in &rows {
+            let Some(profile_id) = row.text("id") else {
+                // `id` is the NOT NULL primary key; without it there is no
+                // target a DELETE could name.
+                continue;
+            };
+            // NOT NULL in the DDL (`sql.rs`), so an unreadable value is a
+            // migrated-row case; 0 contributes under every prompt timestamp
+            // (fail toward erasure, never retention).
+            let watermark = row.i64("last_analyzed_at").unwrap_or(0);
+            report.profiles_considered += 1;
+            if !could_have_contributed(watermark, prompt_created_at) {
+                continue;
+            }
+            let erased = self.delete_profile(&profile_id).await?;
+            report.profiles_deleted += erased.profiles_deleted;
+            report.changelogs_deleted += erased.changelogs_deleted;
+        }
+        Ok(report)
     }
 
     /// Upstream `ready()`.

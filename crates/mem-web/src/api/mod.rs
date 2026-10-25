@@ -1,12 +1,12 @@
 //! The REST surface: the pinned route table and the router that registers it.
 //!
 //! Upstream `web-server.ts` dispatches 33 API method+path entries, 2 OpenCode
-//! catalog paths and (new in the port) the 2 W6.3 session stubs — **37 rows**
+//! catalog paths and (new in the port) the 2 W6.3 session stubs — **38 rows**
 //! in [`ROUTE_TABLE`]. `/api/health` is row 1 and stays registered by
 //! [`crate::server::build_router`] (W6.1 shipped it); [`api_router`] registers
 //! the other 36 paths, plus the two route-layer `DELETE` handlers on the
 //! static `bulk-delete` paths (upstream's `"Invalid ID"` branch — see the
-//! static-shadowing note below), for 38 method registrations.
+//! static-shadowing note below), for 39 method registrations.
 //!
 //! **axum 0.8 syntax:** every parameter is `{name}`, never `:name` —
 //! `Router::route` panics on a `:`-prefixed segment (`validate_v07_paths`), so
@@ -82,10 +82,10 @@ pub struct RouteSpec {
     pub expectation: RouteExpectation,
 }
 
-/// The single source of truth for the upstream surface (37 rows).
+/// The single source of truth for the upstream surface (38 rows).
 ///
 /// Both the contract test and the auth walk iterate this constant.
-pub const ROUTE_TABLE: [RouteSpec; 37] = [
+pub const ROUTE_TABLE: [RouteSpec; 38] = [
     RouteSpec {
         method: "GET",
         path: "/api/health",
@@ -347,6 +347,16 @@ pub const ROUTE_TABLE: [RouteSpec; 37] = [
         module: "api/sessions.rs",
         expectation: RouteExpectation::Stub,
     },
+    // Issue 48.14 — port-only (47.1-B2′): no upstream counterpart. Appended
+    // LAST so the shared-router envelope walk is not perturbed by the fake
+    // profile being deleted before the other profile rows are probed.
+    RouteSpec {
+        method: "DELETE",
+        path: "/api/user-profile",
+        upstream_line: "n/a — port-only (47.1-B2′, issue 48)",
+        module: "api/profile.rs",
+        expectation: RouteExpectation::Success,
+    },
 ];
 
 /// Whether the path is one of the two OpenCode catalog paths (D-11).
@@ -402,7 +412,10 @@ pub fn api_router() -> Router<Arc<AppState>> {
             "/api/prompts/bulk-delete",
             post(prompts::bulk_delete_prompts).delete(reject_bulk_delete_id),
         )
-        .route("/api/user-profile", get(profile::get_user_profile))
+        .route(
+            "/api/user-profile",
+            get(profile::get_user_profile).delete(profile::delete_user_profile),
+        )
         .route(
             "/api/user-profile/changelog",
             get(profile::get_profile_changelog),

@@ -23,6 +23,7 @@ use mem_store::schema_migrations::{
     MigrationOptions, apply_schema_migrations, ensure_user_prompt_columns, user_prompts_migrations,
 };
 
+use crate::erasure::{ProfileEraser, PromptDeletion};
 use crate::error::ProfileError;
 use crate::ids::{next_prompt_id, now_millis};
 
@@ -60,6 +61,15 @@ pub struct UserPromptManager {
     connections: ConnectionManager,
     handle: tokio::sync::OnceCell<DbHandle>,
     max_retries: u32,
+    /// The B2′ hook (47.1-B2′): `delete_prompt` erases every profile the
+    /// deleted prompt could have contributed to **before** it deletes the
+    /// source row (E2 — fail toward privacy).
+    ///
+    /// Composition (`mem-bridge`) is the ONLY production construction site and
+    /// it **must** call [`UserPromptManager::with_eraser`]. `None` is for
+    /// tests/embedded construction only, and it is visible in the outcome
+    /// (`PromptDeletion::Deleted { erasure: None }`), never silent.
+    eraser: Option<Arc<dyn ProfileEraser>>,
 }
 
 impl UserPromptManager {
@@ -96,7 +106,15 @@ impl UserPromptManager {
             connections,
             handle: tokio::sync::OnceCell::new(),
             max_retries,
+            eraser: None,
         }
+    }
+
+    /// Installs the B2′ eraser (the ONE production injection site is
+    /// `mem-bridge`'s composition root; tests use it to drive the seam).
+    pub fn with_eraser(mut self, eraser: Arc<dyn ProfileEraser>) -> Self {
+        self.eraser = Some(eraser);
+        self
     }
 
     /// Upstream `CONFIG.autoCaptureMaxRetries ?? 3`.
@@ -282,15 +300,68 @@ impl UserPromptManager {
         Ok(())
     }
 
-    /// Upstream `deletePrompt`.
-    pub async fn delete_prompt(&self, prompt_id: &str) -> Result<(), ProfileError> {
+    /// The B2′ seam (47.1-B2′, W6/decision 6) — **deliberately divergent from
+    /// upstream** (D-1).
+    ///
+    /// Upstream's `deletePrompt` is a bare DELETE with no profile reference
+    /// (`user-prompt-manager.ts:155`), because upstream never promised its
+    /// derived tier was erasable. We did (W6/decision 6), so the invalidation
+    /// lives **inside** this method and nowhere else:
+    ///
+    /// 1. read the row's `created_at` first — no row means `Absent` and no
+    ///    delete (there is no event to invalidate);
+    /// 2. erase every profile the prompt could have contributed to (E2:
+    ///    **erase before delete**). If the erase fails the prompt is kept, so
+    ///    a retry still has an event that re-fires erasure — deleting the
+    ///    source anyway would silently break the promise;
+    /// 3. delete the prompt. A failure here is reported as a typed partial
+    ///    outcome (`PromptDeleteAfterErasure`) carrying the real erase count.
+    ///    A concurrent peer deleting the row first makes this DELETE change 0
+    ///    rows — idempotent success, not an error.
+    ///
+    /// D-6: an existing row whose `created_at` is unreadable / non-integer must
+    /// NOT fall toward retention. `i64::MIN` satisfies `could_have_contributed`
+    /// under every watermark, so the profile is erased. (`NULL` is unreachable:
+    /// `mem_store::sql` declares `created_at INTEGER NOT NULL`.) This is not an
+    /// error path: the row exists, the erase happens, the prompt is deleted.
+    pub async fn delete_prompt(&self, prompt_id: &str) -> Result<PromptDeletion, ProfileError> {
         let db = self.ready().await?;
+        let row = query_one(
+            db.as_ref(),
+            "SELECT created_at FROM user_prompts WHERE id = ?",
+            vec![Value::Text(prompt_id.to_string())],
+        )
+        .await?;
+        let Some(row) = row else {
+            return Ok(PromptDeletion::Absent);
+        };
+        // D-6 (gate advisory c): an existing row whose created_at is unreadable /
+        // non-integer must NOT fall toward retention. i64::MIN satisfies
+        // could_have_contributed under every watermark, so the profile is erased.
+        // (NULL is unreachable: sql.rs declares created_at INTEGER NOT NULL.)
+        let prompt_created_at = row.i64("created_at").unwrap_or(i64::MIN);
+
+        let erasure = match &self.eraser {
+            Some(eraser) => Some(eraser.erase_derived_from(prompt_created_at).await.map_err(
+                |error| ProfileError::ErasureFailed {
+                    prompt_id: prompt_id.to_string(),
+                    message: error.message(),
+                },
+            )?),
+            None => None,
+        };
+
         db.execute(
             "DELETE FROM user_prompts WHERE id = ?",
             vec![Value::Text(prompt_id.to_string())],
         )
-        .await?;
-        Ok(())
+        .await
+        .map_err(|error| ProfileError::PromptDeleteAfterErasure {
+            prompt_id: prompt_id.to_string(),
+            profiles_erased: erasure.map(|report| report.profiles_deleted).unwrap_or(0),
+            message: error.message(),
+        })?;
+        Ok(PromptDeletion::Deleted { erasure })
     }
 
     /// Upstream `markAsCaptured` (`captured = 1`).
