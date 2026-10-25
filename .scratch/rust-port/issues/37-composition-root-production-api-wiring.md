@@ -224,3 +224,13 @@ Bearer authenticates the CONFIGURED `api_token`, which is `None` in standalone m
 - Not a W6.8 regression: W6.8's composition-root wire is correct and provably so — it resolved the
   dist, the server bound, `/` served the built shell and `/api/health` answered 200. The gap is
   orthogonal and one layer down, in the API services the same composition root hands to mem-web.
+- **2026-10-25 — AC6's premise about `deduplicate()` is superseded (issue 51.2).** AC6 reads
+  "`cleanup()` and `deduplicate()` take no `State` and are unconditional 501 stubs (D-15), so a
+  `MaintenancePort` wiring cannot reach them". The `deduplicate` half stopped being true when issue 40
+  landed as **`6bf7b28`**: that handler now takes `State` and answers through
+  `MaintenancePort::deduplicate`. The `cleanup` half still holds (issue 39, PAUSED). **No AC changes:**
+  AC6 stays sessions-only and maintenance stays out of it — but the dedup factory
+  `production_deduplication_port` is pointed at this issue by its own doc comment and at issue 39 by
+  this AC, so neither owns that wiring. The residual is recorded on issue 40's status line; assigning it
+  is not this issue's work — and that assignment has since been made: the wiring is **owned by issue 54**
+  (`54-dedup-port-wiring-unreachable`), filed 2026-10-25.

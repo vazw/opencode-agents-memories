@@ -1,9 +1,17 @@
 # 40 — W8.2 · Make `POST /api/deduplicate` real (memory deduplication)
 
-Status: ready-for-agent — 2026-10-25 (grilled; decisions below are closed. Blueprint may proceed
-after issue 39 lands, since both mutate shard vectors.)
+Status: **landed — residual owned by issue 54** — 2026-10-25. `POST /api/deduplicate` merged as
+**`6bf7b28`** (`feat(mem-web): real POST /api/deduplicate behind MaintenancePort (issue 40)`, merge of
+`3950938` + `ad6ce7a`, 16 files): a real handler taking `State`, the `ProductionDeduplication`
+implementation of `MaintenancePort::deduplicate`, and the **`production_deduplication_port`** factory.
+**Residual: that factory has no production caller** — the only call site is a test
+(`crates/mem-web/tests/dedup_endpoint.rs`), and `src/main.rs` never calls `.with_maintenance(..)`, so the
+shipped binary still answers the documented 501 from `UnavailablePort`. The wiring is **owned by issue 54**
+(`54-dedup-port-wiring-unreachable`), which files it as its own deliverable — filed, not scheduled.
+**Not `done`:** this issue's deliverable is the endpoint and the service; the composition-root wire is
+issue 54's. Two corrections with evidence sit in the 2026-10-25 comments.
 
-## What to build
+## What to build (AS FILED — superseded by `6bf7b28`; read the Status line and the 2026-10-25 comments first)
 
 `POST /api/deduplicate` is today an unconditional 501 stub taking no `State`:
 `pub async fn deduplicate() -> Response { envelope::not_implemented(DEDUPLICATE_UNAVAILABLE) }`.
@@ -114,3 +122,27 @@ engine's tie order is untestable. Do not "fix" the SQL, and do not restate the w
   forbids the wiring.
 - Sequenced **after** issue 39: both walk every shard and mutate vectors, so running them as one wave
   would put two deletion surfaces in one diff.
+- **2026-10-25 — correction 1 of 2: the 501 belongs to `/api/cleanup`, not here.** Re-derived in the
+  tree at `8a39e01` (`git show --stat 6bf7b28`; `grep -n 'pub async fn cleanup\|pub async fn
+  deduplicate' crates/mem-web/src/api/maintenance.rs`). The surviving stub is `POST /api/cleanup` —
+  `pub async fn cleanup()`, body `envelope::not_implemented(CLEANUP_UNAVAILABLE)`, D-15 — and that is
+  **issue 39's** endpoint. `POST /api/deduplicate` is a real handler taking `State` and answering through
+  `MaintenancePort::deduplicate`; its 501 comes from the *unavailable port* a default or fake wiring
+  injects, never from a leftover stub. The route table says the same thing:
+  `crates/mem-web/src/api/mod.rs` keeps `expectation: RouteExpectation::Stub` for that row with the
+  comment "The handler is real: the 501 comes from the unavailable port the default (and fake) wiring
+  injects".
+- **2026-10-25 — correction 2 of 2: the constructor is called; the factory is not.**
+  `grep -rn 'production_deduplication_port' --include=*.rs` returns the definition
+  (`crates/mem-web/src/api/deduplication/mod.rs`), a doc comment (`crates/mem-web/src/api/dto.rs`,
+  `DedupDto`) and a test (`crates/mem-web/tests/dedup_endpoint.rs`) — **no production caller**.
+  `ProductionDeduplication::new` *is* called inside that factory (`deduplication/mod.rs:270`) and
+  nowhere else. The audit that reported "`ProductionDeduplication::new` uncalled" lost exactly this
+  distinction; the true statement is **factory uncalled**, and the residual belongs to the factory. The
+  wiring that would make it reachable is **issue 54**'s deliverable.
+- **Anchors are symbols; line numbers are a snapshot at `8a39e01`.** The two numbers this issue is most
+  often quoted by had drifted by 2026-10-25: the cleanup stub sits at `maintenance.rs:234` (not `:229`)
+  and the `/api/deduplicate` `RouteSpec` at `mod.rs:180-188` (not `:180-186`). Issue 51's copies were
+  re-derived and corrected by the 2026-10-25 tracker wave; issue 49's `mod.rs:180-186` and issue 37's
+  `maintenance.rs:221/229` still carry the stale pair — drift is per-anchor, not per-document. Re-locate
+  by symbol before citing a line.

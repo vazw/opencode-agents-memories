@@ -17,3 +17,31 @@ Create a new file under `.scratch/<feature-slug>/` (creating the directory if ne
 ## When a skill says "fetch the relevant ticket"
 
 Read the file at the referenced path. The user will normally pass the path or the issue number directly.
+
+## Status lines are claims about the tree
+
+A `Status:` line is read by the next agent as fact, so it must be checkable against the tree: a status that
+claims readiness (`ready-for-agent`) **names the symbols or files the work will create**, and a status that
+claims landing (`done`, or any line asserting merged work) **names the commit that landed it, or — for a
+wave closed on a recorded review outcome — the outcome record under `## Comments`**. This rule is
+**forward-looking**: the 2026-10-18 `done` backfill recorded in `docs/agents/triage-labels.md`
+(issues 01–04) and the existing closings that rest on a recorded review outcome are conformant as they
+stand and need no edit. When the deliverable landed but something remains, name the residual and its
+owning issue in the line — `landed — residual (owned by issue NN)` — rather than choosing `done` (which
+would hide the residual) or the readiness label (which would advert finished work as unstarted). Two
+shapes stay non-findings: an open issue with some waves landed, whose line names what is still pending,
+and a paused issue with a pause note.
+
+Run the block below from the repository root after editing any `Status:` line. It prints nothing when no
+`(issue NN)`-tagged commit contradicts a readiness claim — a commit can land an issue without that tag, so
+**silence is a filter, not proof**: it never certifies that a status line is true, only that the tagged
+subset is uncontradicted.
+
+```sh
+for f in .scratch/*/issues/*.md; do
+  n=$(basename "$f" | cut -d- -f1)
+  grep -q '^Status:.*ready-for-agent' "$f" || continue
+  c=$(git log --format='%h %s' -F --grep="(issue $n)" -1)
+  [ -n "$c" ] && printf 'STALE-CLAIM %s: %s\n' "$f" "$c"
+done
+```
