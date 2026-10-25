@@ -79,22 +79,124 @@ The audit's framing of why B3 cannot be waved through: the promise in decision 6
 prompt text versus memories — and the profile is a **third artefact** that appears in neither leg
 (`REPORT.md` §3.4).
 
+## RULING 47.1 — recorded 2026-10-25 (owner)
+
+**Leg A = A2 (read-only this release). Leg B = B2′ (watermark invalidation).** Both are recorded here
+together, as the header requires; neither may be revised without the other.
+
+### Leg A — A2, read-only
+
+**Nothing learns this release.** The renderer (issue 44) still ships and renders whatever row exists,
+including one carried in from a migrated root; nothing creates or updates a profile row.
+
+*Rationale.* A1 is not one feature but four unwired links plus a dependency: `save_prompt`
+(`prompt.rs:174`) has zero production callers, `LearningRound::new` (`learning_service.rs:210`) has zero
+production constructors, `idle_scheduler`'s `IdleJob::Learn` has zero drivers, and issue 52's
+injected-block filter has no production reader — so a wired learner either reads an empty `user_prompts`
+table (fresh root, learns nothing) or learns from other plugins' injected boilerplate
+(`crates/mem-ai/src/privacy/injection.rs:3-7`). Shipping that during a storage-hardening phase would
+create a **live** privacy surface — model output derived from raw prompt text, re-injected into future
+prompts — at the same time as the work meant to make the storage base trustworthy. A2 declines to create
+new derivation while Leg B governs the derivation that already exists.
+
+### Leg B — B2′, watermark invalidation
+
+**On prompt deletion, delete the profile iff the deleted prompt could have contributed**, i.e. its
+timestamp is at or before the profile's `last_analyzed_at` (`user_profiles`, `sql.rs:143-155`). The erase
+is **explicit over both tables**, in this order, and never left to the declared FK cascade:
+
+1. `DELETE FROM user_profile_changelogs WHERE profile_id = ?` — the changelog carries
+   `profile_data_snapshot TEXT NOT NULL` (`sql.rs:160-170`), i.e. full copies of the profile text, so a
+   profile delete that leaves them behind has erased nothing;
+2. `DELETE FROM user_profiles WHERE id = ?`.
+
+The second statement only, as `delete_profile` does today (`profile_store.rs:547-560`), is **not
+sufficient**. Grounds: the `ON DELETE CASCADE` is declared but **no test exercises it**, and
+`user_profiles_migrations` applies `CREATE TABLE IF NOT EXISTS`, which cannot add an FK to a table a
+migrated root already has — so "the schema says so" holds for databases this build created and not for
+the migrated population this issue exists to cover.
+
+**Unset or zero watermark ⇒ treat as "could have contributed"** and delete. A migrated row with an
+unusable `last_analyzed_at` must fail toward erasure, not toward retention.
+
+*Why B2′ and not the other two:*
+
+- **B1 (regenerate at sweep) is disqualified twice.** Under A2 there is no analysis pipeline to
+  regenerate *with*; and even under A1 it would not work as described, because
+  `build_user_prompt(prompts, existing, …)` (`analysis_prompt.rs:77-117`) is **incremental** — when a
+  profile exists it feeds `build_category_summary(existing)` back to the model, so an erased prompt's
+  contribution survives as the seed of the next round. A true regeneration would have to discard the row
+  and re-derive from scratch, at full re-analysis cost and at the price of the version/changelog history.
+- **B3 (explicit exclusion) is rejected** because the profile is the most direct derivative of prompt
+  text; carving it out of decision 6's artefact-split promise would make the promise narrower than the
+  user was told, which is the failure mode the whole W6 line exists to prevent.
+
+### 47.3 — what happens to a profile row that already exists (A2)
+
+**It is rendered, never updated.** Consistent with the promise because the row is data the user's
+previous install created and A2 is *read-only*, not *amnesia* — and because Leg B still governs it: the
+first source deletion past its watermark erases it, so a rendered profile is never exempt from erasure,
+only from refresh. On a **fresh** root no row is ever created and the renderer renders nothing; that is
+the accepted, stated cost of A2, not an oversight.
+
+### Pruning (retention) — deferred to issue 39, with a binding condition
+
+Deleting prompts through **explicit user deletion** invalidates per B2′. **Retention pruning is
+deferred** to issue 39, because `delete_old_prompts` (`prompt.rs:384`) has **zero callers** today and 39
+owns deletion semantics. The deferral is structural, not editorial: **issue 39 must cite 47.1/B2′ and
+decide whether the pruning path joins the invalidation.** Until it does, material from a
+retention-pruned prompt may persist in the profile — recorded as a named residual in 47.4's table rather
+than left as silence.
+
+### 47.5 — why this class is sufficient under both A1 and A2
+
+The class is conditioned on **derivation**, not on the learner: the trigger is "a source was deleted",
+the action is "remove the derivative". Under **A1** the learner would rebuild the profile from the
+surviving prompts; under **A2** it stays deleted. Neither leg makes the rule insufficient, and a later
+change of mind on Leg A cannot invalidate the class — which is the anti-drift clause of this issue,
+satisfied by construction rather than by a promise to revisit.
+
+### 47.4 — ADR-0019 input
+
+Class: **B2′**, with the derivation path (`analysis_prompt.rs:77-117`, model-mediated and incremental)
+and the re-injection path (issue 44) named explicitly. Residual classes to be itemised in ADR-0019, not
+summarised in a sentence:
+
+| residual class | mechanism | note |
+|---|---|---|
+| `.bak` families | carried from opsec §9 item 8 | unchanged by this ruling |
+| the vault | carried from opsec §9 item 8 | `mem-vault` always encrypted; see issue 53 |
+| logs / exports / media | carried from opsec §9 item 8 | unchanged by this ruling |
+| **the profile (this ruling)** | `user_profiles` **+** `user_profile_changelogs`, explicit two-table delete | **retention-pruned prompts are a named residual until 39 decides**; unset watermark ⇒ conservative delete |
+| VACUUM's temporary rebuild (`{temp_dir}/etilqs_{db}`) | turso `VACUUM` writes a full copy outside the storage root | **conditional** — reachable only if W6 chooses the flag-off option; sourced from the archived ingest quoting `core/vdbe/vacuum.rs:300-306`, not verified from source by us |
+
+**47.4b stands unchanged:** the claim rests on our canary measurement in 48.10, not on a vendor promise —
+turso promises only that unused pages are removed, and SQLite's stronger "cleans all traces" is not
+turso's sentence.
+
+### 47.7 — the follow-up
+
+**Issue 48 carries the erasure leg only** (A2). It may not be dropped: migrated roots already hold
+derived rows, so the erasure hole is live there whether or not this binary writes anything. 48 must cite
+this ruling, and its blueprint may not introduce a profile writer — a blueprint for 48 that creates a
+profile row has silently reversed Leg A.
+
 ## Acceptance criteria
 
-- [ ] **47.1** **One ruling block** in this issue records both legs: `Leg A = A1 | A2` and
+- [x] **47.1** **One ruling block** in this issue records both legs: `Leg A = A1 | A2` and
       `Leg B = B1 | B2 | B3`, each with a one-paragraph rationale. Neither may be recorded without the
       other; an issue revision that fills one field and leaves the other empty fails review.
-- [ ] **47.2** **If A1:** the ruling names (a) the exact composition site that constructs `LearningRound`,
+- [x] **47.2** *(N/A — Leg A = A2; retained so the A1 branch is not lost)* **If A1:** the ruling names (a) the exact composition site that constructs `LearningRound`,
       (b) what drives it — `idle_scheduler`'s debounce plus who calls `on_session_idle`, or a different
       trigger with a reason, (c) the provider/model config source, (d) that no identity ⇒ neither learn
       nor inject (44.12's symmetric refusal), and (e) **whether prompt recording is part of A1 or a separate
       step** — `save_prompt` (`prompt.rs:174`) has no production caller, so on a **fresh** root a learner with
       no prompts learns nothing (a migrated root may already carry rows; 48.9 seeds one), and A1 that omits
       this link is a chain of five unconstructed pieces pretending to be one feature.
-- [ ] **47.3** **If A2:** the ruling states what happens to a profile row that already exists — rendered,
+- [x] **47.3** **If A2:** the ruling states what happens to a profile row that already exists — rendered,
       ignored, or erased — and why that is or is not consistent with the promise. Silence is not an
       option: migrated roots are exactly the population the audit left live.
-- [ ] **47.4** **The erasure class is recorded as ADR-0019 input**, in the shape ADR-0019 needs: the class
+- [x] **47.4** **The erasure class is recorded as ADR-0019 input**, in the shape ADR-0019 needs: the class
       (B1/B2/B3), the reason, the derivation path (`analysis_prompt.rs:77-117`) and the re-injection path
       (issue 44) named explicitly, and the residual **itemised as a table of named classes**, not as a
       sentence. This satisfies the opsec report's ADR-0019 blocker item 8, *"the profile assigned a class"*
@@ -108,24 +210,24 @@ prompt text versus memories — and the profile is a **third artefact** that app
       VACUUM option must either name it as a residual or delete it after the rebuild. It is **conditional**:
       today's configuration refuses `VACUUM` at translation (issue 43's W0), so this class is reachable only
       if W6 chooses the flag-off option.
-- [ ] **47.4b** **The claim states what it rests on: our canary measurement, not a vendor guarantee.**
+- [x] **47.4b** **The claim states what it rests on: our canary measurement, not a vendor guarantee.**
       turso promises only that *"Unused pages from deleted rows and dropped objects are removed, shrinking
       the file"* (`vacuum.mdx:42`, doc-sourced); a search for erase/forensic/residue across its docs finds
       nothing but a `VACUUM INTO` encryption warning. SQLite's stronger *"cleans all traces of deleted
       content"* is **not** turso's sentence and must not be borrowed. No issue in this set may lean on an
       upstream promise, because there is not one — the erasure evidence is the canary in 48.10.
-- [ ] **47.5** **One paragraph states why the class is sufficient under both A1 and A2.** If the paragraph
+- [x] **47.5** **One paragraph states why the class is sufficient under both A1 and A2.** If the paragraph
       cannot be written, the class is wrong — that is the test.
-- [ ] **47.6** The deferral chain is corrected in the tracker: `33-compaction-hook.md:41` and
+- [x] **47.6** The deferral chain is corrected in the tracker: `33-compaction-hook.md:41` and
       `44-user-profile-injection-renderer.md:114` are annotated to point at **47/48**, not at "W5.3's lane"
       and not at "issue 13/14". `44-user-profile-injection-renderer.md:120` is corrected too — it still
       names the phantom `LearningService`, which this issue's own measured table shows has **0** matches
       tree-wide; the sentence must name `LearningRound`. A future reader must not be able to follow any of
       the three pointers into a closed door or a symbol that does not exist.
-- [ ] **47.7** **The follow-up is named.** If A1, this issue records that **48** carries both legs (learner
+- [x] **47.7** **The follow-up is named.** If A1, this issue records that **48** carries both legs (learner
       wiring *and* the erasure mechanism) and that 48 may not merge one without the other. If A2, this
       issue records that 48 carries the erasure leg only, and why that leg cannot be dropped.
-- [ ] **47.8** No code changes in this issue: no `crates/` or `src/` diff, no schema change, no new ADR
+- [x] **47.8** No code changes in this issue: no `crates/` or `src/` diff, no schema change, no new ADR
       file (ADR-0019 is written by issue 43's line once its gate opens — `43:159`).
 
 ## Blocked by / Blocks

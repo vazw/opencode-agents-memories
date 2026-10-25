@@ -111,15 +111,19 @@ read. **Do not wire it** — 44.9 makes that explicit so nobody "completes" it l
 
 - The memory-tier ordering, similarity ranking and `relevance="N%"` rendering — inject work.
 - `<memory_context>` header placement and the trailing disclaimer — inject work (owner: end).
-- Wiring the learner's scheduling (`idle_scheduler`, `incremental_cleanup` cadence) — issue 13/14.
+- Wiring the learner's scheduling (`idle_scheduler`, `incremental_cleanup` cadence) — **issues 47/48**.
+  Corrected 2026-10-25 (47.6): this line previously read "issue 13/14", and neither contains profile
+  learning — 13 is `done` and deliberately shipped the service with no timer, 14 is confidence decay.
 - `user_profile_change` ledger / version rollback — separate.
 
 ## Blocked by / blocks
 
 - **Blocks:** the tier-1 leg of the context-assembly decision; nothing else.
-- **Blocked by:** nothing. Note for the planner: `LearningService` currently has **no constructor call
-  outside `mem-profile`** and nothing outside the profile crate calls `create_profile`, so no profile
-  row is created in a running binary. The renderer can be built and tested against constructed
+- **Blocked by:** nothing. Note for the planner: `LearningRound` currently has **zero production
+  constructors anywhere** and nothing outside the profile crate calls `create_profile`, so no profile
+  row is created in a running binary. (Corrected 2026-10-25 per 47.6: this sentence named `LearningService`,
+  which has **0** matches tree-wide; the type is `LearningRound`, `learning_service.rs:190`. 47.1 has since
+  ruled the tier read-only this release, Leg A = A2, so no learner is being wired.) The renderer can be built and tested against constructed
   `ProfileData` without waiting for that wiring — but 44.11/44.12 cannot be *observed* end-to-end
   until the learner is wired. Split the wave accordingly.
 

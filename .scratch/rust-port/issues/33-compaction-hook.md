@@ -38,7 +38,9 @@ A **compaction hook** in the plugin: ingest the session's context *before* the h
 
 ## Out of scope
 
-- Upstream's `session.idle` auto-capture and profile learning — W5.3's lane.
+- Upstream's `session.idle` auto-capture and profile learning — **issues 47 (the ruling) and 48 (the
+  erasure leg)**. Corrected 2026-10-25 (47.6): this line previously read "W5.3's lane", a lane that never
+  existed. 47.1 ruled the profile tier read-only this release (Leg A = A2), so nothing learns yet.
 - The port's own **episodic** consolidation/compaction (W4.3) — a different meaning of the word "compaction": that one ages episodic rows into milestones; this one is about the host's context window.
 - Any change to the tier-1 promotion path's agent-anonymity (the 2026-10-21 ruling stands).
 - `experimental.compaction.autocontinue` — noted but not required (it can suppress the host's synthetic continue turn; upstream does not use it).

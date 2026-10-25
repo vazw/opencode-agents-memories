@@ -37,6 +37,14 @@ deterministic function of the prompt (`created_at + retention`), never wall-cloc
 The three-phase content below is retained as the record of what was decided and why; it is **not** approved
 for implementation.
 
+**Profile invalidation is inherited, not optional (47.1, 2026-10-25).** When this issue lands the prompt
+deletion path it must cite **47.1 Leg B (B2′)** and decide whether retention pruning joins the profile
+invalidation. `delete_old_prompts` (`prompt.rs:384`) has zero callers today, so 47.1 deliberately deferred
+that case here rather than guess; until it is decided, material from a retention-pruned prompt may persist
+in a `user_profiles` row — a named residual in 47.4, not silence. A deleted prompt that predates the
+profile's `last_analyzed_at` must erase the profile **and** its `user_profile_changelogs` snapshots
+(`profile_data_snapshot` holds full profile text).
+
 ## What to build (SUPERSEDED — see pause note)
 
 `POST /api/cleanup` is an unconditional 501 stub taking no `State`
