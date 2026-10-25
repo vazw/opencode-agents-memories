@@ -1,11 +1,9 @@
 # 45 — Security · Pre-open mixed-version guard: the engine's oracle cannot fire on any open path we use
 
-Status: no triage label applies — this branch is **finished but uncommitted**, not landed. Branch
-`issue-45/mixed-version-guard`, base `8a39e01`, 45 dirty paths, and **no commit exists**: the tree goes
-back to a fresh reviewer before any commit, so no landing claim is available. (`ready-for-human` was wrong
-at both ends — it means "requires human implementation"; the implementation is here.) The one open
-residual is ADR-0025's *text*, owned by issue 43 (`43-database-base-hardening.md:159` gates it); issue 45's
-inputs to it are recorded under `## ADR-0025 inputs` below.
+Status: done — 2026-10-26 (reviewer APPROVED round 4; close-out re-measured after the three non-blocking
+fixes: `--lib open_guard` 15 passed, `--test open_guard` 24 passed / 1 ignored, `override` 2, `purge` 1,
+`fmt --all --check` and both clippy gates clean, `cargo test --workspace` 222 `test result: ok.` / 0 failed,
+plugin 40/40, sizes 112/112/24/24, INVERT 0). Landed as `8b635a8`.
 
 ## PREMISE — `needs_validation` (read before implementing)
 
