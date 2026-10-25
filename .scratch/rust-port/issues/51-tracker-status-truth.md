@@ -1,7 +1,7 @@
 # 51 — Tracker · Issue 40's status still says `ready-for-agent` although its code merged
 
-Status: done — 2026-10-25 (commit `ce9e0b5`, which carries every correction this issue lists; the 51.3
-sweep, its method and its evidence are in the sections below)
+Status: done — 2026-10-25 (commits `ce9e0b5` and `5e743cc` together carry every correction this issue
+lists; the 51.3 sweep, its method and its evidence are in the sections below)
 
 ## What to build
 
