@@ -36,6 +36,19 @@ shard is a constraint · 0023 retired-shard reaping · 0024 brute-force scan cos
 
 ---
 
+## OWNER DECISIONS 2026-10-25 (bind the wave sequence)
+
+| # | decision | consequence |
+|---|---|---|
+| 1 | **43.3 — include a re-embed path now** | W2/W3 grow: the fingerprint check must ship *with* a supported way to re-embed a scope, not with a bare refusal. This is the largest scope addition in the set. |
+| 2 | **43.8 — typed refusal, hard error** | A root written by a newer build refuses to open (`SchemaNewerThanBuild`). A rollback bricks the root until the newer build returns — intended, loud, and a release-process constraint. |
+| 3 | **Never shared with upstream.** *"we are building something new, the upstream is just ref"* | No compatibility contract. Shard v3 and prompts v2 are **ours alone**; W2 and W5 need no downgrade note, and upstream's TypeScript build is a behavioural reference only, never a co-tenant of the storage root. |
+| 4 | **43.10 — 100 ms p95 budget** | `2 × cap × 4 µs ≤ 100 ms` ⇒ `max_vectors_per_shard ≈ 12 500` (from 50 000). One config line, no schema change; shard count grows. Record the arithmetic in ADR-0024 so the number is auditable. |
+| 5 | **43.11 — reaping allowed, no undo** | W7 may delete retired shard files under its safety conditions (inactive, own count zero, opens cleanly, not the highest index), registry row first. The only wave that destroys user data. |
+
+Decision 3 is the cheapest: it deletes a whole compatibility dimension from W2 and W5.
+
+
 ## Why this exists
 
 Two independent reviews of `.tmp/drafts/20261025-database-design-handover.md` (2026-10-25) found defects in
