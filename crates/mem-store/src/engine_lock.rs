@@ -210,6 +210,9 @@ pub fn write_status_file(storage_path: &Path, reason: &str, pid: u32) -> Result<
 mod tests {
     use super::*;
     use crate::operation_lock::OPERATION_LOCK_FILE;
+    // Read only by the `#[cfg(target_os = "linux")]` tests below; on any other
+    // host this import would be dead and `-D warnings` would fail the build.
+    #[cfg(target_os = "linux")]
     use crate::platform::process_start_time;
 
     #[test]
@@ -225,6 +228,11 @@ mod tests {
     }
 
     /// A fresh, uniquely named directory under `TMPDIR`.
+    ///
+    /// Only the `#[cfg(target_os = "linux")]` tests below build directories, so
+    /// the helper is gated with them: on any other host it would be dead code
+    /// and `-D warnings` would fail the build.
+    #[cfg(target_os = "linux")]
     fn temp_dir(prefix: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

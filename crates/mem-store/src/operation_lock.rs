@@ -377,7 +377,12 @@ pub(crate) fn now_rfc3339_millis() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::{Liveness, SystemProcessProbe, process_start_time};
+    use crate::platform::{Liveness, SystemProcessProbe};
+    // Only `process_start_time` is Linux-only: `Liveness` and
+    // `SystemProcessProbe` are also used by the platform-independent tests, so
+    // gating the whole group would break the non-Linux build instead of fixing it.
+    #[cfg(target_os = "linux")]
+    use crate::platform::process_start_time;
     use std::sync::Mutex;
 
     /// A fresh, uniquely named directory under `TMPDIR` (the house temp-dir

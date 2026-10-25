@@ -183,9 +183,24 @@ capture, health), each terminated by `\n`. Its bytes are the framing oracle for 
   `.turso-operation.lock` (operation-scoped) and `.turso-migrate.lock` (W4.3
   consolidation). Reusing either would make `get_write_shard` refuse the engine's own
   writes.
-- The lock body is `LockState` JSON: `{"operation":"engine","pid":<n>,"timestamp":"<UTC ISO-8601>"}`.
-  It must be `read_live_lock`-parseable: a plain-pid body reads as corrupt and is stolen,
-  which would give the DB two owners.
+- The lock body is a `LockRecord` (`crates/mem-store/src/operation_lock.rs`): the three
+  `LockState` fields plus an **optional, additive** `start_time` —
+  `{"pid":<n>,"timestamp":"<UTC ISO-8601>","operation":"engine","start_time":<n>}`. It
+  must be `read_live_lock`-parseable: a plain-pid body reads as corrupt and is stolen,
+  which would give the DB two owners. `start_time` is the holder's start-time token
+  (`/proc/<pid>/stat` field 22), which defeats PID reuse.
+  - **Present** on records written by this binary (on a host without procfs it
+    serializes as `null`, i.e. unobservable, which reads back as absent).
+  - **Absent** on legacy records written before the field existed. That is not an
+    error and not a reason to unlink: an absent token cannot prove a reuse, so the
+    holder is treated conservatively — an unverifiable holder **reads as alive** and
+    keeps its lock.
+  - The field is safe to add because no reader parses the body for control flow:
+    the only reader is `read_live_lock`, it parses serde-tolerantly (no
+    `deny_unknown_fields`, so an old binary ignores the key and a new binary still
+    reads an old body), and nothing requires the key. `start_time` only sharpens the
+    liveness verdict — present-and-mismatched is the one dead verdict on an existing
+    pid — and its absence can only make that verdict more conservative.
 - Acquire is `create_new(true)`; a dead-owner or corrupt lock is unlinked and the acquire
   is retried **once**.
 - The winner holds the lock for its whole lifetime (`Drop` releases it).
