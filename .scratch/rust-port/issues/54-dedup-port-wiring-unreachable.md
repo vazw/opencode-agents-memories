@@ -1,6 +1,6 @@
 # 54 — Composition root · `POST /api/deduplicate` is implemented, tested and unreachable in the shipped binary
 
-Status: done — 2026-10-25. `POST /api/deduplicate` is reachable in the shipped binary: **`fa40b6ce2bd9d6b6b969b55a3bc81237c19c7458`**
+Status: landed — residual (owned by issue 54b) — 2026-10-25. `POST /api/deduplicate` is reachable in the shipped binary: **`fa40b6ce2bd9d6b6b969b55a3bc81237c19c7458`**
 (`feat: wire POST /api/deduplicate into the composition root (issue 54)`) adds the single
 `.with_maintenance(production_deduplication_port(..))` call to `src/main.rs`'s `Some(deps)` arm, fed
 by the resolved `deduplication_enabled` / `deduplication_similarity_threshold`; the oracles are
@@ -92,3 +92,33 @@ Three separate status lines currently point at someone else for this wiring — 
 issue 37's AC6 at issue 39, and issue 40's status at "unowned" — and issue 51's rule (now being implemented)
 forbids `done` on a deliverable carrying a residual with no named owner. Recording the gap without an owner is
 what allowed it to survive issue 40's wave, its review, and the audit that found everything around it.
+
+
+## Comments
+
+### 54b — the near-duplicate scan is bounded and offloaded
+
+Landed as **`423f537`** on branch `issue-54b/dedup-bounding` (base `efd654b`), with its record in
+`54b-dedup-scan-bounding.md` and its measurement artifact in
+`.tmp/measure/20261026-issue-54b-scan-ladder.txt` (raw stdout in `raw-ladder.txt` and
+`base-kernel-10k.txt` beside it).
+
+Measurement, per the pre-registered rule (largest completed rung, debug profile, 768 lanes):
+`c_iter = 13,487.9 ns` per candidate comparison at `n = 10,000` (49,995,000 comparisons in 674.326 s);
+`t50 = 1,249,975,000 × c_iter = 16,859 s ≈ 4.68 h` (INFERRED — the `n = 50,000` rung was not run),
+which is **R3** by a factor of ≈51 over the 330 s request timeout. `T_SCAN_MAX = 10 s` gives
+`10 s / c_iter = 741,405` pairs, floored to two significant figures = **740,000**, which is
+`MAX_NEAR_SCAN_PAIRS` (the 1,250,000,000 ceiling is untouched and not binding). A base-kernel re-run of
+the same rung measured 11,403.3 ns (15.5 % faster, same branch); the ladder value is kept as the more
+conservative, pre-registered input.
+
+Consequence, recorded rather than hidden: one pass now covers about `sqrt(2 × 740,000) ≈ 1,217`
+survivors across all shards in walk order — ≈2.4 % of one 50,000-row shard — and every larger pass
+reports `truncated: true` while still deleting every exact duplicate in every shard. The profile is
+debug; release was not measured, and the derived constant is conservative against it.
+
+So issue 54's reachability flag now has its bound: the endpoint is reachable, the destructive
+exact-delete half is unchanged and complete, and the near-duplicate half is off the runtime thread,
+budgeted, cancellable, and honest about truncation. The residual — the "runtime drop waits for blocking
+tasks" leg read from the tokio documentation rather than measured end to end — is named in the 54b
+record, not hidden here.
