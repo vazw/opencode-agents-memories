@@ -1,6 +1,6 @@
 # 49 — Config · The inert half of the config surface: 45 dead keys, one of them a kill switch
 
-Status: needs-triage — 2026-10-25. **45 of 98 resolved config fields have no production reader — 45.9%, not
+Status: needs-triage — 2026-10-27 (the kill-switch defect is real, but the 98/45 census and the dedup attribution are stale at HEAD — re-derive before a census wave)
 47% — and the sharpest of them, `chatMessage.enabled`, is a documented kill switch that kills nothing.**
 
 ## What to build
@@ -155,3 +155,9 @@ is "wire, issue 52", and this issue gives them no reader of its own.
 - The startup diagnostic (49.6) is an addition to the audit's scope: the audit named the defect as "the
   silence, not the count", and a census alone does not fix silence — it moves it from `schema.rs` into a
   doc nobody reads.
+
+- **2026-10-27 — triaged: the defect is real, the arithmetic is not.** The kill switch still kills nothing:
+  `chat_message.enabled` is parsed and resolved and read by no production path, and `call_inject` never checks a
+  config gate. But the census has drifted — `Config` now resolves ~99 fields (issue 45 added
+  `allow_unguarded_open`), and issue 54 wired `production_deduplication_port`, making two more keys live, so the
+  dead count is at most 43, not 45. A census wave must re-derive at HEAD rather than transcribe this issue.

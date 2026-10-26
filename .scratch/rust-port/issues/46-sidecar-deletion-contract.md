@@ -1,6 +1,6 @@
 # 46 — Storage · The sidecar-deletion contract: exclusivity is asserted, refused, or the file is not unlinked
 
-Status: needs-triage — 2026-10-25. **Three live-path callers unlink a database and its sidecars while
+Status: needs-triage — 2026-10-27 (hazard confirmed as filed, but its stated reuse point — issue 45's two-directional `-tshm` probe — was deliberately never built, and the G1/G2 measurements are unrun)
 nothing proves no other process holds them; one of them unlinks the file out from under its own open
 handle.** The premise is `needs_validation`, not confirmed — see `## PREMISE`.
 
@@ -191,3 +191,10 @@ advisory locks do **not** exclude a live reader, which is why they are labelled 
   paths first ("two recovery paths are unguarded", `REPORT.md:60`), but site #6 is the only one whose
   hazard is provable inside one process, with no second process needed — which makes it the cheapest
   gate and the one least likely to be argued away.
+
+- **2026-10-27 — triaged: hazard confirmed, reuse point absent.** Re-derived at HEAD: ten unlink sites across
+  five files, `remove_sqlite_database` still takes a bare path with no proof token, `SIDECAR_SUFFIXES` covers
+  `-wal`/`-shm`/`-tshm`, and `schema_migrations.rs` unlinks a database out from under its own borrowed
+  `&dyn Db`. Two gaps before a wave: the stated detection leg (`-tshm` offset-0 probe, two-directional) was
+  deliberately **not** built — issue 45 records it superseded — and the G1 self-holder write-loss / G2 `-tshm`
+  split measurements are unrun.

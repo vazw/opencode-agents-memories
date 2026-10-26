@@ -1,6 +1,6 @@
 # 32 — W4.4 · Hard delete & milestone scrub (retention semantics)
 
-Status: needs-triage
+Status: needs-triage — 2026-10-27 (user-path delete is still a tombstone and the CLI purge destroys whole milestones — issue 43 decision 9 overrides this issue's scrub semantics, so it must be re-scoped)
 
 ## What to build
 
@@ -42,3 +42,10 @@ Wave detail: `.scratch/rust-port/roadmap.md` §W4.4.
 - The Agents contribution view (issue 30 / W6.6) and the explorer screens (issue 31 / W6.7) — they consume the read paths this wave leaves intact.
 
 ## Comments
+
+- **2026-10-27 — triaged: partial and superseded in part.** The user-facing delete
+  (`DELETE /api/projects/{id}/sessions/{id}`) still calls `soft_delete_session`, so text and embedding survive.
+  The CLI `purge_session` does hard-delete, but its milestone behaviour is the **opposite** of this issue's
+  acceptance: it deletes the whole milestone row and thereby destroys a co-contributor's retained summary.
+  Issue 43 decision 9 now mandates rewriting the contributor set instead. Re-scope this issue against that
+  decision before planning; the two cannot both be implemented.

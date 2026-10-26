@@ -1,6 +1,6 @@
 # 53 — Storage · A supported config lands in a combination turso's manual excludes: encryption × multiprocess WAL
 
-Status: needs-triage — 2026-10-25. **On every non-Windows platform the vault opens encrypted *and* in
+Status: ready-for-human — 2026-10-27 (the code forces built-in encryption + multiprocess WAL on every non-Windows vault open; the remaining work is an owner ruling plus a two-process measurement neither source reading nor a wave can settle)
 experimental multiprocess WAL — a cell turso's manual excludes for page-codec databases — and a user who
 enables `databaseEncryptionEnabled` puts every shard there too.** Reachability is a source read; the harm is
 `needs_validation` (gate below).
@@ -146,3 +146,11 @@ Whichever is chosen, this issue owns **only** the cell. It does not re-open 43's
   (manual is archived, not on disk). Ingest-sourced and labelled: the `Corrupt` record and its
   string mismatch. Nothing here is a runtime observation, and nothing claims the read-only fallback or the
   corruption is measured.
+
+- **2026-10-27 — triaged `ready-for-human`.** Confirmed at HEAD: `for_config` pushes
+  `ExperimentalFeature::MultiprocessWal` on every non-Windows platform, and that vector entry is decorative —
+  the effective switch is key material (`experimental_encryption(opts.encryption.is_some())`). Store families
+  opt in, but the **vault does not**: `mem-vault` sets `database_encryption_enabled = true` for its manager, so
+  the excluded pair is forced on every vault open. The engine has no built-in-encryption × multiprocess check
+  (`turso_core-0.8.3/database.rs:913-928` rejects external-codec combinations only). The harm is **UNVERIFIABLE**
+  without a two-process encrypted probe; this needs the O1–O4 ruling and G1/G2/G3, not a code wave.

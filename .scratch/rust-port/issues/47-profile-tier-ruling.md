@@ -1,6 +1,6 @@
 # 47 — Profile · One ruling, two legs: does anything learn, and is the profile erasable?
 
-Status: needs-triage — 2026-10-25. **The user-profile tier has no production learner and no erasure class,
+Status: wontfix — 2026-10-27 (already implemented: the two-leg ruling is recorded and executed — the erasure class ships in `mem-profile` and the learner is deliberately unwired)
 and those are the same question asked twice — so they are decided here, together, before either leg's code
 is planned.** This issue is an owner decision; it writes no code.
 
@@ -288,3 +288,11 @@ profile row has silently reversed Leg A.
 - Derivation is model-mediated and abstracted (categories/descriptions), **not a verbatim copy** — but it
   can contain specifics and it is re-injected, which is why it is not a neutral summary
   (`REPORT.md` §3.4).
+
+- **2026-10-27 — triaged as already implemented; status `wontfix`.** The deliverable was a ruling, not code, and it is executed:
+  `crates/mem-profile/src/erasure.rs` carries `could_have_contributed` + the `ProfileEraser` trait, `prompt.rs`
+  calls `erase_derived_from` **before** `DELETE FROM user_prompts`, and `delete_profile` now has two production
+  callers (`mem-web` profile route, `mem-portability` compensate) — so the "zero callers" row is stale. The
+  learner leg is deliberately unwired and pinned: `LearningRound::new` has no production constructor, and
+  `test_delete_old_prompts_does_not_erase_the_profile` holds the deferral. The residual this issue named
+  (`delete_old_prompts` pruning → erase) is owned by issue 39 by the ruling's own pruning section.

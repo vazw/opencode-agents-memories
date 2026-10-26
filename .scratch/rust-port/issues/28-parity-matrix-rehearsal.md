@@ -1,6 +1,6 @@
 # 28 — W7.2 · Parity matrix & drop-in rehearsal
 
-Status: needs-triage
+Status: ready-for-human — 2026-10-27 (matrix 87/110 and no rehearsal transcript; the rest is a manual install/uninstall property plus the §0b D3 hatch ruling)
 
 ## What to build
 
@@ -15,3 +15,11 @@ The final gate: a coverage matrix for **all 110 upstream `*.test.ts` files** wit
 ## Blocked by
 
 - 01–27 (all prior waves)
+
+- **2026-10-27 — triaged `ready-for-human`.** The registry is real but behind: `docs/agents/testing.md`
+  holds 87 upstream rows (83 port / 3 covered-by / 1 N-A) against a pinned 110-file suite, and 23 pinned files
+  have no row — several with live counterparts (`plugin/tests/*.test.mjs`, the portability and skills crates),
+  others genuinely unported (`v2-*`, `tui-companion`, `auto-update`, `i18n`, `runtime-require`). No rehearsal
+  transcript exists under `docs/evidence/`; the hatch has a PRD reconfirmation but no closure record. Why human:
+  a drop-in rehearsal is a manual install/uninstall property no test can settle, and closing the §0b D3 hatch is
+  an owner ruling.

@@ -1,6 +1,6 @@
 # 26 — W6.4 · Portability & skills manager (US 4.3)
 
-Status: needs-triage
+Status: needs-triage — 2026-10-27 (round-trip and skills manager landed; the residual is the V2 bridge, owned by issue 20, and a production caller, owned by issue 22 — re-scope before any wave)
 
 ## What to build
 
@@ -22,3 +22,9 @@ Export/import across the **durable** memory tiers — project/global facts, user
 
 - 15 · W4.1
 - 24 · W6.2
+
+- **2026-10-27 — triaged: landed in part; the residual is other issues' work.** `PortabilityService::export`/`import`
+  round-trips milestones with contributors, staging is opt-in, and the skills manager has its catalog and HTTP
+  routes. What is absent is the host-side skills bridge (upstream `registerV2Adapter`, which needs issue 20's V2
+  adapter) and any production caller for export/import (issue 22's tool/CLI). Keep `needs-triage` and split:
+  this issue should not be a wave until 20 and 22 land, or its residual moves into them.

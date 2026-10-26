@@ -1,6 +1,6 @@
 # 41 — W8.3 · Scheduled retention cleanup (daily tick)
 
-Status: needs-triage
+Status: needs-triage — 2026-10-27 (premise stale: `POST /api/cleanup` is still a 501 and `auto_cleanup_enabled` defaults to **true**, not false — there is nothing for a tick to call)
 
 ## What to build
 
@@ -62,3 +62,8 @@ startup path rather than by a scheduler.
 - Split out of issue 39 on 2026-10-25 by owner decision: ship the manual endpoint first, because
   `auto_cleanup_enabled` defaults to `false` and a timer would otherwise be the first thing that
   deletes memories in the port.
+
+- **2026-10-27 — triaged: premise stale, nothing to schedule.** `POST /api/cleanup` is still the documented
+  501 stub and `MaintenancePort::cleanup` still returns `Unavailable`; issue 39 is paused and issue 43 blocks
+  it. The config this issue describes is also wrong: `auto_cleanup_enabled` defaults to **true**, not false. A
+  tick now would call a stub and read a key whose default contradicts the design. Keep behind 39.
