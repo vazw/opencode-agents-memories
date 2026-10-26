@@ -603,21 +603,32 @@ async fn test_factory_open_refuses_a_live_legacy_holder() {
 }
 
 /// The inversion arm, automated (O6): **the same mixed configuration**, same live
-/// child holder, with only `allow_unguarded_open` flipped. With the override on **no
-/// probe runs at all** — neither the pre-open probe in `preflight` nor the post-open
-/// re-probe in `postflight` (which returns early on `!guarded`) — and turso's
-/// multiprocess open takes no lock on the database file (A2 / `t1`), so success here
-/// is exactly the state that makes the control's `Err` attributable to **our** probe
-/// rather than to the engine.
+/// child holder, with only the override flipped — now through its only remaining
+/// leg, the config key (`allowUnguardedOpen: true`), since issue 45b removed the
+/// per-call field. With the override on **no probe runs at all** — neither the
+/// pre-open probe in `preflight` nor the post-open re-probe in `postflight` (which
+/// returns early on `!guarded`) — and turso's multiprocess open takes no lock on the
+/// database file (A2 / `t1`), so success here is exactly the state that makes the
+/// control's `Err` attributable to **our** probe rather than to the engine.
+///
+/// The "same mixed configuration" claim holds by construction: the database path is
+/// shared with the control, and nothing else in `StoreConfig` reaches the guard —
+/// `experimental`, `read_only` and `encryption` are identical because both option
+/// sets come from `for_config` over otherwise-default store configs, so the override
+/// flag is the only difference.
 #[cfg(unix)]
 #[tokio::test]
 async fn test_override_opens_the_same_mixed_configuration_the_guard_refuses() {
-    let config = common::store_config("guard-override-opens");
+    let mut config = mem_store::config::from_core(&core_config(r#"{"allowUnguardedOpen": true}"#));
+    config.storage_path = common::temp_dir("guard-override-opens");
     let path = config.storage_path.join("held.db");
     let holder = LegacyHolder::spawn(&path);
 
-    let mut options = shipping_options(&config);
-    options.allow_unguarded_open = true;
+    let options = shipping_options(&config);
+    assert!(
+        options.allow_unguarded_open(),
+        "issue 45b: the config leg must reach the option set — it is the only remaining leg"
+    );
     let handle = TursoConnectFactory.connect(path.clone(), options).await;
     let served = match &handle {
         Ok(handle) => handle
@@ -835,7 +846,7 @@ fn test_config_key_allow_unguarded_open_reaches_the_connect_options() {
     let store = mem_store::config::from_core(&enabled);
     let options = ConnectOptions::for_config(&store, Platform::current());
     assert!(
-        options.allow_unguarded_open,
+        options.allow_unguarded_open(),
         "the resolved config's `allowUnguardedOpen: true` must reach ConnectOptions"
     );
 
@@ -843,8 +854,34 @@ fn test_config_key_allow_unguarded_open_reaches_the_connect_options() {
     let store = mem_store::config::from_core(&defaulted);
     let options = ConnectOptions::for_config(&store, Platform::current());
     assert!(
-        !options.allow_unguarded_open,
+        !options.allow_unguarded_open(),
         "the default (false) must reach ConnectOptions too"
+    );
+}
+
+/// AC-9a — the override must never be re-published as a public field.
+///
+/// The `compile_fail` doctest on `ConnectOptions::allow_unguarded_open` proves an
+/// outside crate cannot write the field today; this source pin catches the failure
+/// mode that fence cannot see: a rename plus a fresh `pub` field leaves the doctest
+/// green while re-opening the per-open escape. The field was published as `pub`
+/// before issue 45b and is `pub(crate)` since.
+///
+/// The negative assertion runs first on purpose: at the pre-change tree it is the
+/// one that fails, so the RED observation is reachable instead of being masked.
+#[test]
+fn test_connect_options_never_re_publishes_the_override() {
+    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/db.rs"))
+        .expect("read the `ConnectOptions` declaration source");
+    assert!(
+        !source.contains("pub allow_unguarded_open: bool"),
+        "issue 45b: `ConnectOptions.allow_unguarded_open` must not be published as `pub` \
+         (that is the per-open escape 45b closed); the old declaration is present in src/db.rs"
+    );
+    assert!(
+        source.contains("pub(crate) allow_unguarded_open: bool"),
+        "issue 45b: `ConnectOptions.allow_unguarded_open` must be declared `pub(crate)` — \
+         invisible to every downstream crate and every integration test"
     );
 }
 
@@ -1053,7 +1090,7 @@ async fn test_purge_session_option_set_stays_multiprocess() {
         "45.9: purge writes, so it is a writable open — the guarded cell"
     );
     assert!(
-        !options.allow_unguarded_open,
+        !options.allow_unguarded_open(),
         "the default config must not carry the override"
     );
 
@@ -1086,45 +1123,68 @@ async fn test_purge_session_option_set_stays_multiprocess() {
 }
 
 // ---------------------------------------------------------------------------
-// Round 4, item 3 — the probe releases an in-process legacy lock (PINNED residual)
+// Issue 45b — the residual now requires two distinct resolved configs (PINNED)
 // ---------------------------------------------------------------------------
 
-/// **Pins a documented residual — it does not endorse it.**
+/// **Pins the residual that survives issue 45b — it does not endorse it.**
 ///
-/// An overridden legacy handle is a legitimate in-process legacy opener
-/// (`allow_unguarded_open` is a public per-call field). POSIX record locks are owned
-/// by the *process*, so the probe's own open+close releases this process's lock on
-/// that file (`t2 S4/S6/S7`): `Held` while the handle is live, `Free` on the next
-/// probe, and a guarded writable multiprocess open then **proceeds** while the legacy
-/// handle is still live — the mixed-mode row loss the guard exists to prevent.
+/// Issue 45b left the override with exactly two legs: the env var
+/// (`OPENCODE_MEM_ALLOW_UNGUARDED_OPEN`, which wins) and the resolved config key
+/// (`allowUnguardedOpen`). `ConnectOptions` cannot carry a third, because
+/// `allow_unguarded_open` is `pub(crate)`. This test shows the hazard therefore
+/// requires **two distinct `StoreConfig` values in one process** — reached here
+/// through two resolved configs, and equally reachable by a caller building
+/// `StoreConfig { allow_unguarded_open: true, .. }` and handing it to the public
+/// `for_config` (the config leg, not a per-open switch).
 ///
-/// If design A §11's identity-keyed registry lands (or the override is constrained to
-/// the process-wide env/config legs only), this test MUST fail: that is the point —
-/// it forces the decision instead of letting the behaviour change silently.
+/// An overridden legacy handle is a legitimate in-process legacy opener. POSIX
+/// record locks are owned by the *process*, so the probe's own open+close releases
+/// this process's lock on that file (`t2 S4/S6/S7`): `Held` while the handle is
+/// live, `Free` on the next probe, and a guarded writable multiprocess open derived
+/// from the *other* config then **proceeds** while the legacy handle is still live —
+/// the mixed-mode row loss the guard exists to prevent.
+///
+/// If the config leg ever becomes per-process, or `StoreConfig`'s field becomes
+/// non-settable, the hazard becomes unconstructible and this test MUST fail: that is
+/// the point — it forces the decision instead of letting the behaviour change
+/// silently.
 ///
 /// **Linux only, because `Held` is a Linux fact here.** The first probe must conflict
 /// with a lock the *same process* holds, which only an OFD lock does: on another Unix
 /// the probe is `F_SETLK`, and a POSIX record lock never conflicts with a lock its own
 /// process holds, so the first probe would read `Free` and this test would be asserting
-/// a platform-specific outcome under a broader `cfg`. The hazard itself is if anything
-/// more direct there (the guarded open proceeds without the probe ever seeing the
-/// holder); it is simply not what this test pins.
+/// a platform-specific outcome under a broader `cfg`.
 #[cfg(target_os = "linux")]
 #[tokio::test]
-async fn test_probe_releases_an_in_process_overridden_legacy_lock_and_the_guarded_open_then_proceeds()
- {
-    let config = common::store_config("guard-in-process-legacy");
-    let path = config.storage_path.join("legacy.db");
+async fn test_hazard_requires_two_distinct_resolved_configs() {
+    let root = common::temp_dir("guard-hazard-two-configs");
 
-    let mut legacy = ConnectOptions::for_config(&config, Platform::current());
-    legacy
-        .experimental
-        .retain(|feature| !matches!(feature, ExperimentalFeature::MultiprocessWal));
-    legacy.allow_unguarded_open = true;
+    let mut overridden =
+        mem_store::config::from_core(&core_config(r#"{"allowUnguardedOpen": true}"#));
+    overridden.storage_path = root.clone();
+    let mut guarded = mem_store::config::from_core(&core_config("{}"));
+    guarded.storage_path = root.clone();
+
+    assert!(
+        !shipping_options(&guarded).allow_unguarded_open(),
+        "issue 45b: the guarded option set must not carry the override — if it did, the \
+         guarded open below would succeed for the wrong reason and this test would pass \
+         without two distinct configs"
+    );
+
+    let path = root.join("legacy.db");
+    let legacy = legacy_options(&overridden);
+    // Captured, not asserted, before the open: the open's `expect` is the behavioural
+    // assertion, so a regression in `for_config` fails there with the refusal it causes.
+    let legacy_carries_the_config_leg = legacy.allow_unguarded_open();
     let handle = turso_connect_factory()
         .connect(path.clone(), legacy)
         .await
         .expect("the overridden legacy handle opens");
+    assert!(
+        legacy_carries_the_config_leg,
+        "the overridden legacy option set carries the config leg"
+    );
     handle
         .query("SELECT 1", Vec::new())
         .await
@@ -1146,16 +1206,22 @@ async fn test_probe_releases_an_in_process_overridden_legacy_lock_and_the_guarde
         "the probe's own open+close released this process's POSIX lock (the residual)"
     );
 
-    let guarded = turso_connect_factory()
-        .connect(path, shipping_options(&config))
+    let guarded_open = turso_connect_factory()
+        .connect(path, shipping_options(&guarded))
         .await;
     assert!(
-        guarded.is_ok(),
-        "PINNED RESIDUAL: the guarded open currently proceeds although an in-process legacy handle is \
-         live — if this now refuses, a remedy landed and this test must be updated deliberately: {:?}",
-        guarded.err()
+        guarded_open.is_ok(),
+        "PINNED RESIDUAL (45b): a guarded open derived from a second resolved config \
+         currently proceeds although an in-process legacy handle is live — if this now \
+         refuses, a remedy landed and this test must be updated deliberately: {:?}",
+        guarded_open.err()
     );
-    drop(guarded);
+    assert!(
+        shipping_options(&overridden).allow_unguarded_open(),
+        "issue 45b: config `allowUnguardedOpen: true` must reach the option set — the \
+         guarded option set above cannot have come from this config"
+    );
+    drop(guarded_open);
     drop(handle);
-    let _ = common::cleanup_temp_dir(&config.storage_path);
+    let _ = common::cleanup_temp_dir(&root);
 }

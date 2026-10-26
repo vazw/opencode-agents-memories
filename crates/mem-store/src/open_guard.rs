@@ -17,20 +17,31 @@
 //!
 //! **The measured rule that constrains any future probe:** `close()` on a database
 //! file releases the process's own POSIX locks, for every fcntl variant (`t2
-//! S4/S6/S7`) — it is `close()`, not the lock call. Under owner decision O3 no
-//! in-process *legacy* handle can exist **while the override is unused** (a legacy
-//! option set is refused with [`StoreError::UnsupportedOpenMode`]), so no probed file
-//! can carry our lock and the probe's own open+close is harmless.
+//! S4/S6/S7`) — it is `close()`, not the lock call.
 //!
-//! **With the override active that precondition does not hold.** `allow_unguarded_open`
-//! is a public per-call field, so an overridden legacy open is a legitimate
-//! in-process legacy handle; probing a file it holds reports `Held` and then
-//! **releases that process's own lock** when the probe closes, after which a guarded
-//! open proceeds while the legacy handle is still live — a documented footgun of the
-//! override (see the issue's residual), never a clearance input.
-//! **Do not reinstate a probe that opens and closes a database file this process
-//! holds a lock on**; the day an in-process legacy handle returns, design A §11's
-//! identity-keyed clearance registry must land *before* the probe is allowed near it.
+//! **The override is process-wide (issue 45b).** It has exactly two legs: the env var
+//! (`OPENCODE_MEM_ALLOW_UNGUARDED_OPEN`, which wins) and the resolved config key
+//! (`allowUnguardedOpen`). [`crate::db::ConnectOptions`] cannot be handed a third: its
+//! `allow_unguarded_open` field is `pub(crate)` — invisible to every downstream crate
+//! — with [`crate::db::ConnectOptions::for_config`] the only writer on a shipped
+//! option set (the two in-crate `false` literals are test-only; AC-9's greps keep that
+//! honest, not the compiler). Under one resolved config O3's precondition therefore
+//! holds *with* the override too: either every open derived from that config is
+//! overridden — no probe runs pre or post, so nothing in-process opens and closes a
+//! file it holds — or no legacy option set can be built in-process (it is refused
+//! with [`StoreError::UnsupportedOpenMode`]), so no probed file carries our lock and
+//! the probe's own open+close is harmless.
+//!
+//! **The surviving residual needs two distinct `StoreConfig` values in one process** —
+//! resolved from config files *or* built by a caller, which `StoreConfig`'s public
+//! field and the public `for_config` permit. An overridden legacy open derived from
+//! one value is a legitimate in-process legacy holder; the probe's own open+close
+//! releases this process's lock on the file, after which an open derived from the
+//! *other*, guarded config proceeds while the legacy handle is still live.
+//! `test_hazard_requires_two_distinct_resolved_configs` pins that sequence. **Do not
+//! reinstate a probe that opens and closes a database file this process holds a lock
+//! on** unless design A §11's identity-keyed clearance registry lands first (still
+//! open).
 //!
 //! **Platform matrix (45.10).** Linux: `F_OFD_SETLK` (measured in both directions).
 //! Other Unix: `F_SETLK` (the syscall path is exercised on Linux through
@@ -312,6 +323,9 @@ pub(crate) struct Preflight<'a> {
     pub db_path: &'a Path,
     pub mode: WalMode,
     pub writability: Writability,
+    /// The config leg only, as copied by [`crate::db::ConnectOptions::for_config`];
+    /// the env leg arrives separately in `env_override` and wins (issue 45b: nothing
+    /// here is per-call).
     pub allow_unguarded_open: bool,
     pub env_override: Option<&'a str>,
     /// The liveness oracle the marker uses. Production passes
