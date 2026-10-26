@@ -54,8 +54,9 @@ const DIMENSIONS: usize = 768;
 ///     truncate and `pairsScanned` is the whole grid;
 /// (b) comfortably more than 0.1 s of scan. The ladder's recommended n for
 ///     0.1 s is 130 at its measured c_iter; this fixture is 3x that, about
-///     0.9 s of scan in debug, which is what makes the "still unfinished after
-///     the health response" assertion deterministic instead of timing-fragile.
+///     1.0 s of scan in debug (75,855 x 13.4879 us), which is what makes the
+///     "still unfinished after the health response" assertion deterministic
+///     instead of timing-fragile.
 ///
 /// The literal is baked in on purpose: the test never re-derives it from a
 /// machine measurement at run time.
@@ -65,8 +66,9 @@ const CENTREPIECE_N: usize = 390;
 const LEASE_N: usize = 3_000;
 
 /// How long the first run may go before its future is dropped. `<= 50 ms` per
-/// the test plan; the fixture's scan is far longer than this (tiny vectors
-/// still cost well over 50 ms over ~4.5M comparisons in debug).
+/// the test plan; the fixture's scan is far longer than this (the measured
+/// 4-lane cost of the base kernel put 4.5M comparisons at ~20 ms, so the
+/// fixture uses 64 lanes: roughly 4x that per comparison, ~0.3 s in debug).
 const LEASE_DROP_AFTER: Duration = Duration::from_millis(20);
 
 /// The bounded `yield_now` poll's iteration cap. A few thousand yields would
@@ -259,9 +261,12 @@ async fn test_dedup_scan_is_detached_so_the_runtime_stays_responsive() {
 #[tokio::test]
 async fn test_dedup_service_keeps_the_run_guard_while_a_detached_scan_outlives_a_cancelled_request()
 {
-    // Tiny vectors on purpose: this test exercises the guard/lease, not the
-    // cosine cost. 4 lanes over ~4.5M comparisons is comfortably longer than
-    // the 20 ms drop deadline and short enough for a bounded poll to outlast.
+    // Small vectors on purpose: this test exercises the guard/lease, not the
+    // 768-lane cosine cost. 64 identical lanes over ~4.5M comparisons is
+    // several times the 20 ms drop deadline (so the drop provably lands
+    // mid-scan) and short enough for the bounded poll to outlast it. Identical
+    // vectors give a cosine of exactly 1.0, which the kernel excludes, so no
+    // candidate is claimed.
     let rows: Vec<(i64, DedupMemory)> = (0..LEASE_N)
         .map(|index| {
             (
@@ -271,7 +276,7 @@ async fn test_dedup_service_keeps_the_run_guard_while_a_detached_scan_outlives_a
                     content: format!("lease content {index}"),
                     container_tag: TAG.to_string(),
                     created_at: index as i64,
-                    vector: Some(vec![1.0_f32, 0.0, 0.0, 0.0]),
+                    vector: Some(vec![1.0_f32; 64]),
                 },
             )
         })
