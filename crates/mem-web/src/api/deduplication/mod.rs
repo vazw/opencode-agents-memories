@@ -17,13 +17,20 @@
 //!    cosine similarity lies in `[threshold, 1.0)` within one container tag.
 //!    This path deletes, merges and re-embeds nothing.
 //!
-//! The exact-delete half is never truncated. The near-duplicate half runs on
-//! the blocking pool under one global candidate-comparison budget
-//! ([`MAX_NEAR_SCAN_PAIRS`] by default), so it cannot occupy the engine's
-//! single runtime thread, cannot outrun shutdown (the scan checks a one-way
-//! cancel flag), and cannot hold a blocking thread past the budget. A pass
-//! that exhausts the budget reports `truncated` in
+//! The exact-delete half is never truncated **by the budget**. The
+//! near-duplicate half runs on the blocking pool under one global
+//! candidate-comparison budget ([`MAX_NEAR_SCAN_PAIRS`] by default), so it
+//! cannot occupy the engine's single runtime thread, cannot outrun shutdown
+//! (the scan checks a one-way cancel flag), and cannot hold a blocking thread
+//! past the budget. A pass that exhausts the budget reports `truncated` in
 //! [`NearDuplicateScanReport`] instead of refusing to run.
+//!
+//! A shard whose rows could not be read is counted in `unreadable_shards`,
+//! forces `truncated`, and is never reported as an empty shard: both its near
+//! scan and its exact-delete half go unexamined (the latter is a read that
+//! never happened, not a budget truncation), and the pass continues with the
+//! remaining shards because earlier shards' exact deletions are already
+//! committed.
 //!
 //! [`DedupStore`] is the only boundary between the algorithm and libsql, so
 //! the greedy scan and the run guard are provable with a fake while the real
@@ -117,7 +124,9 @@ pub trait DedupStore: Send + Sync {
     /// scope in `shard_index ASC`.
     async fn shards(&self) -> Result<Vec<DedupShard>, PortError>;
 
-    /// Every row of one shard, ordered `created_at DESC, id ASC`.
+    /// Every row of one shard, ordered `created_at DESC, id ASC`; an open
+    /// failure or a shard fault is returned as an `Err`, counted as unreadable
+    /// by the pass.
     async fn memories(&self, shard: &DedupShard) -> Result<Vec<DedupMemory>, PortError>;
 
     /// Delete one row, then bring the shard's vector accounting in line with
@@ -194,10 +203,30 @@ impl DedupService {
         // per-shard budget with an unbounded shard count is not a bound.
         let mut pairs_remaining = self.near_pair_budget;
         let mut pairs_scanned = 0_u64;
+        let mut unreadable_shards = 0_u64;
         let mut truncated = false;
 
         for shard in &shards {
-            let rows = Arc::new(self.store.memories(shard).await?);
+            let rows = match self.store.memories(shard).await {
+                Ok(rows) => Arc::new(rows),
+                Err(error) => {
+                    // The arm is the loop's first statement: a shard whose
+                    // rows could not be read contributes nothing to the
+                    // deletions, the groups or the pair count, and its
+                    // coverage claim is withdrawn rather than answered as
+                    // "empty". The pass continues because earlier shards'
+                    // exact deletions are already committed — aborting would
+                    // answer an error over a committed write.
+                    tracing::error!(
+                        shard_id = shard.shard_id,
+                        error = %error,
+                        "deduplication: shard read failed"
+                    );
+                    unreadable_shards = unreadable_shards.saturating_add(1);
+                    truncated = true;
+                    continue;
+                }
+            };
             let plan = engine::exact_plan(&rows);
 
             // The exact-delete half is never truncated: it runs for every
@@ -297,6 +326,7 @@ impl DedupService {
                 pairs_scanned,
                 pair_budget: self.near_pair_budget,
                 truncated,
+                unreadable_shards,
             },
         })
     }

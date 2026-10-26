@@ -336,9 +336,15 @@ pub struct NearDuplicateScanReport {
     pub pairs_scanned: u64,
     /// The pass's global candidate-comparison budget.
     pub pair_budget: u64,
-    /// Whether the budget (or a zero budget at a later shard) left scan work
-    /// undone.
+    /// Whether any scan work was left undone — the budget was exhausted, or a
+    /// shard's rows could not be read (`unreadable_shards > 0`).
     pub truncated: bool,
+    /// Shards walked whose rows could not be read; a count, never a detail
+    /// (D-9). Non-zero forces `truncated`. Both halves of such a shard are
+    /// unexamined: its near scan contributes nothing, and its exact-delete
+    /// half never runs, so `exact_duplicates_deleted` under-counts there too —
+    /// a read that was never made, not a budget truncation.
+    pub unreadable_shards: u64,
 }
 
 /// One reported near-duplicate group (upstream `DuplicateGroup`).

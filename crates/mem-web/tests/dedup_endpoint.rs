@@ -316,6 +316,7 @@ async fn test_deduplicate_reports_the_scan_accounting_beside_the_unchanged_field
             "pairBudget".to_string(),
             "pairsScanned".to_string(),
             "truncated".to_string(),
+            "unreadableShards".to_string(),
         ],
         "the accounting key's shape: {body}"
     );
@@ -359,6 +360,11 @@ async fn test_deduplicate_reports_the_scan_accounting_beside_the_unchanged_field
         body["data"]["nearDuplicateScan"]["truncated"],
         Value::Bool(false),
         "a single shard well under the budget never truncates: {body}"
+    );
+    assert_eq!(
+        body["data"]["nearDuplicateScan"]["unreadableShards"],
+        serde_json::json!(0),
+        "every shard of this fixture was read: {body}"
     );
     let mut remaining = row_ids(&store, &shard).await;
     remaining.sort();
