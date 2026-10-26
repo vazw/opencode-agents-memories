@@ -24,8 +24,11 @@ pub fn port_failure(endpoint: &'static str, error: ports::PortError) -> Response
 | `Store(String)` | a store/port failure; detail logged, never returned | **500** — correct |
 
 The module already defines the right constant for the absent-service case — `pub const STUB_STATUS:
-StatusCode = StatusCode::NOT_IMPLEMENTED` (501) — and the explicit stubs use it. The generic failure path
-does not.
+StatusCode = StatusCode::NOT_IMPLEMENTED` (501) — but at the time of filing it had **zero call sites**: the
+explicit stubs call `envelope::not_implemented`, which hardcodes the same 501. (Corrected 2026-10-27 by the
+Plan Gate, which measured `grep -rn STUB_STATUS` over tracked sources: definition only, no consumers. An
+earlier draft of this file claimed "the explicit stubs use it" — that was false.) The generic failure path
+does not classify at all.
 
 **Blast radius:** 49 call sites of `port_failure(...)` / `skill_failure(...)` across the handler modules
 (`memories`, `maintenance`, and the rest); `memories` alone contributes 15 in its GET path.
@@ -54,7 +57,8 @@ perfectly ordinary degraded build.
 
 ## WHAT A WAVE SHOULD PRODUCE
 
-1. `port_failure` classifies: `Unavailable` → `STUB_STATUS` (501) with the documented envelope; `Store` →
+1. `port_failure` classifies: `Unavailable` → the 501 stub envelope the explicit stubs themselves answer (the
+   status `STUB_STATUS` names) with the documented body; `Store` →
    500 with the detail logged and never returned. `NotFound` / `Invalid` must keep whatever behaviour they
    have today — they already have per-handler handling, and this issue is not a licence to redesign the
    error surface. **Measure the current mapping of those two before changing anything**, and change only
@@ -98,7 +102,9 @@ for the absent-service case, not the whole error surface.
 - `PortError` — the four variants and their documented meanings.
 - `port_failure(endpoint, error)` — the single shared mapping; `skill_failure` delegates to it for everything
   except `Invalid`.
-- `STUB_STATUS` — the existing 501 constant; reuse it rather than a new literal.
+- `STUB_STATUS` — the existing 501 constant. It has no call sites today (the stubs hardcode via
+  `envelope::not_implemented`), so bind the tests to it rather than adding another literal, and do not assume
+  the stubs already depend on it.
 - The envelope helpers (`json`, `error`, `internal_error`) — the degraded response must use the same success
   shape as the stubs, not a new one.
 
@@ -117,3 +123,26 @@ for the absent-service case, not the whole error surface.
 - `docs/bridge-schema.md` — the 501/500 contract statement is issue 37's AC4.
 - Redesigning the error surface, or adding variants to `PortError`.
 - The composition-root wiring itself (issue 37 · AC6).
+
+## Comments
+
+- **2026-10-27 — Plan Gate REJECTED (revision 1 of 2).** Blueprint
+  `20261026-2223-issue-61-degraded-build-status` (STAMP `70c6877c54db`) was rejected for five mechanical
+  reasons, all correctable without redesign — the gate called the design, the six oracles and the scope
+  boundary sound:
+
+  1. The Step-2 inventory command matched only one of the four `Unavailable` arms, because three are written
+     `Err(PortError::Unavailable) =>`; the expectation must be four lines, named.
+  2. The Step-6 gate used `git diff --stat`, which cannot see the untracked new test file; it must be
+     `git status --porcelain` or `git add -N` first.
+  3. Step 7's "passed count equals N + 6" is wrong: `--list` counts an `#[ignore]`d test that never passes,
+     so the passed sum is N + 5 while the delta is +6.
+  4. Step 1 claimed `git worktree list` would still show the issue-59 reviewer scratch tree; at `b46bcce` it
+     shows only the main worktree (that path is an unregistered leftover directory, already gone).
+  5. D5's rationale mis-cited D-11: the two skills catalog `Unavailable` arms use `envelope::internal_error()`,
+     which is *inside* the envelope. What D-11 governs is the catalog token posture. The arms stay 500 because
+     they mirror upstream, not because they sit outside the envelope.
+
+  This file was also corrected: the gate measured `grep -rn STUB_STATUS` over tracked sources and found the
+  **definition only, zero call sites** — the explicit stubs call `envelope::not_implemented`, which hardcodes
+  501. The earlier claim that "the explicit stubs use it" was false and is now replaced with the measurement.
