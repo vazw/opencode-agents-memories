@@ -1,0 +1,1375 @@
+[
+  {
+    "coverage_id": "w6-design::co-contributor::milestone-rewrite::residue",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "co-contributor",
+      "subsystem": "milestone-rewrite",
+      "attack_class": "residue"
+    },
+    "surface": "w6-design",
+    "boundary": "co-contributor",
+    "subsystem": "milestone-rewrite",
+    "attack_class": "residue",
+    "starting_paths": [
+      "crates/mem-episodic/src/purge.rs",
+      "crates/mem-episodic/src/milestone.rs",
+      "crates/mem-store/src/episodic_sql.rs",
+      ".scratch/rust-port/issues/43-database-base-hardening.md",
+      ".tmp/drafts/20261025-w6-consult-response.md"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "DATA-ISOLATION-AND-LIFECYCLE.md",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      ".scratch/rust-port/issues/43-database-base-hardening.md",
+      ".tmp/drafts/20261025-w6-consult-response.md",
+      "crates/mem-episodic/src/milestone.rs",
+      "crates/mem-episodic/src/purge.rs",
+      "crates/mem-store/src/episodic_sql.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-episodic/src/purge.rs"
+        ],
+        "invariant": "the rewrite removes the contributor and leaves no copy of its text in the row",
+        "method": "source",
+        "result": "read: only the contributor set is rewritten; summary, embedding, source_count and window bounds also derive from it",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-episodic/src/milestone.rs",
+          "crates/mem-store/src/episodic_sql.rs"
+        ],
+        "invariant": "every stored artefact of the contributor set is accounted for",
+        "method": "source",
+        "result": "read: summary NOT NULL, embedding NOT NULL and never regenerated, source_count and window bounds stored",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".scratch/rust-port/issues/43-database-base-hardening.md"
+        ],
+        "invariant": "the rewrite is also a physical erase",
+        "method": "source",
+        "result": "read: no sweep is attached to it; an UPDATE's old image persists like a DELETE's",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".tmp/drafts/20261025-w6-consult-response.md"
+        ],
+        "invariant": "the sweep set includes every database a scrub wrote to",
+        "method": "source",
+        "result": "read: the consultant states the rule; the recorded decisions do not adopt it",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "w6/milestone/rewrite-keeps-derived-text",
+      "w6/milestone/rewrite-needs-sweep"
+    ],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::data-subject::encrypted-configuration::erasure",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "data-subject",
+      "subsystem": "encrypted-configuration",
+      "attack_class": "erasure"
+    },
+    "surface": "w6-design",
+    "boundary": "data-subject",
+    "subsystem": "encrypted-configuration",
+    "attack_class": "erasure",
+    "starting_paths": [
+      ".tmp/drafts/20261025-w6-design-decisions-consult.md"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "out_of_scope",
+    "agent_id": null,
+    "reviewed_paths": [],
+    "local_checks": [],
+    "result_fingerprints": [],
+    "unresolved": [
+      "erasure under database_encryption_enabled = true is pinned as not meaningful for this decision (the key outlives the deletion); not re-litigated"
+    ]
+  },
+  {
+    "coverage_id": "w6-design::data-subject::erasure-promise::completeness",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "data-subject",
+      "subsystem": "erasure-promise",
+      "attack_class": "completeness"
+    },
+    "surface": "w6-design",
+    "boundary": "data-subject",
+    "subsystem": "erasure-promise",
+    "attack_class": "completeness",
+    "starting_paths": [
+      "crates/mem-store/src/schema_migrations.rs",
+      "crates/mem-store/src/sqlite_files.rs",
+      "crates/mem-store/src/shard_manager.rs",
+      "crates/mem-store/src/shard_path_migration.rs",
+      "crates/mem-store/src/legacy_migrator.rs",
+      "crates/mem-store/src/encryption_migrator.rs",
+      "crates/mem-store/src/migration_service.rs",
+      "crates/mem-store/src/sql.rs",
+      "crates/mem-profile/src/profile_store.rs"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "DATA-ISOLATION-AND-LIFECYCLE.md",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      "crates/mem-profile/src/profile_store.rs",
+      "crates/mem-store/src/encryption_migrator.rs",
+      "crates/mem-store/src/legacy_migrator.rs",
+      "crates/mem-store/src/migration_service.rs",
+      "crates/mem-store/src/schema_migrations.rs",
+      "crates/mem-store/src/shard_manager.rs",
+      "crates/mem-store/src/shard_path_migration.rs",
+      "crates/mem-store/src/sql.rs",
+      "crates/mem-store/src/sqlite_files.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-store/src/schema_migrations.rs",
+          "crates/mem-store/src/sqlite_files.rs"
+        ],
+        "invariant": "every file the promise ranges over is either swept or named",
+        "method": "source",
+        "result": "read: six .bak producers exist, the copy includes -wal, and no code path deletes a .bak",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-store/src/shard_manager.rs",
+          "crates/mem-store/src/shard_path_migration.rs",
+          "crates/mem-store/src/legacy_migrator.rs",
+          "crates/mem-store/src/encryption_migrator.rs",
+          "crates/mem-store/src/migration_service.rs"
+        ],
+        "invariant": "the backup inventory is complete",
+        "method": "source",
+        "result": "read: five further producers of the same shape found; listed in the finding",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-store/src/sql.rs",
+          "crates/mem-profile/src/profile_store.rs"
+        ],
+        "invariant": "derived profile text has an assigned erasure class",
+        "method": "source",
+        "result": "read: profile_data_snapshot holds five full versions and the design never assigns the profile a class",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "w6/erase/promise-overclaims-inventory"
+    ],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::data-subject::erasure-promise::disclosure",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "data-subject",
+      "subsystem": "erasure-promise",
+      "attack_class": "disclosure"
+    },
+    "surface": "w6-design",
+    "boundary": "data-subject",
+    "subsystem": "erasure-promise",
+    "attack_class": "disclosure",
+    "starting_paths": [
+      "crates/mem-web/src/api/prompts.rs",
+      "crates/mem-web/src/api/dto.rs",
+      "crates/mem-web/src/api/maintenance.rs",
+      ".scratch/rust-port/issues/43-database-base-hardening.md"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "DATA-ISOLATION-AND-LIFECYCLE.md",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      ".scratch/rust-port/issues/43-database-base-hardening.md",
+      "crates/mem-web/src/api/dto.rs",
+      "crates/mem-web/src/api/maintenance.rs",
+      "crates/mem-web/src/api/prompts.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-web/src/api/prompts.rs",
+          "crates/mem-web/src/api/dto.rs"
+        ],
+        "invariant": "every delete whose sweep has not completed must not be expressible as a bare success on a surface the user sees",
+        "method": "source",
+        "result": "read: DELETE /api/prompts/{id} answers DeletedPromptDto{deleted_memory} only; the routed default keeps that shape; the only cleanup endpoint is a 501 stub",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-web/src/api/maintenance.rs"
+        ],
+        "invariant": "the design names a lever that exists",
+        "method": "source",
+        "result": "read: POST /api/cleanup is the documented 501 stub (D-15)",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".scratch/rust-port/issues/43-database-base-hardening.md"
+        ],
+        "invariant": "the routed surface shape and the consultant's do not contradict",
+        "method": "source",
+        "result": "read: routed line 100 vs consult line 352 - they contradict; recorded as the finding",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "w6/erase/disclosure-unreachable"
+    ],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::data-subject::erasure-promise::liveness",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "data-subject",
+      "subsystem": "erasure-promise",
+      "attack_class": "liveness"
+    },
+    "surface": "w6-design",
+    "boundary": "data-subject",
+    "subsystem": "erasure-promise",
+    "attack_class": "liveness",
+    "starting_paths": [
+      "crates/mem-store/tests/turso_capabilities.rs",
+      "crates/mem-bridge/src/db_lane.rs",
+      ".tmp/drafts/20261025-w6-design-decisions-consult.md"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "DATA-ISOLATION-AND-LIFECYCLE.md",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      ".tmp/drafts/20261025-w6-design-decisions-consult.md",
+      "crates/mem-bridge/src/db_lane.rs",
+      "crates/mem-store/tests/turso_capabilities.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-store/tests/turso_capabilities.rs"
+        ],
+        "invariant": "a sweep can complete while other engine work continues",
+        "method": "source",
+        "result": "read: VACUUM is pinned to return Busy under a live write transaction, and the sweep needs the primary handle closed - the design states no quiesce rule",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-bridge/src/db_lane.rs"
+        ],
+        "invariant": "the sweep joins the existing serialisation point",
+        "method": "source",
+        "result": "read: db_lane exists and is the natural quiesce point; the design does not mention it",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".tmp/drafts/20261025-w6-design-decisions-consult.md"
+        ],
+        "invariant": "the design claim bound to this path was read and its consequence recorded",
+        "method": "source",
+        "result": "read for the audit question recorded in this unit's finding or coverage note",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "w6/erase/sweep-liveness"
+    ],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::data-subject::erasure-promise::truthfulness",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "data-subject",
+      "subsystem": "erasure-promise",
+      "attack_class": "truthfulness"
+    },
+    "surface": "w6-design",
+    "boundary": "data-subject",
+    "subsystem": "erasure-promise",
+    "attack_class": "truthfulness",
+    "starting_paths": [
+      "crates/mem-profile/src/prompt.rs",
+      "crates/mem-store/src/episodic_sql.rs",
+      "crates/mem-bridge/src/inject.rs",
+      ".tmp/drafts/20261025-w6-design-decisions-consult.md"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "DATA-ISOLATION-AND-LIFECYCLE.md",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      ".tmp/drafts/20261025-w6-design-decisions-consult.md",
+      "crates/mem-bridge/src/inject.rs",
+      "crates/mem-profile/src/prompt.rs",
+      "crates/mem-store/src/episodic_sql.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-profile/src/prompt.rs"
+        ],
+        "invariant": "the promise's first clause describes the effect of a prompt delete",
+        "method": "source",
+        "result": "read: delete_prompt is one DELETE and no episodic leg",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-store/src/episodic_sql.rs",
+          "crates/mem-bridge/src/inject.rs"
+        ],
+        "invariant": "the same text is not retained elsewhere verbatim",
+        "method": "source",
+        "result": "read: episodic_raw_context and episodic_segments retain the transcript per session; injected context is memories",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".tmp/drafts/20261025-w6-design-decisions-consult.md"
+        ],
+        "invariant": "the design claim bound to this path was read and its consequence recorded",
+        "method": "source",
+        "result": "read for the audit question recorded in this unit's finding or coverage note",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "w6/erase/view-clause-contradicts"
+    ],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::data-subject::residual-disclosure::information-disclosure",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "data-subject",
+      "subsystem": "residual-disclosure",
+      "attack_class": "information-disclosure"
+    },
+    "surface": "w6-design",
+    "boundary": "data-subject",
+    "subsystem": "residual-disclosure",
+    "attack_class": "information-disclosure",
+    "starting_paths": [
+      "crates/mem-web/src/gate.rs",
+      "crates/mem-web/src/api_auth.rs",
+      "crates/mem-web/src/api/dto.rs",
+      ".tmp/drafts/20261025-w6-consult-response.md"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "WEB-PROTOCOL-AND-AUTH.md",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      ".tmp/drafts/20261025-w6-consult-response.md",
+      "crates/mem-web/src/api/dto.rs",
+      "crates/mem-web/src/api_auth.rs",
+      "crates/mem-web/src/gate.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-web/src/gate.rs",
+          "crates/mem-web/src/api_auth.rs"
+        ],
+        "invariant": "a residual naming db labels and file paths does not cross a boundary a local reader has not already crossed",
+        "method": "source",
+        "result": "read: /api/* needs the local token, which is a 0600 file readable by any same-uid process; the storage root path is already known from config; no new confidentiality boundary is crossed, so the minimum residual is a design-wording issue, not a finding",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-web/src/api/dto.rs"
+        ],
+        "invariant": "the design claim bound to this path was read and its consequence recorded",
+        "method": "source",
+        "result": "read for the audit question recorded in this unit's finding or coverage note",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".tmp/drafts/20261025-w6-consult-response.md"
+        ],
+        "invariant": "the design claim bound to this path was read and its consequence recorded",
+        "method": "source",
+        "result": "read for the audit question recorded in this unit's finding or coverage note",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::data-subject::tshm-sensor::content",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "data-subject",
+      "subsystem": "tshm-sensor",
+      "attack_class": "content"
+    },
+    "surface": "w6-design",
+    "boundary": "data-subject",
+    "subsystem": "tshm-sensor",
+    "attack_class": "content",
+    "starting_paths": [
+      "crates/mem-store/tests/turso_capabilities.rs",
+      "crates/mem-store/src/sqlite_files.rs",
+      ".tmp/drafts/20261025-w6-consult-response.md"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "DATA-ISOLATION-AND-LIFECYCLE.md",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      ".tmp/drafts/20261025-w6-consult-response.md",
+      "crates/mem-store/src/sqlite_files.rs",
+      "crates/mem-store/tests/turso_capabilities.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-store/tests/turso_capabilities.rs",
+          "crates/mem-store/src/sqlite_files.rs"
+        ],
+        "invariant": "-tshm holds no user content",
+        "method": "source",
+        "result": "read: header counters, owner records and a page-to-frame index only; the stale-file measurements are consistent with that",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".tmp/drafts/20261025-w6-consult-response.md"
+        ],
+        "invariant": "-tshm presence is a liveness signal",
+        "method": "source",
+        "result": "read: refuted by the measured permanence of the file",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "w6/tshm/carries-content",
+      "w6/tshm/presence-is-liveness"
+    ],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::data-subject::vault-tier::completeness",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "data-subject",
+      "subsystem": "vault-tier",
+      "attack_class": "completeness"
+    },
+    "surface": "w6-design",
+    "boundary": "data-subject",
+    "subsystem": "vault-tier",
+    "attack_class": "completeness",
+    "starting_paths": [
+      "crates/mem-vault/src/lib.rs",
+      "crates/mem-bridge/src/purge.rs"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "DATA-ISOLATION-AND-LIFECYCLE.md",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      "crates/mem-bridge/src/purge.rs",
+      "crates/mem-vault/src/lib.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-vault/src/lib.rs"
+        ],
+        "invariant": "the purge report names every tier it did not erase",
+        "method": "source",
+        "result": "read: the crate documents that not_erased is incomplete and untrue without naming the vault",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-bridge/src/purge.rs"
+        ],
+        "invariant": "the residual list is complete",
+        "method": "source",
+        "result": "read: NOT_ERASED has one element",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "w6/purge/report-omits-vault"
+    ],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::local-user::engine-lock::liveness",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "local-user",
+      "subsystem": "engine-lock",
+      "attack_class": "liveness"
+    },
+    "surface": "w6-design",
+    "boundary": "local-user",
+    "subsystem": "engine-lock",
+    "attack_class": "liveness",
+    "starting_paths": [
+      "crates/mem-store/src/platform.rs",
+      "crates/mem-store/src/operation_lock.rs",
+      "crates/mem-store/src/engine_lock.rs",
+      "crates/mem-store/src/db.rs"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md"
+    ],
+    "excluded_blocks": [],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      "crates/mem-store/src/db.rs",
+      "crates/mem-store/src/engine_lock.rs",
+      "crates/mem-store/src/operation_lock.rs",
+      "crates/mem-store/src/platform.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-store/src/platform.rs"
+        ],
+        "invariant": "the liveness probe matches its documented contract on every shipping platform",
+        "method": "source",
+        "result": "read: the code is /proc-only and answers false everywhere else, while the comment promises true",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-store/src/operation_lock.rs",
+          "crates/mem-store/src/engine_lock.rs"
+        ],
+        "invariant": "a live holder can never have its lock stolen",
+        "method": "source",
+        "result": "read: a dead verdict unlinks the file and the acquire retry succeeds",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-store/src/db.rs"
+        ],
+        "invariant": "the mixed-version hazard is Linux-only",
+        "method": "source",
+        "result": "read: the multiprocess flag is enabled for every non-Windows platform, so macOS roots are flag-on roots",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "w6/liveness/platform-probe-fails-open"
+    ],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::local-user::legacy-guard::availability",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "local-user",
+      "subsystem": "legacy-guard",
+      "attack_class": "availability"
+    },
+    "surface": "w6-design",
+    "boundary": "local-user",
+    "subsystem": "legacy-guard",
+    "attack_class": "availability",
+    "starting_paths": [
+      ".scratch/rust-port/issues/43-database-base-hardening.md",
+      "crates/mem-store/tests/turso_capabilities.rs"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "DATA-ISOLATION-AND-LIFECYCLE.md",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "same-account availability only; no shared-service or multi-tenant availability boundary"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      ".scratch/rust-port/issues/43-database-base-hardening.md",
+      "crates/mem-store/tests/turso_capabilities.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".scratch/rust-port/issues/43-database-base-hardening.md",
+          "crates/mem-store/tests/turso_capabilities.rs"
+        ],
+        "invariant": "a local process can force the tool into permanent exit 75 only by defeating a boundary it is already inside",
+        "method": "source",
+        "result": "read: any same-uid process can hold byte 0 of a -tshm and make every open refuse; under the stated threat model this is a same-account DoS, accepted, and must be named in ADR-0025 (it is strictly better than silent data loss)",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::local-user::legacy-guard::concurrency",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "local-user",
+      "subsystem": "legacy-guard",
+      "attack_class": "concurrency"
+    },
+    "surface": "w6-design",
+    "boundary": "local-user",
+    "subsystem": "legacy-guard",
+    "attack_class": "concurrency",
+    "starting_paths": [
+      "crates/mem-store/tests/turso_capabilities.rs",
+      ".tmp/drafts/20261025-w6-consult-response.md"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "MEMORY-SAFETY-AND-BINARY.md",
+      "DATA-ISOLATION-AND-LIFECYCLE.md"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      ".tmp/drafts/20261025-w6-consult-response.md",
+      "crates/mem-store/tests/turso_capabilities.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-store/tests/turso_capabilities.rs"
+        ],
+        "invariant": "the guard's impact ceiling is measured for the sweep, not only for an ordinary open",
+        "method": "source",
+        "result": "read: VACUUM under a live writer is measured only same-mode/Busy; the cross-mode rewrite is unmeasured",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".tmp/drafts/20261025-w6-consult-response.md"
+        ],
+        "invariant": "the worst case is stated as a measurement",
+        "method": "source",
+        "result": "read: it is stated as a judgement ('the worst outcome in this design')",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "w6/guard/vacuum-under-legacy-holder"
+    ],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::local-user::legacy-guard::detectability",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "local-user",
+      "subsystem": "legacy-guard",
+      "attack_class": "detectability"
+    },
+    "surface": "w6-design",
+    "boundary": "local-user",
+    "subsystem": "legacy-guard",
+    "attack_class": "detectability",
+    "starting_paths": [
+      "crates/mem-store/tests/turso_capabilities.rs",
+      ".scratch/rust-port/issues/43-database-base-hardening.md"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "DATA-ISOLATION-AND-LIFECYCLE.md",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      ".scratch/rust-port/issues/43-database-base-hardening.md",
+      "crates/mem-store/tests/turso_capabilities.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-store/tests/turso_capabilities.rs"
+        ],
+        "invariant": "the byte-0 lock distinguishes a live flag-on holder",
+        "method": "source",
+        "result": "read: the holder takes a shared lock at open and holds it; the mixed cell succeeds because turso's check is unreachable, not because the byte is free",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".scratch/rust-port/issues/43-database-base-hardening.md"
+        ],
+        "invariant": "the oracle's mechanism is stated correctly",
+        "method": "source",
+        "result": "read: the routed default states it correctly; the claim tested here is its negation",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "w6/guard/oracle-cannot-detect"
+    ],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::local-user::legacy-guard::fail-open",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "local-user",
+      "subsystem": "legacy-guard",
+      "attack_class": "fail-open"
+    },
+    "surface": "w6-design",
+    "boundary": "local-user",
+    "subsystem": "legacy-guard",
+    "attack_class": "fail-open",
+    "starting_paths": [
+      ".scratch/rust-port/issues/43-database-base-hardening.md",
+      ".tmp/drafts/20261025-w6-consult-response.md",
+      "crates/mem-store/tests/turso_capabilities.rs",
+      "crates/mem-store/src/operation_lock.rs"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md",
+      "MEMORY-SAFETY-AND-BINARY.md"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      ".scratch/rust-port/issues/43-database-base-hardening.md",
+      ".tmp/drafts/20261025-w6-consult-response.md",
+      "crates/mem-store/src/operation_lock.rs",
+      "crates/mem-store/tests/turso_capabilities.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".scratch/rust-port/issues/43-database-base-hardening.md"
+        ],
+        "invariant": "the guard's oracle is specified by primitive, platform and failure semantics",
+        "method": "source",
+        "result": "read: it is specified by description only ('shared lock on byte 0'); no primitive, no positive control, no unknown-means-refuse rule",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".tmp/drafts/20261025-w6-consult-response.md"
+        ],
+        "invariant": "the check the consultant proposes uses the lock and not the file",
+        "method": "source",
+        "result": "read: it uses presence and deletes the file; the routed default removed the deletion but kept the wording",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-store/tests/turso_capabilities.rs"
+        ],
+        "invariant": "a bypassed guard has a bounded, measured consequence",
+        "method": "source",
+        "result": "read: silent loss of the opener's committed row with integrity_check ok",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-store/src/operation_lock.rs"
+        ],
+        "invariant": "the repo's lock-reading style is fail-closed",
+        "method": "source",
+        "result": "read: read_live_lock treats an unreadable file as no lock - the same fail-open shape would be inherited",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "w6/guard/oracle-failopen"
+    ],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::local-user::legacy-guard::lifecycle",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "local-user",
+      "subsystem": "legacy-guard",
+      "attack_class": "lifecycle"
+    },
+    "surface": "w6-design",
+    "boundary": "local-user",
+    "subsystem": "legacy-guard",
+    "attack_class": "lifecycle",
+    "starting_paths": [
+      ".scratch/rust-port/issues/43-database-base-hardening.md"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "DATA-ISOLATION-AND-LIFECYCLE.md",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      ".scratch/rust-port/issues/43-database-base-hardening.md"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".scratch/rust-port/issues/43-database-base-hardening.md"
+        ],
+        "invariant": "the retirement condition is satisfiable by the binaries it defends against",
+        "method": "source",
+        "result": "read: the condition names a check that only new builds execute, while the hazard is an old build holding the database",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "w6/guard/retirement-nonsequitur"
+    ],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::local-user::legacy-guard::portability",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "local-user",
+      "subsystem": "legacy-guard",
+      "attack_class": "portability"
+    },
+    "surface": "w6-design",
+    "boundary": "local-user",
+    "subsystem": "legacy-guard",
+    "attack_class": "portability",
+    "starting_paths": [
+      "crates/mem-store/tests/turso_capabilities.rs",
+      "crates/mem-store/src/platform.rs",
+      ".scratch/rust-port/issues/43-database-base-hardening.md"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "DATA-ISOLATION-AND-LIFECYCLE.md",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "SUPPLY-CHAIN-AND-RELEASE.md",
+        "reason": "the dependency-pin question is noted, not audited; no artifact-provenance boundary in a source checkout"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      ".scratch/rust-port/issues/43-database-base-hardening.md",
+      "crates/mem-store/src/platform.rs",
+      "crates/mem-store/tests/turso_capabilities.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-store/tests/turso_capabilities.rs"
+        ],
+        "invariant": "a tool-side probe is measured against a live holder on each platform",
+        "method": "source",
+        "result": "read: no such probe exists; all pinned cells exercise turso's own opens",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-store/src/platform.rs"
+        ],
+        "invariant": "platform-divergent primitives in this repo are measured, not inferred",
+        "method": "source",
+        "result": "read: the repo's other platform-divergent primitive was implemented contrary to its contract",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".scratch/rust-port/issues/43-database-base-hardening.md"
+        ],
+        "invariant": "the marker/self-conflict case for selectable WAL is specified",
+        "method": "source",
+        "result": "read: the marker records mode, but the guard's self-conflict case is not addressed",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "w6/guard/tshm-probe-portability"
+    ],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::local-user::non-w6-code::none",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "local-user",
+      "subsystem": "non-w6-code",
+      "attack_class": "none"
+    },
+    "surface": "w6-design",
+    "boundary": "local-user",
+    "subsystem": "non-w6-code",
+    "attack_class": "none",
+    "starting_paths": [
+      "crates"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "out_of_scope",
+    "agent_id": null,
+    "reviewed_paths": [],
+    "local_checks": [],
+    "result_fingerprints": [],
+    "unresolved": [
+      "Rust outside the W6 subject is excluded by the spawn contract; the storage-root permission question was recorded as a boundary condition, not audited as a finding"
+    ]
+  },
+  {
+    "coverage_id": "w6-design::local-user::purge-queue::authorization",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "local-user",
+      "subsystem": "purge-queue",
+      "attack_class": "authorization"
+    },
+    "surface": "w6-design",
+    "boundary": "local-user",
+    "subsystem": "purge-queue",
+    "attack_class": "authorization",
+    "starting_paths": [
+      ".scratch/rust-port/issues/43-database-base-hardening.md",
+      ".tmp/drafts/20261025-w6-consult-response.md",
+      "crates/mem-episodic/src/purge.rs",
+      "crates/mem-bridge/src/purge.rs",
+      "crates/mem-bridge/src/capture.rs"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "DATA-ISOLATION-AND-LIFECYCLE.md",
+      "DESKTOP-MOBILE-AND-LOCAL-IPC.md"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      ".scratch/rust-port/issues/43-database-base-hardening.md",
+      ".tmp/drafts/20261025-w6-consult-response.md",
+      "crates/mem-bridge/src/capture.rs",
+      "crates/mem-bridge/src/purge.rs",
+      "crates/mem-episodic/src/purge.rs"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".scratch/rust-port/issues/43-database-base-hardening.md"
+        ],
+        "invariant": "the enqueue decision states who may enqueue and when execution happens",
+        "method": "source",
+        "result": "read: it states neither; the earlier review's 'deletion oracle' framing was correctly rejected as a cross-user claim",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".tmp/drafts/20261025-w6-consult-response.md"
+        ],
+        "invariant": "the only worked-out drain preserves the owner-initiated invariant",
+        "method": "source",
+        "result": "read: it drains at start-up, which the episodic module's own doc forbids",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-episodic/src/purge.rs"
+        ],
+        "invariant": "erasure stays owner-initiated",
+        "method": "source",
+        "result": "read: the module says erasure is never automatic; a start-up drain is automatic",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-bridge/src/purge.rs"
+        ],
+        "invariant": "the human-intent gate survives the transport change",
+        "method": "source",
+        "result": "read: --confirm is a reproducible string; it is a human gate only when typed at a TTY",
+        "artifact": null
+      },
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          "crates/mem-bridge/src/capture.rs"
+        ],
+        "invariant": "a queue, if kept, reuses the existing engine-owned inbox pattern",
+        "method": "source",
+        "result": "read: the capture inbox already provides idempotent, bounded, engine-owned entries",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "w6/purge/queue-automates-erasure",
+      "w6/queue/deletion-oracle-crossuser"
+    ],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::local-user::purge-queue::resource-exhaustion",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "local-user",
+      "subsystem": "purge-queue",
+      "attack_class": "resource-exhaustion"
+    },
+    "surface": "w6-design",
+    "boundary": "local-user",
+    "subsystem": "purge-queue",
+    "attack_class": "resource-exhaustion",
+    "starting_paths": [
+      ".tmp/drafts/20261025-w6-consult-response.md",
+      ".scratch/rust-port/issues/43-database-base-hardening.md"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md"
+    ],
+    "excluded_blocks": [],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "opsec",
+    "reviewed_paths": [
+      ".scratch/rust-port/issues/43-database-base-hardening.md",
+      ".tmp/drafts/20261025-w6-consult-response.md"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "opsec",
+        "reviewed_paths": [
+          ".tmp/drafts/20261025-w6-consult-response.md",
+          ".scratch/rust-port/issues/43-database-base-hardening.md"
+        ],
+        "invariant": "the queue's count and size are bounded, and overflow refuses rather than evicts",
+        "method": "source",
+        "result": "read: no bound is stated in either document; the recommendation is in the report (bounded count/size, loud refusal, never silent eviction of the oldest request) - a design omission recorded as guidance, not a separate finding because no principal is harmed until the queue exists",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": []
+  },
+  {
+    "coverage_id": "w6-design::none::web-ui::none",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "none",
+      "subsystem": "web-ui",
+      "attack_class": "none"
+    },
+    "surface": "w6-design",
+    "boundary": "none",
+    "subsystem": "web-ui",
+    "attack_class": "none",
+    "starting_paths": [
+      "web-ui"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "out_of_scope",
+    "agent_id": null,
+    "reviewed_paths": [],
+    "local_checks": [],
+    "result_fingerprints": [],
+    "unresolved": [
+      "web-ui/ is excluded by the spawn contract; the design's UI obligations are stated as requirements in the report, not reviewed as code"
+    ]
+  },
+  {
+    "coverage_id": "w6-design::remote-attacker::threat-model::none",
+    "canonical_refs": {
+      "surface": "w6-design",
+      "boundary": "remote-attacker",
+      "subsystem": "threat-model",
+      "attack_class": "none"
+    },
+    "surface": "w6-design",
+    "boundary": "remote-attacker",
+    "subsystem": "threat-model",
+    "attack_class": "none",
+    "starting_paths": [
+      "crates/mem-web/src/gate.rs"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "WEB-PROTOCOL-AND-AUTH.md"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+        "reason": "bounded to the queue bounds check; no shared-service availability boundary exists in a single-user local tool"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "not_applicable",
+    "agent_id": null,
+    "reviewed_paths": [],
+    "local_checks": [],
+    "result_fingerprints": [],
+    "unresolved": [
+      "remote and network adversaries are outside the stated threat model; the loopback UI was examined only as a residual-disclosure surface"
+    ]
+  }
+]

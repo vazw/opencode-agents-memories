@@ -1,6 +1,11 @@
 # 43 — W9.0 · Database base hardening (review findings)
 
-Status: needs-triage — 2026-10-25. **Blocks issue 39 (retention cleanup) and issue 41 (scheduler).**
+Status: ready-for-human — 2026-10-27 (umbrella, not a single wave: **W0** `af01156`, **W1 write side**
+`3d5e940` and the **liveness blocker** `aa0dcc4` are landed; W2, W3, W4, W5, W7 and W8 are absent from the
+tree, and **ADRs 0017–0024 are all unwritten**. The audit that gates ADR-0019 and ADR-0025 is now preserved
+in-repo at `docs/evidence/opsec-w6-design-2026-10-25/` — §9 lists twelve blockers, 1 closed, 2–12 open.
+Next moves are the owner's: pick the next wave, rule the ADR-0019 promise, write ADR items 4–12. **Blocks
+issue 39 (retention cleanup) and issue 41 (scheduler).**
 
 ## RE-VERIFICATION 2026-10-25 (architecture pass) — read this before the items below
 
@@ -121,7 +126,10 @@ wish.
 The W6 *design* was audited as target code — decisions 6–9, the routed defaults and the consultant response,
 against the pinned probes and the turso 0.8.3 sources. Output:
 `.tmp/scratch/opsec-opencode-agents-memory-run-1/` (REPORT.md, FINDINGS-DETAIL.md, coverage ledger 21/21,
-validators PASS).
+validators PASS). **Preserved 2026-10-27 at `docs/evidence/opsec-w6-design-2026-10-25/`** — that path was
+gitignored, so the gate below was one `rm -rf` from gone; all seven artifacts are byte-identical there
+(`cmp`-verified, per-file sha256 in that directory's `README.md`), and the audited ref `b42905c` is still
+reachable in this repo's history.
 
 **Two high findings, both fail-open, both before ADR-0025:**
 
@@ -555,3 +563,35 @@ a benchmark.
   re-verified in the tree; the two refuted ones are listed so a future reader does not re-open them.
 - Issue 39 (retention cleanup) is paused pending 43.1 and 43.2, and is itself re-opening its storage design
   on the reviewers' convergent finding.
+
+---
+
+## TRIAGE 2026-10-27 — why `ready-for-human`, and what is actually open
+
+Verified against the tree at HEAD `1ef7fe6`. The status was `needs-triage` while three of its own waves had
+already landed, so the line now names them instead of inviting a re-triage.
+
+**Landed** — W0 (`af01156`, 22 pinned engine facts), W1 write side (`3d5e940`, `find_memory_in_scope` +
+`ScopeShardUnreadable`), blocker 1 of §9 (`aa0dcc4`, `decide_liveness`).
+
+**Absent from the tree** — W2 (`shard_stats`, embedding fingerprint), W3 (`embedding_model` is still unread
+outside `sql.rs`), W4 (no `WHERE is_active = 1` unique index), W5 (no prompts `user_version = 2`), W7 (no
+reaping code), W8 (no `benches/` target anywhere in the workspace). **ADRs 0017–0024: none exist**;
+`docs/adr/` stops at 0016.
+
+**Why this is not `ready-for-agent`.** It is a program, not a task: five code waves, eight ADRs, and the
+owner decisions that bound them. The next binding moves are rulings a wave cannot make — which wave next,
+the ADR-0019 promise (artefact split, `PendingErase` surface, the residual's fields), ADR-0025's oracle
+contract, and the selectable-WAL constraint recorded above. A single agent brief would either pick one wave
+and hide the rest, or claim a scope no gate could verify. `ready-for-human` is the honest state.
+
+**The split that is worth doing next, when it is scheduled.** W1b's note above ("still owes: `find_memory`
+preferring the highest `shard_index`, global search deduping by id, and delete-by-id removing every copy
+across the scope") is **partly stale**: `shard_manager.rs` already sorts `get_all_shards` by
+`Reverse(shard_index)` with a comment saying the highest index is the latest row, and `inject.rs` already
+dedups accepted memories through a `seen: HashSet<String>`. What is **not** verified is scope-wide
+delete-by-id — `delete_memory_by_id` takes a single `db`. That residual deserves its own issue and its own
+brief rather than a fourth status on this one.
+
+**Not done here, deliberately:** no code, no ADR text, no wave filed. The only change this triage makes is
+the status line plus the preserved audit.

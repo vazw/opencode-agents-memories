@@ -1,0 +1,37 @@
+{
+  "run_id": "opsec-opencode-agents-memory-run-1",
+  "repo": "opencode-agents-memory",
+  "target": "/home/vaz/Code/Personal/Rust/opencode-agents-memory",
+  "source_ref": {
+    "head": "b42905c45345acc1f672071b40d32bbf89e0c5db",
+    "orchestrator_named_base": "7390de1",
+    "worktree_dirty": false,
+    "note": "The spawn contract named HEAD 7390de1 with crates/mem-store/tests/turso_capabilities.rs dirty and under review. During reconnaissance the same content was committed as b42905c (parent 7390de1, one file, +1454/-17) and the tree is now clean. The probe file audited here is that committed content; no other path changed."
+  },
+  "profile": "standard",
+  "profile_note": "The spawn PROFILE field described the target class (local single-user developer tool) and its adversaries rather than naming quick|standard|deep. Defaulted to standard per SKILL.md §6 and overrode the threat model as instructed. Scoped run: coverage is partial by construction and the ledger records out-of-scope surfaces.",
+  "scope_paths": [
+    ".tmp/drafts/20261025-w6-design-decisions-consult.md",
+    ".scratch/rust-port/issues/43-database-base-hardening.md",
+    ".tmp/drafts/20261025-w6-consult-response.md",
+    "crates/mem-store/tests/turso_capabilities.rs",
+    "crates/mem-bridge/src/purge.rs",
+    "crates/mem-episodic/src/purge.rs",
+    "crates/mem-profile/src/prompt.rs",
+    "crates/mem-web/src/api/memories.rs",
+    "crates/mem-web/src/api/dto.rs",
+    "crates/mem-store/src/operation_lock.rs",
+    "crates/mem-store/src/engine_lock.rs"
+  ],
+  "budget": 30,
+  "budget_used_units": 21,
+  "posture": {
+    "report_only": true,
+    "spawn_proof": true,
+    "target_controlled_execution": false,
+    "note": "No target code was built, run, fuzzed or executed. Evidence is source inspection of the repository plus the vendored turso 0.8.3 crate sources in the local cargo registry (read as data). No probe was re-run: the pinned measurements were treated as given per the spawn contract."
+  },
+  "confirmed_semantics": "In this fleet confirmed = a static property of source (complete trace, no visible preventing layer, named principal/resource/impact). For this run the 'source' is the design text plus the code it binds; runtime-decisive questions are needs_validation.",
+  "run_status": "complete",
+  "terminal_state": "audit_complete"
+}
