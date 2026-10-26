@@ -65,3 +65,18 @@ mem-store = { workspace = true }
 mem-skills = { workspace = true }
 mem-portability = { workspace = true }
 mem-web = { workspace = true }
+
+# Dev/test profile tuning (owner directive, 2026-10-26). Debug info is the bulk
+# of what makes linking this workspace RAM-hungry, and `cargo test` inherits
+# this profile, so tests pay the same cost.
+[profile.dev]
+# 1 = line tables only: enough for a readable backtrace, far less to link and
+# to hold on disk. Set 0 for maximum RAM savings, at the cost of line numbers.
+debug = 1
+# Emit debug info into per-CGU `.dwo` sidecars instead of the executables, so
+# the linker processes skeletons rather than all of it. Measured on rustc
+# 1.98.0: accepted on Linux and it does write a `.dwo` beside the binary (the
+# Linux default is `off`, i.e. embedded, so this is a real change).
+# Trade-off: `.dwo` files are extra files on disk; they must stay next to the
+# binary for backtraces to resolve.
+split-debuginfo = "unpacked"
