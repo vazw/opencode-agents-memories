@@ -1,6 +1,6 @@
 # 59 — Test harness · two scratch fixtures resolve `target/` relatively, so with `CARGO_TARGET_DIR` unset one suite fails and another writes into the checkout
 
-Status: needs-triage — 2026-10-27. **With `CARGO_TARGET_DIR` unset, `cargo test --workspace` on a clean
+Status: ready-for-agent — 2026-10-27 (fully specified: premise measured, acceptance criteria and the open design question are in the issue). **With `CARGO_TARGET_DIR` unset, `cargo test --workspace` on a clean
 tree exits 101** on `mem-skills`' `v2_bridge_skill_path_absolute`, and `mem-portability`'s suite passes while
 silently creating `crates/mem-portability/target/` inside the checkout (untracked — `.gitignore`'s `/target`
 is root-anchored). Found while landing 57, which fixed the third member of the same class; filed because the
