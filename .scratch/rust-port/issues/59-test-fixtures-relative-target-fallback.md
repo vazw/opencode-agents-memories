@@ -1,10 +1,6 @@
 # 59 — Test harness · two scratch fixtures resolve `target/` relatively, so with `CARGO_TARGET_DIR` unset one suite fails and another writes into the checkout
 
-Status: ready-for-agent — 2026-10-27 (fully specified: premise measured, acceptance criteria and the open design question are in the issue). **With `CARGO_TARGET_DIR` unset, `cargo test --workspace` on a clean
-tree exits 101** on `mem-skills`' `v2_bridge_skill_path_absolute`, and `mem-portability`'s suite passes while
-silently creating `crates/mem-portability/target/` inside the checkout (untracked — `.gitignore`'s `/target`
-is root-anchored). Found while landing 57, which fixed the third member of the same class; filed because the
-repo's primary command is conditionally green and a test run dirties a clean tree.
+Status: landed 2026-10-27 in `72470ce38cc072cbf1d44831853a777e713937c6` — both fixtures derive their scratch base from `env!("CARGO_TARGET_TMPDIR")` (`<target>/tmp`), so with `CARGO_TARGET_DIR` unset `cargo test --workspace` exits 0 (231 result lines, 1848 passed, 0 FAILED), no `crates/*/target` appears, and one pinning test per crate (`scratch_base_is_absolute_under_the_target_dir`) fails on the pre-fix bodies.
 
 ## PREMISE — measured, not inherited
 
@@ -143,3 +139,30 @@ seam).
   segment is still load-bearing, because `<target>/tmp` is shared by every integration-test binary in a
   run. `docs/agents/testing.md:56` ("Temp dirs under `std::env::temp_dir()` only") contradicts these
   fixtures and is reconciled in the same wave rather than left standing.
+
+- **2026-10-27 — landed `72470ce38cc072cbf1d44831853a777e713937c6`.** Chosen: `env!("CARGO_TARGET_TMPDIR")`
+  (`<target>/tmp`) behind a private `scratch_base()` in each test file, with the
+  `<base>/scratch/<suite>/<label>` shape unchanged. Refused: `CARGO_MANIFEST_DIR` arithmetic (ignores
+  `CARGO_TARGET_DIR`, so worktree runs and the pre-commit hook's
+  `CARGO_TARGET_DIR=<toplevel>/.tmp/scratch/cargo-target` would all collapse into `<workspace>/target`) and
+  a shared support crate (`docs/agents/testing.md` records the no-dev-deps rejection; per-crate sharing is
+  by copying). `current_exe()` was demoted from mechanism to the test's independent cross-check: as a
+  mechanism its `.expect("<target>/<profile>/deps/<test>")` is a run-time panic on cargo's layout, it shifts
+  silently under `--target <triple>` (`INFERRED`, not measured), and it rediscovers at run time what cargo
+  already knows at compile time.
+
+  Measured this wave with the variable unset: `mem-skills` 15 passed/1 failed → 17/17
+  (`v2_bridge_skill_path_absolute` green again); `mem-portability` 20/20 (which also wrote
+  `crates/mem-portability/target/`) → 21/21 with `find crates -maxdepth 2 -name target -type d` empty;
+  `cargo test --workspace` exit 0 with 231 `test result:` lines, 1848 passed, 0 `FAILED`, no untracked
+  paths. The pin `scratch_base_is_absolute_under_the_target_dir` failed on the pre-fix bodies in both
+  crates with `the scratch base must be absolute, got "target"` (RED logs kept). Mirror control — the only
+  run that separates this derivation from `CARGO_MANIFEST_DIR` arithmetic —
+  `CARGO_TARGET_DIR=.tmp/scratch/issue59-target`: 17/17, 15 label dirs, and
+  `.tmp/scratch/issue59-target/tmp/scratch/mem-skills/v2-bridge` exists. Evidence:
+  `.tmp/scratch/issue59-memskills-red.log`, `issue59-memskills-green.log`, `issue59-memskills-suite.log`,
+  `issue59-portability-red.log`, `issue59-portability-suite.log`, `issue59-workspace.log`,
+  `issue59-mirror.log` (plus `*-suite-postfmt.log` after rustfmt).
+
+  Residual: issue 60's `mem-profile` CAS-barrier flake is untouched; r1's `--target <triple>` nesting
+  residual is retired by construction — the macro carries no layout arithmetic to shift.

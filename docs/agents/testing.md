@@ -54,6 +54,7 @@ Child mechanics (proven executable by `crates/mem-core/tests/fixture_recipe.rs` 
 ## Hermeticity rules
 
 - Temp dirs under `std::env::temp_dir()` only.
+- Two suites keep their scratch fixtures under `env!("CARGO_TARGET_TMPDIR")` rather than `std::env::temp_dir()`: `mem-skills` and `mem-portability` need a path under the target dir, and the recorded reason for staying off `/tmp` is that this host's `/tmp` is tmpfs (measured 2026-10-27) and truncation of files to zero there was reported while the 2026-10-21…10-23 wave was running (`REPORTED`, not re-measured). Under the pre-commit hook the two agree anyway — ADR-0016 D-6 exports `TMPDIR=<toplevel>/.tmp/scratch`.
 - Never `std::env::set_var` (parallel tests race) — inject values via the `EnvSource`/`ConfigPaths` seams.
 - No network, no user-home reads/writes, no dev-dependencies, no sleeps for synchronization.
 
