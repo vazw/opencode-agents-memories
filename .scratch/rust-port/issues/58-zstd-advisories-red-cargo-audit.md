@@ -70,10 +70,11 @@ and this issue together. That is the useful shape of this finding: not three pro
 - **Reachability in this codebase is unmeasured.** Whether any of the three is exercisable depends
   on whether `turso_core`'s FTS/sstable path ever calls `zstd` decompression on untrusted input; I
   have not traced it. That trace, not a severity score, is what would decide urgency.
-- **I did not read `tantivy-sstable 0.27.0`'s manifest**, so "0.27 moves zstd to 0.14" is
-  `INFERRED` from the lockstep versioning and the `zstd >= 0.14.3` fix floor, not measured.
-- Whether `turso` has published a release admitting `tantivy ^0.27` since `0.9.0-pre.1` — not
-  checked here.
+- ~~**I did not read `tantivy-sstable 0.27.0`'s manifest**, so "0.27 moves zstd to 0.14" is
+  `INFERRED`~~ — **measured 2026-10-27, see the comment below: `tantivy-sstable 0.27.0` declares
+  `zstd = "^0.14"`. Upgraded `INFERRED` → `MEASURED`.**
+- ~~Whether `turso` has published a release admitting `tantivy ^0.27` since `0.9.0-pre.1`~~
+  — **checked 2026-10-27, see the comment: it has not.**
 
 ## Gate
 
@@ -84,3 +85,50 @@ real finding rather than an optional check — but it is **outside the scope of 
 needs an owner decision (accept with a documented class-checked entry, or hold for the upstream bump).
 
 ## Comments
+
+- **2026-10-27 — the escape route is measured closed, and `zstd` is confirmed compiled.** Three
+  measurements, each answering one of the gaps above. Sources: crates.io API (`/crates/<name>`,
+  `/crates/<name>/<ver>/dependencies`), `cargo tree -e features -i zstd`, `cargo update -p zstd --dry-run`.
+  Advisory DB at this run: 1,378 advisories, last-updated `2026-10-26T14:45:01+01:00`. The 3 vuln IDs and
+  10 warnings re-enumerate exactly as recorded above — no drift.
+
+  **1. The crate is compiled, not feature-eliminated** (`cargo tree -e features -i zstd`):
+
+  ```
+  zstd v0.13.3  ├── zstd feature "arrays"
+                │   └── zstd feature "default"
+                │       └── tantivy-sstable v0.7.0 ─ default ─ tantivy-columnar v0.7.0
+                │           ─ default ─ tantivy v0.26.2
+                │               ├── tantivy feature "columnar-zstd-compression"
+                │               │   └── tantivy feature "default"
+                │               │       └── turso_core v0.8.3 ─ default ─ turso v0.8.3 ─ mem-store
+  ```
+
+  So the finding is not dismissible as "optional dep never enabled". (`turso_core` is given as the
+  negative control in the same probe: it appears with the same shape, and it is certainly compiled.)
+
+  **2. No in-range fix exists.** `tantivy-sstable 0.7.0` declares `zstd = "^0.13"`; the 0.13 line ends at
+  **0.13.3 (2025-02-20)** — there is no 0.13.4, and every fixed release is 0.14.x or later
+  (0.14.0 → 0.14.3). `cargo update -p zstd --dry-run` → **"Locking 0 packages"**, which is the lockfile
+  agreeing. And no patch release inside turso's own range exists to carry the bump: `tantivy` publishes
+  nothing between `0.26.2` and `0.27.0`, and `tantivy-sstable` nothing between `0.7.0` and `0.27.0`.
+
+  **3. The upgrade hop is now measured, and upstream has not taken it.** The chain is
+  `tantivy 0.27.0 → tantivy-sstable ^0.27 → zstd ^0.14` (`tantivy-sstable 0.27.0`'s manifest declares
+  `zstd = "^0.14"`; `tantivy 0.27.0` depends on `tantivy-columnar ^0.27` and `tantivy-sstable ^0.27`).
+  `turso_core`'s newest published release is **`0.9.0-pre.1` (2026-10-15)** and its dependency list still
+  reads `tantivy ^0.26.2` — as does every release back through `0.8.0`. `^0.26.2` allows
+  `>=0.26.2, <0.27.0`, so it can never select 0.27. The unblocking event has **not** happened.
+
+  **Consequence for triage.** There is no action available on this tree that removes the findings: not
+  `cargo update` (no in-range version), not a direct `zstd = "0.14"` (adds a second copy, as the issue
+  already says), not a `[patch]` (a patch cannot satisfy a `^0.13` requirement with a 0.14 crate). The
+  remaining choice is therefore genuinely binary and belongs to the owner:
+  **(a) accept the three IDs** in `.cargo/audit.toml` — which requires the armed drift check its header
+  mandates, an explicit note that these are `vulnerability` class (the file's existing entries are all
+  `unmaintained`/`unsound`, so this would be the first vulnerability-class acceptance), and a revisit
+  trigger tied to `turso_core` admitting `tantivy ^0.27`; **or (b) hold the gate red** until that release.
+  What would still sharpen (a): a trace of whether `turso_core`'s sstable/FTS path feeds untrusted bytes
+  to `zstd` decompression. Not measured here — the two `zstd-safe` vulns (`Seekable::decompress` length
+  overflow, streaming legacy-frame failure) are decompression-side, so the trace decides exploitability,
+  not fixability.
