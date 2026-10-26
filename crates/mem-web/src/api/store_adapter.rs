@@ -16,11 +16,13 @@
 //! `turso-api-scope.test.ts` does when it monkey-patches
 //! `embeddingService.embedWithTimeout`.
 //!
-//! **What is not.** `MaintenancePort` stays `unavailable()`: the
-//! handlers, the D-B bridge and the sync `TagMigrator` wiring already exist
-//! (Step 11), but a production `MigrationService` needs the W5.x readiness
-//! gate and a provider for `generate_tags`; `ApiServices::with_maintenance`
-//! is the injection point. With no AI provider in this build,
+//! **What is not.** `ApiServices::production()` leaves the slot on
+//! `UnavailablePort`; the composition root now injects the deduplication port
+//! through `.with_maintenance(..)`; every migration method still answers
+//! `Unavailable`. The handlers, the D-B bridge and the sync `TagMigrator`
+//! wiring already exist (Step 11), but a production `MigrationService` needs
+//! the W5.x readiness gate and a provider for `generate_tags`. With no AI
+//! provider in this build,
 //! `ProfilePort::ai_cleanup` answers the upstream business message
 //! [`NO_PROVIDER_MESSAGE`] at HTTP 200, and `apply_cleanup` answers the
 //! documented "no pending cleanup" message (the pending-cleanup session is

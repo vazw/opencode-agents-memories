@@ -291,8 +291,12 @@ curl -i -H "$AUTH" -H 'content-type: application/json' -d '{"strategy":"yolo"}' 
 # HTTP/1.1 200 OK
 # {"success":false,"error":"Invalid strategy"}
 
-# D-15: no service exists in this build — the stubs answer 501, not a
-# placeholder and not a 200 with invented data.
+# D-15 (pre-54 historical): this transcript predates issue 54, whose oracle is
+# `tests/production_api_wiring.rs`; `/api/deduplicate` now answers 200 with the
+# real report on a composed runtime (or the 200 disabled business message when
+# `deduplicationEnabled` is false). The `/api/cleanup` 501 below is still
+# current — it is its own stub, not a placeholder and not a 200 with invented
+# data.
 curl -i -X POST -H "$AUTH" http://127.0.0.1:4747/api/cleanup
 # HTTP/1.1 501 Not Implemented
 # {"success":false,"error":"cleanup is not available in this build"}
@@ -309,11 +313,12 @@ curl -i http://127.0.0.1:4747/api/migration/detect
 The migration service **exists** — `crates/mem-store/src/migration_service.rs`
 (exported at `crates/mem-store/src/lib.rs:22`, tested by
 `crates/mem-store/tests/turso_reembed_migration.rs`) — but it is **unwired**.
-The migration routes read `ApiServices::maintenance`, which the production
-wiring still leaves `unavailable()` until the composition root (issue 37)
-supplies the `ProductionMaintenance` adapter and the `.with_maintenance(...)`
-call; the same 500/`Internal Server Error` note as the skills block applies.
-The envelopes above are the handler contract, exercised by
+The migration routes read `ApiServices::maintenance`, whose slot now holds the
+deduplication port (issue 54); the migration service still has no adapter, so
+those methods answer `Unavailable`, which `port_failure` maps to the D-9 500.
+The residual is issue 37's AC6
+(issue 39 stays PAUSED and scoped to `/api/cleanup`). The envelopes above are
+the handler contract, exercised by
 `api_endpoint_contract.rs` over the fake port.
 
 ### F. Sessions (W6.3 — issue #25)
@@ -416,7 +421,7 @@ curl -i http://127.0.0.1:<port>/api/projects/demo-project/sessions
 | **D-12** | `parseInt` on a bad `page` yields `NaN` → an empty page and `totalPages: null`. | `page ≥ 1` and `1 ≤ pageSize ≤ 200`; a violation is `400` `{"success":false,"error":"Invalid pagination parameters"}`. | `NaN` pagination and an unbounded `pageSize` are a DoS and a contract hazard; the UI only sends valid numbers. |
 | **D-13** | (no upstream counterpart) | The session-history endpoints are registered from W6.2 on and answer the documented `501` (`"Session history endpoints land with W6.3"`) until the composition root injects the port. W6.3 supplies `EpisodicSessionPort`; `ApiServices::production()` still keeps `UnavailablePort` until the issue-37 composition root calls `.with_sessions(episodic_session_port(store))`, so the production wiring answers the `501` **by design** until then. | The seam and the route shapes landed in W6.2; the W6.3 adapter makes the fill a one-builder change, and the 501 stays truthful until the composition root wires it. |
 | **D-14** | The stored `metadata` object keeps its insertion order. | A `serde_json::Value` object is key-sorted. | Free-form metadata; the UI reads by key. |
-| **D-15** | `POST /api/cleanup` and `POST /api/deduplicate` exist and answer real data (upstream ships `cleanup-service.ts` and `deduplication-service.ts`). | Both answer **501** with a fixed message (`"… is not available in this build"`). | The port had neither service when this row was written; **the deduplication one landed in `6bf7b28`** behind `production_deduplication_port`, which the composition root still does not call (`src/main.rs` never calls `.with_maintenance(..)`). Both routes still answer **501**, by different mechanisms: `/api/deduplicate` through the `UnavailablePort` that `ApiServices::production(...)` installs for `maintenance` (`maintenance: Arc::new(UnavailablePort)` at `crates/mem-web/src/api/ports.rs`) — `ApiServices::unavailable()` installs the same `UnavailablePort` — and `/api/cleanup` from its own stub, which returns `CLEANUP_UNAVAILABLE` without consulting the port. Cleanup's service is issue 39 (PAUSED). (`mem_core::dedup` is the profile-conflict kernel, not upstream's memory-dedup service.) |
+| **D-15** | `POST /api/cleanup` and `POST /api/deduplicate` exist and answer real data (upstream ships `cleanup-service.ts` and `deduplication-service.ts`). | `POST /api/cleanup` answers **501** with a fixed message (`"… is not available in this build"`). `POST /api/deduplicate` answers **200** with the real report — or the 200 business envelope `{"success":false,"error":"Deduplication is disabled in config"}` when `deduplicationEnabled` is `false` — and answers **501** only on the tier-1-composition-failed launch, where the web server comes up on `ApiServices::unavailable()` and the maintenance slot is the `UnavailablePort`. | The port had neither service when this row was written; **the deduplication one landed in `6bf7b28`** behind `production_deduplication_port`, which the composition root did not call until issue 54 (`src/main.rs`'s `Some(deps)` arm now chains `.with_maintenance(..)`). `/api/cleanup` still answers from its own stub, which returns `CLEANUP_UNAVAILABLE` without consulting the port, so its 501 is unchanged. Cleanup's service is issue 39 (PAUSED). (`mem_core::dedup` is the profile-conflict kernel, not upstream's memory-dedup service.) |
 | **D-16** | `GET /api/skills?tag=<malformed>` applies no validation — the malformed tag simply matches nothing and the answer is an empty list. | The `tag` filter goes through the container-tag guard; a malformed tag is rejected with `400` `"Invalid container tag"`. | A traversal attempt must be rejected at **every** scoped endpoint; an empty list would silently answer a hostile tag. |
 | **D-17** | `POST /api/memories` computes the embedding **before** the scope extraction, so an invalid container tag still burns an embedding. | The container tag is resolved first; an invalid tag is rejected before any embedding is computed (and before the port is called). | A rejected request must not consume an embedding, and the port must not do work for a request it refuses. |
 | **D-18** | The **body** `containerTag` of `POST /api/skills` and `PUT /api/skills/{id}` is stored verbatim; upstream applies no validation. | The body's `containerTag` goes through the **same** guard as the query filter; a malformed body tag is rejected with `400` and never reaches the `SkillPort`. | The traversal requirement covers the body paths too, not only the query filters. |
@@ -442,7 +447,7 @@ curl -i http://127.0.0.1:<port>/api/projects/demo-project/sessions
   is added later, the guard must fall back to `req.uri().authority()` or it
   will refuse every h2 request.
 
-## Close-out measurements (2026-10-21)
+## Close-out measurements (2026-10-21 — historical; maintenance wiring changed in issue 54)
 
 The W6.2 REST surface (issue 24) was smoked **live** against the engine
 binary built from this workspace, on a throwaway store, one request per
@@ -499,6 +504,15 @@ Binary under test: sha256 prefix `9dcded5b953f` (12 hex).
 | 35 | GET /skills/{id}/{file} | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
 | 36 | GET /api/projects/{project_id}/sessions | 501 | BLOCKED | issue 37 (AC6): .with_sessions(episodic_session_port(...)) not wired |
 | 37 | DELETE /api/projects/{project_id}/sessions/{session_id} | 501 | BLOCKED | issue 37 (AC6): .with_sessions(episodic_session_port(...)) not wired |
+
+> **Addendum (issue 54).** This sheet is a historical measurement record: it
+> was measured on the binary above against the then-37-row table (38 rows since
+> issue 48) and has not been re-measured. Issue 54 changed the maintenance
+> wiring: `POST /api/deduplicate` now answers 200 on a composed runtime (or the
+> 200 `{"success":false,"error":"Deduplication is disabled in config"}`
+> business message when `deduplicationEnabled` is false); `/api/cleanup` and
+> every migration method are unchanged; the maintenance slot now holds the
+> deduplication port.
 
 ### Reproduction recipe
 

@@ -2,10 +2,9 @@
 //! gate, `ProductionDeduplication`, `ShardDedupStore`, real shard files with
 //! real vectors.
 //!
-//! The only absent link in the shipped binary is the composition-root
-//! injection (issue 37), so the 501 case here drives the untouched
-//! `ApiServices::unavailable()` wiring while every other case injects
-//! `production_deduplication_port`.
+//! The composition root wires the port (issue 54); the 501 case here
+//! deliberately drives the untouched `ApiServices::unavailable()` wiring while
+//! every other case injects `production_deduplication_port`.
 
 mod common;
 

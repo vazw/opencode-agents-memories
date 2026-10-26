@@ -41,7 +41,7 @@
 //! `PACKAGED-FIXTURE`), not on a connection refusal. With BOTH candidates absent
 //! (the second test's layout) the chain is: `RootWebLauncher::launch` emits
 //! `web.dist_missing` and returns `Err` **before** any bind
-//! (`src/main.rs:113-123`) -> the port is never bound -> `web.launch_failed`
+//! (`src/main.rs:114-124`) -> the port is never bound -> `web.launch_failed`
 //! follows from the engine's degradation
 //! (`crates/mem-bridge/src/engine.rs:917-938`).
 
