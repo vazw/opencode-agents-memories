@@ -99,7 +99,7 @@ pub const RUNNING_MESSAGE: &str = "Deduplication already running";
 /// Debug profile: the ladder ran under `cargo test` (no `--release`), so the
 /// derived value is conservative against a release build — release is faster
 /// and the same budget then buys less than 10 s. Measured (issue 56):
-/// k = 20.470 faster in release, so the same 740,000 pairs buy 0.49 s there;
+/// a factor of 20.470 faster in release, so the same 740,000 pairs buy 0.49 s there;
 /// evidence in `docs/evidence/dedup-release-profile-2026-10-26/README.md`.
 pub const MAX_NEAR_SCAN_PAIRS: u64 = 740_000;
 

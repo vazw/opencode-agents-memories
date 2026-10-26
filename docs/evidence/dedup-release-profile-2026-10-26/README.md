@@ -66,8 +66,9 @@ with the two `->` lines (per-shard truncation, whole-pass survivor coverage) kep
 
 ## Run environment
 
-Every line below is copied from `release-run-1.txt` (the other two runs carry identical environment lines
-apart from their timestamps); `argv` names the release test binary.
+Every line below is copied from `release-run-1.txt`; the `== environment ==` block is byte-identical across
+the three runs (the UTC stamps live in each file's `# run N started` header and `# run N exit=... finished`
+footer, not in this block), and `argv` names the release test binary.
 
 ```text
 cargo profile            : detected debug_assertions=false -> optimised (debug-assertions off: release, or a custom profile with debug-assertions off); opt-level not probed
@@ -93,15 +94,17 @@ argv                     : /home/vaz/Code/Personal/Rust/opencode-agents-memory/t
   run re-measured 289.9 s, which is not that estimate — it is this build. Runs 2 and 3 did not re-link
   (`Finished ... in 0.26s` / `0.24s`).
 - **cargo config preflight (recorded, not edited).** `~/.cargo/config.toml` carries
-  `rustc-wrapper = "sccache"`, `SCCACHE_CACHE_SIZE = "10G"`, `SCCACHE_BASEDIRS = "/home/vaz/Code/Personal/Rust"`,
-  `jobs = 2` and no `rustflags`/`RUSTFLAGS` of its own; the shell environment carried no `RUSTFLAGS`,
-  `CARGO_*` or `SCCACHE_*` entry either. Difference from the fragment recorded at
-  `docs/evidence/sccache-2026-10-26/README.md:60-69`: the global config now **also** carries
-  `[target.x86_64-unknown-linux-gnu] linker = "clang"` with
+  `rustc-wrapper = "sccache"`, `SCCACHE_CACHE_SIZE = "10G"`, `SCCACHE_BASEDIRS = "/home/vaz/Code/Personal/Rust"`
+  (the last two via its `[env]` table) and `jobs = 2`; it declares no `[build]` rustflags, and the shell
+  environment carried no `RUSTFLAGS` or `SCCACHE_*` entry either. Its only `rustflags` are the two
+  `-Clink-arg` entries in the difference below. Every cargo call in this record also ran through
+  `.tmp/scripts/cargo-serialized.sh`, which exports `CARGO_INCREMENTAL=0` — the release default, so it does
+  not move `c_iter`; the two rustflags are link-time only and likewise do not. Difference from the
+  fragment recorded at `docs/evidence/sccache-2026-10-26/README.md:60-69`: the global config now **also**
+  carries `[target.x86_64-unknown-linux-gnu] linker = "clang"` with
   `-Clink-arg=--ld-path=/home/vaz/.cargo/bin/wild` and `-Clink-arg=-Wl,--no-madvise-huge-pages`, and the
-  repo-local `.cargo/config.toml` carries the same two entries. Those are **link-time only** — they do not
-  change generated code, so they cannot move `c_iter` — but they do mean this build's link phase ran under
-  the wild linker, which is part of the recorded wall time.
+  repo-local `.cargo/config.toml` carries the same two entries. They do mean this build's link phase ran
+  under the wild linker, which is part of the recorded wall time.
 - **Per-run UTC stamps:** run 1 `19:01:44Z` → `19:02:25Z`, run 2 `19:02:25Z` → `19:03:07Z`, run 3
   `19:03:07Z` → `19:03:49Z`. Each is one separate harness invocation (`n = 3` observations per rung), not
   three passes inside one process.
@@ -247,8 +250,10 @@ The matching row of the pre-registered table, and only that row:
 The trade the owner is being asked to accept, stated plainly: the current cap is conservative on the
 measured profile — it spends `740,000 × 658.9 ns = 0.49 s`, well under the pre-registered 10 s — so the
 endpoint truncates earlier than the budget intends. That is a **usefulness** loss, not a safety bug, which
-is why this is not urgent. Keeping 740,000 is safe; the ceiling keeps the proposed 15,000,000 non-binding
-per shard by a factor of ~83.
+is why this is not urgent. Keeping 740,000 is safe. The **ceiling** is the quantity that does not bind:
+it is 1,250,000,000, ~83× the proposed 15,000,000, so `cap_release = 15,000,000` never reaches it. The
+**proposal** still binds per shard — 15,000,000 pairs against a 50,000-row shard's 1,249,975,000 — and that
+truncation is exactly what buys the 5,477 survivors above.
 
 ## What this does NOT establish
 
@@ -262,8 +267,8 @@ per shard by a factor of ~83.
   profile with `debug-assertions = false` and `opt-level = 0` would print the optimised line.
 - **The release run's AC2 recommendation is not adopted.** `pairs_for_tenth_of_a_second` is
   profile-relative, and the suite's 0.1 s sizing belongs to the **debug** profile the default suite runs
-  in; the release artifact's `recommended n : 560` (0.10 s in the optimised profile) stays an artifact
-  line, not a suite change.
+  in; the release artifacts print `recommended n : 560` / `550` / `560` for runs 1–3 (0.10 s in the
+  optimised profile), which stays an artifact line, not a suite change.
 - **This record does not decide the cap.** It makes the decision decidable against the pre-registered rule
   and leaves `MAX_NEAR_SCAN_PAIRS = 740_000` unchanged; the ownership of that decision is why the issue is
   `ready-for-human` rather than `done`.
