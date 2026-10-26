@@ -8,6 +8,7 @@
 
 mod common;
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -933,18 +934,41 @@ fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
 // Process-level CLI tests
 // ---------------------------------------------------------------------------
 
+/// Where the root binary lives, given the running test executable and the
+/// `CARGO_TARGET_DIR` value (if any).
+///
+/// An integration test's `current_exe()` is `<target>/<profile>/deps/<test>`,
+/// while the root package's binary is written to `<target>/<profile>/`. The
+/// derivation therefore strips exactly one `deps` segment; any other parent is
+/// taken as the profile directory itself. With no parent at all (a root path —
+/// unreachable for a real test binary) the bare file name is returned, which
+/// resolves against the working directory and keeps the function total.
+///
+/// Pure: no environment reads, no filesystem access, no allocation beyond the
+/// returned path — the caller owns both inputs.
+fn resolve_binary_path(current_exe: &Path, target_dir: Option<&OsStr>) -> PathBuf {
+    let name = format!("opencode-agents-memory{}", std::env::consts::EXE_SUFFIX);
+    if let Some(target_dir) = target_dir {
+        return Path::new(target_dir).join("debug").join(name);
+    }
+    let profile_dir = current_exe.parent().map(|parent| {
+        if parent.file_name() == Some(OsStr::new("deps")) {
+            parent.parent().unwrap_or(parent)
+        } else {
+            parent
+        }
+    });
+    match profile_dir {
+        Some(profile_dir) => profile_dir.join(name),
+        None => PathBuf::from(name),
+    }
+}
+
 fn binary_path() -> PathBuf {
     use std::sync::OnceLock;
     static BUILT: OnceLock<()> = OnceLock::new();
-    let name = format!("opencode-agents-memory{}", std::env::consts::EXE_SUFFIX);
-    let binary = match std::env::var_os("CARGO_TARGET_DIR") {
-        Some(target_dir) => PathBuf::from(target_dir).join("debug").join(name),
-        None => std::env::current_exe()
-            .expect("current exe")
-            .parent()
-            .expect("deps/")
-            .join(name),
-    };
+    let exe = std::env::current_exe().expect("current exe");
+    let binary = resolve_binary_path(&exe, std::env::var_os("CARGO_TARGET_DIR").as_deref());
     // Always (re)build once per test process: `cargo test -p mem-bridge` does
     // not build the ROOT binary, and a stale one would silently test the old
     // argv surface. The build is incremental and serialized by cargo's own
@@ -962,6 +986,68 @@ fn binary_path() -> PathBuf {
         binary.display()
     );
     binary
+}
+
+// binary_path resolution (issue 57)
+
+fn root_binary_name() -> String {
+    format!("opencode-agents-memory{}", std::env::consts::EXE_SUFFIX)
+}
+
+#[test]
+fn test_resolve_binary_path_prefers_the_profile_dir_when_the_exe_sits_in_deps() {
+    let root = scratch_home("resolve-deps");
+    let resolved = resolve_binary_path(
+        &root.join("debug").join("deps").join("purge_cli-abcd1234"),
+        None,
+    );
+    assert_eq!(resolved, root.join("debug").join(root_binary_name()));
+}
+
+#[test]
+fn test_resolve_binary_path_uses_cargo_target_dir_when_it_is_set() {
+    let root = scratch_home("resolve-target-dir");
+    let elsewhere = root.join("elsewhere");
+    let resolved = resolve_binary_path(
+        &root.join("debug").join("deps").join("purge_cli-abcd1234"),
+        Some(elsewhere.as_os_str()),
+    );
+    assert_eq!(resolved, elsewhere.join("debug").join(root_binary_name()));
+}
+
+#[test]
+fn test_resolve_binary_path_treats_a_non_deps_parent_as_the_profile_dir() {
+    let root = scratch_home("resolve-flat");
+    let resolved = resolve_binary_path(&root.join("debug").join("purge_cli-abcd1234"), None);
+    assert_eq!(resolved, root.join("debug").join(root_binary_name()));
+}
+
+#[test]
+fn test_resolve_binary_path_ignores_dwo_sidecars_in_deps() {
+    let root = scratch_home("resolve-dwo");
+    let debug = root.join("debug");
+    let deps = debug.join("deps");
+    std::fs::create_dir_all(&deps).expect("deps dir");
+    std::fs::write(
+        deps.join("opencode_agents_memory-318052b41797682c.dwo"),
+        b"",
+    )
+    .expect("dwo decoy");
+    std::fs::write(deps.join("opencode_agents_memory-318052b41797682c"), b"")
+        .expect("underscored decoy");
+    std::fs::write(debug.join(root_binary_name()), b"").expect("binary placeholder");
+    let resolved = resolve_binary_path(&deps.join("purge_cli-abcd1234"), None);
+    assert_eq!(resolved, debug.join(root_binary_name()));
+    assert!(
+        resolved.exists(),
+        "the resolver must land on the profile-dir binary, not a deps/ sidecar"
+    );
+}
+
+#[test]
+fn test_resolve_binary_path_falls_back_to_a_bare_name_when_the_exe_has_no_parent() {
+    let resolved = resolve_binary_path(Path::new("/"), None);
+    assert_eq!(resolved, PathBuf::from(root_binary_name()));
 }
 
 fn scratch_home(label: &str) -> PathBuf {
