@@ -1,6 +1,6 @@
 # 50 — Inject · Context assembly: the owner's rulings get a home, and the framing gets built
 
-Status: needs-triage — 2026-10-25. **Five of the six context-assembly rulings exist only in a gitignored
+Status: ready-for-agent — 2026-10-27 (verified absent: no wrapper, no `relevance`, no ADR 0026, and a negative assertion currently pins the absence; brief under `## Agent Brief`)
 draft, and the `<memory_context>` framing they describe is absent from the emitted block entirely.**
 
 ## The finding
@@ -119,3 +119,44 @@ by adding a constant is the defect class this repo has spent two days removing.
   budget charge do not exist. The audit's "cheapest fix is an ADR or a tracked issue" understates one half
   and overstates the cost of the other — an ADR alone would record an order for a block that has no
   wrapper.
+
+## Agent Brief
+
+**Category:** enhancement
+**Summary:** give the owner's context-assembly rulings a tracked home, and emit the wrapper they describe.
+
+**Current behavior (verified at HEAD `206cf9f`):**
+The injector emits a bare session-history block and nothing else: no `<memory_context>` wrapper, no header
+framing, no `relevance="N%"` attribute and no trailing safety sentence exist anywhere in the tree. The
+absence is **pinned by a negative assertion** in the end-to-end inject test, which asserts the wrapper is
+absent — so leaving it untouched would make the suite assert the bug once the wrapper lands. The owner's five
+rulings still live only in a gitignored draft, and `docs/adr/` stops at 0016: there is no ADR 0026.
+
+**Desired behavior:**
+An ADR records the five unowned rulings with their precedence, treats the scope statement as the scope
+statement it is, carries the ground for the missing-header regression, and points at issue 44's invariant
+restatement instead of duplicating it. The emitted block is wrapped, carries the header framing, and carries
+the safety sentence **at the end** — a test asserts the disclaimer's position relative to the last tier block,
+not merely its presence. Tier order is profile → project knowledge → project/agent session history, asserted
+with all present tiers; if the profile renderer has not landed, the profile slot is an explicitly **skipped**
+assertion citing issue 44, never silently omitted. Scored tiers carry `relevance="N%"` derived from the
+actual score, with the rounding rule recorded in the ADR and pinned at a boundary. The wrapper's own bytes are
+charged inside the budget, proven by an inversion arm that fails if the wrapper is excluded from accounting.
+
+**Key interfaces:**
+- The block open/close constants and the renderer that emits them.
+- `InjectResult` / `InjectParams` — changes may be additive only; the frozen DTOs stay untouched.
+- The `4 × token_budget` invariant — the wrapper now consumes part of it.
+- The negative assertion in the inject end-to-end test — it must be inverted, not deleted.
+- Issue 44.13's invariant sentence — this issue must not restate, weaken or edit it.
+
+**Acceptance criteria:**
+- [ ] The issue's 50.1–50.9, unchanged.
+- [ ] `git ls-files .tmp/drafts` is still empty after the ADR lands: no tracked file may cite the gitignored
+      draft as the authority for these rulings.
+- [ ] The inversion arm exists: removing the wrapper from the budget accounting makes the boundary test fail.
+
+**Out of scope:**
+- The profile renderer itself (issue 44) and its invariant sentence (44.13).
+- Any change to the frozen DTOs beyond additive fields.
+- Re-litigating the five rulings; the ADR records them, it does not re-decide them.

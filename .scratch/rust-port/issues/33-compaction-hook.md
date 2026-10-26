@@ -1,6 +1,6 @@
 # 33 — W5.5 · Compaction hook: ingest before, restore after (US 1.2)
 
-Status: needs-triage
+Status: ready-for-agent — 2026-10-27 (dependency verified landed at HEAD: capture writes tier-1 rows carrying `session_id`; brief under `## Agent Brief`)
 
 ## What to build
 
@@ -46,3 +46,55 @@ A **compaction hook** in the plugin: ingest the session's context *before* the h
 - `experimental.compaction.autocontinue` — noted but not required (it can suppress the host's synthetic continue turn; upstream does not use it).
 
 ## Comments
+
+## Agent Brief
+
+**Category:** enhancement
+**Summary:** handle the host's two compaction events — append durable memory before compaction, restore
+tier-1 facts after it.
+
+**Current behavior (verified at HEAD `206cf9f`):**
+No handler exists. Neither `session.compacting` nor `session.compacted` appears anywhere in the engine or the
+wrapper, and the restore heading upstream uses appears nowhere either; the wrapper's event hook acts only on
+`session.idle`. `compaction.enabled` / `compaction.memory_limit` are parsed and resolved by the config layer and
+read by **nothing**, and the log signatures for this lane are explicitly marked dormant. The dependency this
+lane was blocked on has landed: capture now writes tier-1 rows carrying the producing session's id, while
+promoted facts remain session-less.
+
+**Desired behavior:**
+Before compaction, append the session's durable memory to the host's compaction prompt as additional context,
+without double-counting the port's own injected block. After compaction, re-inject that session's tier-1 facts
+as a **single synthetic no-reply message**, formatted exactly as upstream does (`## Restored Session Memory`,
+then `### Memory N` with its tags). Resolve the pre-compaction agent and model and pass them explicitly, so the
+restore lands in the agent that was running rather than the host's stock general-purpose fallback. Child and
+subagent sessions restore nothing — an emergent property of the capture gate, so it must be pinned by a test,
+not assumed. Both halves honour the two config knobs with upstream's defaults (`enabled: true`,
+`memory_limit: 10`) and fail open: no engine, no rows, or disabled config makes the path a no-op that never
+blocks the host.
+
+**Key interfaces:**
+- The wrapper's `event` hook surface — the only place a host compaction event can be observed.
+- A tier-1 read keyed by `session_id`. The write side already exists; **this lane adds no writer** of
+  `memories.session_id`, and it must not touch the promotion path's agent-anonymity.
+- The `Compaction { enabled, memory_limit }` config type: these two fields must gain their first production
+  readers.
+- Upstream's restore formatting and the agent/model resolution ordering (upstream issue #236 is the reason the
+  fallback is wrong).
+
+**Acceptance criteria:**
+- [ ] `experimental.session.compacting` is handled: the session's durable memory is appended to the compaction
+      prompt, and the port's own injected block is not double-counted in that context.
+- [ ] `session.compacted` is handled: tier-1 facts for that `session_id` are re-injected as one synthetic
+      no-reply message, formatted upstream-exactly.
+- [ ] The pre-compaction agent and model are resolved and passed explicitly; the restore does not land in the
+      stock general-purpose fallback.
+- [ ] A child/subagent session restores nothing, and a test pins that behaviour rather than assuming it.
+- [ ] `compaction.enabled` and `compaction.memory_limit` drive the lane, with upstream's defaults.
+- [ ] Fail-open: no engine, no tier-1 rows, or disabled config is a no-op that never blocks or fails the
+      host's compaction.
+- [ ] Neither half writes `memories.session_id`; the capture-time write remains the sole producer.
+
+**Out of scope:**
+- The `session.idle` auto-capture and profile learning — issues 47 (ruling) and 48 (erasure leg) own those.
+- Episodic consolidation (a different meaning of "compaction"; it ages episodic rows into milestones).
+- `experimental.compaction.autocontinue`.

@@ -1,6 +1,6 @@
 # 60 — `mem-profile` · `test_exactly_one_competitor_cas_reclaims_dead_owner` times out intermittently, in isolation
 
-Status: needs-triage — 2026-10-27. **`crates/mem-profile/tests/profile_learning_lock.rs:345` fails with
+Status: ready-for-agent — 2026-10-27 (diagnosis first; the test is pre-existing and its failure is intermittent at ~1/6 in isolation; brief under `## Agent Brief`)
 `barrier hs.seen.b never appeared` after ~30 s, including when run alone.** It surfaced twice in one day
 (a workspace run and a reviewer's isolation run) and passes otherwise, so it is a flake — but an
 unexplained one, in a test that exists to prove a lock property.
@@ -58,3 +58,41 @@ Two consequences:
 - **2026-10-27** — filed from the issue-56 review after the failure appeared twice. Evidence:
   the coder's workspace log (30.08 s) and the reviewer's six isolation runs (1 fail at 30.01 s, five passes
   at 0.04–0.05 s). No code in that wave touches `crates/mem-profile`.
+
+## Agent Brief
+
+**Category:** bug
+**Summary:** a lock-correctness test times out intermittently — including when run alone — and nobody knows which
+participant fails to arrive.
+
+**Current behavior (verified):**
+`test_exactly_one_competitor_cas_reclaims_dead_owner` in the profile learning-lock suite fails with
+`barrier hs.seen.b never appeared` after roughly 30 seconds. It has failed twice in one day: once under a
+concurrent workspace run, and once in a six-run isolation series (run 1 of 6, 30.01 s; runs 2–6 pass in
+0.04–0.05 s). The whole file passes in isolation when the barrier does not stall. The test is pre-existing —
+the only commit that ever touched its file is the one that added it — and the barrier timeout is a 30-second
+constant.
+
+**Desired behavior:**
+A recorded diagnosis of **which participant fails to arrive at the barrier and where it blocks** — thread start
+failure, a lock held across the barrier, a lost notify, or a scheduler-dependent ordering. Then a test that
+cannot silently degrade: if the barrier is a coordination device, its timeout must say which side failed and
+why, not just that the second participant never appeared.
+
+**Key interfaces:**
+- The barrier rendezvous in the test — the thing that stalls.
+- The lock state type the test exercises (owner, timestamp, operation) and the CAS reclaim path.
+- `BARRIER_TIMEOUT` — a signal, not a knob to widen.
+
+**Acceptance criteria:**
+- [ ] A recorded diagnosis naming the failing participant and the point at which it blocks.
+- [ ] The suite is green across **at least 20 consecutive isolation runs** and in a workspace battery, with the
+      count recorded.
+- [ ] The CAS property is still asserted: exactly one competitor reclaims the dead owner's lease.
+- [ ] The failure message names the side that did not arrive.
+
+**Out of scope:**
+- Raising the barrier timeout to make the suite green — a 30-second budget exceeded intermittently in
+  isolation is the signal, and widening it hides it.
+- Weakening the assertion, or turning the race test into a sequential one.
+- Any other flaky or failing test in the workspace.

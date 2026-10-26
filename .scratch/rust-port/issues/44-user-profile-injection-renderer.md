@@ -1,6 +1,6 @@
 # 44 — W5.4 · User-profile injection tier: the ranked renderer
 
-Status: needs-triage — 2026-10-25. **Blocks the tier-1 leg of the context-assembly decision
+Status: ready-for-agent — 2026-10-27 (verified absent at HEAD: no renderer, no escaping, `InjectService` holds no `ProfileStore`; issue 47 no longer blocks it — brief under `## Agent Brief`)
 (`.tmp/drafts/20261025-context-assembly-decision.md`).** No dependency on 43's blockers; this is
 independent work that can run in parallel with the W6/guard line.
 
@@ -183,3 +183,55 @@ text is *model-generated from user prompts and fed back into a prompt* — untru
 end. An unescaped `</user_profile>` inside a preference description closes the block early, and
 everything after it reads as instructions carrying the wrapper's authority. Our tree has no escaping
 on this path.
+
+## Agent Brief
+
+**Category:** enhancement
+**Summary:** render a ranked, total-escaped, identity-gated `<user_profile>` block and inject it.
+
+**Current behavior (verified at HEAD `206cf9f`):**
+Nothing renders or injects profile data. `InjectService` holds `store`, `shards`, `scope_resolver`,
+`consolidation_active`, `embedder` and `probe` — **no `ProfileStore`** — and the inject module contains no
+profile reference at all, so this is absent rather than partial. The scoring, category-dedup and escaping
+helpers do not exist anywhere in the tree. `ProjectScope.user_email` exists and is populated, but its only
+consumer is capture metadata, so identity never reaches injection. The three `user_profile_inject_*` knobs
+resolve into the config and are read by nothing.
+
+**Desired behavior:**
+A renderer mapping a profile row's `ProfileData` to `Option<String>`, emitting four sections in order
+(Preferences, Patterns, Workflows, Learning Paths) and omitting any empty section entirely — a bare header is
+never acceptable. Preferences apply four steps in order: confidence sort with frozen items last and a
+frequency tie-break; `slice(0, 2N)`; a recency blend of `confidence×0.7 + exp(−age_days/90)×0.3` reusing the
+existing decay constant; then one item per category capped at N. Patterns apply frequency sort (frozen last)
+then one-per-category. Workflows apply frequency sort then top-N with the step chain, and a workflow with no
+steps renders its short form. Learning paths emit the first three as `- <topic>: <description>`. Escaping is
+**total** over `&`, `<`, `>` in that order — a description containing a closing block tag must not be able to
+close the block. Unparseable profile JSON returns `None` and logs, never panics and never emits a partial
+block. An all-empty profile returns `None`, not an empty wrapper. Caps come from the three injection knobs,
+never from `max_profile_items`. Output is byte-identical across runs for identical input.
+
+**Key interfaces:**
+- `ProfileData` and the profile store — the renderer's input; the store must become reachable from the
+  injection service.
+- `ProjectScope.user_email` → `InjectParams` — the identity gate; the renderer runs iff the `inject_profile`
+  knob is on **and** an identity is present.
+- The decay constant (`MILLIS_PER_DAY`) — reuse it rather than redefining 86 400 000.
+- `max_profile_items` — must remain deliberately unread, with a doc comment saying why, and a test proving
+  changing it does not move the rendered counts.
+- ADR-0013 — no `unwrap`/`expect`/`panic!` in production code.
+
+**Acceptance criteria:**
+- [ ] The issue's 44.1–44.13, unchanged — they are already behavioural and each names what can fail.
+- [ ] The three injection knobs are the only source of caps; a test flips `max_profile_items` and observes no
+      change in rendered counts.
+- [ ] The identity gate is enforced at the injection site: no identity ⇒ no block, even with the knob on.
+- [ ] Total escaping is proven against a hostile description that tries to close the block, not merely against
+      `&`/`<`/`>` in isolation.
+- [ ] A typed symmetric refusal exists for the configured-but-unusable case, matching the capture side's shape.
+
+**Out of scope:**
+- The learner — issue 47.1 ruled the tier read-only this release (Leg A = A2); nothing learns.
+- Erasure of derived profiles — issue 48 landed that leg.
+- The `<memory_context>` wrapper, tier order and `relevance` attribute — issue 50 owns those.
+- Scoring the profile tier: a scored profile would be a different design.
+- Any schema change, and any `agent_id` column on `memories`.

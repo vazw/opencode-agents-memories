@@ -1,6 +1,6 @@
 # 52 — Privacy · The injected-prompt filter is implemented, tested and unreachable on all three paths
 
-Status: needs-triage — 2026-10-25. **Our port records another plugin's orchestration boilerplate as if the
+Status: ready-for-agent — 2026-10-27 (verified unreachable at HEAD: filter and middleware exist, constructed only in tests; both config keys have no reader; brief under `## Agent Brief`)
 user had typed it, and summarises it into memories: the filter that exists to prevent exactly that has zero
 production call sites, and the two config keys that would enable it have zero readers.**
 
@@ -197,3 +197,47 @@ the reason (c) cannot be left where it is.
   re-home clause in 52.6 if the owner prefers the Phase 5 lane. And the audit's config buckets shift:
   two of the 32 "no landing issue" keys now have one (**32 − 2 = 30**; **13 + 2 = 15**) — my arithmetic on
   the audit's numbers, not a re-derivation.
+
+## Agent Brief
+
+**Category:** bug
+**Summary:** the injected-prompt filter exists, is tested, and has zero production call sites — so injected
+boilerplate is still captured as user text.
+
+**Current behavior (verified at HEAD `206cf9f`):**
+`mem-ai`'s privacy module carries the filter, the internal-prompt predicate and the middleware, all with tests.
+They are **unreachable**: the middleware is constructed only inside tests and no predicate is called from
+outside the privacy module. The two config keys that would enable them resolve into the config and are read by
+**nothing**; there is no `PrivacyConfig::from_core`. Capture applies only private-tag stripping before its
+durable writes, in both the capture path and the raw-context path. The wrapper's transcript extraction flattens
+parts and ignores their type, so a synthetic block cannot be distinguished from user text on the way in.
+
+**Desired behavior:**
+The filter runs at the store-side seam, adjacent to the existing private-content stripping and before any
+durable write, and on the raw-context path too — one place, not a call per caller. The two config keys gain
+their first production readers through a single `PrivacyConfig::from_core`, and a test flips each key and
+observes the behaviour change (filter on ⇒ marker text absent from the durable row; off ⇒ present). Both
+refusal shapes are right: a prompt that is *entirely* injected produces a typed skip and writes neither tier,
+while a *mixed* prompt keeps the user text and drops the injected block; the internal-prompt predicate must
+exempt the port's own analysis prompts so filtering can never zero a legitimate capture. The request-side
+question is decided rather than assumed, with its gate measurement recorded. Any deferred wiring is owned by a
+numbered issue, not by a deferred list.
+
+**Key interfaces:**
+- The existing predicates, types and marker list — **no second implementation**. A diff that adds a filter
+  module or a second marker list is rejected on sight.
+- `PrivacyConfig::from_core(&Config)` — the only production constructor where the layer is wired.
+- The capture write seam next to the private-content stripper, and the raw-context write.
+- The deferral pointers in the privacy module, its `CONTEXT.md` and the config normaliser — they name this
+  issue and must be corrected when it lands.
+
+**Acceptance criteria:**
+- [ ] The issue's 52.1–52.7, unchanged.
+- [ ] The gate measurement in 52.5 is recorded, not inferred: capture one real idle payload and record whether
+      the port's own synthetic block appears in the host's message list.
+- [ ] A second filter implementation, or a second marker list, fails review.
+
+**Out of scope:**
+- Reimplementing or re-tuning the filter and its markers.
+- The request-side wrap, unless this wave takes it — a re-homed issue may own it, but a deferred list is not
+  an owner.
