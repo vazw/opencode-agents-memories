@@ -1,6 +1,10 @@
 # 58 — Supply chain · `cargo audit` is red on `main`: one pinned tantivy line yields 3 live vulnerabilities and 10 warnings
 
-Status: needs-triage — 2026-10-26. **`cargo audit` exits 1 on `main` at `c4cd25b` and at the
+Status: paused — 2026-10-27, owner ruling: **hold the gate red.** `cargo audit` stays failing until
+`turso_core` admits `tantivy ^0.27` (measured 2026-10-27: the newest release `0.9.0-pre.1` still pins
+`^0.26.2`, and no in-range zstd fix exists, so nothing on this tree can clear it — see `## Comments`).
+Reopens when that release exists; the reopen check is a single `curl` against `turso_core`'s dependency
+list, not a re-triage. **`cargo audit` exits 1 on `main` at `c4cd25b` and at the
 issue-55 merge `6ad24a4`, with three unaccepted vulnerabilities in `zstd` / `zstd-safe` and ten
 further warnings in the same family — all reachable through a single dependency pin
 (`turso_core 0.8.3 → tantivy 0.26.2 → tantivy-sstable 0.7.0 → zstd ^0.13`).** The lock is
@@ -132,3 +136,23 @@ needs an owner decision (accept with a documented class-checked entry, or hold f
   to `zstd` decompression. Not measured here — the two `zstd-safe` vulns (`Seekable::decompress` length
   overflow, streaming legacy-frame failure) are decompression-side, so the trace decides exploitability,
   not fixability.
+
+- **2026-10-27 — owner ruling: hold the gate red.** Presented with the measured facts (nothing on this
+  tree can remove the findings: no in-range zstd release, no patch release inside `^0.26.2`, and
+  `turso_core 0.9.0-pre.1` still pins `tantivy ^0.26.2`), the owner chose to **keep `cargo audit` red**
+  rather than accept the three IDs into `.cargo/audit.toml`. Rationale recorded as the deciding one: an
+  `ignore` entry silences its ID regardless of class, and the file's existing three entries are
+  `unmaintained`/`unsound` — accepting `vulnerability`-class findings with unmeasured reachability would
+  be the first such acceptance and would convert a live signal into a documented assumption.
+
+  Consequences, stated so the next agent does not re-litigate:
+  - **No action is pending on this issue.** No wave, no acceptance entry, no `.cargo/audit.toml` edit.
+  - **The red is expected, not a regression.** Any run reporting `cargo audit` exit 1 with exactly
+    `0391`/`0398`/`0403` plus the ten warnings is the known state; a *different* ID appearing is a new
+    finding and must be surfaced.
+  - **Reopen trigger (single check):** `turso_core` publishing a release whose `tantivy` requirement
+    admits `^0.27`. At that point `tantivy-sstable 0.27.0`'s `zstd ^0.14` (measured) becomes reachable,
+    and the fix is a lockfile update rather than a decision.
+  - The `zstd` reachability trace (whether `turso_core`'s sstable/FTS path feeds untrusted bytes to
+    decompression) is **not** being done, and is no longer on the path to a decision: it would bound
+    exploitability of a finding that cannot be fixed either way.
