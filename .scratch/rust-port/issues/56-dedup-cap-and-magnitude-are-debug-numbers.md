@@ -1,8 +1,10 @@
 # 56 — Dedup · the cap, the cost curve and DEDUP-001's magnitude are all debug-profile numbers
 
-Status: needs-triage — 2026-10-26. **`MAX_NEAR_SCAN_PAIRS = 740_000` is `floor2(10 s ÷ 13,487.9 ns)`, measured
-in a debug test binary; release was never measured, so the cap is conservative by the debug/release factor and
-the 4.68 h magnitude sits beside a production bound.** The branch verdict is robust; the *numbers* are not.
+Status: ready-for-human — 2026-10-27. Instrument fixed (detected profile) and the release ladder measured:
+`c_iter_release = 658.9 ns/pair` (k = 20.470, 5.2 % spread), evidence in
+`/home/vaz/Code/Personal/Rust/opencode-agents-memory/docs/evidence/dedup-release-profile-2026-10-26/`.
+`MAX_NEAR_SCAN_PAIRS` is unchanged at 740,000; the re-derivation to 15000000 is an owner decision against the
+pre-registered `T_SCAN_MAX = 10 s` (table in the evidence README).
 
 ## PREMISE — the numbers, and the profile they came from
 
@@ -60,3 +62,27 @@ at `5c06275`. The release `c_iter` is **unmeasured** — that is the whole issue
 which `opsec` closed on the branch (`dedup/near-scan-inline-runtime-thread` → `rejected`).
 
 ## Comments
+
+### Outcome (record-only; implementation commits e168afb, b50fe18)
+
+- **Detected profile.** `crates/mem-web/tests/dedup_scan_measure.rs` no longer prints a hardcoded
+  `debug (cargo test without --release)`. It binds `cfg!(debug_assertions)` once and derives every profile
+  word from it (`profile_entry`, `profile_short`, `environment_lines`), plus a `DEDUP_MEASURE_EXPECT` guard
+  that panics on a mismatch **and** on an unrecognised value (`relase`, `Release`, `1`), evaluated after the
+  environment block so a refused run still records the profile it found. Six pure unit tests pin the
+  helpers, the guard and the cap derivation; the ladder stays `#[ignore]`d and still never joins
+  `cargo test --workspace`.
+- **Measured.** Three separate release invocations (`DEDUP_MEASURE_EXPECT=release`,
+  `DEDUP_MEASURE_RUNGS=1000,5000,10000`), each detecting `debug_assertions=false`, each printing
+  `== end of ladder ==`; no run was killed and the 17.9 s early-stop gate did not fire. Fixture width 768
+  lanes, same as 54b. `n = 10_000` ns/pair: 643.4 / 677.1 / 658.9 → **median 658.9**, spread 5.2 %;
+  `k = 13,487.9 / 658.9 = 20.470`. `t50_release = 823.6 s` is **INFERRED** (the 50k rung was not run); R3
+  is unchanged (823.6 s > 330 s).
+- **Decision inputs, no decision.** At `c_iter_release = 658.9 ns` the pre-registered rule yields
+  `cap_release = 15,000,000` (9.88 s of a detached blocking task per pass, coverage 1,217 → 5,477
+  survivors, 2.4 % → 11.0 % of a 50k shard), while the shipped cap spends 0.49 s. Row 1 of the
+  pre-registered table fired. **`MAX_NEAR_SCAN_PAIRS` and its value are untouched**: any diff line touching
+  the declaration is a rejection of this wave, and raising it is the owner's decision against
+  `T_SCAN_MAX = 10 s`.
+- **Record.** Raw runs, the scripts, the aggregation (`derived.txt`), the cap table and the README are
+  committed in `docs/evidence/dedup-release-profile-2026-10-26/` (UTC date), not in `.tmp/`.

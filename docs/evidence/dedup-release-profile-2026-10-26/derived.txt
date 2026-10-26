@@ -1,0 +1,13 @@
+# derived 2026-10-26T19:04:07Z
+n=1000   runs=3 min=616.1 median=637.3 max=643.1 spread=4.4%
+n=5000   runs=3 min=630.6 median=661.8 max=662.0 spread=5.0%
+n=10000  runs=3 min=643.4 median=658.9 max=677.1 spread=5.2%
+# detected profiles:
+cargo profile            : detected debug_assertions=false -> optimised (debug-assertions off: release, or a custom profile with debug-assertions off); opt-level not probed
+cargo profile            : detected debug_assertions=false -> optimised (debug-assertions off: release, or a custom profile with debug-assertions off); opt-level not probed
+cargo profile            : detected debug_assertions=false -> optimised (debug-assertions off: release, or a custom profile with debug-assertions off); opt-level not probed
+cargo profile            : detected debug_assertions=true -> debug (debug-assertions on: dev profile, or a custom profile with debug-assertions on); opt-level not probed
+# end-of-ladder markers:
+/home/vaz/Code/Personal/Rust/opencode-agents-memory/docs/evidence/dedup-release-profile-2026-10-26/release-run-1.txt:1
+/home/vaz/Code/Personal/Rust/opencode-agents-memory/docs/evidence/dedup-release-profile-2026-10-26/release-run-2.txt:1
+/home/vaz/Code/Personal/Rust/opencode-agents-memory/docs/evidence/dedup-release-profile-2026-10-26/release-run-3.txt:1

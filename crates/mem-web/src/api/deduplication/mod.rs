@@ -59,13 +59,20 @@ pub const RUNNING_MESSAGE: &str = "Deduplication already running";
 
 /// Hard ceiling on one pass's near-duplicate scan, in candidate comparisons.
 ///
-/// **Derivation (issue 54b, Step 1).** `c_iter = 13,487.9 ns` per candidate
-/// comparison at 768 lanes, measured at the largest completed rung (`n = 10,000`,
-/// 49,995,000 comparisons in 674.326 s) by
-/// `crates/mem-web/tests/dedup_scan_measure.rs`; the artifact is
-/// `.tmp/measure/20261026-issue-54b-scan-ladder.txt` and the numbers are
-/// transcribed in `.scratch/rust-port/issues/54b-dedup-scan-bounding.md`. With
-/// `T_SCAN_MAX = 10 s` pre-registered:
+/// **Derivation (issue 54b, Step 1), debug profile.** `c_iter = 13,487.9 ns`
+/// per candidate comparison at 768 lanes, measured **in the debug profile**
+/// (`cargo test` without `--release`) at the largest completed rung
+/// (`n = 10,000`, 49,995,000 comparisons in 674.326 s) by
+/// `crates/mem-web/tests/dedup_scan_measure.rs`, so this number can never be
+/// quoted as a production figure. The 54b artifact is gone; the durable record
+/// of the release re-measurement (issue 56) is
+/// `docs/evidence/dedup-release-profile-2026-10-26/README.md`, with the raw runs
+/// committed beside it, and 54b's numbers are transcribed in
+/// `.scratch/rust-port/issues/54b-dedup-scan-bounding.md`. Issue 56 measured the
+/// same 768-lane ladder in release: `c_iter_release = 658.9 ns/pair`,
+/// k = 13,487.9 / 658.9 = 20.470 (median of three runs, 5.2 % spread). **This
+/// value is unchanged** pending the owner's re-derivation against
+/// `T_SCAN_MAX = 10 s`. With that budget pre-registered:
 ///
 /// ```text
 /// 10 s / c_iter                  = 741,405 pairs
@@ -91,7 +98,9 @@ pub const RUNNING_MESSAGE: &str = "Deduplication already running";
 ///
 /// Debug profile: the ladder ran under `cargo test` (no `--release`), so the
 /// derived value is conservative against a release build — release is faster
-/// and the same budget then buys less than 10 s.
+/// and the same budget then buys less than 10 s. Measured (issue 56):
+/// a factor of 20.470 faster in release, so the same 740,000 pairs buy 0.49 s there;
+/// evidence in `docs/evidence/dedup-release-profile-2026-10-26/README.md`.
 pub const MAX_NEAR_SCAN_PAIRS: u64 = 740_000;
 
 /// One shard the pass walks; opaque to the engine (it is handed back
