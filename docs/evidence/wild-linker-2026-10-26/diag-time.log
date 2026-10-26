@@ -1,0 +1,64 @@
+   Compiling opencode-agents-memory v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory)
+warning: linker stdout: └─    1.01 Build thread pool
+         ┌───    7.03 Open input files
+         │ ┌───    0.00 Process linker scripts
+         │ ├───    0.25 Group files
+         │ ├───   15.25 Read symbols
+         │ ├───    4.77 Populate symbol map
+         ├─┴─   20.62 Load inputs into symbol DB
+         │ │ ┌───    0.08 Assign COMDAT metadata to objects
+         │ │ ├───    1.58 Bucket COMDAT candidates
+         │ │ ├───    0.02 Accumulate COMDAT candidates
+         │ │ ├───    0.94 Select native COMDAT winners
+         │ │ ├───    0.04 Select IR COMDAT winners
+         │ │ ├───    0.42 Apply COMDAT selection
+         │ │ ├───    0.02 Drop COMDAT winner maps
+         │ ┌─┴─    3.18 Select COMDAT groups
+         ├─┴─   19.71 Resolve symbols
+         ├───    0.99 Resolve alternative symbol definitions
+         │ ┌───   17.43 Resolve sections
+         │ ├───    1.39 Assign section IDs
+         │ ├───    0.16 Canonicalise undefined symbols
+         ├─┴─   19.25 Section resolution
+         │ ┌───    0.06 Build SONAME index
+         │ ├───   41.30 Merge strings and traverse reference graph
+         │ ├───    0.07 Finalise copy relocations
+         │ ├───    0.01 Merge dynamic symbol definitions
+         │ ├───    0.04 Create canonical PLT entries
+         │ ├───    0.03 Harvest and sort script sections
+         │ ├───    0.10 Merge GNU property notes
+         │ ├───    0.04 Merge .riscv.attributes sections
+         │ ├───    0.00 Merge e_flags
+         │ ├───    9.42 Finalise per-object sizes
+         │ ├───    0.08 Apply non-addressable indexes
+         │ ├───    0.07 Propagate section attributes
+         │ ├───    0.03 Compute output order
+         │ ├───    0.13 Compute total section sizes
+         │ ├───    0.01 Computing segment alignments
+         │ ├───    0.02 Layout sections
+         │ ├───    0.01 Compute segment layouts
+         │ ├───    0.00 Compute per-alignment offsets
+         │ ├───    0.11 Compute per-group start offsets
+         │ ├───    0.00 Compute merged string section start addresses
+         │ ├───   10.20 Assign symbol addresses
+         │ ├───    0.00 Update dynamic symbol resolutions
+         ├─┴─   62.70 Layout
+         │ ┌───    0.33 Wait for output file creation
+         │ │ ┌───    3.55 Fill padding for sections
+         │ │ ├───    0.02 Split buffers by alignment
+         │ │ ├───    0.41 Split output buffers by group
+         │ ├─┴─20186.16 Write data to file
+         │ ├───    1.99 Sort .eh_frame_hdr
+         │ ├───   11.54 Compute build ID
+         │ ├───    0.29 Flush and unmap output file
+         ├─┴─20200.57 Write output file
+         │ ┌───    0.33 Verify inputs unchanged
+         │ ├───   16.72 Drop layout
+         │ ├───    1.93 Drop inputs
+         ├─┴─   19.04 Shutdown
+         └─20350.07 Link
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `opencode-agents-memory` (bin "opencode-agents-memory") generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.09s

@@ -1,0 +1,7 @@
+A3-debug-r1 1916 1164320
+A3-debug-r2 1886 1179372
+A3-debug-r3 2068 1186400
+B3-debug-default-r1 15924 949352
+B4-debug-threads-r1 1768 952468
+B4-debug-threads-r2 25213 949568
+B4-debug-threads-r3 23360 953000

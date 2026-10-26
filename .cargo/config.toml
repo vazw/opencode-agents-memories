@@ -1,0 +1,33 @@
+# Repo-local toolchain config: the wild linker, adopted 2026-10-27 after measurement.
+#
+# Evidence: docs/evidence/wild-linker-2026-10-26/README.md
+# Measured on this machine, linking this repo's 195 MB debug binary:
+#   rust-lld (rustc's bundled, the previous default)  1.89-2.01 s   1116-1142 MiB
+#   wild 0.11.0 + --no-madvise-huge-pages            1.22-1.45 s    867-928 MiB
+# i.e. ~35 % less wall time and ~20 % less link memory, and the wild-linked binary passes
+# the process-level purge_cli suite 21/21.
+#
+# Deliberately REPO-LOCAL, not in ~/.cargo/config.toml: machine-wide, `--ld-path=wild`
+# does not compile an aya-ebpf project, so this setting is scoped to this repository
+# (it applies to every worktree of it, including the pre-commit hook's clippy runs).
+#
+# Why each entry:
+#   * `linker = "clang"` — gcc's `-fuse-ld` accepts only named linkers (bfd/gold/lld/mold),
+#     never a path, so clang is the driver that can reach wild at all.
+#   * `--ld-path=` absolute — a bare name resolves through PATH and a missing linker would
+#     fail less clearly; an absolute path errors out loudly, which is what we measured.
+#   * `--no-madvise-huge-pages` — REQUIRED, not a preference. wild 0.11.0 enables
+#     MADV_HUGEPAGE on the output mmap by default; on this xfs `target/` with THP at
+#     [madvise] that costs 8-25 s per link of the 195 MB debug binary (2 MB page faults
+#     hitting direct compaction), against 1.2-1.4 s with the flag. Removing this flag
+#     re-introduces the 10x regression. The rest of wild's write path (fallocate,
+#     update-in-place) was measured as NOT responsible: disabling either alone changes
+#     nothing, only the hugepage flag does.
+#
+# To revert: delete this file. rustc then uses its bundled rust-lld again, as it did before.
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = [
+    "-Clink-arg=--ld-path=/home/vaz/.cargo/bin/wild",
+    "-Clink-arg=-Wl,--no-madvise-huge-pages",
+]

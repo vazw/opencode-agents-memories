@@ -1,0 +1,90 @@
+   Compiling serde_core v1.0.229
+   Compiling subtle v2.6.1
+   Compiling serde_json v1.0.154
+   Compiling tracing v0.1.44
+   Compiling tokio v1.53.3
+   Compiling serde v1.0.229
+   Compiling deranged v0.5.9
+   Compiling tracing-subscriber v0.3.23
+   Compiling time v0.3.55
+   Compiling universal-hash v0.5.1
+   Compiling polyval v0.6.2
+   Compiling erased-serde v0.4.10
+   Compiling tantivy-common v0.11.0
+   Compiling uuid v1.28.0
+   Compiling tantivy-sstable v0.7.0
+   Compiling tantivy-stacker v0.7.0
+   Compiling typetag v0.2.23
+   Compiling tantivy-columnar v0.7.0
+   Compiling tantivy-query-grammar v0.26.0
+   Compiling ghash v0.5.1
+   Compiling sketches-ddsketch v0.4.1
+   Compiling tantivy-tokenizer-api v0.7.0
+   Compiling rust-stemmers v1.2.0
+   Compiling aes-gcm v0.10.3
+   Compiling rustls v0.23.46
+   Compiling tantivy v0.26.2
+   Compiling ureq v3.4.2
+   Compiling tracing-appender v0.2.5
+   Compiling jsonc-parser v0.34.0
+   Compiling serde_path_to_error v0.1.20
+   Compiling spm_precompiled v0.1.4
+   Compiling hyper v1.12.0
+   Compiling ort-sys v2.0.0-rc.14
+   Compiling mem-core v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/crates/mem-core)
+   Compiling turso_core v0.8.3
+   Compiling form_urlencoded v1.2.2
+   Compiling hyper-util v0.1.21
+   Compiling tower v0.5.3
+   Compiling tk-encode v0.1.0-rc.2
+   Compiling url v2.5.8
+   Compiling tokio-rustls v0.26.6
+   Compiling tk-serialize v0.1.0-rc.2
+   Compiling hyper-rustls v0.27.10
+   Compiling tower-http v0.6.11
+   Compiling rustls-platform-verifier v0.7.1
+   Compiling tk-convert v0.1.0-rc.2
+   Compiling ort v2.0.0-rc.14
+   Compiling reqwest v0.13.5
+   Compiling tokenizers v1.0.0-rc.2
+   Compiling mem-embed v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/crates/mem-embed)
+   Compiling tokio-util v0.7.20
+   Compiling mem-ai v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/crates/mem-ai)
+   Compiling turso_sync_engine v0.8.3
+   Compiling turso_sdk_kit v0.8.3
+   Compiling turso_sync_sdk_kit v0.8.3
+   Compiling turso v0.8.3
+   Compiling mem-store v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/crates/mem-store)
+   Compiling mem-profile v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/crates/mem-profile)
+   Compiling mem-episodic v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/crates/mem-episodic)
+   Compiling mem-vault v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/crates/mem-vault)
+   Compiling mem-facts v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/crates/mem-facts)
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/crates/mem-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 28s
+     Running tests/purge_cli.rs (target/debug/deps/purge_cli-13116131ddb5c33c)
+
+running 21 tests
+test test_purge_is_never_reachable_from_capture_or_consolidation ... ok
+test test_purge_report_always_names_the_surviving_tier ... ok
+test test_purge_refuses_a_missing_facts_store_when_the_database_exists ... ok
+test test_purge_refuses_a_facts_store_rooted_elsewhere ... ok
+test test_purge_report_merges_the_two_stores ... ok
+test test_resolve_binary_path_falls_back_to_a_bare_name_when_the_exe_has_no_parent ... ok
+test test_resolve_binary_path_ignores_dwo_sidecars_in_deps ... ok
+test test_resolve_binary_path_prefers_the_profile_dir_when_the_exe_sits_in_deps ... ok
+test test_resolve_binary_path_treats_a_non_deps_parent_as_the_profile_dir ... ok
+test test_resolve_binary_path_uses_cargo_target_dir_when_it_is_set ... ok
+test test_interrupted_purge_converges_on_retry ... ok
+test test_purge_raced_against_a_consolidator_leaves_nothing_behind ... ok
+test test_purge_takes_the_consolidation_locks_before_the_pre_scan ... ok
+test test_purge_skips_the_facts_leg_when_there_is_no_facts_db ... ok
+test test_purge_session_rejects_an_invalid_scope_with_exit_64 ... ok
+test test_purge_session_reports_a_store_failure_with_exit_74 ... ok
+test test_purge_session_reports_busy_with_exit_75 ... ok
+test test_purge_session_refuses_without_a_matching_confirmation ... ok
+test test_purge_does_not_touch_the_vault_directories ... ok
+test test_purge_session_process_exits_zero_and_reports_counts ... ok
+test test_purge_session_honours_storage_root ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.44s
+
