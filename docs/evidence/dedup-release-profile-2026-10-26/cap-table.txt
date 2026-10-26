@@ -1,0 +1,4 @@
+candidate                       cap   t_at_cap_s   coverage pct_of_50k
+current (debug-derived)       740000         0.49       1217      2.4%
+release-derived            15000000         9.88       5477     11.0%
+# k = 20.470  (13487.9 / 658.9)

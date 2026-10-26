@@ -1,0 +1,49 @@
+# debug profile probe started 2026-10-26T19:01:25Z
+# command: DEDUP_MEASURE_RUNGS=100 cargo test -p mem-web --test dedup_scan_measure -- --ignored --nocapture --test-threads=1
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.48s
+     Running tests/dedup_scan_measure.rs (target/debug/deps/dedup_scan_measure-011af111811cf483)
+
+running 1 test
+test measure_near_scan_ladder ... == environment ==
+cargo profile            : detected debug_assertions=true -> debug (debug-assertions on: dev profile, or a custom profile with debug-assertions on); opt-level not probed
+lscpu model              : Model name:                              AMD Ryzen 5 6600U with Radeon Graphics
+rustc                    : rustc 1.98.0 (88d9e12ae 2026-08-18)
+DEFAULTS.embedding_model : Xenova/nomic-embed-text-v1
+DEFAULTS.embedding_dimensions (table) : 768
+embedding_dimensions_for_model(default) : 768  (used for the fixtures)
+threshold                : 0.9
+argv                     : /home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/dedup_scan_measure-011af111811cf483 --ignored --nocapture --test-threads=1
+
+== ladder (one rung per line, printed as it completes) ==
+      n      comparisons       wall_s  ns/comparison   exponent  exact_plan_ms
+    100             4950        0.051        10202.7          -          0.253
+
+== skip paths the budget must also cover (n = 5000) ==
+tag rejection (no cosine)  :      0.365 s        29.2 ns/comparison  (12497500 comparisons)
+claimed-set growth         :      0.058 s         4.7 ns/comparison  (the Vec<&str> membership scan)
+ratio cosine/tag-reject    : NaNx — the budget must count comparisons, not cosines
+
+== decision rule ==
+largest fully measured rung : n = 100 (4950 comparisons, 0.051 s)
+n = 50_000                  : NOT run (not requested); t50 below is INFERRED from c_iter
+c_iter                      : 10202.7 ns per candidate comparison
+t50 = c_iter x 1,249,975,000: 12753.2 s (INFERRED)
+branch                      : R3 (offload + cap both required; the pre-fix endpoint could never answer)
+floor2(10 s / c_iter)       : 980000
+cap candidate (this run)    : 980000   <- derived from THIS run's c_iter, not the source constant
+MAX_NEAR_SCAN_PAIRS (source): 740000
+cap candidate / source      : 1.32x
+  -> a single 50 000-row shard (1,249,975,000 pairs) IS truncated by the cap (the cap binds per shard)
+  -> a whole pass covers about 1400 survivors (sqrt(2 x 980000 pairs))
+
+== centrepiece recommendation (AC2) ==
+recommended n               : 150  (grid 11175 comparisons, 0.11 s of scan in this debug profile)
+  jobs: 11175 < cap candidate = 980000  AND  >= 0.1 s in debug
+this ladder's debug c_iter  : 10202.7 ns/pair -> the derived cap is CONSERVATIVE against release
+
+== end of ladder ==
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.64s
+
+# exit=0 finished 2026-10-26T19:01:26Z
