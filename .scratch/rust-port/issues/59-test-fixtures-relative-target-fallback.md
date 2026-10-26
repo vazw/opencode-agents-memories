@@ -166,3 +166,34 @@ seam).
 
   Residual: issue 60's `mem-profile` CAS-barrier flake is untouched; r1's `--target <triple>` nesting
   residual is retired by construction — the macro carries no layout arithmetic to shift.
+
+- **2026-10-27 — reviewer APPROVED** (independent re-execution of the blueprint's test plan, not a read of
+  the coder's report). Reviewed landing `72470ce` + record `0ab97ff`; the review ran on a Rust-identical
+  tree, and `git diff` against both commits over the two test files and the docs bullet is empty. All 13
+  ACs observed: the workspace run gives **231 result lines / 1848 passed / 0 failed / exit 0**, both new
+  tests appearing as `ok` in that log; `find crates -maxdepth 2 -name target -type d` is empty; the
+  post-fmt `target/tmp/scratch` trees hold 15 and 19 label dirs; `CARGO_TARGET_TMPDIR` appears exactly once
+  per test file and **zero** times under `src/`, behind a private `fn scratch_base()`. The namespace claim
+  was re-derived rather than inherited: **16/20** test attributes at `78f2ae9` → **17/21** at HEAD, `+2`,
+  no test dropped, renamed or skipped.
+
+  **Two mutations, both non-vacuous, both reverted** (scratch worktree at `72470ce`; the workspace was
+  never mutated, and the worktree is gone — `git worktree list` is back to one entry):
+  - **M1** — restore the pre-fix body (`env::var("CARGO_TARGET_DIR")` … `unwrap_or_else(|_| "target")`),
+    variable unset: exit 101, panic `skills_manager.rs:63:5: the scratch base must be absolute, got
+    "target"`, byte-identical to the handoff RED.
+  - **M2** — an absolute base *outside* the target dir (`/nonexistent-issue59-proof`): exit 101, panic
+    `:71:5: the scratch base must live under the target directory`. This is the run that proves assertion 2
+    (the `current_exe()` cross-check) does real work rather than decorating the test.
+  - Restore → 17 passed, 0 failed. Logs: `.tmp/scratch/review-issue59-mutation1-red.log`,
+    `…mutation2-red.log`, `…mutation-restored.log`.
+
+  The mirror control was re-run into a **fresh** absolute dir (`.tmp/scratch/issue59-review-mirror`): 17/17,
+  `MIRROR-OK`, 15 label dirs — so the mechanism honours `CARGO_TARGET_DIR` and a stale cache bake is
+  excluded rather than assumed away. `cargo fmt --all --check` exit 0; both clippy gates exit 0 with the
+  three named exclusions intact. The docs change is `+1 / −0` lines in the record commit only.
+
+  Two non-blocking observations, recorded rather than acted on: the blueprint's Step-5 count gate is
+  **format-sensitive** (it reads the scratch chain as a single line, so rustfmt's split makes the matcher
+  report 2 rather than 0 — the semantic count of 4 holds and the reviewer read all four lines), and the
+  ledger's "4 hunks per file" is 2 unified hunks carrying those four edits. Neither changes the artifact.
