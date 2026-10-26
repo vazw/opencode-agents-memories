@@ -1,6 +1,6 @@
 # 37 — W6.2 follow-up · Wire the production API services into the composition root
 
-Status: ready-for-agent — 2026-10-25 (grilled and re-scoped: AC4 = contract-only doc statement;
+Status: ready-for-agent — 2026-10-27 (verified open at HEAD: `.with_sessions(...)` has **no caller** and `WebStoreDeps` has no episodic field — AC6; and `docs/bridge-schema.md` states neither the token header nor the 501/500 distinction — AC4; brief under `## Agent Brief`)
 AC6 = sessions wiring ONLY — the maintenance half moved to issue 39. Anchors are symbol-precise,
 line numbers demoted to hints. See "2026-10-25 re-scope" below.)
 
@@ -234,3 +234,51 @@ Bearer authenticates the CONFIGURED `api_token`, which is `None` in standalone m
   this AC, so neither owns that wiring. The residual is recorded on issue 40's status line; assigning it
   is not this issue's work — and that assignment has since been made: the wiring is **owned by issue 54**
   (`54-dedup-port-wiring-unreachable`), filed 2026-10-25.
+
+## Agent Brief
+
+**Category:** enhancement
+**Summary:** two leftovers from the composition-root wiring — wire the sessions port, and state the auth/failure
+contract where a UI author will find it.
+
+**Current behavior (verified at HEAD `206cf9f`):**
+AC1–AC3 and the oracle criterion landed with the composition root: the root builds real `ApiServices` over the
+real stores, the degrade path is "no deps → unavailable", and the live oracle seeds a row through a real shard
+manager and asserts it. Two criteria remain open. **AC6:** `ApiServices::with_sessions` exists as a builder with
+documentation, but no production caller invokes it, and `WebStoreDeps` has no `episodic` field, so the sessions
+port cannot be attached — every session-backed endpoint stays on the unavailable path. **AC4:** the bridge
+schema says nothing about the local-token header or about the 501-versus-500 distinction, so a UI author has to
+discover both by experiment.
+
+**Desired behavior:**
+The composition root passes the episodic store into the web deps and attaches the sessions port at its single
+construction site, so session-backed endpoints answer real data instead of the documented stub. The bridge
+schema gains the three contract statements AC4 names: the custom token header and the fact that neither Basic
+nor Bearer works in standalone mode; that 501 means "this service is absent in this build" while 500 means an
+internal fault, and a client must not conflate them; and that per-endpoint availability is deliberately **not**
+enumerated, because it tracks the build.
+
+**Key interfaces:**
+- `WebStoreDeps` — the struct that must gain `episodic: Arc<EpisodicStore>`, filled from the composed runtime's
+  existing store field at the same place the other deps are filled.
+- `ApiServices::with_sessions(episodic_session_port(store))` — the call with no caller today.
+- `docs/bridge-schema.md` — the contract surface AC4 edits.
+- The auth gate's header constant and its gate order — verify the statements against the code before writing
+  them.
+
+**Acceptance criteria:**
+- [ ] The sessions port is attached at the composition root through a single construction site; the deps struct
+      carries the episodic store.
+- [ ] A session-backed endpoint answers real data against a live engine, and a project-scoped call never
+      returns another project's sessions.
+- [ ] The bridge schema states the token header shape, the Basic/Bearer failure, and the 501-versus-500
+      distinction — each verified against the auth gate and the maintenance handler, not recalled.
+- [ ] **No endpoint status table is written.** Per-endpoint availability is explicitly declared out of scope in
+      the document.
+- [ ] The `unavailable()` degrade path still exists and is still tested.
+
+**Out of scope:**
+- The maintenance/cleanup port — that half moved to issue 39.
+- Fixing the port-failure conflation in `mem-web` (a `PortError::Unavailable` still funnels to 500 through the
+  generic failure helper); AC4 records the contract, it does not change the handler.
+- Any endpoint beyond sessions.

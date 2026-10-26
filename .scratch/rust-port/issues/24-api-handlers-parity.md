@@ -1,6 +1,6 @@
 # 24 — W6.2 · API handlers parity (US 5.1)
 
-Status: ready-for-agent — 2026-10-21 (REST surface complete and reviewed; AC2 blocked on 26 · W6.4, 37 and 29 · W6.5 — see the close-out comment)
+Status: ready-for-agent — 2026-10-27 (verified at HEAD: REST surface reviewed and the skills port is now wired at the root; **AC2's live smoke is the only open criterion**, and 3 of its 37 rows stay gated on 37 · AC6 and issue 39 — brief under `## Agent Brief`)
 
 ## What to build
 
@@ -38,3 +38,47 @@ W6.2 execution notes (blueprint `20261020-1602-w62-api-handlers-parity-r4`, `blu
 Closing measurements: `cargo fmt --all --check` clean, `cargo build --workspace` clean, `cargo clippy --workspace --all-targets -- -D warnings` clean, `cargo test --workspace` = **1225 tests green / 0 failed**, `cargo audit` exit 0 (3 pre-existing allowed warnings). `host_allowlist.rs` sha256 unchanged (`616ec782b9dd…`); the normalized lock anchor unchanged (`11538f989e33…`); `git diff -- Cargo.lock` is exactly the three added `mem-web` dependency lines (`async-trait`, `chrono`, `serde`). `cargo test -p mem-web` = 144 tests green across 18 test binaries.
 - **2026-10-20 (W6.2 close-out — reviewer APPROVED):** blueprint `20261020-1602-w62-api-handlers-parity-r4` (sha256 `479a22c86d63`), ledger `/tmp/opencode/progress/20261020-1602-w62-api-handlers-parity-r4.ledger.md` (16/16 rows done, 0 unchecked, 0 open). The re-review after rework iteration 1 returned **STATUS: APPROVED**. The prior finding (an out-of-wave `Status:` hunk on line 3) was the orchestrator's own pre-wave triage promotion (`edit` at 2026-10-20T15:09:46Z, session `ses_eb227a42fffe4lSE1UV3Yj7C4U` — 1h37m before this blueprint was approved), not a wave edit; the rework reverted line 3 to the HEAD byte value so the file's diff now carries only the wave's own `## Comments` hunk (`@@ -18,0 +19,13 @@`, numstat `13  0`, no `Status:` hunk). Reviewer's re-run: `cargo fmt -p mem-web --check` PASS · `cargo build -p mem-web` PASS · `cargo clippy -p mem-web --all-targets -- -D warnings` PASS · `cargo test -p mem-web` **145 green / 0 failed** (18 binaries) · the nine per-file batteries green · `cargo test -p mem-episodic` 21 passed · `cargo test -p mem-store` green · strict audit (7-ignore form) exit 0 · `host_allowlist.rs` sha256 `616ec782b9dd…` unchanged · W6.2's own `Cargo.lock` contribution still exactly the three `mem-web` dep lines. **AC state:** AC1 (behaviors ported — the episodic parts land with W6.3 by the AC's own text) and AC3 (traversal rejected at every scoped endpoint — `guard.rs::resolve_scoped_request`, no widening on rejection) are MET and ticked. **AC2 is NOT met and stays unticked:** the six per-endpoint-group manual-smoke procedures are documented in `docs/web-skeleton-smoke.md`, but its UI-facing half cannot run yet — the four screen routes the explorer owns (`ProjectMemories`, `Tags`, `Profile`, `Settings`) are still planned notices whose route-table owner label (`Owner::W6_2`) now points at this closing wave, and the live server smoke needs the W5.x composition root to point `mem-web`'s `dist_dir` at `web-ui/dist`. **Residuals recorded, not this wave's to fix:** the skills port stays `unavailable()` in production until W6.4; the maintenance port (export/import) is injected at the composition root; the three newly published webpki advisories (RUSTSEC-2026-0381/0382/0383) are a repo-level dependency follow-up (patch bumps `webpki-roots ≥1.0.10`, `rustls-webpki ≥0.103.16`, `webpki-root-certs ≥1.0.10`) — the reviewer ruled them an advisory-DB refresh delta, not a wave defect; the tree-wide normalized lock anchor has moved to `2ba5500be534…` because of W5.1's concurrent lock edits, while W6.2's own contribution is unchanged. **This issue stays OPEN** for AC2's UI-facing smoke and the four unbuilt screen lanes.
 - 2026-10-21 (orchestrator note — cross-lane coupling, not a W6.2 defect): W5.1's commit `c2b22b8` landed the W5.1 cluster (59 paths) but **HEAD does not compile on its own**: the committed `src/main.rs:90` calls `mem_web::api::ports::ApiServices::unavailable()`, and that `mem_web::api` module is this issue's still-uncommitted `crates/mem-web/src/api/**` work (HEAD's `crates/mem-web/src/lib.rs` does not declare `pub mod api;`). The working tree builds and every gate passes; only a clean checkout of HEAD fails. The remedy is this issue's `api/` module being committed — deliberately NOT folded into W5.1's commit, because issue 24 is open with AC2 unticked and this work is unreviewed. No action is required from W6.2 beyond landing the module as planned.
+
+## Agent Brief
+
+**Category:** enhancement
+**Summary:** close the last acceptance criterion — re-run the 37-row live smoke now that the ports it was
+blocked on have been wired, and tick AC2 only if every row asserts.
+
+**Current behavior (verified at HEAD `206cf9f`):**
+The REST surface is complete and reviewed: AC1 (behaviours ported) and AC3 (traversal rejected at every scoped
+endpoint) are met and ticked. The 2026-10-21 smoke ran all 37 `ROUTE_TABLE` rows against the live binary and
+recorded **19 asserted + 4 measured-not-asserted + 14 blocked**. Two of the three causes of those 14 have since
+closed: the skills port is now wired at the composition root (`.with_skills(...)` is called in `src/main.rs`,
+with the `unavailable()` degrade path behind it), and the maintenance half moved out of issue 37 into issue 39.
+What remains gated is the sessions group: `.with_sessions(...)` **exists as a builder but has no caller**, and
+`WebStoreDeps` carries no episodic field — that is issue 37's AC6.
+
+**Desired behavior:**
+Re-run the existing smoke harness against a live standalone engine and update the row table from measurement,
+not from memory. Every row that is now wired must move from BLOCKED to asserted; the rows that remain blocked
+must stay blocked with the reason named. AC2 ticks only when the table has no BLOCKED rows left — a partially
+asserted table is a recorded truth, not a pass.
+
+**Key interfaces:**
+- The smoke harness under the wave's scratch directory (`run-smoke.sh`) and its `rows.tsv`: one row per
+  `ROUTE_TABLE` entry, verdicts derived from `$6`.
+- `ApiServices::with_skills` / `with_sessions` — the two ports whose presence decides whether a row can assert.
+- `WebStoreDeps` — the struct issue 37 must extend before the sessions rows can assert.
+- The auth walk: a token-less request gets 401 and lazily creates the token file; the token-bearing request
+  uses the custom header, never Bearer.
+
+**Acceptance criteria:**
+- [ ] The smoke is re-run against the live binary on a throwaway store, and the row table is regenerated from
+      the run's own output.
+- [ ] Every row that is wired asserts; any row still blocked names the issue that unblocks it (37 · AC6 or 39).
+- [ ] AC2 is ticked **only** if the regenerated table contains no BLOCKED rows; otherwise it stays unticked and
+      the residual is named in the Status line.
+- [ ] The four "measured-not-asserted" rows are either asserted or re-recorded with why they cannot be.
+- [ ] No production code changes. If a row fails because of a real defect, stop and report it — do not adjust
+      the expectation to fit.
+
+**Out of scope:**
+- The sessions wiring itself (issue 37 · AC6) and the maintenance/cleanup port (issue 39).
+- The UI-facing half's screen behaviour (issue 29's live smoke) — this issue asserts the REST surface.
+- The three unused W6.2 primitives and the two stale doc comments already recorded as residuals.
