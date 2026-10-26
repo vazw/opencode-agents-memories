@@ -244,6 +244,11 @@ pub enum ExperimentalFeature {
 }
 
 /// Per-open options handed to a [`ConnectFactory`].
+///
+/// The override is process-wide: it is set only from `StoreConfig` by
+/// [`ConnectOptions::for_config`] and is not settable on an option set from outside
+/// this crate, so a downstream caller cannot override a single open — it can only
+/// choose a `StoreConfig`, which the config leg permits.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions {
     pub experimental: Vec<ExperimentalFeature>,
@@ -252,9 +257,11 @@ pub struct ConnectOptions {
     /// applies). Writability is part of the open guard's contract, not a comment
     /// (issue 45 `45.13` / `A3`): a read-only open skips the legacy-holder probe.
     pub read_only: bool,
-    /// The config leg of the O4/O5 override. The env leg
-    /// (`OPENCODE_MEM_ALLOW_UNGUARDED_OPEN`) is read at the seam and wins.
-    pub allow_unguarded_open: bool,
+    /// The config leg of the O4/O5 override, copied verbatim by
+    /// [`ConnectOptions::for_config`]. It is `pub(crate)` since issue 45b, so **no
+    /// downstream crate can set it** and the escape is not a per-open switch. The env
+    /// leg (`OPENCODE_MEM_ALLOW_UNGUARDED_OPEN`) is read at the seam and wins.
+    pub(crate) allow_unguarded_open: bool,
     /// The storage root whose [`.wal-mode`](crate::open_guard::WAL_MODE_MARKER_FILE)
     /// marker the guard maintains. `None` for hand-built options ⇒ no marker is
     /// written (a caller with no root has no marker to own).
@@ -279,6 +286,27 @@ impl ConnectOptions {
             allow_unguarded_open: config.allow_unguarded_open,
             storage_root: Some(config.storage_path.clone()),
         }
+    }
+
+    /// The override state this option set carries — readable, never per-call writable.
+    /// The only writer is [`ConnectOptions::for_config`] (the config leg); the env leg
+    /// (`OPENCODE_MEM_ALLOW_UNGUARDED_OPEN`) is read at the seam and wins.
+    ///
+    /// ```compile_fail
+    /// use mem_store::db::ConnectOptions;
+    /// let mut options = ConnectOptions::default();
+    /// options.allow_unguarded_open = true; // E0616: not writable outside this crate (issue 45b)
+    /// ```
+    ///
+    /// ```
+    /// // The read path the snippet above depends on, so that a `compile_fail` pass is
+    /// // the field's visibility (not a missing import or a renamed type).
+    /// let options = mem_store::db::ConnectOptions::default();
+    /// assert!(!options.allow_unguarded_open());
+    /// ```
+    #[must_use]
+    pub fn allow_unguarded_open(&self) -> bool {
+        self.allow_unguarded_open
     }
 }
 
@@ -370,7 +398,7 @@ async fn open_guarded(
             db_path: &path,
             mode,
             writability,
-            allow_unguarded_open: opts.allow_unguarded_open,
+            allow_unguarded_open: opts.allow_unguarded_open(),
             env_override: env_override.as_deref(),
             process_probe: &crate::platform::SystemProcessProbe,
         },
