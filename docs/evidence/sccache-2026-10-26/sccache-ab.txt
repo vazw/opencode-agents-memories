@@ -1,0 +1,161 @@
+sccache A/B/C/D — 2026-10-26T14:29:36Z
+HEAD:      fa8012e build: cap dev-profile debug info and split it out
+sccache:   sccache 0.18.0
+rustc:     rustc 1.98.0 (88d9e12ae 2026-08-18)
+profile:   debug = 1 
+
+===== A no-sccache cold =====
+  RUSTC_WRAPPER=<unset>  CARGO_INCREMENTAL=<unset>
+  exit=0  wall=437.5s  peakRSS=2870 MiB (sampled)
+A no-sccache cold                              exit=0  wall_ms=437538    peakRSS_MiB=2870
+
+===== B sccache cold (misses) =====
+  RUSTC_WRAPPER=sccache  CARGO_INCREMENTAL=<unset>
+  exit=0  wall=431.7s  peakRSS=2616 MiB (sampled)
+B sccache cold (misses)                        exit=0  wall_ms=431714    peakRSS_MiB=2616
+
+  Compile requests                    798
+  Compile requests executed           545
+  Cache hits                            0
+  Cache misses                        547
+  Cache misses (Assembler)            135
+  Cache misses (C/C++)                277
+  Cache misses (Rust)                 135
+  Cache hits rate                    0.00 %
+  Cache hits rate (Assembler)        0.00 %
+  Cache hits rate (C/C++)            0.00 %
+  Cache hits rate (Rust)             0.00 %
+  Cache timeouts                        0
+  Cache read errors                     0
+  Forced recaches                       0
+  Cache write errors                    0
+  Cache errors                          0
+  Compilations                        547
+  Compilation failures                  0
+  Non-cacheable compilations            0
+  Non-cacheable calls                 253
+  Non-compilation calls                 0
+  Unsupported compiler calls            0
+  Average cache write               0.001 s
+  Average compiler                  0.266 s
+  Average cache read hit            0.000 s
+  Failed distributed compilations       0
+  
+  Non-cacheable reasons:
+  incremental                         229
+  crate-type                           24
+  
+  Cache location                  Local disk: "/home/vaz/.cache/sccache"
+  Base directories                (none)
+  Use direct/preprocessor mode?   yes
+  Version (client)                0.18.0
+  Cache size                          336 MiB
+  Max cache size                       10 GiB
+
+===== C sccache clean+warm (hits) =====
+  RUSTC_WRAPPER=sccache  CARGO_INCREMENTAL=<unset>
+  exit=0  wall=312.5s  peakRSS=2756 MiB (sampled)
+C sccache clean+warm (hits)                    exit=0  wall_ms=312471    peakRSS_MiB=2756
+
+  Compile requests                    1161
+  Compile requests executed            818
+  Cache hits                           810
+  Cache hits (Assembler)               136
+  Cache hits (C/C++)                   313
+  Cache hits (Rust)                    361
+  Cache misses                           5
+  Cache misses (C/C++)                   1
+  Cache misses (Rust)                    4
+  Cache hits rate                    99.39 %
+  Cache hits rate (Assembler)       100.00 %
+  Cache hits rate (C/C++)            99.68 %
+  Cache hits rate (Rust)             98.90 %
+  Cache timeouts                         0
+  Cache read errors                      0
+  Forced recaches                        0
+  Cache write errors                     0
+  Cache errors                           0
+  Compilations                           5
+  Compilation failures                   3
+  Non-cacheable compilations             0
+  Non-cacheable calls                  338
+  Non-compilation calls                  5
+  Unsupported compiler calls             0
+  Average cache write                0.004 s
+  Average compiler                  10.447 s
+  Average cache read hit             0.000 s
+  Failed distributed compilations        0
+  
+  Non-cacheable reasons:
+  incremental                          230
+  crate-type                            93
+  -                                      6
+  missing input                          6
+  -o                                     3
+  
+  Cache location                  Local disk: "/home/vaz/.cache/sccache"
+  Base directories                (none)
+  Use direct/preprocessor mode?   yes
+  Version (client)                0.18.0
+  Cache size                           379 MiB
+  Max cache size                        10 GiB
+
+===== D fresh target dir, warm cache =====
+  RUSTC_WRAPPER=sccache  CARGO_INCREMENTAL=<unset>
+  exit=0  wall=388.4s  peakRSS=3018 MiB (sampled)
+D fresh target dir, warm cache                 exit=0  wall_ms=388442    peakRSS_MiB=3018
+
+  Compile requests                    1161
+  Compile requests executed            818
+  Cache hits                           449
+  Cache hits (Assembler)               136
+  Cache hits (C/C++)                   313
+  Cache misses                         366
+  Cache misses (C/C++)                   1
+  Cache misses (Rust)                  365
+  Cache hits rate                    55.09 %
+  Cache hits rate (Assembler)       100.00 %
+  Cache hits rate (C/C++)            99.68 %
+  Cache hits rate (Rust)              0.00 %
+  Cache timeouts                         0
+  Cache read errors                      0
+  Forced recaches                        0
+  Cache write errors                     0
+  Cache errors                           0
+  Compilations                         366
+  Compilation failures                   3
+  Non-cacheable compilations             0
+  Non-cacheable calls                  338
+  Non-compilation calls                  5
+  Unsupported compiler calls             0
+  Average cache write                0.005 s
+  Average compiler                   0.628 s
+  Average cache read hit             0.000 s
+  Failed distributed compilations        0
+  
+  Non-cacheable reasons:
+  incremental                          230
+  crate-type                            93
+  -                                      6
+  missing input                          6
+  -o                                     3
+  
+  Cache location                  Local disk: "/home/vaz/.cache/sccache"
+  Base directories                (none)
+  Use direct/preprocessor mode?   yes
+  Version (client)                0.18.0
+  Cache size                           709 MiB
+  Max cache size                        10 GiB
+
+===== split-debuginfo × sccache =====
+  test binary:            dedup_unreadable_shard-c338f40cc2e59709
+  .debug_* sections:      12
+  .dwo sidecars in deps:  17997
+  readelf --debug-dump=info: parses cleanly
+  panic resolves file:line on a cache hit: 1 (expect >=1)
+  dwo emitted beside probe: 1
+
+===== verdict inputs =====
+  A and C are the comparison that decides adoption.
+  Inverted world: if C is not materially faster than A, do not adopt.
+  target-scc-probe/ left in place for inspection; remove it after.
