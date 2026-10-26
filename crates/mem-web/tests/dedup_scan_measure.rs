@@ -25,14 +25,16 @@
 //! 6. the machine (`lscpu` model line) and the compiler (`rustc -V`), so the
 //!    numbers are attributable.
 //!
-//! ## The profile matters, and it is debug
+//! ## The profile matters, and the recorded 54b run was debug
 //!
-//! `cargo test` without `--release` is a debug build, which is the profile the
-//! default suite (and therefore AC2's 0.1 s sizing) actually runs in. The
-//! `MAX_NEAR_SCAN_PAIRS` value derived from this ladder is therefore
-//! **conservative against a release build**: release is faster, so the same
-//! comparison budget buys less wall time there. The record must say so; the
-//! constant is not "derived at production speed".
+//! Issue 54b ran this ladder under `cargo test` without `--release`, so its
+//! `c_iter = 13,487.9 ns/pair` — the only input the cap was ever derived from —
+//! is a **debug** figure, and the default suite (hence AC2's 0.1 s sizing) runs
+//! in that same profile. The harness does not assert which profile it is in: it
+//! detects `cfg!(debug_assertions)` and prints the probe's value, hedged to
+//! exactly what that flag proves, with `opt-level not probed` stated because
+//! Rust has no stable compile-time probe for it. Every profile word printed
+//! below is derived from that one detected value.
 //!
 //! ## Why the ladder's vectors are one-hot
 //!
@@ -61,8 +63,8 @@ use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use mem_core::config::{DEFAULTS, embedding_dimensions_for_model};
-use mem_web::api::deduplication::DedupMemory;
 use mem_web::api::deduplication::engine::{NearScanLimits, exact_plan, near_groups};
+use mem_web::api::deduplication::{DedupMemory, MAX_NEAR_SCAN_PAIRS};
 
 /// The ladder the measurement takes. `50_000` is appended at run time only if
 /// the `25_000` rung finished inside [`FIFTY_K_GATE`].
@@ -300,32 +302,107 @@ fn cpu_model_line() -> String {
     }
 }
 
+/// The single printed profile line: the flag is the probe's value, and each
+/// label names only what that value proves. Neither label asserts `--release`
+/// and neither asserts `opt-level` — a custom profile can pair
+/// `debug-assertions = true` with `opt-level = 3`, and the flag cannot see it.
+fn profile_entry(debug_assertions: bool) -> String {
+    let (label, hedge) = if debug_assertions {
+        (
+            "debug",
+            "debug-assertions on: dev profile, or a custom profile with debug-assertions on",
+        )
+    } else {
+        (
+            "optimised",
+            "debug-assertions off: release, or a custom profile with debug-assertions off",
+        )
+    };
+    format!(
+        "cargo profile            : detected debug_assertions={debug_assertions} -> {label} ({hedge}); opt-level not probed"
+    )
+}
+
+/// The bare profile word the prose sites interpolate.
+fn profile_short(debug_assertions: bool) -> &'static str {
+    if debug_assertions {
+        "debug"
+    } else {
+        "optimised"
+    }
+}
+
+/// The `== environment ==` block, profile entry first, so every measurement
+/// line in an artifact has a profile claim above it.
+fn environment_lines(debug_assertions: bool) -> Vec<String> {
+    let default_model = DEFAULTS.embedding_model;
+    let resolved_dimensions = embedding_dimensions_for_model(default_model);
+    vec![
+        profile_entry(debug_assertions),
+        format!("lscpu model              : {}", cpu_model_line()),
+        format!(
+            "rustc                    : {}",
+            command_line("rustc", &["-V"])
+        ),
+        format!("DEFAULTS.embedding_model : {default_model}"),
+        format!(
+            "DEFAULTS.embedding_dimensions (table) : {}",
+            DEFAULTS.embedding_dimensions
+        ),
+        format!(
+            "embedding_dimensions_for_model(default) : {resolved_dimensions}  (used for the fixtures)"
+        ),
+        format!(
+            "threshold                : {}",
+            DEFAULTS.deduplication_similarity_threshold
+        ),
+    ]
+}
+
+/// The pre-flight guard. `DEDUP_MEASURE_EXPECT` has exactly three states: unset
+/// or empty (no expectation), `debug`, and `release`. A typo, a case variant or
+/// a number is refused as well, because mapping an unrecognised expectation to
+/// "no expectation" reproduces the defect the guard exists to prevent.
+fn expectation_mismatch(expected: &str, debug_assertions: bool) -> Option<String> {
+    match expected {
+        "" => None,
+        "debug" if debug_assertions => None,
+        "release" if !debug_assertions => None,
+        "debug" | "release" => Some(format!(
+            "DEDUP_MEASURE_EXPECT={expected} but this binary reports debug_assertions={debug_assertions}; refusing to measure"
+        )),
+        other => Some(format!(
+            "DEDUP_MEASURE_EXPECT={other} is not debug|release; refusing to measure"
+        )),
+    }
+}
+
 #[test]
 #[ignore = "measurement harness — prints the ladder, asserts no timing"]
 fn measure_near_scan_ladder() {
     // ---- 1. re-derive the vector width from config resolution -------------
+    let debug_assertions = cfg!(debug_assertions);
+    let profile_word = profile_short(debug_assertions);
     let default_model = DEFAULTS.embedding_model;
     let resolved_dimensions = embedding_dimensions_for_model(default_model) as usize;
     println!("== environment ==");
-    println!("cargo profile            : debug (cargo test without --release)");
-    println!("lscpu model              : {}", cpu_model_line());
+    for line in environment_lines(debug_assertions) {
+        println!("{line}");
+    }
     println!(
-        "rustc                    : {}",
-        command_line("rustc", &["-V"])
-    );
-    println!("DEFAULTS.embedding_model : {default_model}");
-    println!(
-        "DEFAULTS.embedding_dimensions (table) : {}",
-        DEFAULTS.embedding_dimensions
-    );
-    println!(
-        "embedding_dimensions_for_model(default) : {resolved_dimensions}  (used for the fixtures)"
-    );
-    println!(
-        "threshold                : {}",
-        DEFAULTS.deduplication_similarity_threshold
+        "argv                     : {}",
+        std::env::args().collect::<Vec<_>>().join(" ")
     );
     println!();
+
+    // The guard runs after the environment block, so a refused run still
+    // records which profile it found before it refuses.
+    if let Some(reason) = expectation_mismatch(
+        &std::env::var("DEDUP_MEASURE_EXPECT").unwrap_or_default(),
+        debug_assertions,
+    ) {
+        panic!("{reason}");
+    }
 
     let dimensions = resolved_dimensions;
     let threshold = DEFAULTS.deduplication_similarity_threshold;
@@ -521,7 +598,14 @@ fn measure_near_scan_ladder() {
         "floor2(10 s / c_iter)       : {}",
         floor_to_two_significant_figures(1e10 / c_iter_ns)
     );
-    println!("MAX_NEAR_SCAN_PAIRS         : {cap:.0}");
+    println!(
+        "cap candidate (this run)    : {cap:.0}   <- derived from THIS run's c_iter, not the source constant"
+    );
+    println!("MAX_NEAR_SCAN_PAIRS (source): {MAX_NEAR_SCAN_PAIRS}");
+    println!(
+        "cap candidate / source      : {:.2}x",
+        cap / MAX_NEAR_SCAN_PAIRS as f64
+    );
     println!(
         "  -> a single 50 000-row shard (1,249,975,000 pairs) {}",
         if ONE_SHARD_GRID > cap {
@@ -537,7 +621,7 @@ fn measure_near_scan_ladder() {
     );
 
     // ---- 5. the centrepiece's recommended n (AC2) -------------------------
-    // Two jobs: n(n-1)/2 < cap, and >= ~0.1 s of scan in THIS (debug) profile.
+    // Two jobs: n(n-1)/2 < cap, and >= ~0.1 s of scan in THIS profile.
     let pairs_for_tenth_of_a_second = (1e8 / c_iter_ns).ceil();
     let recommended_n = {
         // Smallest n with n(n-1)/2 >= pairs_needed, then rounded up to a
@@ -554,18 +638,146 @@ fn measure_near_scan_ladder() {
     println!();
     println!("== centrepiece recommendation (AC2) ==");
     println!(
-        "recommended n               : {recommended_n}  (grid {} comparisons, {:.2} s of scan in this debug profile)",
+        "recommended n               : {recommended_n}  (grid {} comparisons, {:.2} s of scan in this {profile_word} profile)",
         comparisons(recommended_n),
         c_iter_ns * comparisons(recommended_n) as f64 / 1e9
     );
     println!(
-        "  jobs: {} < MAX_NEAR_SCAN_PAIRS = {}  AND  >= 0.1 s in debug",
+        "  jobs: {} < cap candidate = {}  AND  >= 0.1 s in {profile_word}",
         comparisons(recommended_n),
         cap
     );
-    println!(
-        "this ladder's debug c_iter  : {c_iter_ns:.1} ns/pair -> the derived cap is CONSERVATIVE against release"
-    );
+    if debug_assertions {
+        println!(
+            "this ladder's {profile_word} c_iter  : {c_iter_ns:.1} ns/pair -> the derived cap is CONSERVATIVE against release"
+        );
+    } else {
+        println!(
+            "this ladder's {profile_word} c_iter  : {c_iter_ns:.1} ns/pair -> this is not the profile the cap was derived in; whether the cap under- or over-spends here is the measured ratio printed above"
+        );
+    }
     println!();
     println!("== end of ladder ==");
+}
+
+// ---- the profile probe's own tests (pure: no ladder, no timing) ----------
+
+#[test]
+fn test_profile_entry_names_the_debug_profile_when_debug_assertions_are_on() {
+    let line = profile_entry(true);
+    assert!(
+        line.contains("debug_assertions=true"),
+        "the debug line must print the probe's value: {line}"
+    );
+    assert!(
+        line.contains("-> debug ("),
+        "the debug line must name the debug label: {line}"
+    );
+    assert!(
+        !line.contains("debug_assertions=false"),
+        "the debug line must not print the opposite value: {line}"
+    );
+}
+
+#[test]
+fn test_profile_entry_names_the_optimised_profile_when_debug_assertions_are_off() {
+    let line = profile_entry(false);
+    assert!(
+        line.contains("debug_assertions=false"),
+        "the optimised line must print the probe's value: {line}"
+    );
+    assert!(
+        line.contains("-> optimised ("),
+        "the optimised line must name the optimised label: {line}"
+    );
+    assert!(
+        !line.contains("debug_assertions=true"),
+        "the optimised line must not print the opposite value: {line}"
+    );
+}
+
+#[test]
+fn test_environment_report_names_the_profile_this_binary_actually_has() {
+    let debug_assertions = cfg!(debug_assertions);
+    let lines = environment_lines(debug_assertions);
+    let first = lines
+        .first()
+        .unwrap_or_else(|| panic!("the environment report must carry at least the profile entry"));
+    assert!(
+        first.contains(&format!("debug_assertions={debug_assertions}")),
+        "the report must print this binary's probe, not a hardcoded value: {first}"
+    );
+}
+
+#[test]
+fn test_environment_report_never_repeats_the_retired_hardcoded_profile_claim() {
+    const RETIRED: &str = "debug (cargo test without --release)";
+    for debug_assertions in [true, false] {
+        let lines = environment_lines(debug_assertions);
+        for line in &lines {
+            assert!(
+                !line.contains(RETIRED),
+                "the retired hardcoded profile claim reappeared: {line}"
+            );
+        }
+        // The profile claim is the line that prints the detected flag; the
+        // marker is used instead of repeating the claim's own label here,
+        // which would make the AC2 source grep count this assertion as a
+        // second claim site.
+        let detected = format!("detected debug_assertions={debug_assertions}");
+        let profile_lines = lines.iter().filter(|line| line.contains(&detected)).count();
+        assert_eq!(
+            profile_lines, 1,
+            "exactly one environment line may claim the profile (found {profile_lines})"
+        );
+    }
+}
+
+#[test]
+fn test_expectation_guard_rejects_a_mismatched_profile_and_accepts_a_matching_one() {
+    assert!(
+        expectation_mismatch("release", true).is_some(),
+        "a release expectation on a debug-assertions build must be refused"
+    );
+    assert!(
+        expectation_mismatch("debug", false).is_some(),
+        "a debug expectation on a debug-assertions-off build must be refused"
+    );
+    assert!(
+        expectation_mismatch("release", false).is_none(),
+        "a release expectation on a debug-assertions-off build must be accepted"
+    );
+    assert!(
+        expectation_mismatch("debug", true).is_none(),
+        "a debug expectation on a debug-assertions build must be accepted"
+    );
+    assert!(
+        expectation_mismatch("", true).is_none() && expectation_mismatch("", false).is_none(),
+        "unset/empty is the no-expectation default in either profile"
+    );
+    for debug_assertions in [true, false] {
+        let typo = expectation_mismatch("relase", debug_assertions);
+        assert!(
+            typo.is_some(),
+            "an unrecognised expectation must be refused (debug_assertions={debug_assertions})"
+        );
+        assert!(
+            typo.as_deref()
+                .is_some_and(|reason| reason.contains("is not debug|release")),
+            "the refusal must name the accepted values"
+        );
+    }
+}
+
+#[test]
+fn test_derived_cap_at_the_recorded_debug_c_iter_reproduces_the_constant() {
+    assert_eq!(
+        derive_cap(13_487.9e-9) as u64,
+        MAX_NEAR_SCAN_PAIRS,
+        "the pre-registered rule must still derive the shipped constant from the recorded debug c_iter"
+    );
+    assert_eq!(
+        MAX_NEAR_SCAN_PAIRS, 740_000,
+        "the cap is unchanged by this wave; raising it is the owner's decision"
+    );
 }
