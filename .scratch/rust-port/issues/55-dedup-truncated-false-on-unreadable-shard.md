@@ -1,9 +1,8 @@
 # 55 — Dedup · `nearDuplicateScan.truncated: false` claims full coverage over a shard that was never read
 
-Status: needs-triage — 2026-10-26. **The completeness signal added by issue 54b cannot see the store's own
-swallowed read failure: an unreadable shard returns an empty row list, the shard takes the "no scan work"
-early `continue`, and the report answers `truncated: false` — a definitive claim of full coverage over a shard
-that was never read.** Reachability is a source read (chain below); the runtime frequency is `needs_validation`.
+Status: done — 2026-10-26. Landed as **`34a5fa3`** (`fix(dedup): count unreadable shards instead of
+claiming full coverage`) on branch `issue-55/dedup-completeness`, base `c4cd25b`. This record's status
+line and `## Comments` entry follow in the record-only commit that names `34a5fa3`.
 
 ## PREMISE — the chain, source-read end to end in this tree
 
@@ -55,3 +54,55 @@ Every claim above is `READ` from this tree at `5c06275`. What is **not** establi
 degrade per shard. Both are `needs_validation`; neither blocks writing the failing test.
 
 ## Comments
+
+### Outcome (record-only; implementation commit `34a5fa3`)
+
+**Design resolution — A's signature plus B's field; C rejected.** `get_all_memories` becomes
+`pub async fn get_all_memories(db: &dyn Db) -> Result<Vec<Row>, StoreError>` (body:
+`db.query(GET_ALL_MEMORIES, Vec::new()).await`), not a sibling `try_` variant: ADR-0013 D-4 already
+names a swallowed failure a defect, a sibling would leave the banned shape in production and guarantee
+the next reader reinvents this bug, upstream `getAllMemories` throws, and the blast radius was three
+sites. `NearDuplicateScanReport` gains `unreadable_shards` (wire key `unreadableShards`) **inside**
+`nearDuplicateScan`, beside the flag it qualifies. `truncated` becomes true whenever the counter is
+non-zero but is **not** folded into it: `truncated` still means *budget exhaustion* as issue 54b pinned
+it (`pairsScanned == pairBudget` is a false corollary of every unreadable shard), so the counter is the
+only key that separates "we stopped spending" from "we could not see". C (abort with
+`Err(PortError::Store)`) was rejected because the pass mutates as it walks (each shard's exact
+deletions are awaited and committed before the next shard is read), so a mid-pass abort would answer
+an error over deletions already committed in earlier shards; the per-shard read fault follows the
+in-file precedent of the per-row delete fault instead.
+
+**Pre-change behaviour, observed not inferred.** Both runs were taken against `c4cd25b` with the new
+field absent from the test bodies (both are recorded verbatim in the wave ledger,
+`.tmp/progress/20261026-1213-issue-55-dedup-completeness.ledger.md`, which is gitignored):
+the dropped-table shard answered `truncated: false` with `pairsScanned: 0` and no groups or deletions
+— `truncated: false` over a shard whose rows were never read; the fake store's read fault answered
+`Err(PortError::Store(..))` for the **whole** pass — the abort that the new arm replaces. AC1/AC3/AC4/
+AC5/AC6's RED at base is a compile error (`E0609`, the field does not exist), which proves wiring and
+suppresses every assertion in the file; it is not presented as a behavioural observation.
+
+**Divergence (recorded):** upstream aborts the pass on a shard read failure and answers an error over
+deletions already committed; this build counts the shard, forces `truncated`, and continues.
+
+**The `open_shard`-on-garbage probe was not taken.** Whether a shard file written with garbage bytes
+(or truncated mid-page) makes `open_shard` itself fail is not covered by any evidence here. The plan
+does not depend on it: the DROP-based fixture forces the open-succeeds-then-query-fails path
+unconditionally, and the read-fault arm is separately proven with a fake.
+
+**Adjacent residual (recorded, not a work item):** the per-row delete fault in the same loop
+(`crates/mem-web/src/api/deduplication/mod.rs:238-247`) is logged and swallowed without withdrawing any
+coverage claim — the same shape as this issue, one layer over. It is 43.2 / ADR-0018 territory, not
+fixed here and not precedent for widening scope. Likewise `get_distinct_tags` and
+`get_project_path_counts` (`crates/mem-store/src/vector.rs:180-207`) still swallow a query failure into
+an empty result; they are out of scope and recorded as residual, not fixed.
+
+**Tests.** `crates/mem-web/tests/dedup_unreadable_shard.rs` (new, 3 — counted-and-truncated, the pass
+degrades rather than aborting, and the mirror-image guard that a genuinely empty shard still reports
+full coverage); `crates/mem-store/tests/vector_store_subset.rs` (one new failing-read case);
+`crates/mem-web/tests/dedup_service.rs` (`FakeDedupStore::fail_memories_on` plus the AC4 case, and
+issue 54b's truncation assertions kept byte-identical except one added `unreadable_shards == 0`);
+`crates/mem-web/tests/dedup_endpoint.rs` (the pinned `nearDuplicateScan` key set gains only
+`unreadableShards`, asserted `0`). `cargo test --workspace` green; both clippy gates and
+`cargo fmt --all --check` green; `crates/mem-web/tests/api_endpoint_contract.rs` and
+`api_route_auth.rs` byte-identical. No dependency, manifest, toolchain or `.cargo/` change; no config
+key — the field reports what happened, it does not choose anything.

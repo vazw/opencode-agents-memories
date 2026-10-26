@@ -177,9 +177,24 @@ async fn test_get_all_memories_orders_by_created_at_desc() {
     insert_vector(db.as_ref(), &record("mid", 50, false, None))
         .await
         .unwrap();
-    let rows = get_all_memories(db.as_ref()).await;
+    let rows = get_all_memories(db.as_ref())
+        .await
+        .expect("the fixture rows read");
     let ids: Vec<String> = rows.iter().filter_map(|row| row.text("id")).collect();
     assert_eq!(ids, vec!["new", "mid", "old"]);
+}
+
+#[tokio::test]
+async fn test_get_all_memories_reports_a_query_failure() {
+    let config = common::store_config("vec-unreadable");
+    let db = prepared_db(&config, "shard.db", 2).await;
+    db.execute("DROP TABLE memories", Vec::new())
+        .await
+        .expect("the table drops");
+    assert!(
+        get_all_memories(db.as_ref()).await.is_err(),
+        "a failed SELECT * is a returned error, never an empty list"
+    );
 }
 
 // ---------------------------------------------------------------------------

@@ -526,6 +526,7 @@ pub struct NearDuplicateScanDto {
     pub pairs_scanned: u64,
     pub pair_budget: u64,
     pub truncated: bool,
+    pub unreadable_shards: u64,
 }
 
 /// One reported near-duplicate group (upstream `DuplicateGroup`).
@@ -584,6 +585,7 @@ impl From<super::ports::DedupReport> for DedupDto {
                 pairs_scanned: report.near_duplicate_scan.pairs_scanned,
                 pair_budget: report.near_duplicate_scan.pair_budget,
                 truncated: report.near_duplicate_scan.truncated,
+                unreadable_shards: report.near_duplicate_scan.unreadable_shards,
             },
         }
     }

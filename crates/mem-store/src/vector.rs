@@ -170,10 +170,11 @@ pub async fn count_vectors_by_container_tag(db: &dyn Db, container_tag: &str) ->
 }
 
 /// Upstream `getAllMemories` (`SELECT *`, `created_at DESC`).
-pub async fn get_all_memories(db: &dyn Db) -> Vec<Row> {
-    db.query(crate::sql::GET_ALL_MEMORIES, Vec::new())
-        .await
-        .unwrap_or_default()
+///
+/// A query failure is returned, never an empty list: upstream throws, and a
+/// swallowed error here is indistinguishable from an empty shard.
+pub async fn get_all_memories(db: &dyn Db) -> Result<Vec<Row>, StoreError> {
+    db.query(crate::sql::GET_ALL_MEMORIES, Vec::new()).await
 }
 
 /// Upstream `getDistinctTags`.

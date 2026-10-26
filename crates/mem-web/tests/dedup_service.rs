@@ -64,6 +64,7 @@ struct FakeDedupStore {
     shards_calls: AtomicUsize,
     memories_calls: AtomicUsize,
     fail_delete_at: Option<usize>,
+    fail_memories_on: Option<i64>,
     gate: Option<Arc<Gate>>,
 }
 
@@ -77,6 +78,7 @@ impl FakeDedupStore {
             shards_calls: AtomicUsize::new(0),
             memories_calls: AtomicUsize::new(0),
             fail_delete_at: None,
+            fail_memories_on: None,
             gate: None,
         }
     }
@@ -88,6 +90,13 @@ impl FakeDedupStore {
 
     fn fail_delete_at(mut self, attempt: usize) -> Self {
         self.fail_delete_at = Some(attempt);
+        self
+    }
+
+    /// Makes one shard's `memories()` answer `Err(PortError::Store(..))`,
+    /// modelling a store/port-level fault that is not the mem-store swallow.
+    fn fail_memories_on(mut self, shard_id: i64) -> Self {
+        self.fail_memories_on = Some(shard_id);
         self
     }
 
@@ -120,6 +129,9 @@ impl DedupStore for FakeDedupStore {
 
     async fn memories(&self, shard: &DedupShard) -> Result<Vec<DedupMemory>, PortError> {
         let call = self.memories_calls.fetch_add(1, Ordering::SeqCst);
+        if self.fail_memories_on == Some(shard.shard_id) {
+            return Err(PortError::Store("forced read failure".to_string()));
+        }
         // The lock is released before any await (never held across it).
         let rows = self
             .rows
@@ -452,11 +464,53 @@ async fn test_dedup_run_reports_truncation_and_still_deletes_the_first_shards_ex
     );
     assert_eq!(store.deleted(), vec!["dup_old".to_string()]);
     assert!(report.near_duplicate_scan.truncated, "the pass was cut");
+    assert_eq!(report.near_duplicate_scan.unreadable_shards, 0);
     assert_eq!(
         report.near_duplicate_scan.pairs_scanned, 10,
         "shard 1's six comparisons plus four of shard 2's"
     );
     assert!(report.near_duplicate_scan.pairs_scanned <= report.near_duplicate_scan.pair_budget);
+}
+
+#[tokio::test]
+async fn test_dedup_run_counts_an_unreadable_shard_and_keeps_scanning_the_rest() {
+    // Shard 1's read fault arrives as a store/port-level `Err`, not as the
+    // mem-store swallow: the pass must count it and walk on to shard 2.
+    let mut rows = vec![
+        (1, mem("dup_new", "same content", 3_000, unit_x())),
+        (1, mem("dup_old", "same content", 2_000, unit_x())),
+    ];
+    rows.push((2, mem("later_new", "later content", 2_000, unit_y())));
+    rows.push((2, mem("later_old", "later content", 1_000, unit_y())));
+    let store = Arc::new(FakeDedupStore::new(vec![shard(1), shard(2)], rows).fail_memories_on(1));
+    let service = DedupService::new(store.clone(), true, 0.9);
+
+    let report = service
+        .run()
+        .await
+        .expect("a read fault degrades per shard instead of aborting the pass");
+    assert_eq!(
+        report.near_duplicate_scan.unreadable_shards, 1,
+        "the failed shard is counted"
+    );
+    assert!(
+        report.near_duplicate_scan.truncated,
+        "an unreadable shard withdraws the coverage claim"
+    );
+    assert_eq!(
+        report.near_duplicate_scan.pairs_scanned, 0,
+        "the unreadable shard contributes no pair work"
+    );
+    assert_eq!(
+        store.memories_calls(),
+        2,
+        "the pass keeps walking the remaining shards"
+    );
+    assert_eq!(
+        report.exact_duplicates_deleted, 1,
+        "shard 2's older exact duplicate is still deleted"
+    );
+    assert_eq!(store.deleted(), vec!["later_old".to_string()]);
 }
 
 #[tokio::test]

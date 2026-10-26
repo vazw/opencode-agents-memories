@@ -78,11 +78,13 @@ impl DedupStore for ShardDedupStore {
             .open_shard(&shard.db_path)
             .await
             .map_err(store_failure)?;
-        // `get_all_memories` is `SELECT *` and swallows query errors as an
-        // empty list (fenced module): an unreadable shard is indistinguishable
-        // from an empty one here, so the run's report is partial for it — no
-        // deletions, no groups, no error surfaced.
-        let rows = vector::get_all_memories(db.as_ref()).await;
+        // `get_all_memories` is `SELECT *` and fallible. A read failure is
+        // mapped and the pass counts the shard as unreadable
+        // (`nearDuplicateScan.unreadableShards`) and truncates its coverage
+        // claim — it is never reported as an empty shard.
+        let rows = vector::get_all_memories(db.as_ref())
+            .await
+            .map_err(store_failure)?;
         let mut memories: Vec<DedupMemory> = rows
             .iter()
             .map(|row| DedupMemory {
