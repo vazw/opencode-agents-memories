@@ -506,13 +506,26 @@ pub struct CleanupDto {
 ///
 /// Served whenever a `MaintenancePort` with a real `deduplicate()` is
 /// injected (`api::deduplication::production_deduplication_port`); the
-/// default wiring's `UnavailablePort` is what still answers the documented
-/// 501.
+/// contract suite's `fake_services()` injects `FakeBackend`, whose
+/// `deduplicate()` answers `PortError::Unavailable`; the D-38 no-composed-stores
+/// degrade path installs `ApiServices::unavailable()`'s `UnavailablePort`.
+/// Those two are what pin the documented 501 now that production injects the
+/// real port.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DedupDto {
     pub exact_duplicates_deleted: u64,
     pub near_duplicate_groups: Vec<NearDuplicateGroupDto>,
+    pub near_duplicate_scan: NearDuplicateScanDto,
+}
+
+/// One pass's near-duplicate scan accounting (`nearDuplicateScan`).
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NearDuplicateScanDto {
+    pub pairs_scanned: u64,
+    pub pair_budget: u64,
+    pub truncated: bool,
 }
 
 /// One reported near-duplicate group (upstream `DuplicateGroup`).
@@ -567,6 +580,11 @@ impl From<super::ports::DedupReport> for DedupDto {
                         .collect(),
                 })
                 .collect(),
+            near_duplicate_scan: NearDuplicateScanDto {
+                pairs_scanned: report.near_duplicate_scan.pairs_scanned,
+                pair_budget: report.near_duplicate_scan.pair_budget,
+                truncated: report.near_duplicate_scan.truncated,
+            },
         }
     }
 }

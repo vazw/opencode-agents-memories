@@ -323,6 +323,22 @@ pub struct CleanupReport {
 pub struct DedupReport {
     pub exact_duplicates_deleted: u64,
     pub near_duplicate_groups: Vec<NearDuplicateGroup>,
+    /// What the bounded near-duplicate scan did — always present, so a
+    /// consumer that ignores it still sees truthful legacy fields and one that
+    /// reads it can tell "no near duplicates" from "did not look".
+    pub near_duplicate_scan: NearDuplicateScanReport,
+}
+
+/// One pass's near-duplicate scan accounting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NearDuplicateScanReport {
+    /// Candidate comparisons actually performed across the whole pass.
+    pub pairs_scanned: u64,
+    /// The pass's global candidate-comparison budget.
+    pub pair_budget: u64,
+    /// Whether the budget (or a zero budget at a later shard) left scan work
+    /// undone.
+    pub truncated: bool,
 }
 
 /// One reported near-duplicate group (upstream `DuplicateGroup`).
@@ -601,10 +617,11 @@ impl ApiServices {
     /// unavailable until W6.4, and sessions keep the `UnavailablePort` until
     /// the W5.x composition root calls
     /// `.with_sessions(episodic_session_port(store))` — production answers the
-    /// documented `501` by design until then. Maintenance stays unavailable
-    /// until the W5.x readiness gate supplies a `MigrationService`; the
-    /// `with_skills` / `with_sessions` / `with_maintenance` builders are the
-    /// injection points.
+    /// documented `501` by design until then. The composition root injects the
+    /// deduplication port through `.with_maintenance(..)`; every migration
+    /// method keeps answering `Unavailable` until the W5.x readiness gate
+    /// supplies a `MigrationService`. The `with_skills` / `with_sessions` /
+    /// `with_maintenance` builders are the injection points.
     pub fn production(deps: super::store_adapter::ProductionDeps) -> Self {
         Self {
             memory: Arc::new(super::store_adapter::ProductionMemory::new(deps.shards)),

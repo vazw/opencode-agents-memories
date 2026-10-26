@@ -67,8 +67,11 @@ pub enum RouteExpectation {
     BusinessError,
     /// `4xx` (the skills routes only, upstream's explicit status map).
     ClientError,
-    /// The documented `501`: a stub, or a real handler whose port is
-    /// unavailable in this build.
+    /// The documented `501`: a stub handler that answers without consulting
+    /// its port (`/api/cleanup`), a real handler whose port is unavailable in
+    /// this build (the session-history rows), or a real handler whose port
+    /// answers `Unavailable` only in the wiring that drives the case (the
+    /// contract-suite fake, or the D-38 no-composed-stores degrade).
     Stub,
 }
 
@@ -182,8 +185,11 @@ pub const ROUTE_TABLE: [RouteSpec; 38] = [
         path: "/api/deduplicate",
         upstream_line: ":601",
         module: "api/maintenance.rs",
-        // The handler is real: the 501 comes from the unavailable port the
-        // default (and fake) wiring injects, not from a leftover stub.
+        // The handler is real and the composition root injects the
+        // deduplication port (issue 54). The 501 survives in two wirings: the
+        // contract suite's `FakeBackend`, and the D-38 no-composed-stores
+        // degrade (the `RootWebLauncher` `None` arm, reached when composition
+        // fails and the web port still binds). It is not a leftover stub.
         expectation: RouteExpectation::Stub,
     },
     RouteSpec {
