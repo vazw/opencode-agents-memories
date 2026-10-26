@@ -21,6 +21,7 @@
 //! | `import_replace_mode_replaces_the_row` | the replace mode |
 //! | `import_rejects_unsupported_schema_version` | upstream's version guard |
 //! | `write_bundle_is_private_and_atomic` | the writer rules |
+//! | `scratch_base_is_absolute_under_the_target_dir` | issue 59 — the scratch base is cargo's test-data dir under the target dir |
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -194,15 +195,53 @@ impl Embedder for FailingEmbedder {
 // Fixtures
 // ---------------------------------------------------------------------------
 
+/// The base cargo reserves for this test binary's data: `<target>/tmp`.
+///
+/// Cargo creates it and resolves a relative `CARGO_TARGET_DIR` itself, so it is
+/// absolute whatever the working directory or the variable's form. `env!` is
+/// only defined for integration-test targets — inside `src/` it is a compile
+/// error — so this helper must never leave `tests/`.
+fn scratch_base() -> PathBuf {
+    PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+}
+
 /// A scratch directory under the target dir (never `/tmp`).
 fn scratch_root(label: &str) -> PathBuf {
-    let base = std::env::var("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("target"));
-    let dir = base.join("scratch").join("mem-portability").join(label);
+    let dir = scratch_base()
+        .join("scratch")
+        .join("mem-portability")
+        .join(label);
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("scratch dir");
     dir
+}
+
+// scratch base resolution (issue 59)
+
+#[test]
+fn scratch_base_is_absolute_under_the_target_dir() {
+    let base = scratch_base();
+    assert!(
+        base.is_absolute(),
+        "the scratch base must be absolute, got {:?}",
+        base
+    );
+    let exe = std::env::current_exe().expect("current test executable");
+    let target = exe
+        .ancestors()
+        .nth(3)
+        .expect("the test executable lives at <target>/<profile>/deps/<test>");
+    assert!(
+        base.starts_with(target),
+        "the scratch base must live under the target directory: {} is not under {}",
+        base.display(),
+        target.display()
+    );
+    assert!(
+        !base.starts_with(env!("CARGO_MANIFEST_DIR")),
+        "the scratch base must not live inside the checkout, got {}",
+        base.display()
+    );
 }
 
 /// A project directory pinned by the project marker (so the container tag

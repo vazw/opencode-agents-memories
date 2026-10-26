@@ -16,6 +16,7 @@
 //! | `v2_bridge_skill_path_absolute` | "exposes absolute skill paths for OpenCode Skill.INFO" |
 //! | `rejects_duplicate_and_invalid_ids` | "rejects invalid and duplicate ids" |
 //! | `reopens_after_reset` | "reopens after closeTursoAndInvalidateCaches" |
+//! | `scratch_base_is_absolute_under_the_target_dir` | — (house fixture invariant, issue 59; no upstream counterpart) |
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -40,15 +41,53 @@ fn test_lock() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// The base cargo reserves for this test binary's data: `<target>/tmp`.
+///
+/// Cargo creates it and resolves a relative `CARGO_TARGET_DIR` itself, so it is
+/// absolute whatever the working directory or the variable's form. `env!` is
+/// only defined for integration-test targets — inside `src/` it is a compile
+/// error — so this helper must never leave `tests/`.
+fn scratch_base() -> PathBuf {
+    PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+}
+
 /// A scratch directory under the target dir (never `/tmp`).
 fn scratch_dir(label: &str) -> PathBuf {
-    let base = std::env::var("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("target"));
-    let dir = base.join("scratch").join("mem-skills").join(label);
+    let dir = scratch_base()
+        .join("scratch")
+        .join("mem-skills")
+        .join(label);
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("scratch dir");
     dir
+}
+
+// scratch base resolution (issue 59)
+
+#[test]
+fn scratch_base_is_absolute_under_the_target_dir() {
+    let base = scratch_base();
+    assert!(
+        base.is_absolute(),
+        "the scratch base must be absolute, got {:?}",
+        base
+    );
+    let exe = std::env::current_exe().expect("current test executable");
+    let target = exe
+        .ancestors()
+        .nth(3)
+        .expect("the test executable lives at <target>/<profile>/deps/<test>");
+    assert!(
+        base.starts_with(target),
+        "the scratch base must live under the target directory: {} is not under {}",
+        base.display(),
+        target.display()
+    );
+    assert!(
+        !base.starts_with(env!("CARGO_MANIFEST_DIR")),
+        "the scratch base must not live inside the checkout, got {}",
+        base.display()
+    );
 }
 
 fn store_config(storage_path: &Path) -> StoreConfig {
