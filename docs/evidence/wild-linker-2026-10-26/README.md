@@ -116,6 +116,28 @@ With the config above in force, on this tree:
 
 Raw log: `adoption-gate-workspace.log`.
 
+## WebAssembly — tried and rejected (2026-10-27)
+
+wild 0.11.0 also implements the **wasm-ld CLI** (`USAGE.md` §WebAssembly: `-C linker=path/to/wild -C
+linker-flavor=wasm-ld`). It was tested against this repo's real wasm crate, `web-ui` (Leptos CSR +
+wasm-bindgen), and **it does not work**:
+
+- A trivial probe does pass: a `wasm32-unknown-unknown` cdylib exporting `add` links (259 B against
+  wasm-ld's 1,589,111 B) and Node evaluates `add(2,3)=5`. That is why the probe alone was not evidence.
+- **`cargo test --target wasm32-unknown-unknown` fails to link**:
+  `wild: error: symbol exported via --export not found: __wbg_jspi_task_poll`. wasm-ld tolerates a
+  `--export` target that does not exist; wild treats it as fatal.
+- **`cd web-ui && trunk build` fails at the wasm-bindgen step** (exit 1 after 113.6 s; wild was invoked
+  three times for the module, then wasm-bindgen rejected the result).
+
+Conclusion: wild stays **ELF-only** in this repo. wasm continues on Rust's bundled `wasm-ld` (`trunk build`
+exit 0 in 22.1 s, `dist/*.wasm` 762,115 B; `cargo test --target wasm32-unknown-unknown` 32 passed across
+3 suites: 19 + 8 + 5). The repo's `.cargo/config.toml` deliberately has no `[target.wasm32-*]` section.
+
+Note: the machine-wide `~/.cargo/config.toml` briefly carried wasm sections pointing at wild (added outside
+this repo while the test ran); they were removed after the failure, with a backup at
+`~/.cargo/config.toml.bak-wasm-wild`. Nothing in this repository depends on them.
+
 ## What this does NOT establish
 
 - Only the 195 MB debug binary was timed. Small test binaries, proc-macros and build-script links were

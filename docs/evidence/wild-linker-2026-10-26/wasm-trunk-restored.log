@@ -1,0 +1,9 @@
+2026-10-26T20:27:37.784938Z  INFO 🚀 Starting trunk 0.22.0
+2026-10-26T20:27:37.785383Z  INFO 📦 starting build
+2026-10-26T20:27:37.786214Z  INFO ⏫ Found an update of trunk: 0.22.0 -> 0.22.1
+   Compiling web-ui v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/web-ui)
+    Finished `wasm-release` profile [optimized] target(s) in 20.60s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+2026-10-26T20:27:59.864070Z  INFO applying new distribution
+2026-10-26T20:27:59.865099Z  INFO ✅ success

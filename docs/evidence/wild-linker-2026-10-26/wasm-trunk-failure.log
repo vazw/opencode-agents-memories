@@ -1,0 +1,175 @@
+2026-10-26T20:21:50.754655Z  INFO 🚀 Starting trunk 0.22.0
+2026-10-26T20:21:50.757397Z  INFO 📦 starting build
+   Compiling unicode-ident v1.0.27
+   Compiling memchr v2.8.3
+   Compiling pin-project-lite v0.2.17
+   Compiling cfg-if v1.0.5
+   Compiling futures-core v0.3.34
+   Compiling wasm-bindgen-shared v0.2.129
+   Compiling futures-sink v0.3.34
+   Compiling once_cell v1.21.4
+   Compiling futures-channel v0.3.34
+   Compiling serde_core v1.0.229
+   Compiling futures-task v0.3.34
+   Compiling futures-io v0.3.34
+   Compiling slab v0.4.12
+   Compiling wasm-bindgen v0.2.129
+   Compiling futures-util v0.3.34
+   Compiling serde v1.0.229
+   Compiling zerofrom v0.1.8
+   Compiling stable_deref_trait v1.2.1
+   Compiling yoke v0.8.3
+   Compiling thiserror v2.0.21
+   Compiling zerovec v0.11.8
+   Compiling js-sys v0.3.106
+   Compiling smallvec v1.16.3
+   Compiling tinystr v0.8.4
+   Compiling futures-executor v0.3.34
+   Compiling litemap v0.8.3
+   Compiling writeable v0.6.4
+   Compiling icu_locale_core v2.3.0
+   Compiling futures v0.3.34
+   Compiling zerotrie v0.2.5
+   Compiling potential_utf v0.1.6
+   Compiling parking_lot_core v0.9.12
+   Compiling scopeguard v1.2.0
+   Compiling utf8_iter v1.0.4
+   Compiling icu_normalizer_data v2.3.0
+   Compiling icu_collections v2.3.0
+   Compiling zmij v1.0.23
+   Compiling icu_properties_data v2.3.0
+   Compiling lock_api v0.4.14
+   Compiling icu_provider v2.3.1
+   Compiling event-listener v5.4.2
+   Compiling throw_error v0.2.0
+   Compiling itoa v1.0.18
+   Compiling serde_json v1.0.154
+   Compiling event-listener-strategy v0.5.4
+   Compiling slotmap v1.1.1
+   Compiling send_wrapper v0.6.0
+   Compiling proc-macro2 v1.0.107
+   Compiling or_poisoned v0.1.0
+   Compiling hydration_context v0.2.1
+   Compiling thiserror v1.0.69
+2026-10-26T20:22:03.322923Z  INFO ⏫ Found an update of trunk: 0.22.0 -> 0.22.1
+   Compiling icu_normalizer v2.3.0
+   Compiling icu_properties v2.3.0
+   Compiling web-sys v0.3.106
+   Compiling wasm-bindgen-futures v0.4.79
+   Compiling any_spawner v0.2.0
+   Compiling async-lock v3.4.2
+   Compiling quote v1.0.47
+   Compiling guardian v1.3.0
+   Compiling percent-encoding v2.3.2
+   Compiling either v1.19.0
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.3
+   Compiling rustc-hash v2.1.3
+   Compiling crossbeam-utils v0.8.23
+   Compiling indexmap v2.14.2
+   Compiling itertools v0.14.0
+   Compiling idna_adapter v1.2.2
+   Compiling parking_lot v0.12.5
+   Compiling bytes v1.12.1
+   Compiling winnow v1.0.4
+   Compiling konst_macro_rules v0.2.19
+   Compiling konst v0.2.20
+   Compiling toml_parser v1.1.5+spec-1.1.0
+   Compiling http v1.5.0
+   Compiling pin-project v1.1.13
+   Compiling idna v1.1.0
+   Compiling syn v2.0.119
+   Compiling form_urlencoded v1.2.2
+   Compiling either_of v0.1.9
+   Compiling proc-macro2-diagnostics v0.10.1
+   Compiling oco_ref v0.2.1
+   Compiling aho-corasick v1.1.5
+   Compiling regex-syntax v0.8.11
+   Compiling reactive_graph v0.1.8
+   Compiling reactive_stores v0.1.8
+   Compiling gloo-utils v0.2.0
+   Compiling drain_filter_polyfill v0.1.3
+   Compiling html-escape v0.2.15
+   Compiling toml_datetime v1.1.2+spec-1.1.0
+   Compiling const_str_slice_concat v0.1.0
+   Compiling yansi v1.0.1
+   Compiling unicode-segmentation v1.13.3
+   Compiling dyn-clone v1.0.20
+   Compiling hashbrown v0.14.5
+   Compiling serde_spanned v1.1.2
+   Compiling next_tuple v0.1.0
+   Compiling linear-map v1.2.0
+   Compiling tachys v0.1.9
+   Compiling dashmap v6.2.1
+   Compiling toml v1.1.8+spec-1.1.0
+   Compiling convert_case v0.6.0
+   Compiling regex-automata v0.4.18
+   Compiling gloo-net v0.6.0
+   Compiling wasm-streams v0.4.2
+   Compiling url v2.5.8
+   Compiling const_format v0.2.36
+   Compiling serde_qs v0.13.0
+   Compiling camino v1.2.6
+   Compiling anyhow v1.0.104
+   Compiling xxhash-rust v0.8.19
+   Compiling pathdiff v0.2.3
+   Compiling same-file v1.0.6
+   Compiling config v0.15.27
+   Compiling walkdir v2.5.0
+   Compiling server_fn v0.7.8
+   Compiling typed-builder v0.20.1
+   Compiling regex v1.13.1
+   Compiling rstml v0.12.1
+   Compiling num-traits v0.2.19
+   Compiling codee v0.3.5
+   Compiling base64 v0.22.1
+   Compiling leptos_hot_reload v0.7.8
+   Compiling leptos_server v0.7.8
+   Compiling leptos_config v0.7.8
+   Compiling leptos_dom v0.7.8
+   Compiling siphasher v1.0.4
+   Compiling phf_shared v0.13.1
+   Compiling leptos v0.7.8
+   Compiling chrono v0.4.45
+   Compiling phf v0.13.1
+   Compiling thaw_utils v0.1.2
+   Compiling approx v0.5.1
+   Compiling uuid v1.28.0
+   Compiling icondata_core v0.1.0
+   Compiling palette_math v0.7.7
+   Compiling palette v0.7.7
+   Compiling thaw_components v0.3.2
+   Compiling icondata_ai v0.0.10
+   Compiling leptos_router v0.7.8
+   Compiling leptos_meta v0.7.8
+   Compiling thaw v0.4.8
+   Compiling console_error_panic_hook v0.1.7
+   Compiling web-ui v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/web-ui)
+    Finished `wasm-release` profile [optimized] target(s) in 1m 52s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+error: failed to read wasm-bindgen data from '/home/vaz/Code/Personal/Rust/opencode-agents-memory/web-ui/target/wasm32-unknown-unknown/wasm-release/web-ui.wasm'
+
+Caused by:
+    the `__wasm_bindgen_unstable` custom section is missing, but the module still contains wasm-bindgen shims
+    
+    This section carries the metadata wasm-bindgen needs to process the module, and
+    is usually lost by running a post-processing tool that strips custom sections,
+    such as `llvm-objcopy --strip-all` (which removes all custom sections since
+    LLVM 23) or `wasm-strip`, on the module before `wasm-bindgen`.
+    
+    Make sure `wasm-bindgen` runs on the Wasm file directly produced by the linker,
+    before any such stripping tool.
+2026-10-26T20:23:44.369770Z ERROR ❌ error
+error from build pipeline
+
+Caused by:
+    0: HTML build pipeline failed (1 errors), showing first
+    1: error from asset pipeline
+    2: running wasm-bindgen
+    3: wasm-bindgen call to executable '/home/vaz/.cargo/bin/wasm-bindgen' with args: '["--target=web", "--out-dir=/home/vaz/Code/Personal/Rust/opencode-agents-memory/web-ui/target/wasm-bindgen/release", "--out-name=web-ui", "/home/vaz/Code/Personal/Rust/opencode-agents-memory/web-ui/target/wasm32-unknown-unknown/wasm-release/web-ui.wasm", "--no-typescript"]' returned a bad status: exit status: 1
+2026-10-26T20:23:44.369808Z ERROR error from build pipeline
+2026-10-26T20:23:44.369822Z  INFO   1: HTML build pipeline failed (1 errors), showing first
+2026-10-26T20:23:44.369826Z  INFO   2: error from asset pipeline
+2026-10-26T20:23:44.369829Z  INFO   3: running wasm-bindgen
+2026-10-26T20:23:44.369833Z  INFO   4: wasm-bindgen call to executable '/home/vaz/.cargo/bin/wasm-bindgen' with args: '["--target=web", "--out-dir=/home/vaz/Code/Personal/Rust/opencode-agents-memory/web-ui/target/wasm-bindgen/release", "--out-name=web-ui", "/home/vaz/Code/Personal/Rust/opencode-agents-memory/web-ui/target/wasm32-unknown-unknown/wasm-release/web-ui.wasm", "--no-typescript"]' returned a bad status: exit status: 1
