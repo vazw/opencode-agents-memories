@@ -84,11 +84,11 @@ Full process: `docs/agents/workflow.md`.
   `cargo run`. Web UI: `cd web-ui && trunk build`, tests wasm-only (`cargo test --target
   wasm32-unknown-unknown`). Wrapper: `cd plugin && node --test tests/*.test.mjs`.
 - `cargo audit` runs from the repo root only — `.cargo/audit.toml` is the sole file it reads accepted
-  findings from, and it documents its own drift check. The repo's only other tracked toolchain config is
-  `.cargo/config.toml`, which pins the **wild** linker for `x86_64-unknown-linux-gnu` (measured 2026-10-27:
-  1.22–1.45 s vs rust-lld's 1.89–2.01 s per debug link, −20 % link RSS; evidence in
-  `docs/evidence/wild-linker-2026-10-26/`). There is no CI, no release automation, no `clippy.toml`,
-  `rustfmt.toml` or `rust-toolchain.toml`.
+  findings from, and it documents its own drift check. The repo has exactly two tracked cargo configs:
+  `.cargo/config.toml` (pins the **wild** linker for `x86_64-unknown-linux-gnu` host links — measured
+  2026-10-27: 1.22–1.45 s vs rust-lld's 1.89–2.01 s per debug link, −20 % link RSS, evidence in
+  `docs/evidence/wild-linker-2026-10-26/`) and `web-ui/.cargo/config.toml` (the wasm test runner, nothing
+  else). There is no CI, no release automation, no `clippy.toml`, `rustfmt.toml` or `rust-toolchain.toml`.
 - Never invoke Bun/npm/eslint: that tooling belongs to the reference-only `example/` subtree.
 
 ## Gates
