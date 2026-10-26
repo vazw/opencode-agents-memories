@@ -535,15 +535,35 @@ pub fn json_body_or_default<T: DeserializeOwned + Default>(bytes: &Bytes) -> T {
     serde_json::from_slice(bytes).unwrap_or_default()
 }
 
-/// The common `500` mapping for a port failure: the detail goes to the log and
-/// never into the response (D-9).
+/// The fixed message of the absent-service class (issue 61): the `501` body of
+/// a route whose port is not wired in this build. The `PortError`'s own
+/// Display is a log-level description and is never echoed.
+pub const UNAVAILABLE_MESSAGE: &str = "the endpoint is not available in this build";
+
+/// The answer for a port failure. The detail goes to the log and never into the
+/// response (D-9); the absent-service class answers the documented `501` stub
+/// envelope instead of a `500` (issue 61).
 pub fn port_failure(endpoint: &'static str, error: ports::PortError) -> Response {
     tracing::error!(endpoint, error = %error, "api handler failed");
-    envelope::internal_error()
+    match error {
+        // The service is not wired in this build: the same class the explicit
+        // stubs answer, so a client can tell "not supported here" from
+        // "broken here" without reading the body.
+        ports::PortError::Unavailable => envelope::not_implemented(UNAVAILABLE_MESSAGE),
+        // MEASURED status quo (2026-10-27), not an endorsement: `NotFound` and
+        // `Invalid` are pre-empted by every handler that documents 404/400/200
+        // (sessions, skills, maintenance, profile), and on the generic path
+        // they keep the D-9 500. Redesigning them is not issue 61's.
+        ports::PortError::NotFound | ports::PortError::Invalid(_) | ports::PortError::Store(_) => {
+            envelope::internal_error()
+        }
+    }
 }
 
 /// A `Query` alias for the repeated-key pairs used by every GET handler.
 pub type QueryPairs = Query<Vec<(String, String)>>;
 
-/// The status used by the documented stubs.
+/// The status used by the explicit stubs and by the absent-service class
+/// through [`port_failure`]; the tests bind the builder's literal to this
+/// constant.
 pub const STUB_STATUS: StatusCode = StatusCode::NOT_IMPLEMENTED;
