@@ -4,6 +4,8 @@ Status: done — 2026-10-26 (reviewer APPROVED round 4; close-out re-measured af
 fixes: `--lib open_guard` 15 passed, `--test open_guard` 24 passed / 1 ignored, `override` 2, `purge` 1,
 `fmt --all --check` and both clippy gates clean, `cargo test --workspace` 222 `test result: ok.` / 0 failed,
 plugin 40/40, sizes 112/112/24/24, INVERT 0). Landed as `8b635a8`.
+45b narrowed the override to the env/config legs and retired the per-call field; the residual is now two
+distinct `StoreConfig` values in one process (resolved or caller-built). Landed as `725c8c7`.
 
 ## PREMISE — `needs_validation` (read before implementing)
 
@@ -481,22 +483,39 @@ then); (iii) read-only opens skip probe B — they can be victims, never aggress
 dead and be replaced, so the marker is mode *truth*, never a clearance input; (vi) no holder identity is
 claimed, ever.
 
-**Probe-vs-in-process-legacy residual (round 4, measured at the public seam — documented, NOT fixed).**
-An overridden legacy handle is a legitimate in-process legacy opener, because `allow_unguarded_open` is a
-public per-call field (`ConnectOptions`, `config.rs:28` / `db.rs:257`). Measured sequence:
-`probe_database_file` on that live path = **`Held`**; the probe's own open+close then releases *this
+**Probe-vs-in-process-legacy residual (round 4, measured at the public seam — remedy (a) LANDED in 45b).**
+An overridden legacy handle is a legitimate in-process legacy opener. Historical sequence, measured before
+45b: `probe_database_file` on that live path = **`Held`**; the probe's own open+close then releases *this
 process's* POSIX lock (`t2 S4/S6/S7`), so the next probe = **`Free`**, and a subsequent **guarded** writable
 multiprocess open therefore **proceeds** while the legacy handle is still live — the mixed-mode row loss this
-guard exists to prevent. Pinned by
-`test_probe_releases_an_in_process_overridden_legacy_lock_and_the_guarded_open_then_proceeds`, which must
-**fail** if either remedy below lands, forcing the decision instead of a silent behaviour change.
-*Seam:* reachable only through the per-call `ConnectOptions.allow_unguarded_open` field. *Why the engine
-cannot reach it:* the engine resolves one `StoreConfig` per process and derives every `ConnectOptions` from
-it (`for_config`), so no per-open divergence between legacy and multiprocess exists there; the sequence needs
-a caller that builds two different option sets against the same root in one process. *Remedies left to the
-owner:* (a) constrain the override to the process-wide legs only (env var + config key, no per-call field),
-or (b) land design A §11's identity-keyed clearance registry before the probe may meet an in-process legacy
-handle. Neither is taken here — both are design/API decisions outside this issue's approved scope.
+guard exists to prevent.
+
+*Remedies:* **(a) LANDED — issue 45b, commit `725c8c7`, blueprint
+`20261026-0732-issue-45b-override-scope`.** The override is now the two process-wide legs only (env var,
+which wins, and config key); `ConnectOptions.allow_unguarded_open` is `pub(crate)` and read through a
+`#[must_use]` accessor, so no downstream crate and no integration test can set it on an option set.
+**(b) STILL OPEN:** design A §11's identity-keyed clearance registry — now needed only for the two-config
+path below.
+
+*Seam:* reachable only through **two distinct `StoreConfig` values in one process** — `Config`-resolved or
+caller-built (`StoreConfig.allow_unguarded_open` is `pub` at `config.rs:28`, and `for_config` is `pub` at
+`db.rs:276`, so a downstream crate can mint one; that is the config leg, permitted by the ruling, not a
+per-call field). *Why the engine cannot reach it:* the engine resolves one `StoreConfig` per process and
+derives every `ConnectOptions` from it (`for_config`), so no divergence between legacy and multiprocess
+exists there; the sequence needs a caller that builds two different configs against the same root in one
+process.
+
+*Pinned by* `test_hazard_requires_two_distinct_resolved_configs`, the successor of the retired
+`test_probe_releases_an_in_process_overridden_legacy_lock_and_the_guarded_open_then_proceeds` (retired
+because its construction site no longer compiles). The successor must **fail** if the config leg ever becomes
+per-process or `StoreConfig`'s field becomes non-settable, forcing the decision instead of a silent behaviour
+change. The surface proofs are the `compile_fail` doctest on `ConnectOptions::allow_unguarded_open`
+(unwritable from a downstream crate) **and** the source pin
+`test_connect_options_never_re_publishes_the_override` (never re-published as `pub`; the coded
+`compile_fail,E0616` form was measured inert on `rustdoc 1.98.0`, so it is not used). The guarantee is
+**downstream-only** and must not be stated more strongly: `pub(crate)` blocks every outside caller, while
+inside the crate the single writer (`for_config`) is convention, checked by the writer-set greps recorded with
+45b.
 
 **Marker footgun (Plan Gate residual 6, recorded in `open_guard.rs`'s module doc).** An *overridden*
 legacy open writes `{"mode":"legacy"}` into the root's `.wal-mode` marker; a later **guarded** writable
