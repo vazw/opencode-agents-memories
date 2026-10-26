@@ -108,3 +108,38 @@ seam).
   `.tmp/scratch/issue59-portability-unset.log` (20/20 green **and** the checkout dirtied). The reviewer
   reproduced both independently, including the variable-present control (`mem-skills` 16/16) and the empty
   `git diff` against base. Nothing here is inherited from a report.
+
+- **2026-10-27 — class enumeration completed, and the option list in `## OPEN DESIGN QUESTION` was
+  incomplete.** Both are recorded here so the wave's scope is not a guess.
+
+  **A fourth CWD-derived path exists and is benign — do not fix it here.** `tests/web_dist_wiring.rs:54`,
+  `let root = std::env::current_dir().expect("repo root");`, then writes
+  `<root>/tmp/scratch/web-dist-wiring/<pid>-<nanos>`. It looks like this issue's defect and is not one:
+  cargo runs a test binary with its CWD at that **package's** root, and this suite belongs to the root
+  package (`name = "opencode-agents-memory"`, 11 suites under `tests/`), whose package root *is* the repo
+  root. So the same rule that makes `crates/<crate>/target` wrong makes `<repo>/tmp` right here. It is
+  also gitignored (`.gitignore:5` matches `/tmp/`), which is why it never dirtied the tree. Residual
+  risk, named not fixed: a direct invocation of that binary from any other directory writes the scratch
+  tree to the wrong place. Out of scope — `MEASURED` 2026-10-27, no change proposed.
+
+  **`CARGO_TARGET_TMPDIR` was missing from the option list and is the answer.** The Cargo Book documents
+  it as *"a path to a directory inside the target directory where integration tests or benchmarks are
+  free to put any data needed by the tests/benches"*, created by cargo, content unmanaged. Measured on
+  rustc 1.98.0 with a throwaway integration test under `.tmp/probe/tmpdir`:
+
+  | `CARGO_TARGET_DIR` | value | absolute |
+  |---|---|---|
+  | unset | `<proj>/target/tmp` | true |
+  | `rel-target` (**relative**) | `<proj>/rel-target/tmp` | true |
+  | absolute, outside the project | `<abs>/tmp` | true |
+
+  Cargo resolves the relative value itself. `cargo check --all-targets`, `cargo build --all-targets` and
+  `cargo clippy --all-targets -- -D warnings` all pass with `env!("CARGO_TARGET_TMPDIR")` in an
+  integration test. **Constraint, measured:** the same macro in a **unit** test is a hard compile error —
+  `environment variable `CARGO_TARGET_TMPDIR` not defined at compile time` — so any helper using it must
+  stay in `tests/` and must never be reachable from `src/`.
+
+  Consequence for acceptance 4: the shape becomes `<target>/tmp/scratch/<suite>/<label>`. The suite
+  segment is still load-bearing, because `<target>/tmp` is shared by every integration-test binary in a
+  run. `docs/agents/testing.md:56` ("Temp dirs under `std::env::temp_dir()` only") contradicts these
+  fixtures and is reconciled in the same wave rather than left standing.
