@@ -7,8 +7,8 @@
 //! `ApiServices::production(...)` chain — against a storage root seeded with
 //! exactly one tier-1 memory row, and asserts a store-backed endpoint answers
 //! `200` with that row. Revert `src/main.rs` to `ApiServices::unavailable()`
-//! and every assertion here goes RED with the documented `500`
-//! `{"success":false,"error":"Internal Server Error"}`.
+//! and every assertion here goes RED with the documented `501`
+//! `{"success":false,"error":"the endpoint is not available in this build"}`.
 //!
 //! House rules obeyed (same as `tests/web_dist_wiring.rs`): child stdout/stderr
 //! go to FILES (never pipes) and every wait is bounded; `std::env::set_var` is
@@ -725,7 +725,7 @@ fn test_production_wiring_serves_a_seeded_memory() {
     assert_eq!(
         status, 200,
         "the binary's own composition root must serve /api/memories, not the \
-         stub's 500 — body: {raw}"
+         stub's 501 — body: {raw}"
     );
     let body: serde_json::Value = serde_json::from_str(
         raw.split("\r\n\r\n")
