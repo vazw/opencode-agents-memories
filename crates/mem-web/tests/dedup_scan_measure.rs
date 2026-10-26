@@ -283,6 +283,23 @@ fn command_line(program: &str, args: &[&str]) -> String {
     }
 }
 
+/// The CPU model, not `lscpu`'s first line (which is only `Architecture:`):
+/// prefer the `Model name:` row so the numbers are attributable to a machine.
+fn cpu_model_line() -> String {
+    match Command::new("lscpu").output() {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            stdout
+                .lines()
+                .map(str::trim)
+                .find(|line| line.starts_with("Model name:"))
+                .map(str::to_string)
+                .unwrap_or_else(|| command_line("lscpu", &[]))
+        }
+        Err(error) => format!("<lscpu failed: {error}>"),
+    }
+}
+
 #[test]
 #[ignore = "measurement harness — prints the ladder, asserts no timing"]
 fn measure_near_scan_ladder() {
@@ -291,7 +308,7 @@ fn measure_near_scan_ladder() {
     let resolved_dimensions = embedding_dimensions_for_model(default_model) as usize;
     println!("== environment ==");
     println!("cargo profile            : debug (cargo test without --release)");
-    println!("lscpu model              : {}", command_line("lscpu", &[]));
+    println!("lscpu model              : {}", cpu_model_line());
     println!(
         "rustc                    : {}",
         command_line("rustc", &["-V"])

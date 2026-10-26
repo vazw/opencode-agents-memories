@@ -111,12 +111,26 @@ MAX_NEAR_SCAN_PAIRS         : 870000
 ```
 
 **What it settles, and what it does not.** The base kernel is *faster* on the same rung (11,403.3 ns vs
-13,487.9 ns, −15.5 %), so the ladder's number is the more conservative input and the constant is
-derived from it. The 15–18 % spread is run-to-run variation on one machine, not a kernel effect: the
-ladder fixture never claims a candidate, so `processed` stays empty and the `Vec`→`HashSet` change
-cannot move `c_iter` at all — the two runs differ because the machine differed, and both land R3. The
-record therefore claims the ladder measured the pre-change kernel, with the ordering argument and this
-cross-check as its evidence, and does not claim a precision better than the spread shows.
+13,487.9 ns, −15.5 %), so the ladder's number is the more conservative input and the constant is derived
+from it. The spread is run-to-run variation, and **its cause is documented**: the ladder was executed by
+invoking the compiled test binary *directly, outside the cargo serialiser*, precisely so the shared build
+lock was not held for an hour while the sibling 45b wave built — which means the machine was concurrently
+loaded. The record's own table corroborates it: `exact_plan_ms` differs **31.3 ms vs 50.4 ms (61 %)**
+between the two runs of the *same code*. Limits, stated rather than implied: n = 2, no load or thermal
+control, and no machine model recorded (`lscpu` printed only `Architecture: x86_64`). **Consequence:** the
+spread moves the cap's *second* significant figure (740,000 from Run A vs 870,000 from Run B), so on this
+machine the constant is reproducible to about one significant figure even though the pre-registered rule
+quotes two. Run A's value is used because it is both the pre-registered ladder and the more conservative
+bound.
+
+The cross-check does **not** establish kernel identity by itself: both runs are the *same* kernel under
+the ordering premise, so what it measures is run-to-run spread, not a kernel effect. The `Vec`/`HashSet`
+question is settled independently — `processed` is only inserted on a claim, and the ladder fixture
+claims nothing (the harness asserts no group at every rung), so the set stays empty and the change cannot
+move `c_iter`. Kernel identity therefore rests on the build-order argument: the ladder's binary was built
+and launched at 08:45–08:59Z, before `engine.rs`'s first edit (~09:16Z). That is corroborated (the raw
+artifact's mtime is 08:59:08Z; the edits are later) but **not machine-proven**, and the record does not
+claim more.
 
 
 ### Skip paths (n = 5,000)
@@ -151,7 +165,7 @@ derived at production speed, and the ≈4.68 h figure is a debug-profile figure.
 
 ## The cap's value, and where it lives
 
-`MAX_NEAR_SCAN_PAIRS = 741_000` (crate-visible constant,
+`MAX_NEAR_SCAN_PAIRS = 740_000` (crate-visible constant,
 `crates/mem-web/src/api/deduplication/mod.rs`), derived as
 `min(max(250_000, floor_to_two_significant_figures(10 s / c_iter)), 1_250_000_000)`. The floor only
 guards a broken measurement; the ceiling is one shard's whole pair grid rounded up from 1,249,975,000.
@@ -160,6 +174,21 @@ capacity (1,249,975,000 pairs) is truncated, and a multi-shard pass reaches the 
 ceiling's own truth, for the record: it is a *global* per-pass budget and shard count is unbounded (no
 `max_shards` key exists), so a pass accumulating more than one shard's grid can still reach it — the
 ceiling is not a per-shard exemption. The record never says "cap skipped" or "truncation impossible".
+
+**One mid-flight figure was rejected.** The orchestrator's correction of 10:01Z said 741,000; that is a
+*three*-significant-figure truncation of 741,405, while the pre-registered rule specifies **two**
+significant figures (740,000). The implementation and this record's derivation were right and the
+mid-flight figure was wrong: the contradiction came from that message, not from the code, and the
+harness itself prints `740000`. 741,000 is kept here as the rejected value so no later reader
+re-derives it as a live alternative.
+
+### Blueprint corrections (the approved body is immutable)
+
+The approved blueprint's parenthetical at `:174-175` asserts that the R1 validity-gate defect was
+*"corrected here, before any gate saw it"*. That is **false** — the previous revision *was* gated (it was
+rejected, with ten modifications). The blueprint body cannot be edited after approval (its hash is the
+STAMP), so the correction is recorded here instead: R1 is a **validity gate, not a design branch**, it is
+reachable only through a broken measurement, and no step is ever skipped on the strength of it.
 
 ### Why a constant and not a config key
 
@@ -288,6 +317,11 @@ that it was never measured, so the next wave does not re-derive it.
 - The `JoinError -> PortError::Store` arm is mutation-only: reaching it needs a panicking or cancelled
   blocking task, and ADR-0013 forbids `panic!` in production code. It is not covered by a test, by
   design.
+- **The linear leg still runs on the runtime thread.** `engine::exact_plan` is cheap but not free — the
+  ladder measured 31–50 ms at `n = 10,000` in debug, which extrapolates to ~150–250 ms for a 50,000-row
+  shard (the extrapolation is INFERRED; the rung was not run). It is a `HashMap` grouping pass, not a
+  pair loop, so it is not the wedge this wave removes; it stays a named residual rather than a silently
+  accepted cost.
 
 ## Files
 

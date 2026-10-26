@@ -66,9 +66,14 @@ const CENTREPIECE_N: usize = 390;
 const LEASE_N: usize = 3_000;
 
 /// How long the first run may go before its future is dropped. `<= 50 ms` per
-/// the test plan; the fixture's scan is far longer than this (the measured
-/// 4-lane cost of the base kernel put 4.5M comparisons at ~20 ms, so the
-/// fixture uses 64 lanes: roughly 4x that per comparison, ~0.3 s in debug).
+/// the test plan, and the fixture's scan is on the order of a second in debug:
+/// the whole case measures 1.59–2.44 s (reviewer and coder runs) for one
+/// abandoned scan, the bounded poll, and one accepted scan, so a single scan is
+/// ~0.7–1.5 s — **35–75x** the deadline, not the ~15x an earlier comment
+/// claimed. The fixture is 64 lanes (the first cut used 4; 64 is **16x**, not
+/// "roughly 4x"). Whether 4 lanes would have cleared the deadline was never
+/// timed: the base RED showed only that the inline run answered before 20 ms,
+/// which is an upper bound on that fixture's cost, not a measurement of it.
 const LEASE_DROP_AFTER: Duration = Duration::from_millis(20);
 
 /// The bounded `yield_now` poll's iteration cap. A few thousand yields would
@@ -186,7 +191,7 @@ fn router_with(store: Arc<FakeStore>) -> axum::Router {
     build_router(Arc::new(state))
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread")]
 async fn test_dedup_scan_is_detached_so_the_runtime_stays_responsive() {
     let entered = Arc::new(Notify::new());
     let store = Arc::new(

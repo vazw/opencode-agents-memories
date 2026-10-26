@@ -378,7 +378,7 @@ async fn test_dedup_run_keeps_deleting_exact_duplicates_in_later_shards_after_th
     rows.push((2, mem("later_new", "later content", 2_000, unit_y())));
     rows.push((2, mem("later_old", "later content", 1_000, unit_y())));
     let store = Arc::new(FakeDedupStore::new(vec![shard(1), shard(2)], rows));
-    // Shard 1 has three survivors (six comparisons); a budget of one spends
+    // Shard 1 has three survivors (three comparisons); a budget of one spends
     // itself there, before shard 2 is even read.
     let service = DedupService::new(store.clone(), true, 0.9).with_near_pair_budget(1);
 
