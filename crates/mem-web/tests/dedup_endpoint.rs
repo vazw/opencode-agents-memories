@@ -17,7 +17,7 @@ use common::real_store::{
 };
 use common::{api_request, app_state_with_api};
 use mem_core::scope::Scope;
-use mem_web::api::deduplication::production_deduplication_port;
+use mem_web::api::deduplication::{MAX_NEAR_SCAN_PAIRS, production_deduplication_port};
 use mem_web::api::ports::ApiServices;
 use mem_web::server::build_router;
 use mem_web::web_auth::WebAuth;
@@ -255,6 +255,117 @@ async fn test_deduplicate_endpoint_is_deterministic_across_runs() {
         first_body.body_string(),
         second_body.body_string(),
         "equal created_at + reversed insertion order must serialize identically"
+    );
+}
+
+#[tokio::test]
+async fn test_deduplicate_reports_the_scan_accounting_beside_the_unchanged_fields() {
+    let store = new_store("dedup-endpoint-scan-accounting");
+    let shard = create_shard(&store, Scope::Project, HASH, 0).await;
+    // One exact duplicate pair (newest wins) plus one distinct row at cosine
+    // 0.95 — so the pass deletes once and the two survivors are exactly one
+    // comparison, reported as one near-duplicate group.
+    insert(
+        &store,
+        &shard,
+        "mem_new",
+        "same content",
+        TAG,
+        3000,
+        unit_x(),
+    )
+    .await;
+    insert(
+        &store,
+        &shard,
+        "mem_old",
+        "same content",
+        TAG,
+        2000,
+        unit_x(),
+    )
+    .await;
+    insert(
+        &store,
+        &shard,
+        "mem_near",
+        "near content",
+        TAG,
+        1000,
+        with_cos(0.95),
+    )
+    .await;
+
+    let response = post_deduplicate(router(&store, true)).await;
+    assert_eq!(response.status, 200, "{}", response.body_string());
+    let body = body_json(&response);
+
+    // The new key is additive and always present.
+    assert_eq!(
+        sorted_keys(&body["data"]),
+        vec![
+            "exactDuplicatesDeleted".to_string(),
+            "nearDuplicateGroups".to_string(),
+            "nearDuplicateScan".to_string(),
+        ],
+        "the data object carries exactly the legacy keys plus the scan accounting: {body}"
+    );
+    assert_eq!(
+        sorted_keys(&body["data"]["nearDuplicateScan"]),
+        vec![
+            "pairBudget".to_string(),
+            "pairsScanned".to_string(),
+            "truncated".to_string(),
+        ],
+        "the accounting key's shape: {body}"
+    );
+
+    // ... and every legacy key keeps its name, value and shape.
+    assert_eq!(body["success"], Value::Bool(true), "{body}");
+    assert_eq!(body["data"]["exactDuplicatesDeleted"], 1, "{body}");
+    let groups = body["data"]["nearDuplicateGroups"]
+        .as_array()
+        .unwrap_or_else(|| panic!("nearDuplicateGroups is an array: {body}"));
+    assert_eq!(groups.len(), 1, "{body}");
+    assert_eq!(
+        sorted_keys(&groups[0]["representative"]),
+        vec!["containerTag", "content", "createdAt", "id"],
+        "the representative keeps the upstream keys: {body}"
+    );
+    assert_eq!(
+        sorted_keys(&groups[0]["duplicates"][0]),
+        vec![
+            "content".to_string(),
+            "id".to_string(),
+            "similarity".to_string()
+        ],
+        "a duplicate keeps the upstream keys: {body}"
+    );
+    assert_eq!(groups[0]["representative"]["id"], "mem_new", "{body}");
+    assert_eq!(groups[0]["duplicates"][0]["id"], "mem_near", "{body}");
+
+    // The accounting tells the truth about this fixture.
+    assert_eq!(
+        body["data"]["nearDuplicateScan"]["pairsScanned"],
+        serde_json::json!(1),
+        "two survivors are exactly one ordered comparison: {body}"
+    );
+    assert_eq!(
+        body["data"]["nearDuplicateScan"]["pairBudget"],
+        serde_json::json!(MAX_NEAR_SCAN_PAIRS),
+        "the report names the pass's global budget: {body}"
+    );
+    assert_eq!(
+        body["data"]["nearDuplicateScan"]["truncated"],
+        Value::Bool(false),
+        "a single shard well under the budget never truncates: {body}"
+    );
+    let mut remaining = row_ids(&store, &shard).await;
+    remaining.sort();
+    assert_eq!(
+        remaining,
+        vec!["mem_near".to_string(), "mem_new".to_string()],
+        "only the exact duplicate is deleted"
     );
 }
 

@@ -516,6 +516,16 @@ pub struct CleanupDto {
 pub struct DedupDto {
     pub exact_duplicates_deleted: u64,
     pub near_duplicate_groups: Vec<NearDuplicateGroupDto>,
+    pub near_duplicate_scan: NearDuplicateScanDto,
+}
+
+/// One pass's near-duplicate scan accounting (`nearDuplicateScan`).
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NearDuplicateScanDto {
+    pub pairs_scanned: u64,
+    pub pair_budget: u64,
+    pub truncated: bool,
 }
 
 /// One reported near-duplicate group (upstream `DuplicateGroup`).
@@ -570,6 +580,11 @@ impl From<super::ports::DedupReport> for DedupDto {
                         .collect(),
                 })
                 .collect(),
+            near_duplicate_scan: NearDuplicateScanDto {
+                pairs_scanned: report.near_duplicate_scan.pairs_scanned,
+                pair_budget: report.near_duplicate_scan.pair_budget,
+                truncated: report.near_duplicate_scan.truncated,
+            },
         }
     }
 }

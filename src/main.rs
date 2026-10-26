@@ -21,6 +21,7 @@
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use mem_ai::CRATE_NAME as MEM_AI;
 use mem_bridge::CRATE_NAME as MEM_BRIDGE;
@@ -43,7 +44,7 @@ use mem_skills::SkillsManager;
 use mem_store::CRATE_NAME as MEM_STORE;
 use mem_vault::CRATE_NAME as MEM_VAULT;
 use mem_web::CRATE_NAME as MEM_WEB;
-use mem_web::api::deduplication::production_deduplication_port;
+use mem_web::api::deduplication::production_deduplication_port_with_cancel;
 use mem_web::api::ports::ApiServices;
 use mem_web::api::store_adapter::{ProductionDeps, ProductionEmbed, production_skill_port};
 use opencode_agents_memory::web_dist::{self, ResolvedDist};
@@ -150,6 +151,12 @@ impl WebLauncher for RootWebLauncher {
                     store_config,
                 )))
             };
+            // One flag, two readers: the deduplication port (a running or
+            // queued near scan returns at its next check) and the stop
+            // closure below (which sets it before stopping the server). It is
+            // declared above the `match deps` so both arms can see it; the
+            // `None` arm has no deduplication port to cancel.
+            let deduplication_cancelled = Arc::new(AtomicBool::new(false));
             let api = match deps {
                 Some(deps) => {
                     let service = EmbeddingService::new(
@@ -164,11 +171,14 @@ impl WebLauncher for RootWebLauncher {
                             embed: Arc::new(ProductionEmbed::new(Arc::new(service))),
                         })
                         .with_skills(skills_port)
-                        .with_maintenance(production_deduplication_port(
-                            deps.shards.clone(),
-                            core_config.deduplication_enabled,
-                            core_config.deduplication_similarity_threshold,
-                        )),
+                        .with_maintenance(
+                            production_deduplication_port_with_cancel(
+                                deps.shards.clone(),
+                                core_config.deduplication_enabled,
+                                core_config.deduplication_similarity_threshold,
+                                Arc::clone(&deduplication_cancelled),
+                            ),
+                        ),
                     )
                 }
                 // The documented degrade path: no composed stores means the
@@ -202,6 +212,11 @@ impl WebLauncher for RootWebLauncher {
                     let stop: Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send> =
                         Box::new(move || {
                             Box::pin(async move {
+                                // FIRST, before the server is stopped: a near
+                                // scan running or queued on the blocking pool
+                                // returns at its next check, so the graceful
+                                // drain does not wait for detached CPU work.
+                                deduplication_cancelled.store(true, Ordering::SeqCst);
                                 let _ = handle.stop().await;
                             })
                                 as Pin<Box<dyn Future<Output = ()> + Send>>

@@ -7,7 +7,7 @@
 //! third run) strict rather than a counter artefact.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -340,4 +340,154 @@ async fn test_dedup_service_rejects_a_second_run_while_the_first_is_in_flight() 
         "the store is already deduplicated"
     );
     assert_eq!(store.deleted(), vec!["dup_2".to_string()]);
+}
+
+// ---------------------------------------------------------------------------
+// The global near-pair budget and the pre-scan cancellation flag (AC6, AC7)
+// ---------------------------------------------------------------------------
+
+/// Rows that make one shard's near scan cost exactly `pairs(survivors)`:
+/// distinct contents (no exact duplicates) and vectors whose every pair is
+/// either orthogonal (`0.0`) or identical (`1.0`, excluded by the kernel), so
+/// nothing is ever claimed and every ordered pair is visited.
+fn scan_rows(shard_id: i64, count: usize, label: &str) -> Vec<(i64, DedupMemory)> {
+    (0..count)
+        .map(|index| {
+            let vector = if index % 2 == 0 { unit_x() } else { unit_y() };
+            (
+                shard_id,
+                mem(
+                    &format!("{label}_{index}"),
+                    &format!("{label} content {index}"),
+                    1_000 + index as i64,
+                    vector,
+                ),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn test_dedup_run_keeps_deleting_exact_duplicates_in_later_shards_after_the_near_budget_is_spent()
+ {
+    let mut rows = vec![
+        (1, mem("dup_new", "same content", 3_000, unit_x())),
+        (1, mem("dup_old", "same content", 2_000, unit_x())),
+    ];
+    rows.extend(scan_rows(1, 2, "first"));
+    rows.push((2, mem("later_new", "later content", 2_000, unit_y())));
+    rows.push((2, mem("later_old", "later content", 1_000, unit_y())));
+    let store = Arc::new(FakeDedupStore::new(vec![shard(1), shard(2)], rows));
+    // Shard 1 has three survivors (six comparisons); a budget of one spends
+    // itself there, before shard 2 is even read.
+    let service = DedupService::new(store.clone(), true, 0.9).with_near_pair_budget(1);
+
+    let report = service.run().await.expect("the walk succeeds");
+    assert_eq!(
+        report.exact_duplicates_deleted, 2,
+        "the exact-delete half is never truncated: shard 2's duplicate is still deleted"
+    );
+    assert_eq!(
+        store.deleted(),
+        vec!["dup_old".to_string(), "later_old".to_string()],
+        "both shards' older duplicates are gone"
+    );
+    assert!(report.near_duplicate_groups.is_empty());
+    assert_eq!(
+        report.near_duplicate_scan.pairs_scanned, 1,
+        "the budget was spent in shard 1 and never re-granted"
+    );
+    assert_eq!(report.near_duplicate_scan.pair_budget, 1);
+    assert!(report.near_duplicate_scan.truncated);
+}
+
+#[tokio::test]
+async fn test_dedup_run_reports_the_global_budget_and_the_truncation() {
+    let mut rows = scan_rows(1, 4, "first");
+    rows.extend(scan_rows(2, 4, "second"));
+    let store = Arc::new(FakeDedupStore::new(vec![shard(1), shard(2)], rows));
+    // Each shard's four survivors are six comparisons; five is one global
+    // budget, not five per shard.
+    let service = DedupService::new(store.clone(), true, 0.9).with_near_pair_budget(5);
+
+    let report = service.run().await.expect("the walk succeeds");
+    assert_eq!(report.exact_duplicates_deleted, 0);
+    assert!(report.near_duplicate_groups.is_empty());
+    assert_eq!(
+        report.near_duplicate_scan.pairs_scanned, 5,
+        "one budget spans the whole pass: 6 + 6 comparisons would be 12"
+    );
+    assert_eq!(report.near_duplicate_scan.pair_budget, 5);
+    assert!(
+        report.near_duplicate_scan.truncated,
+        "shard 2's scan work was left undone"
+    );
+    assert!(
+        report.near_duplicate_scan.pairs_scanned <= report.near_duplicate_scan.pair_budget,
+        "the report can never claim more work than the budget allowed"
+    );
+}
+
+#[tokio::test]
+async fn test_dedup_run_reports_truncation_and_still_deletes_the_first_shards_exact_duplicates() {
+    // The CAP SEMANTICS A/B discriminator: shard 1 holds one byte-identical
+    // pair plus distinct survivors; shard 2 alone exceeds the remaining
+    // budget.
+    let mut rows = vec![
+        (1, mem("dup_new", "first duplicate", 3_000, unit_x())),
+        (1, mem("dup_old", "first duplicate", 2_000, unit_x())),
+    ];
+    rows.extend(scan_rows(1, 3, "first"));
+    rows.extend(scan_rows(2, 6, "second"));
+    let store = Arc::new(FakeDedupStore::new(vec![shard(1), shard(2)], rows));
+    let service = DedupService::new(store.clone(), true, 0.9).with_near_pair_budget(10);
+
+    let report = service
+        .run()
+        .await
+        .expect("a truncated pass still answers a report");
+    assert_eq!(
+        report.exact_duplicates_deleted, 1,
+        "B's arm: the deletion is committed, not refused"
+    );
+    assert_eq!(store.deleted(), vec!["dup_old".to_string()]);
+    assert!(report.near_duplicate_scan.truncated, "the pass was cut");
+    assert_eq!(
+        report.near_duplicate_scan.pairs_scanned, 10,
+        "shard 1's six comparisons plus four of shard 2's"
+    );
+    assert!(report.near_duplicate_scan.pairs_scanned <= report.near_duplicate_scan.pair_budget);
+}
+
+#[tokio::test]
+async fn test_dedup_run_abandons_the_scan_when_the_cancel_flag_is_set_before_it_begins() {
+    let mut rows = vec![
+        (1, mem("dup_new", "same content", 3_000, unit_x())),
+        (1, mem("dup_old", "same content", 2_000, unit_x())),
+    ];
+    rows.extend(scan_rows(1, 2, "cancelled"));
+    let store = Arc::new(FakeDedupStore::new(vec![shard(1)], rows));
+    let cancel = Arc::new(AtomicBool::new(true));
+    let service =
+        DedupService::new(store.clone(), true, 0.9).with_cancellation(Arc::clone(&cancel));
+
+    assert_eq!(
+        service.run().await,
+        Err(PortError::Store("deduplication scan cancelled".to_string())),
+        "a cancelled pass answers an error, never a partial report"
+    );
+    assert_eq!(
+        store.deleted(),
+        vec!["dup_old".to_string()],
+        "the exact-delete half ran before the cancelled scan"
+    );
+
+    // The error path unwinds the guard and the lease: the next attempt is
+    // cancelled again (the flag is one-way), not refused as already running.
+    assert_eq!(
+        service.run().await,
+        Err(PortError::Store("deduplication scan cancelled".to_string())),
+        "the second attempt reaches the scan again, so the guard was released"
+    );
+    assert!(cancel.load(Ordering::Relaxed));
 }

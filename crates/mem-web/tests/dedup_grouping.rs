@@ -7,11 +7,23 @@
 //! - [`rotated`] at an angle from `x` (the greediness test's directions);
 //! - [`identical_vector`] whose cosine with itself is **exactly** `1.0`.
 
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use mem_core::utils::math::cosine_similarity;
 use mem_web::api::deduplication::DedupMemory;
-use mem_web::api::deduplication::engine::{exact_plan, near_groups};
+use mem_web::api::deduplication::engine::{NearScanLimits, exact_plan, near_groups};
 
 const DIMENSIONS: usize = 768;
+
+/// A budget so generous it cannot bind, plus a fresh never-set cancel flag:
+/// these cases pin the *grouping* behaviour, which the bound must not perturb.
+fn limits() -> NearScanLimits {
+    NearScanLimits {
+        max_pairs: u64::MAX,
+        cancel: Arc::new(AtomicBool::new(false)),
+    }
+}
 
 fn mem(
     id: &str,
@@ -110,7 +122,7 @@ fn test_near_groups_report_a_pair_in_the_band() {
         mem("mem_b", "content b", "tag_a", 1000, Some(with_cos(0.95))),
     ];
 
-    let groups = near_groups(&rows, &[0, 1], 0.9);
+    let groups = near_groups(&rows, &[0, 1], 0.9, &limits()).groups;
     assert_eq!(groups.len(), 1, "one group: {groups:?}");
     assert_eq!(groups[0].representative, 0);
     assert_eq!(groups[0].duplicates.len(), 1);
@@ -137,7 +149,9 @@ fn test_near_groups_exclude_a_similarity_of_exactly_one() {
     ];
 
     assert!(
-        near_groups(&rows, &exact_plan(&rows).survivors, 0.9).is_empty(),
+        near_groups(&rows, &exact_plan(&rows).survivors, 0.9, &limits())
+            .groups
+            .is_empty(),
         "similarity == 1.0 is excluded: the exact pass owns identical rows"
     );
 }
@@ -149,7 +163,11 @@ fn test_near_groups_skip_a_pair_below_the_threshold() {
         mem("mem_b", "content b", "tag_a", 1000, Some(with_cos(0.5))),
     ];
 
-    assert!(near_groups(&rows, &[0, 1], 0.9).is_empty());
+    assert!(
+        near_groups(&rows, &[0, 1], 0.9, &limits())
+            .groups
+            .is_empty()
+    );
 }
 
 #[test]
@@ -159,7 +177,11 @@ fn test_near_groups_never_pair_different_container_tags() {
         mem("mem_b", "content b", "tag_b", 1000, Some(with_cos(0.99))),
     ];
 
-    assert!(near_groups(&rows, &[0, 1], 0.9).is_empty());
+    assert!(
+        near_groups(&rows, &[0, 1], 0.9, &limits())
+            .groups
+            .is_empty()
+    );
 }
 
 #[test]
@@ -178,7 +200,7 @@ fn test_near_groups_are_greedy_not_transitive() {
         mem("mem_c", "content c", "tag_a", 1000, Some(c)),
     ];
 
-    let groups = near_groups(&rows, &[0, 1, 2], 0.9);
+    let groups = near_groups(&rows, &[0, 1, 2], 0.9, &limits()).groups;
     assert_eq!(groups.len(), 1, "exactly one group: {groups:?}");
     assert_eq!(groups[0].representative, 0);
     assert_eq!(
@@ -201,14 +223,22 @@ fn test_near_groups_skip_a_row_without_a_parsed_vector() {
         mem("mem_a", "content a", "tag_a", 2000, Some(unit_x())),
         mem("mem_b", "content b", "tag_a", 1000, None),
     ];
-    assert!(near_groups(&rows, &[0, 1], 0.9).is_empty());
+    assert!(
+        near_groups(&rows, &[0, 1], 0.9, &limits())
+            .groups
+            .is_empty()
+    );
 
     // As the first survivor: skipped, so the later row groups with nothing.
     let rows = vec![
         mem("mem_a", "content a", "tag_a", 2000, None),
         mem("mem_b", "content b", "tag_a", 1000, Some(unit_x())),
     ];
-    assert!(near_groups(&rows, &[0, 1], 0.9).is_empty());
+    assert!(
+        near_groups(&rows, &[0, 1], 0.9, &limits())
+            .groups
+            .is_empty()
+    );
 }
 
 #[test]
@@ -220,7 +250,7 @@ fn test_near_groups_follow_the_scan_order_of_the_input() {
         mem("mem_d", "content d", "tag_a", 1000, Some(with_cos_y(0.95))),
     ];
 
-    let groups = near_groups(&rows, &[0, 1, 2, 3], 0.9);
+    let groups = near_groups(&rows, &[0, 1, 2, 3], 0.9, &limits()).groups;
     assert_eq!(groups.len(), 2, "two groups: {groups:?}");
     assert_eq!(groups[0].representative, 0);
     assert_eq!(groups[0].duplicates.len(), 1);

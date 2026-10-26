@@ -768,6 +768,52 @@ fn test_production_wiring_serves_a_seeded_memory() {
 }
 
 #[test]
+fn test_composition_root_passes_the_shutdown_cancel_flag_to_the_deduplication_port() {
+    // AC10: a source pin over the composition root. Reaching this behaviour
+    // end to end needs a SIGTERM mid-scan; the wiring itself is a text
+    // property, and the mechanism is proven at the mem-web seams
+    // (`dedup_offload.rs`, `dedup_service.rs`). House precedent:
+    // `test_no_mem_bridge_to_mem_web_edge` below.
+    let source = std::fs::read_to_string("src/main.rs").expect("read the composition root");
+
+    assert!(
+        source.contains("production_deduplication_port_with_cancel("),
+        "the wired arm must use the cancellation-aware factory"
+    );
+    assert!(
+        source.contains("Arc::clone(&deduplication_cancelled)"),
+        "the port must receive a clone of the launcher's flag"
+    );
+    assert!(
+        source.contains("use std::sync::atomic::"),
+        "the launcher needs the atomic imports for its flag"
+    );
+    assert!(
+        source.contains("deduplication_cancelled.store(true"),
+        "the stop closure must set the flag"
+    );
+    assert!(
+        !source.contains("with_maintenance(production_deduplication_port("),
+        "the 3-arg factory (a fresh never-set flag) must be gone from the wired arm"
+    );
+
+    // Condition: both `find`s must succeed before the positional comparison —
+    // `None < Some(..)` is `true`, so comparing raw `Option`s would pass on a
+    // source that lost either statement.
+    let store_at = source
+        .find("deduplication_cancelled.store(true")
+        .expect("the stop closure sets the deduplication cancel flag");
+    let stop_at = source
+        .find("handle.stop().await")
+        .expect("the stop closure stops the web server handle");
+    assert!(
+        store_at < stop_at,
+        "the flag must be set BEFORE the server is stopped, so the in-flight scan \
+         is cancelled while the runtime is still alive"
+    );
+}
+
+#[test]
 fn test_no_mem_bridge_to_mem_web_edge() {
     // AC4 / ADR-0007:584: mem-bridge may NEVER depend on mem-web — the root
     // crate is the composition root for that edge.

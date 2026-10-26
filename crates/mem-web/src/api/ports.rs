@@ -323,6 +323,22 @@ pub struct CleanupReport {
 pub struct DedupReport {
     pub exact_duplicates_deleted: u64,
     pub near_duplicate_groups: Vec<NearDuplicateGroup>,
+    /// What the bounded near-duplicate scan did — always present, so a
+    /// consumer that ignores it still sees truthful legacy fields and one that
+    /// reads it can tell "no near duplicates" from "did not look".
+    pub near_duplicate_scan: NearDuplicateScanReport,
+}
+
+/// One pass's near-duplicate scan accounting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NearDuplicateScanReport {
+    /// Candidate comparisons actually performed across the whole pass.
+    pub pairs_scanned: u64,
+    /// The pass's global candidate-comparison budget.
+    pub pair_budget: u64,
+    /// Whether the budget (or a zero budget at a later shard) left scan work
+    /// undone.
+    pub truncated: bool,
 }
 
 /// One reported near-duplicate group (upstream `DuplicateGroup`).
