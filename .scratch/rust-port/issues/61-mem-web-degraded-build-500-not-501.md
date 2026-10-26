@@ -1,6 +1,6 @@
 # 61 — `mem-web` · a degraded build answers **500** where the contract says **501**, because `port_failure` ignores the error class
 
-Status: ready-for-agent — 2026-10-27 (premise measured at HEAD `ffa4898`; 49 call sites, one mapping
+Status: landed 2026-10-27 as merge `0fbc9b5` (branch `issue-61/mem-web-500-501`, implementation `7402ecc`) — reviewer APPROVED after re-running every gate independently: RED 4 failed / 2 passed with the four predicted names, GREEN 6/6, `--list` 237 = 231 + 6, passed sum 236 = 231 + 5 (one ignored), the mutation back to 500 reproduces 4/2 and reverts to 6/6 with the same file hash, workspace 232 result lines with none failed, and the eight excluded paths byte-identical.
 function, and a reachable production degrade path — brief at the end of this file).
 
 ## PREMISE — measured, not inherited
@@ -146,3 +146,24 @@ for the absent-service case, not the whole error surface.
   This file was also corrected: the gate measured `grep -rn STUB_STATUS` over tracked sources and found the
   **definition only, zero call sites** — the explicit stubs call `envelope::not_implemented`, which hardcodes
   501. The earlier claim that "the explicit stubs use it" was false and is now replaced with the measurement.
+
+- **2026-10-27 — merged `0fbc9b5`.** The wave went through three blueprint revisions and one
+  record-only rework. The first two gate rejections were mechanical (a stale HEAD literal, an
+  off-by-one line cite, an incomplete `D1` row, and a second stale `500` string); the third was
+  approved. The reviewer then rejected the **ledger** once, not the code: Step 7 recorded
+  `api_endpoint_contract` 13 / `dedup_endpoint` 11 / `stats_contract` 21, where the tree measures
+  17 / 7 / 6. A `debugger` confirmed the cause and audited every other number: the Step 7 command
+  printed counts alone (`grep -n "test result:"`) and a second command printed `Running` names
+  alone, the two line-numbered lists were paired by hand, and three of seven pairings slipped to
+  the immediately preceding binary (`lib` 13, `cors` 11, `static_hosting` 21). Every other
+  recorded value reproduced. The rework replaced the row with a per-binary derivation and
+  appended an audit block; the re-review approved.
+
+  Two findings came out of the audit and were filed separately rather than absorbed: **#65** (three
+  stale figures in tracked docs, including `docs/agents/testing.md:181` claiming 16 where the file
+  declares 17) and the debugger's ledger rule — *every numeric cell must be a literal copy of one
+  line of one named command's output; a bare number in a list and a name in a separate list are
+  not admissible*.
+
+  Residual, unchanged: the log level on the failure path (D6 of the blueprint, deliberately not
+  touched — no log-capture harness exists to serve as an oracle).
