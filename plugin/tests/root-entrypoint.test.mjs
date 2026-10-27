@@ -2,7 +2,8 @@
 // example/opencode-mem/tests/plugin-root-entrypoint.test.ts: OpenCode loads a
 // directory plugin by falling back to `<dir>/index`, so a local checkout needs
 // index.js resolving to the same default export as dist/plugin.js.
-// (The `setup` function belongs to W5.2 — it must NOT exist yet.)
+// Both host contracts are exposed: the V1 `server` and the delegating V2
+// `setup` (see dist/v2/plugin.js).
 
 import test from "node:test";
 import assert from "node:assert/strict";

@@ -1,0 +1,192 @@
+// V2→V1 legacy client (W5.2, blueprint D2/D3/D7) — adapts the V2 plugin context
+// to the *narrow* slice of the V1 client shape the ported wrapper actually
+// consumes:
+//   - `session.messages({ path: { id } })` → the transcript the idle capture
+//     parses (`plugin/src/plugin.js:668-677`), in the V1 `{ info, parts }` shape;
+//   - `tui.showToast({ body })` → the toast RPC event (`./toast-rpc.js`).
+//
+// Everything else upstream's 19-case legacy client carries — structured output,
+// session create/prompt/abort/delete, the provider directory, `noReply`,
+// `legacyToolResult` — is deliberately absent: the port's V1 behaviour consumes
+// no such capability, the summariser lives in Rust, and provider connectivity
+// is issue 62's (never a `client.provider` surface here).
+//
+// Upstream reference: example/opencode-mem/src/v2/legacy-client.ts.
+
+import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
+
+import { toastPayload } from "./toast-rpc.js";
+
+// opencode v2 no longer publishes `session.idle`, which is what auto-capture is
+// built on. The event stream emits `session.execution.{succeeded,failed,
+// interrupted}` with `data.sessionID`; forwarding them under the legacy names
+// is enough. Names are also stripped of a trailing `.1` version suffix.
+const LEGACY_EVENT_ALIASES = {
+  "session.compaction.ended": "session.compacted",
+  "session.execution.succeeded": "session.idle",
+  "session.execution.failed": "session.idle",
+  "session.execution.interrupted": "session.idle",
+};
+
+// The V1 transcript shape the wrapper's `parseIdleTranscript` reads: `info.role`
+// plus `parts[*].type`/`text`/`tool`. `user`/`synthetic`/`system` become a user
+// message whose single text part carries the synthetic flag; `assistant` keeps
+// its content parts; `compaction` is a summary the parser skips.
+function legacyMessage(message, sessionID) {
+  if (message.type === "user" || message.type === "synthetic" || message.type === "system") {
+    return {
+      info: { id: message.id, sessionID, role: "user", agent: message.agent },
+      parts: [
+        {
+          id: `${message.id}-text`,
+          sessionID,
+          messageID: message.id,
+          type: "text",
+          text: message.text ?? "",
+          synthetic: message.type !== "user",
+        },
+      ],
+    };
+  }
+  if (message.type === "assistant") {
+    return {
+      info: {
+        id: message.id,
+        sessionID,
+        role: "assistant",
+        agent: message.agent,
+        mode: message.agent,
+      },
+      parts: (message.content ?? []).map((part, index) => ({
+        id: part.id ?? `${message.id}-${index}`,
+        sessionID,
+        messageID: message.id,
+        ...part,
+      })),
+    };
+  }
+  if (message.type === "compaction") {
+    return {
+      info: {
+        id: message.id,
+        sessionID,
+        role: "assistant",
+        summary: true,
+        mode: "compaction",
+      },
+      parts: [],
+    };
+  }
+  return {
+    info: { id: message.id ?? randomUUID(), sessionID, role: "assistant" },
+    parts: [],
+  };
+}
+
+function sessionIDFrom(input) {
+  return input?.sessionID ?? input?.path?.id;
+}
+
+// One console line, never a throw: a host with no RPC bridge still shows the
+// intent somewhere, and the message path is never disturbed.
+function toastFallback(input) {
+  const body = input?.body ?? input ?? {};
+  const text = [body.title, body.message].filter(Boolean).join(": ");
+  if (text) {
+    const method = body.variant === "error" ? "error" : body.variant === "warning" ? "warn" : "info";
+    console[method](`[opencode-mem] ${text}`);
+  }
+  return { data: false };
+}
+
+async function showToastViaRpc(toastRpc, input) {
+  if (!toastRpc) return toastFallback(input);
+  const payload = toastPayload(input);
+  if (payload === null) return toastFallback(input);
+  try {
+    await toastRpc.events.emit("toast", payload);
+    return { data: true };
+  } catch {
+    return toastFallback(input);
+  }
+}
+
+/**
+ * Adapts the V2 plugin context to the two V1 client capabilities the wrapper
+ * uses. `toastRpc` is the emitter `ctx.rpc.register(MemToast, {})` returned, or
+ * `undefined` when the host has no RPC registry.
+ */
+export function createLegacyClient(ctx, toastRpc) {
+  return {
+    session: {
+      messages: async (input) => {
+        const sessionID = sessionIDFrom(input);
+        if (!sessionID) throw new Error("session id required");
+        const messages = await ctx.session.context({ sessionID });
+        return { data: messages.map((message) => legacyMessage(message, sessionID)) };
+      },
+    },
+    tui: {
+      showToast: async (input) => showToastViaRpc(toastRpc, input),
+    },
+  };
+}
+
+/**
+ * Maps a raw V2 host event onto the V1 event envelope. Upstream returns three
+ * different property shapes; the port must merge the legacy `type` into
+ * whichever one it returns — replacing the object drops `properties.sessionID`
+ * and silently kills the adapter's compaction cache invalidation (H2).
+ */
+export function toLegacyEvent(raw) {
+  const envelope = raw?.payload ?? raw;
+  const source = envelope?.type === "sync" && envelope.syncEvent ? envelope.syncEvent : envelope;
+  const rawType = typeof source?.type === "string" ? source.type.replace(/\.1$/, "") : source?.type;
+  const type = typeof rawType === "string" ? (LEGACY_EVENT_ALIASES[rawType] ?? rawType) : rawType;
+  const data = source?.data ?? {};
+
+  const base =
+    source && typeof source === "object" && "properties" in source
+      ? source.properties
+      : type === "session.created" || type === "session.updated"
+        ? { info: data.session ?? data.info ?? data }
+        : data;
+  return { type, properties: { ...base, type } };
+}
+
+/**
+ * The global event stream is process-scoped; only events for this project may
+ * reach the V1 event hook. Directory-bearing events are decided directly;
+ * otherwise the event's session is resolved through the host and its directory
+ * compared. Errors and a missing id are `false` — never a forwarded event.
+ */
+export async function eventBelongsToLocation(ctx, raw) {
+  const directory =
+    raw?.location?.directory ??
+    raw?.directory ??
+    raw?.payload?.location?.directory ??
+    raw?.payload?.directory ??
+    raw?.data?.info?.directory;
+  if (typeof directory === "string") {
+    return resolve(directory) === resolve(ctx.location.directory);
+  }
+
+  const data = raw?.data ?? raw?.payload?.data ?? raw?.properties;
+  const sessionID = data?.sessionID ?? data?.session?.id ?? data?.info?.id;
+  if (sessionID) {
+    try {
+      const session = await ctx.session.get({ sessionID });
+      const sessionDirectory =
+        session?.location?.directory ?? session?.directory ?? session?.data?.directory;
+      return (
+        typeof sessionDirectory === "string" &&
+        resolve(sessionDirectory) === resolve(ctx.location.directory)
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
