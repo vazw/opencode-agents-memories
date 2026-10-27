@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use mem_core::config::Config;
 use mem_episodic::store::EpisodicStore;
+use mem_profile::profile_context::ProfileInjectPolicy;
 use mem_profile::profile_store::{ProfileConfig, ProfileStore};
 use mem_profile::prompt::UserPromptManager;
 use mem_store::connection::ConnectionManager;
@@ -219,7 +220,11 @@ pub async fn build_composed_runtime(
         consolidation_active.clone(),
         embedder.clone(),
         probe.clone(),
-    );
+    )
+    // The ONE production `.with_profile` site (issue 44, D1): forgetting it is
+    // exactly what `test_composed_runtime_wires_the_profile_tier_into_inject`
+    // catches, and the tier reports `NotWired` (logged) until it is here.
+    .with_profile(profile.clone(), ProfileInjectPolicy::from_core(config));
 
     // Q8: the consolidator behind the scheduler. Same provider, same
     // embedder, same probe, the tree's `DEFAULT_BATCH_LIMIT` (rows per agent
@@ -292,7 +297,7 @@ impl mem_episodic::summarizer::MilestoneSummarizer for UnavailableMilestoneSumma
 }
 
 /// The tag-resolution resolver over the resolved config (the same
-/// `TagResolver::project_tag_info` derivation as Step 2).
+/// `TagResolver::tags` derivation as Step 2).
 pub struct EnvResolver {
     pub container_tag_prefix: String,
     pub user_email_override: Option<String>,

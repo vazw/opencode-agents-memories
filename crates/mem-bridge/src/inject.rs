@@ -16,16 +16,28 @@
 //!   operation/legacy lock) skips ONLY the tier-1 leg; the episodic block
 //!   still renders with the reduced `memory_count` — inject never waits.
 //! - Privacy: `<private>` content is stripped before rendering.
+//! - Profile tier (issue 44): `mem_profile::profile_context` renders the
+//!   identity-gated `<user_profile>` block (`PROFILE_BLOCK_OPEN`), which is
+//!   PREPENDED to the history bytes. It is bounded by item count, never by the
+//!   byte budget, it never turns an `Ok` into an `Err`, and the `profile
+//!   inject` counter is emitted exactly once per rendered block with no
+//!   payload (ADR-0014 D-2).
 
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::Instant;
 
+use mem_core::logging::log;
+use mem_core::logging::signatures::PROFILE_INJECT;
 use mem_core::scope::Scope;
 use mem_embed::embedder::Embedder;
 use mem_episodic::record::AgentSession;
 use mem_episodic::store::EpisodicStore;
+use mem_profile::profile_context::{
+    ProfileInjectPolicy, StoredProfileRender, render_stored_profile,
+};
+use mem_profile::profile_store::ProfileStore;
 use mem_store::db::Row;
 use mem_store::operation_lock::{LEGACY_MIGRATION_LOCK_FILE, OPERATION_LOCK_FILE, read_live_lock};
 use mem_store::shard_manager::ShardManager;
@@ -99,9 +111,18 @@ pub struct InjectParams {
     /// Either the frozen `["summary","metadata"]` array form or the
     /// additive options object `{recent_count?, query?}`.
     pub include: Option<mem_store::serde_json::Value>,
+    /// An explicit profile identity. Trimmed and used when non-empty; it wins
+    /// over the resolved scope's `user_email` (the profile tier's store key).
+    /// The wrapper sends none, so the scope's git identity is the production
+    /// path.
+    pub user_id: Option<String>,
 }
 
 /// The result body (frozen response schema).
+///
+/// `profile` is a RUST-side outcome only: `Engine::call_inject` hand-builds the
+/// five-key wire JSON, so the field never reaches the response and
+/// `tests/fixtures/bridge/inject-response.json` stays byte-identical.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct InjectResult {
     pub block: Option<String>,
@@ -109,6 +130,40 @@ pub struct InjectResult {
     pub tokens: u64,
     pub truncated: bool,
     pub handling_ms: u64,
+    /// What the profile tier decided (see [`ProfileInjection`]).
+    pub profile: ProfileInjection,
+}
+
+/// The profile tier's typed outcome, carried inside `Ok` (never an error, never
+/// a silent skip) — the same shape as the capture side's
+/// `CaptureSummaryOutput::Skip` / `EntryOutcome`.
+///
+/// Every non-`Rendered` arm logs exactly once and never logs the identity or
+/// any profile text; the `Rendered` arm emits the `profile inject` counter
+/// (ADR-0014 D-2) with `data: None`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProfileInjection {
+    /// `injectProfile` is off (`Disabled` is also the `Default`).
+    #[default]
+    Disabled,
+    /// No `ProfileStore` was handed to this injector (`with_profile` never
+    /// called) — a composition bug, distinct from a configured "off".
+    NotWired,
+    /// A2: absent/blank `project_id`, so no scope was derived and the tier
+    /// never ran.
+    NoProjectScope,
+    /// Neither `params.user_id` nor the resolved scope's `user_email` yields a
+    /// non-empty identity.
+    NoIdentity,
+    /// The store has no active profile for the resolved identity.
+    NoProfile,
+    /// The profile could not be read or its `profile_data` did not parse.
+    Unusable,
+    /// The row parsed but every section rendered empty — no block, never an
+    /// empty wrapper.
+    Empty,
+    /// A `<user_profile>` block was prepended to the result.
+    Rendered,
 }
 
 /// One candidate row for the greedy budget append.
@@ -133,6 +188,13 @@ enum Tier1Leg {
     Skipped,
 }
 
+/// The optional profile tier: the store the row is read from plus the policy
+/// that gates and caps the render.
+struct ProfileTier {
+    store: Arc<ProfileStore>,
+    policy: ProfileInjectPolicy,
+}
+
 pub struct InjectService {
     store: Arc<EpisodicStore>,
     shards: Arc<ShardManager>,
@@ -141,6 +203,9 @@ pub struct InjectService {
     consolidation_active: Arc<AtomicBool>,
     embedder: Arc<dyn Embedder>,
     probe: Arc<dyn mem_store::platform::ProcessProbe>,
+    /// `None` until [`InjectService::with_profile`] is called — the tier then
+    /// reports [`ProfileInjection::NotWired`] instead of silently vanishing.
+    profile: Option<ProfileTier>,
 }
 
 impl InjectService {
@@ -160,7 +225,16 @@ impl InjectService {
             consolidation_active,
             embedder,
             probe,
+            profile: None,
         }
+    }
+
+    /// Wires the profile tier (issue 44). Additive on purpose: the other five
+    /// `InjectService::new` call sites keep compiling verbatim and report
+    /// [`ProfileInjection::NotWired`], which is a distinct, logged state.
+    pub fn with_profile(mut self, store: Arc<ProfileStore>, policy: ProfileInjectPolicy) -> Self {
+        self.profile = Some(ProfileTier { store, policy });
+        self
     }
 
     /// Assembles the injection block.
@@ -174,6 +248,7 @@ impl InjectService {
             .as_deref()
             .filter(|p| !p.trim().is_empty())
         else {
+            tracing::debug!("inject: no project scope, returning no block");
             return Ok(empty(started));
         };
 
@@ -186,6 +261,11 @@ impl InjectService {
             .scope_resolver
             .resolve(scope_input)
             .map_err(InjectError::Scope)?;
+
+        // 1b. The profile tier, resolved EXACTLY ONCE per `assemble`: the
+        // three `InjectResult` sites consume this pair, so the counter can
+        // never double-emit and no path can see a divergent profile outcome.
+        let (profile_block, profile_injection) = self.profile_tier(params, &scope).await;
 
         // 2. Recent sessions: 2 × N rows, blockers first with stable
         // recency inside the groups.
@@ -302,7 +382,7 @@ impl InjectService {
 
         // 5. Greedy budget append; tier-1 rows capped at 25% of the total.
         // The heading bytes are charged INSIDE the greedy pass (see `greedy`),
-        // so the emitted block can never exceed `4 × token_budget`.
+        // rows never exceed `4 × token_budget`; the wrapper adds a fixed constant; the profile block is separately bounded by item count, not bytes
         let tier1_cap = budget_bytes / TIER1_BUDGET_SHARE;
         let (mut included, truncated) = greedy(candidates, budget_bytes, tier1_cap);
 
@@ -325,12 +405,17 @@ impl InjectService {
         }
 
         if included.is_empty() {
+            // The profile tier is item-count bounded, so it survives an empty
+            // history: the early return emits it (never `None` beside a
+            // rendered profile) and accounts for it with the same rule.
+            let tokens = emitted_tokens(profile_block.as_deref());
             return Ok(InjectResult {
-                block: None,
+                block: profile_block,
                 memory_count: 0,
-                tokens: 0,
+                tokens,
                 truncated,
                 handling_ms: ms(started),
+                profile: profile_injection,
             });
         }
 
@@ -347,16 +432,73 @@ impl InjectService {
             body.push('\n');
         }
         body.push_str(HISTORY_BLOCK_CLOSE);
-        let tokens = (body.len() / 4) as u64;
+
+        // The profile block is PREPENDED; the history bytes are untouched.
+        let block = match profile_block {
+            Some(profile) => format!("{profile}\n{body}"),
+            None => body,
+        };
+        // The byte-based estimate of the EMITTED block, profile included
+        // (D-W5.3-3 + 44.13).
+        let tokens = emitted_tokens(Some(block.as_str()));
 
         Ok(InjectResult {
-            block: Some(body),
+            block: Some(block),
             memory_count: included.len() as u64,
-            // The byte-based estimate of the EMITTED block (D-W5.3-3).
             tokens,
             truncated,
             handling_ms: ms(started),
+            profile: profile_injection,
         })
+    }
+
+    /// Runs the profile tier for one `assemble` call.
+    ///
+    /// The ladder is total and fail-soft: every arm returns `(None, <outcome>)`
+    /// except `Rendered`, so a profile problem can never turn an `Ok` into an
+    /// `Err` and never blocks the history assembly. No lock is held across the
+    /// read or the render.
+    async fn profile_tier(
+        &self,
+        params: &InjectParams,
+        scope: &ResolvedProjectScope,
+    ) -> (Option<String>, ProfileInjection) {
+        let Some(tier) = self.profile.as_ref() else {
+            tracing::warn!("inject: the profile tier is not wired");
+            return (None, ProfileInjection::NotWired);
+        };
+        if !tier.policy.enabled {
+            tracing::debug!("inject: the profile tier is disabled by configuration");
+            return (None, ProfileInjection::Disabled);
+        }
+        let Some(user_id) = resolve_user_id(params, scope) else {
+            tracing::warn!("inject: the profile tier refused, no user identity");
+            return (None, ProfileInjection::NoIdentity);
+        };
+        let profile = match tier.store.get_active_profile(&user_id).await {
+            Ok(Some(profile)) => profile,
+            Ok(None) => {
+                tracing::debug!("inject: no active profile for the resolved identity");
+                return (None, ProfileInjection::NoProfile);
+            }
+            Err(_) => {
+                // The store error text is a DB diagnostic, but the identity and
+                // any profile text stay out of the log regardless.
+                tracing::warn!("inject: the profile store read failed");
+                return (None, ProfileInjection::Unusable);
+            }
+        };
+        match render_stored_profile(&profile.profile_data, now_millis(), &tier.policy.caps) {
+            StoredProfileRender::Block(block) => {
+                // One event per rendered block, no payload (ADR-0014 D-2).
+                log(PROFILE_INJECT, None);
+                (Some(block), ProfileInjection::Rendered)
+            }
+            // Each of these two logs exactly once inside the renderer; logging
+            // again here would double-count the outcome.
+            StoredProfileRender::Empty => (None, ProfileInjection::Empty),
+            StoredProfileRender::Unreadable => (None, ProfileInjection::Unusable),
+        }
     }
 
     async fn read_recent(
@@ -421,11 +563,47 @@ fn empty(started: Instant) -> InjectResult {
         tokens: 0,
         truncated: false,
         handling_ms: ms(started),
+        // A2: no scope was derived, so the tier never ran.
+        profile: ProfileInjection::NoProjectScope,
     }
 }
 
 fn ms(started: Instant) -> u64 {
     started.elapsed().as_millis() as u64
+}
+
+/// The ONE accounting rule (D-W5.3-3 + 44.13): `tokens` is the byte estimate
+/// of the emitted block — profile included — and is `0` exactly when there is
+/// no block. Both `assemble` return sites use it, so the field never means
+/// "history bytes" on one branch and "everything" on another.
+fn emitted_tokens(block: Option<&str>) -> u64 {
+    block.map_or(0, |block| (block.len() / 4) as u64)
+}
+
+/// The profile identity: `params.user_id` trimmed and non-empty FIRST, else the
+/// resolved scope's `user_email` trimmed and non-empty, else `None`.
+///
+/// One value, never concatenated, hashed or joined with `agent_id`.
+fn resolve_user_id(params: &InjectParams, scope: &ResolvedProjectScope) -> Option<String> {
+    let explicit = params
+        .user_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let scope_email = scope
+        .user_email
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    explicit.or(scope_email).map(str::to_string)
+}
+
+/// The injected clock for the profile render (the renderer never reads one).
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// The CHECKED token→byte mapping (D-W5.3-3): reject overflow, never wrap.
@@ -531,8 +709,8 @@ fn classify_row(metadata_text: Option<&str>) -> Option<FactOrSummary> {
 /// **Heading charge:** a candidate that OPENS a section pays its heading.
 /// "Already open" is derived from the last ACCEPTED candidate, so a skipped
 /// candidate can never mark a heading as paid for. This is what makes the
-/// emitted block provably bounded:
-/// `block.len() = 63 + Σ(h+1) + Σ(line+1) <= 65 + Σ(h+1) + Σ(line+3) = used
+/// emitted history block provably bounded:
+/// `history.len() = 63 + Σ(h+1) + Σ(line+1) <= 65 + Σ(h+1) + Σ(line+3) = used
 /// <= budget_bytes`, with no slop.
 ///
 /// Tier-1 candidates (`## Project facts` / `## Captured session summaries`)

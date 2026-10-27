@@ -4,8 +4,8 @@
 //!
 //! Given the wrapper's host `project_id` (the immutable host directory),
 //! this module derives `{container_tag, scope_hash}` through
-//! `TagResolver::project_tag_info` once and validates the result through
-//! `extract_scope_from_container_tag` once. No other code may re-hash the
+//! `TagResolver::tags` (one project resolution plus one user resolution) and
+//! validates the result through `extract_scope_from_container_tag` once. No other code may re-hash the
 //! path, hand-build a tag, fall back to an empty tag, or derive a second,
 //! divergent hash: the empty tag means "all memories" to the public
 //! `list_memories_by_container_tag`, so a fallback here would silently
@@ -13,7 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
-use mem_core::tags::{TagInfo, TagResolver};
+use mem_core::tags::TagResolver;
 
 /// The resolved scope every W5.3 consumer receives.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,9 +111,16 @@ impl crate::scope_resolver::ProjectScopeResolver for EnvProjectScopeResolver {
     }
 }
 
-/// Resolves the project scope: ONE `project_tag_info` call, then ONE scope
+/// Resolves the project scope: ONE `tags` call (one project resolution plus
+/// one user resolution, exactly as upstream `getTags`), then ONE scope
 /// validation of the produced tag. The hash kept is the tag's own validated
 /// hash segment — never a separately computed hash of `project_id`.
+///
+/// The user half supplies `user_name`/`user_email`; the project half supplies
+/// the tag, its display name and the git extras. Resolving only the project
+/// half hard-wires both identity fields to `None`, which left every tier-1
+/// capture row with a NULL user identity (D6 — necessary, not sufficient: the
+/// store-side profile key is issue 64's).
 pub fn resolve_project_scope(
     project_id: &str,
     resolver: &TagResolver<'_>,
@@ -121,8 +128,9 @@ pub fn resolve_project_scope(
     if project_id.trim().is_empty() {
         return Err(ProjectScopeError::BlankProjectId);
     }
-    let info: TagInfo = resolver.project_tag_info(Path::new(project_id));
-    let scope_ref = match mem_core::scope::extract_scope_from_container_tag(&info.tag) {
+    let tags = resolver.tags(Path::new(project_id));
+    let project = tags.project;
+    let scope_ref = match mem_core::scope::extract_scope_from_container_tag(&project.tag) {
         Ok(scope_ref) => scope_ref,
         Err(error) => return Err(ProjectScopeError::Core(error.to_string())),
     };
@@ -131,19 +139,19 @@ pub fn resolve_project_scope(
         None => {
             return Err(ProjectScopeError::Core(format!(
                 "Invalid containerTag hash: expected 16 lowercase hex characters in \"{}\"",
-                info.tag
+                project.tag
             )));
         }
     };
     Ok(ResolvedProjectScope {
         project_id: project_id.to_string(),
-        container_tag: info.tag,
+        container_tag: project.tag,
         scope_hash: hash.as_str().to_string(),
-        display_name: info.display_name,
-        user_name: info.user_name,
-        user_email: info.user_email,
-        project_path: info.project_path,
-        project_name: info.project_name,
-        git_repo_url: info.git_repo_url,
+        display_name: project.display_name,
+        user_name: tags.user.user_name,
+        user_email: tags.user.user_email,
+        project_path: project.project_path,
+        project_name: project.project_name,
+        git_repo_url: project.git_repo_url,
     })
 }

@@ -89,3 +89,19 @@ the `-32002` code row, the exit-code-75 row, the status-file-format row.
   `vault_source_ref(Session, …)`; content with no external referent uses
   `VaultSourceKind::Manual` → `manual:<opaque>`. The API enforces presence,
   not truthfulness.
+
+**Issue 44 additions (the profile tier):**
+
+- **`ProfileInjection`** — `inject`'s typed profile-tier outcome carried INSIDE
+  `Ok`: `Disabled`, `NotWired`, `NoProjectScope`, `NoIdentity`, `NoProfile`,
+  `Unusable`, `Empty`, `Rendered`. Never an error, never a silent skip, and
+  `NotWired` (no `.with_profile`) is distinct from `Disabled` (the knob is off)
+  so a forgotten composition line is visible. The tier is fail-soft: no arm
+  turns an `Ok` into an `Err`.
+- **`profile inject` counter + the profile block's accounting** — emitted once
+  per `Rendered` block with `data: None` (ADR-0014 D-2; no profile text, no
+  identity). The block is PREPENDED to `<project_agent_session_history>`; the
+  history bytes are untouched, `memory_count` counts history rows only, and
+  `tokens` is the byte estimate of the emitted block INCLUDING the profile —
+  `0` iff there is no block, on the normal path and on the `included.is_empty()`
+  early return alike.
