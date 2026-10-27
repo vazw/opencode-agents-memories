@@ -52,6 +52,10 @@ function createHarness() {
       get: async (input) => {
         getCalls.push(input);
         if (input?.sessionID === "ses-boom") throw new Error("host lookup failed");
+        // The only fixture that resolves to a DIFFERENT project through the
+        // session fallback: every directory-bearing envelope returns at the
+        // directory branch, so the session comparison is decided here.
+        if (input?.sessionID === "ses-foreign") return { location: { directory: "/workspace/elsewhere" } };
         return { location: { directory: "/workspace/project" } };
       },
     },
@@ -333,6 +337,14 @@ test("test_v2_adapter_forwards_location_filtered_events_to_the_v1_event_hook", {
   // A host lookup error drops that event and never kills the subscription.
   await harness.deliver({ type: "message.updated", data: { sessionID: "ses-boom" } });
   assert.equal(delivered.length, 5, "a throwing session lookup drops the event");
+
+  // The session fallback's own decision, which every directory-bearing shape
+  // above returns before reaching: a session that lives in another project is
+  // dropped. A successful lookup that forwards regardless would capture this
+  // project's transcript under the foreign session's idle event.
+  await harness.deliver({ type: "message.updated", data: { sessionID: "ses-foreign" } });
+  assert.equal(delivered.length, 5, "a session that lives in another project is dropped");
+
   await harness.deliver({
     type: "message.updated",
     location: { directory: "/workspace/project" },

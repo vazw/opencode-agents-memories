@@ -1,10 +1,10 @@
 // W5.2 `js` shard — the adapter's memory-context cache lifecycle, the half of
 // upstream `tests/v2-memory-context.test.ts` this lane owns (blueprint D6.1).
 // Five cases: three assert upstream case intents (`:28` retained across model
-// steps, `:44` sessions isolated, `:58` empty/failed refresh) and two are
-// net-new adapter semantics with no upstream oracle (refresh per prompt,
-// compaction drop). The file's *store-backed* subject has no port counterpart:
-// its nine upstream cases are partitioned with an owner each in
+// steps, `:44` sessions isolated, `:58` empty/failed refresh including `:62`'s
+// retry) and two are net-new adapter semantics with no upstream oracle (refresh
+// per prompt, compaction drop). The file's *store-backed* subject has no port
+// counterpart: its nine upstream cases are partitioned with an owner each in
 // `docs/agents/testing.md` — `:35`/`:49`/`:53`/`:65`/`:70` → issue 63, `:83` →
 // issue 63 (`inject_on`) plus the unowned transcript predicate, `:70`'s
 // injected-only half → issue 52.
@@ -165,6 +165,23 @@ test("test_v2_memory_context_injects_nothing_when_the_v1_hook_injects_nothing", 
     await contextOf(harness.hooks, "ses-1"),
     [],
     "a failed refresh drops the stale block too"
+  );
+
+  // Upstream `:62` (`result.retried === result.recovered`): the failure must not
+  // latch. A retry prompt refreshes and caches again, so the session recovers
+  // instead of staying memoryless for the rest of its life.
+  legacy["chat.message"] = async (_input, output) => {
+    output.message.parts.push({ type: "text", text: "recovered after failure", synthetic: true });
+  };
+  await harness.hooks.get("prompt")({
+    sessionID: "ses-1",
+    messageID: "msg-5",
+    prompt: { text: "fifth" },
+  });
+  assert.deepEqual(
+    await contextOf(harness.hooks, "ses-1"),
+    ["recovered after failure"],
+    "a failed refresh does not latch: the next prompt recovers"
   );
 
   await cleanup();
