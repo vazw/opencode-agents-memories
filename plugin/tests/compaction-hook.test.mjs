@@ -142,8 +142,17 @@ test(
     const bare = wire.filter((message) => message.method === "inject");
     assert.equal(bare.length, 2, "the chat.message inject and the compacting inject");
     const [chatInject, ingestInject] = bare;
-    assert.equal(chatInject.params.include, undefined, "chat.message sends no include option");
+    assert.deepEqual(
+      chatInject.params.include,
+      { query: "hi" },
+      "chat.message sends the authored harness text as the query"
+    );
     assert.equal(ingestInject.params.include.compaction, "ingest");
+    assert.equal(
+      ingestInject.params.include.query,
+      undefined,
+      "the compaction leg carries no query (compactionParams overwrites include)"
+    );
     assert.equal(ingestInject.params.session_id, "sess-A", "the hook's own id, never sess-OTHER");
     assert.equal(
       ingestInject.params.project_id,
@@ -177,7 +186,8 @@ test(
     assert.equal(call.body.agent, "builder");
 
     const chatInject = wire.find(
-      (message) => message.method === "inject" && !message.params?.include
+      (message) =>
+        message.method === "inject" && message.params?.include?.compaction === undefined
     );
     const restoreInject = injects(wire, "restore")[0];
     assert.ok(restoreInject, "the restore read reached the engine");

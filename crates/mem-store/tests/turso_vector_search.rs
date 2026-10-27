@@ -13,7 +13,7 @@ use mem_store::schema_migrations::{
 };
 use mem_store::vector::{
     MemoryInsert, VectorColumn, exact_scan_kind, get_memories_by_session_id, insert_vector,
-    insert_vector_statement, search_in_shard,
+    insert_vector_statement, search_in_shard, search_memories_by_content,
 };
 
 const NOW_MS: i64 = 1_700_000_000_000;
@@ -395,4 +395,141 @@ async fn test_search_returns_empty_for_zero_limit() {
         .await
         .expect("empty search");
     assert!(empty_results.is_empty(), "no candidates → empty results");
+}
+
+// ---------------------------------------------------------------------------
+// 6/8 — issue 50 (O9): the content-only read ignores the tags vector
+// ---------------------------------------------------------------------------
+
+/// Two rows whose content vectors are orthogonal to the query; the second one
+/// carries the query direction in its TAGS vector. A content-only read must
+/// score A at `1.0` and D at `0.0`; any hybrid blend would score them `0.6` /
+/// `0.4` (or `0.5` / `0.3` with keyword text), and upstream's fabricated
+/// `1.0` would put D at the top.
+#[tokio::test]
+async fn test_content_read_ignores_the_tags_vector() {
+    let config = common::store_config("vec-content-read");
+    let db = prepared_db(&config, "shard.db", 2).await;
+    let container_tag = "opencode_project_a1b2c3d4e5f67890";
+
+    insert_vector(
+        db.as_ref(),
+        &record("mem_A", "row A", &[1.0, 0.0], container_tag),
+    )
+    .await
+    .expect("insert A");
+    let mut d = record("mem_D", "row D", &[0.0, 1.0], container_tag);
+    d.tags_vector = Some(vec![1.0, 0.0]);
+    insert_vector(db.as_ref(), &d).await.expect("insert D");
+
+    let results = search_memories_by_content(db.as_ref(), &[1.0, 0.0], container_tag, 10)
+        .await
+        .expect("content read");
+    let a = results
+        .iter()
+        .find(|row| row.id == "mem_A")
+        .expect("A present");
+    let d = results
+        .iter()
+        .find(|row| row.id == "mem_D")
+        .expect("D present");
+    // MEASURED deviation from the blueprint's exact equality: turso's
+    // `vector_distance_cos` returns 4.47e-8 of cosine error for the unit
+    // vectors, so 1.0 arrives as 0.9999999552983359. A 1e-6 tolerance keeps
+    // the oracle discriminating: the hybrid would score 0.6 / 0.4 (far),
+    // and upstream's fabricated 1.0 would put D at the top.
+    assert!(
+        (a.similarity - 1.0).abs() < 1e-6,
+        "the content direction scores 1.0 (measured {})",
+        a.similarity
+    );
+    assert!(
+        d.similarity.abs() < 1e-6,
+        "the tags vector is ignored: an orthogonal content vector scores 0.0 (measured {})",
+        d.similarity
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 7/8 — issue-50 review: the comparator's three keys, each in conflict
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_scored_order_is_similarity_then_recency_then_id() {
+    use mem_store::vector::{ScoredMemory, scored_order};
+
+    fn row(id: &str, similarity: f64, created_at: i64) -> ScoredMemory {
+        ScoredMemory {
+            id: id.to_string(),
+            content: String::new(),
+            similarity,
+            created_at,
+            metadata_text: None,
+        }
+    }
+    fn ids(rows: &[ScoredMemory]) -> Vec<&str> {
+        rows.iter().map(|row| row.id.as_str()).collect()
+    }
+
+    let mut rows = vec![
+        row("mem_z", 0.9, 3_000),
+        row("mem_a", 0.9, 2_000),
+        row("mem_m", 1.0, 1_000),
+    ];
+    rows.sort_by(scored_order);
+    assert_eq!(
+        ids(&rows),
+        vec!["mem_m", "mem_z", "mem_a"],
+        "similarity first"
+    );
+
+    let mut rows = vec![row("mem_z", 0.9, 2_500), row("mem_a", 0.9, 500)];
+    rows.sort_by(scored_order);
+    assert_eq!(
+        ids(&rows),
+        vec!["mem_z", "mem_a"],
+        "then recency descending"
+    );
+
+    let mut rows = vec![row("mem_z", 0.9, 1_000), row("mem_a", 0.9, 1_000)];
+    rows.sort_by(scored_order);
+    assert_eq!(ids(&rows), vec!["mem_a", "mem_z"], "then id ascending");
+}
+
+// ---------------------------------------------------------------------------
+// 8/8 — issue-50 review: the content read honours the hydrate's 1000-id bound
+// ---------------------------------------------------------------------------
+
+/// 1001 rows in one tag with `limit = 600` → k = 1200 candidates. Before the
+/// clamp the read bound 1004 params against 1003 placeholders and failed with
+/// `Turso { message: "bind index 1004 is out of bounds", is_constraint: false }`;
+/// the clamp keeps the nearest 1000 and the read returns the 600 requested rows.
+#[tokio::test]
+async fn test_content_read_clamps_the_hydrate_at_a_thousand_ids() {
+    let config = common::store_config("vec-content-read-1000-bound");
+    let db = prepared_db(&config, "shard.db", 2).await;
+    let container_tag = "opencode_project_a1b2c3d4e5f67890";
+
+    for index in 0..1001u32 {
+        insert_vector(
+            db.as_ref(),
+            &record(
+                &format!("mem_{index:04}"),
+                &format!("row {index:04}"),
+                &[1.0, 0.0],
+                container_tag,
+            ),
+        )
+        .await
+        .expect("insert row");
+    }
+
+    let results = search_memories_by_content(db.as_ref(), &[1.0, 0.0], container_tag, 600)
+        .await
+        .expect("1001 candidates must not overflow the hydrate bind list");
+    assert_eq!(results.len(), 600, "600 requested rows hydrate");
+    assert!(
+        results.windows(2).all(|pair| pair[0].id < pair[1].id),
+        "equal-similarity rows tie-break by id ascending"
+    );
 }

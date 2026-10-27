@@ -400,8 +400,12 @@ async fn test_inject_without_include_compaction_is_unchanged() {
         .expect("the plain inject path still assembles");
     let block = result.block.expect("the fixture renders the chat block");
     assert!(
-        block.starts_with("<project_agent_session_history>"),
-        "a bare inject returns the chat block, never the session render: {block}"
+        block.starts_with("<memory_context>"),
+        "the plain path returns the framed block, never the session render: {block}"
+    );
+    assert!(
+        block.contains("<project_agent_session_history>"),
+        "the history block stays inside the frame: {block}"
     );
     assert!(
         block.contains("The deploy key lives in op://infra/deploy"),

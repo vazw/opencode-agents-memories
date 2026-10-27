@@ -48,6 +48,9 @@ const REQUEST_TIMEOUT_MS = 15000;
 // Compaction is on the host's critical path: a wedged engine must not stall it
 // for the 15 s default. Both compaction calls pass this explicitly.
 const COMPACTION_REQUEST_TIMEOUT_MS = 2000;
+// Issue 50 (D-26-11): the authored-text cap, in CODE POINTS — the same unit the
+// engine's `chars().take(2000)` cap counts (never UTF-16 units or bytes).
+const MAX_QUERY_CHARS = 2000;
 
 // ── canonical serialization (§1, D-42) ──────────────────────────────────
 // Wire objects serialize compactly with keys in lexicographic order at every
@@ -678,7 +681,7 @@ export const server = async function server(input) {
         // the transcript); an inject error fails open (no block, no error).
         let block = null;
         try {
-          const result = await sendRequest("inject", injectParams());
+          const result = await sendRequest("inject", injectParams(queryFromParts(output)));
           if (result && typeof result.block === "string" && result.block.length > 0) {
             block = result.block;
           }
@@ -810,9 +813,44 @@ export const server = async function server(input) {
     }
   }
 
-  function injectParams() {
+  // Issue 50 (D-26-11): `include.query` is the authored text of the message
+  // being sent — text parts that are NOT synthetic (never our own injected
+  // block) and not a tool part — joined with a newline, trimmed, capped at
+  // MAX_QUERY_CHARS code points. Absent/blank means the key is omitted, so an
+  // ordinary message keeps today's bytes. The extraction never throws: a throw
+  // would be swallowed by the hook's catch and the injection would vanish.
+  function queryFromParts(output) {
+    try {
+      const parts =
+        output && output.message && Array.isArray(output.message.parts)
+          ? output.message.parts
+          : output && Array.isArray(output.parts)
+            ? output.parts
+            : [];
+      const text = parts
+        .filter(
+          (part) =>
+            part &&
+            part.type === "text" &&
+            part.synthetic !== true &&
+            typeof part.text === "string"
+        )
+        .map((part) => part.text)
+        .join("\n")
+        .trim();
+      if (text.length === 0) return undefined;
+      return Array.from(text).slice(0, MAX_QUERY_CHARS).join("");
+    } catch {
+      return undefined;
+    }
+  }
+
+  function injectParams(query) {
     const params = { session_id: currentSessionId() };
     if (hostProjectId !== null) params.project_id = hostProjectId;
+    if (typeof query === "string" && query.length > 0) {
+      params.include = { query };
+    }
     return params;
   }
 

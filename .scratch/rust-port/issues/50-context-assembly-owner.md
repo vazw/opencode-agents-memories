@@ -206,3 +206,24 @@ charged inside the budget, proven by an inversion arm that fails if the wrapper 
   - **Two new open questions, both with defaults:** pinned project memories survive unchanged (default: no
     override — the fallback arm keeps pins); the older-sessions semantic leg goes live with the same field
     (default: yes).
+
+## Mapping (50.8)
+
+Every ruling in the table above has one home. D-26-N refers to
+`docs/adr/0026-context-assembly.md`; 44.13 refers to
+`.scratch/rust-port/issues/44-profile-injection-tier.md`.
+
+| # | ruling | home |
+|---|---|---|
+| 1 | profile first, **unscored**, gated `inject_profile && user identity` | issue **44** (44.13); the order is **D-26-1** |
+| 2 | tier order: profile → project knowledge → project/agent session history | **D-26-1** (the project leg renders under the existing headings; no `<project_knowledge>` block) |
+| 3 | within a tier, similarity descending, ties by recency | **D-26-2** — the project leg implements it (`scored_order`); the episodic leg's `ORDER BY distance ASC, id ASC` remains a narrowed forward obligation |
+| 4 | carry the score into the text — `relevance="N%"` | **D-26-3** (the one rounding rule and its measured boundary) |
+| 5 | `project_agent_session_history` stays as its own block | **D-26-4** |
+| 6 | everything else the agent queries for itself | **D-26-6** (scope statement) |
+| 7 | the safety sentence goes at the **end** | **D-26-5** (the frozen frame bytes and the split header) |
+
+The draft's `inject.rs:305` invariant restatement stays owned by **44.13**: D-26-9 quotes its old
+text and the six-line replacement verbatim, and does not restate it a second time. The owner's
+2026-10-27 scope growth — the scored project-knowledge read and the `include.query` field — is recorded
+as **D-26-10** and **D-26-11**.

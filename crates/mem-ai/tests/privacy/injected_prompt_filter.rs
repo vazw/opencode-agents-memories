@@ -209,7 +209,6 @@ fn test_default_markers_match_config_defaults() {
         DEFAULT_INJECTION_MARKERS,
         mem_core::config::DEFAULT_INJECTION_MARKERS
     );
-    assert_eq!(default_markers_owned().len(), 8);
 }
 
 #[test]

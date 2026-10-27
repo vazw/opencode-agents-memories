@@ -42,6 +42,11 @@ Injection renders exactly one `<project_agent_session_history>` block with
 `<project_knowledge>` block. A capture-summary row whose session is already rendered as an episodic row
 is suppressed (deduplicated, never counted twice); otherwise it renders under the summaries heading.
 
+**Amendment (issue 50, ADR-0026 D-26-5).** The path now emits exactly one
+`<memory_context>` frame around the one history block, and it still emits
+no `<project_knowledge>` block: the scored project-knowledge read feeds the existing tier-1 headings.
+The original sentence above stands; only its wrapper half is superseded.
+
 ### D-W5.3-3 — `token_budget` is converted to bytes with checked arithmetic
 
 `token_budget.unwrap_or(2000)` maps to `4 × tokens` bytes with CHECKED multiplication (an overflow is a

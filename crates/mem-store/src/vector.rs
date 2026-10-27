@@ -522,6 +522,97 @@ pub async fn search_in_shard(
     Ok(results)
 }
 
+/// One content-scored row (issue 50, D9): the content cosine only, with the raw
+/// metadata column and the `created_at` the ordering needs.
+///
+/// `metadata_text` is the RAW column, never a parsed value: the bridge's
+/// `classify_row` must see "malformed" and "absent" as distinct states.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScoredMemory {
+    pub id: String,
+    pub content: String,
+    pub similarity: f64,
+    pub created_at: i64,
+    pub metadata_text: Option<String>,
+}
+
+/// The one ordering rule for scored reads (D-26-2): similarity descending, then
+/// `created_at` descending, then id ascending. The domain is finite and clamped,
+/// so `partial_cmp` never sees a NaN; the fallback keeps the sort total anyway.
+pub fn scored_order(left: &ScoredMemory, right: &ScoredMemory) -> std::cmp::Ordering {
+    right
+        .similarity
+        .partial_cmp(&left.similarity)
+        .unwrap_or(std::cmp::Ordering::Equal)
+        .then_with(|| right.created_at.cmp(&left.created_at))
+        .then_with(|| left.id.cmp(&right.id))
+}
+
+/// The content-only scored read (issue 50, D-26-10): exact cosine over the
+/// content vector, tags ignored, a `NULL` `content_dist` dropped (never
+/// coerced), ordered by [`scored_order`] and then truncated to `limit`.
+/// Candidate ids are clamped to the hydrate builder's 1000-placeholder bound,
+/// so the returned count is at most `min(limit, 1000)`.
+///
+/// This is deliberately NOT `search_in_shard`: that hybrid renders a
+/// content-identical row as `50%` and a tags-only row as `30%`, and this read
+/// must report the content cosine alone.
+pub async fn search_memories_by_content(
+    db: &dyn Db,
+    query_vector: &[f32],
+    container_tag: &str,
+    limit: usize,
+) -> Result<Vec<ScoredMemory>, StoreError> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    // the query vector is serialized once and threaded: a failure is typed, not a panic (ADR-0013 D-3)
+    let query_json = vector_to_text(query_vector)?;
+    let k = (limit.saturating_mul(2)).max(32);
+    let mut hits =
+        exact_scan_kind(db, &query_json, k, container_tag, VectorColumn::Content).await?;
+    // `hydrate_candidates_sql(0, ..)` would build `IN ()`; an empty id list is
+    // an empty result, never a query.
+    if hits.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Placeholder-count clamp (the frozen hydrate builder caps the SQL at
+    // 1000 `?`s; ids stay BOUND PARAMS — never interpolated). The scan is
+    // ordered by distance, so the nearest 1000 survive — as in
+    // `search_in_shard`.
+    hits.truncate(1000);
+
+    let filtered = !container_tag.is_empty();
+    let sql = crate::sql::hydrate_candidates_sql(hits.len(), filtered);
+    let mut params = vec![
+        Value::Text(query_json.clone()),
+        Value::Text(query_json.clone()),
+    ];
+    params.extend(hits.into_iter().map(|(id, _)| Value::Text(id)));
+    if filtered {
+        params.push(Value::Text(container_tag.to_string()));
+    }
+    let rows = db.query(&sql, params).await?;
+
+    let mut scored: Vec<ScoredMemory> = Vec::new();
+    for row in rows {
+        // The DDL forbids a vectorless row, so this drop is defensive only.
+        let Some(distance) = row.f64("content_dist") else {
+            continue;
+        };
+        scored.push(ScoredMemory {
+            id: row.text("id").unwrap_or_default(),
+            content: row.text("content").unwrap_or_default(),
+            similarity: distance_to_similarity(distance),
+            created_at: row.i64("created_at").unwrap_or(0),
+            metadata_text: row.text("metadata"),
+        });
+    }
+    scored.sort_by(scored_order);
+    scored.truncate(limit);
+    Ok(scored)
+}
+
 /// Upstream `getMemoriesBySessionID` (L407–424): direct `session_id` match
 /// OR a metadata LIKE fallback for pre-v2 rows (`prepareShardDb` skipped —
 /// manager-owned, recorded). Raw rows are returned as-is (the port's shape).

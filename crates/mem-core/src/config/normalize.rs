@@ -269,6 +269,12 @@ pub fn normalize_memory_temperature(
 /// (upstream `injected-prompt-filter.ts`). The merge semantics land here;
 /// the filter functions are the injected-prompt-filter port in
 /// `crates/mem-ai/src/privacy/injection.rs`.
+///
+/// Divergence (issue 50, D-26-8): the first eight entries are upstream's list;
+/// `<memory_context>` is the port's own marker, appended for the one frame this
+/// engine emits. `<user_profile>` is NOT a marker (transitively covered by the
+/// frame — a second emitter cannot exist), and neither is `<memory>`, whose
+/// closer appears on every scored row and would end the region after the first.
 pub const DEFAULT_INJECTION_MARKERS: &[&str] = &[
     "<system-reminder>",
     "<!-- OMO_INTERNAL_INITIATOR -->",
@@ -278,6 +284,7 @@ pub const DEFAULT_INJECTION_MARKERS: &[&str] = &[
     "[Category+Skill Reminder]",
     "<team_mode_status",
     "<auto-slash-command>",
+    "<memory_context>",
 ];
 
 const MARKERS_KEY: &str = "chatMessage.injectionMarkers";

@@ -142,10 +142,11 @@ fn test_default_injection_markers_match_upstream_list() {
         "<team_mode_status",
         "<auto-slash-command>",
     ];
-    assert_eq!(DEFAULT_INJECTION_MARKERS.len(), expected.len());
+    assert_eq!(DEFAULT_INJECTION_MARKERS.len(), 9);
     for (actual, expected) in DEFAULT_INJECTION_MARKERS.iter().zip(expected) {
         assert_eq!(*actual, expected);
     }
+    assert_eq!(DEFAULT_INJECTION_MARKERS[8], "<memory_context>");
 }
 
 #[test]

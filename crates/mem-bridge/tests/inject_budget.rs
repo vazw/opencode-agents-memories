@@ -830,3 +830,45 @@ async fn test_inject_summary_renders_when_its_episode_row_is_budget_dropped() {
     );
     assert_eq!(result.memory_count, 1);
 }
+
+/// The `<memory_context>` frame is charged INSIDE the greedy pass: with a
+/// 480-byte budget (`used_at_zero = 257`) two 99-byte lines fit and the
+/// emitted block is `192 + 63 + 19 + 2×100 = 474` bytes, never 574 (frame
+/// emitted but uncharged) and never 382 (frame absent).
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_wrapper_frame_bytes_are_charged_inside_the_budget() {
+    let (_dir, store, _shards, service) = fixture("frame-charge").await;
+    for index in 0..4 {
+        let _ = seed_episode(
+            store.as_ref(),
+            &format!("sess-frame-{index}"),
+            &"y".repeat(90),
+            &fake_embedder(),
+            &[],
+        )
+        .await;
+    }
+
+    let result = service
+        .assemble(&InjectParams {
+            token_budget: Some(120),
+            ..params("/srv/proj", json!({ "recent_count": 4 }))
+        })
+        .await
+        .expect("assemble");
+    let block = result
+        .block
+        .as_ref()
+        .expect("two rows plus the frame render");
+    assert_eq!(block.len(), 474, "192-byte frame + history bytes: {block}");
+    assert!(
+        block.len() <= 480,
+        "the frame is charged inside 4 x token_budget: {}",
+        block.len()
+    );
+    assert_eq!(
+        result.memory_count, 2,
+        "the frame's 192 bytes evict the third row"
+    );
+    assert!(result.truncated, "the frame charge truncates the row set");
+}
