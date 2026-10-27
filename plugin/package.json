@@ -43,7 +43,8 @@
     "type": "plugin",
     "hooks": [
       "chat.message",
-      "event"
+      "event",
+      "experimental.session.compacting"
     ]
   },
   "files": [

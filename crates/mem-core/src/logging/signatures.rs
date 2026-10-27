@@ -45,11 +45,11 @@ pub const AUTO_CAPTURE_SKIPPED: &str = "Auto-capture skipped";
 /// the returned block, so the injector is the emit site.
 pub const PROFILE_INJECT: &str = "profile inject";
 
-/// `compactionInjections` counter. **Dormant:** the engine has no compaction
-/// hook (`mem_bridge::engine` exposes capture, inject, recall, health and
-/// shutdown); only the pure attribution helper
-/// `mem_episodic::attribution::compaction_injection_agent` exists. Follow-up
-/// gated on the compaction hook.
+/// `compactionInjections` counter. Emitted by `mem_bridge::inject`
+/// (`InjectService::compaction_leg`, the `COMPACTION_MEMORY_INJECTED` arm) —
+/// exactly one event per rendered session block, payload carrying `session_id`
+/// and `memory_count` only. The renderer (`mem_bridge::compaction`) emits
+/// nothing: it has no session id.
 pub const COMPACTION_MEMORY_INJECTED: &str = "Compaction memory injected";
 
 // ---------------------------------------------------------------------------
@@ -75,9 +75,10 @@ pub const FAILED_TO_LOAD_SKILLS: &str = "Failed to load skills for OpenCode regi
 /// payload `reason` is one of the existing fixed constants).
 pub const AUTO_CAPTURE_FINAL_ERROR: &str = "Auto-capture final error";
 
-/// `Compaction handler error` bucket. **Dormant:** the same missing compaction
-/// handler as [`COMPACTION_MEMORY_INJECTED`]. Follow-up gated on the
-/// compaction hook.
+/// `Compaction handler error` bucket. Emitted by `mem_bridge::inject`
+/// (`InjectService::compaction_leg`) exactly once for any read failure after
+/// the disabled/session-id guards. The payload carries the session id and a
+/// class, never the store's message.
 pub const COMPACTION_HANDLER_ERROR: &str = "Compaction handler error";
 
 /// `Idle processing error` bucket. **Dormant:**

@@ -31,8 +31,10 @@ function tempPackage() {
   copyFileSync(path.join(PLUGIN, "index.js"), path.join(dir, "index.js"));
   mkdirSync(path.join(dir, "dist"));
   copyFileSync(path.join(PLUGIN, "dist/plugin.js"), path.join(dir, "dist/plugin.js"));
+  copyFileSync(path.join(PLUGIN, "dist/compaction.js"), path.join(dir, "dist/compaction.js"));
   mkdirSync(path.join(dir, "src"));
   copyFileSync(path.join(PLUGIN, "src/plugin.js"), path.join(dir, "src/plugin.js"));
+  copyFileSync(path.join(PLUGIN, "src/compaction.js"), path.join(dir, "src/compaction.js"));
   return dir;
 }
 

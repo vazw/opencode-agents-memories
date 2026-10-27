@@ -364,6 +364,7 @@ async fn test_capture_metadata_json_survives_quotes_in_session_id() {
             token_budget: Some(2_000),
             include: None,
             user_id: None,
+            session_id: None,
         })
         .await
         .expect("assemble");

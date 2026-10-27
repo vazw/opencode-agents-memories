@@ -23,6 +23,14 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import path from "node:path";
 
+import {
+  isChildSession,
+  readSession,
+  resolveSessionAgent,
+  resolveSessionModel,
+  restorePromptBody,
+} from "./compaction.js";
+
 const PROTOCOL = "1.0.0";
 const MIN_PROTOCOL = "1.0.0";
 const CLIENT_NAME = "opencode-mem-plugin";
@@ -36,6 +44,9 @@ const SHUTDOWN_RESPONSE_TIMEOUT_MS = 2000;
 const CAPTURE_DRAIN_MAX_MS = 2000;
 const CAPTURE_DRAIN_POLL_MS = 50;
 const REQUEST_TIMEOUT_MS = 15000;
+// Compaction is on the host's critical path: a wedged engine must not stall it
+// for the 15 s default. Both compaction calls pass this explicitly.
+const COMPACTION_REQUEST_TIMEOUT_MS = 2000;
 
 // ── canonical serialization (§1, D-42) ──────────────────────────────────
 // Wire objects serialize compactly with keys in lexicographic order at every
@@ -231,6 +242,8 @@ let engineCompatible = false;
 let capturedSessionId = null;
 let pendingCaptures = 0;
 let requestCounter = 1; // ids: "hello-1", then "capture-2", ...
+// Process-unique prompt part ids: `Date.now()` collides on a back-to-back pair.
+let compactionPartCounter = 0;
 let shuttingDownFlag = false;
 let lineBuffer = "";
 
@@ -457,8 +470,9 @@ function fireCapture(payload) {
 
 // ── toast intents (W5.2) ────────────────────────────────────────────────
 // A V2 host gives the plugin no `ui.toast`; the only user-visible channel is
-// the toast RPC the TUI companion renders (`plugin/src/tui.js`). The one
-// producer is the inject failure alternate below. This function is
+// the toast RPC the TUI companion renders (`plugin/src/tui.js`).
+// The two producers are the inject failure alternate and the post-compaction restore below.
+// This function is
 // fire-and-forget by contract: it never awaits, so a host that hangs or
 // refuses the capability can neither delay nor fail a turn. Deduped per reason
 // per process — the wrapper cannot read the engine's config (no JS config
@@ -493,6 +507,40 @@ function notifyHost(client, reason) {
     ).catch((err) => logWarn("toast.failed", { reason, message: shortError(err) }));
   } catch (err) {
     logWarn("toast.failed", { reason, message: shortError(err) });
+  }
+}
+
+// The restore toast (ADR-0017 DECISION 9): one per successful restore, body
+// fixed except the engine's `memory_count`. Deliberately NOT routed through
+// `NOTIFIED` — upstream toasts every restore, and a per-process dedupe would
+// silence all but the first. Fire-and-forget: the call is made synchronously so
+// the toast is observable at hook return, the returned promise is not awaited.
+function notifyRestore(client, count) {
+  let showToast;
+  try {
+    showToast = client?.tui?.showToast;
+  } catch {
+    showToast = undefined;
+  }
+  if (typeof showToast !== "function") {
+    logInfo("toast.not_delivered", { reason: "memory.restored" });
+    return;
+  }
+  try {
+    Promise.resolve(
+      showToast.call(client.tui, {
+        body: {
+          title: "Memory Restored",
+          message: `${count} memories injected after compaction`,
+          variant: "success",
+          duration: 3000,
+        },
+      })
+    ).catch((err) =>
+      logWarn("toast.failed", { reason: "memory.restored", message: shortError(err) })
+    );
+  } catch (err) {
+    logWarn("toast.failed", { reason: "memory.restored", message: shortError(err) });
   }
 }
 
@@ -647,8 +695,43 @@ export const server = async function server(input) {
         logWarn("chat.message.failed", { message: shortError(err) });
       }
     },
+    // Issue 33 / AC 1: the session's own durable memory is appended to the
+    // host's compaction prompt as ONE string. Never `output.prompt` — setting
+    // it (even to "") replaces the host's prompt and drops `output.context`.
+    "experimental.session.compacting": async (hookInput, output) => {
+      try {
+        const sessionID =
+          hookInput && typeof hookInput.sessionID === "string" && hookInput.sessionID.length > 0
+            ? hookInput.sessionID
+            : null;
+        if (sessionID === null) return;
+        const client = hostInputRef()?.client;
+        const session = await readSession(client, sessionID);
+        if (isChildSession(session)) return;
+        const result = await sendRequest(
+          "inject",
+          compactionParams("ingest", sessionID),
+          COMPACTION_REQUEST_TIMEOUT_MS
+        );
+        if (!result || typeof result.block !== "string" || result.block.length === 0) return;
+        if (!output || !Array.isArray(output.context)) return;
+        output.context.push(result.block);
+      } catch (err) {
+        logWarn("compaction.ingest_failed", { message: shortError(err) });
+      }
+    },
     event: async (hookInput) => {
       try {
+        // AC 2: the restore branch reads the event's OWN id at the branch's
+        // top, NEVER `capturedSessionId`. Dispatch is the envelope's
+        // `event.type` — `properties.type` is the V2-merged shape.
+        if (hookInput && hookInput.event && hookInput.event.type === "session.compacted") {
+          const compactedSessionID =
+            typeof hookInput.event.properties?.sessionID === "string"
+              ? hookInput.event.properties.sessionID
+              : null;
+          await handleCompacted(compactedSessionID);
+        }
         const properties =
           hookInput && hookInput.event && typeof hookInput.event === "object"
             ? hookInput.event.properties
@@ -678,6 +761,53 @@ export const server = async function server(input) {
   return { hooks };
 
   // ── local closures (kept per-server for the frozen input) ──
+
+  // `injectParams()` carries `project_id` and stamps `currentSessionId()`;
+  // `session_id` is overridden AFTER the spread with the hook's own id.
+  function compactionParams(mode, sessionID) {
+    return {
+      ...injectParams(),
+      session_id: sessionID,
+      include: { compaction: mode },
+    };
+  }
+
+  // AC 2, in upstream's order (`example/opencode-mem/src/index.ts:1311-1361`):
+  // read → child gate → inject → no block? → agent → model → no prompt API? →
+  // one prompt → toast. The read precedes agent resolution, which is what makes
+  // the V2 inheritance pin reachable (no agent there, so the inject is the last
+  // observation).
+  async function handleCompacted(sessionID) {
+    try {
+      if (typeof sessionID !== "string" || sessionID.length === 0) return;
+      const client = hostInputRef()?.client;
+      const session = await readSession(client, sessionID);
+      if (isChildSession(session)) return;
+      const result = await sendRequest(
+        "inject",
+        compactionParams("restore", sessionID),
+        COMPACTION_REQUEST_TIMEOUT_MS
+      );
+      if (!result || typeof result.block !== "string" || result.block.length === 0) return;
+      const agent = await resolveSessionAgent(client, sessionID, session);
+      if (!agent) return;
+      const resolved = resolveSessionModel(client, sessionID, session);
+      if (!client || typeof client.session?.prompt !== "function") return;
+      await client.session.prompt({
+        path: { id: sessionID },
+        body: restorePromptBody({
+          text: result.block,
+          agent,
+          model: resolved?.model,
+          variant: resolved?.variant,
+          now: compactionPartCounter++,
+        }),
+      });
+      notifyRestore(client, result.memory_count);
+    } catch (err) {
+      logWarn("compaction.restore_failed", { message: shortError(err) });
+    }
+  }
 
   function injectParams() {
     const params = { session_id: currentSessionId() };

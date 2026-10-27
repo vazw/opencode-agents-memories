@@ -62,3 +62,17 @@ test("test_loader_server_returns_hooks_without_engine", { timeout: 10000 }, asyn
   assert.equal(typeof result.hooks["chat.message"], "function");
   assert.equal(typeof result.hooks["event"], "function");
 });
+
+// W5.5 (issue 33): the published capability list names the one new hook and
+// NOT `experimental.compaction.autocontinue` — that hook is a recorded non-use
+// (ADR-0017 DECISION 10), not a silent omission.
+test("test_loader_manifest_declares_the_compacting_hook_and_not_autocontinue", () => {
+  assert.ok(
+    pkg.opencode.hooks.includes("experimental.session.compacting"),
+    "package.json opencode.hooks must declare the pre-compaction hook"
+  );
+  assert.ok(
+    !pkg.opencode.hooks.includes("experimental.compaction.autocontinue"),
+    "experimental.compaction.autocontinue is deliberately not registered"
+  );
+});

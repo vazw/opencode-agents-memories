@@ -68,8 +68,17 @@ export function stageStubEngine(pkgDir, { requestLogPath, manifestPath, injectMo
 // SIGTERM or stdin EOF.
 function stubEngineSource({ injectMode, requestLogPath, manifestPath }) {
   const config = JSON.stringify({ injectMode, requestLogPath, manifestPath });
+  const blocks = JSON.stringify({
+    restore:
+      "## Restored Session Memory\n\n### Memory 1\nRetries are capped at three\n\nTags: project, opencode-mem\n\n### Memory 2\nDeploys go through the staging gate first\n\nTags: project, opencode-mem\n\n",
+    ingest:
+      "## Session Memory Before Compaction\n\n### Memory 1\nRetries are capped at three\n\nTags: project, opencode-mem\n\n### Memory 2\nDeploys go through the staging gate first\n\nTags: project, opencode-mem\n\n",
+    project:
+      "<project_agent_session_history>\n## Project facts\n- The deploy key lives in op://infra/deploy\n</project_agent_session_history>",
+  });
   return `#!/usr/bin/env node
 const CONFIG = ${config};
+const BLOCKS = ${blocks};
 import fs from "node:fs";
 const { injectMode, requestLogPath, manifestPath } = CONFIG;
 function logLine(object) {
@@ -103,6 +112,9 @@ function respond(parsed) {
   if (method === "inject" && injectMode === "error") {
     return { id, jsonrpc: "2.0", error: { code: -32001, message: "degraded" } };
   }
+  // "silent": never answer inject at all (the wrapper's 2 s timeout is the
+  // only way out), while hello/capture/shutdown still answer.
+  if (method === "inject" && injectMode === "silent") return null;
   let result = null;
   if (method === "hello") {
     result = {
@@ -116,7 +128,21 @@ function respond(parsed) {
   } else if (method === "recall") {
     result = { items: [], count: 0 };
   } else if (method === "inject") {
-    result = { block: null, memory_count: 0, tokens: 0, truncated: false, handling_ms: 0 };
+    if (injectMode === "compaction") {
+      const params = (parsed && parsed.params) || {};
+      const mode = params.include && params.include.compaction;
+      if (mode === "restore") {
+        result = { block: BLOCKS.restore, memory_count: 7, tokens: 0, truncated: false, handling_ms: 0 };
+      } else if (mode === "ingest") {
+        result = { block: BLOCKS.ingest, memory_count: 2, tokens: 0, truncated: false, handling_ms: 0 };
+      } else {
+        // The trap: a bare inject (no include.compaction) gets the chat block,
+        // so a no-subtraction implementation appends it to output.context.
+        result = { block: BLOCKS.project, memory_count: 1, tokens: 0, truncated: false, handling_ms: 0 };
+      }
+    } else {
+      result = { block: null, memory_count: 0, tokens: 0, truncated: false, handling_ms: 0 };
+    }
   } else if (method === "health") {
     result = {
       ok: true,
@@ -228,11 +254,111 @@ if (mode === "v1") {
   process.exit(0);
 }
 
+if (mode === "v1-compaction") {
+  const mod = await import(pathToFileURL(path.join(pkgDir, "dist", "plugin.js")));
+  // Exactly the four capabilities the compaction handlers may use. The
+  // session-keyed maps are the multi-session instrument (fixture C).
+  const sessionGetCalls = [];
+  const sessionMessagesCalls = [];
+  const promptCalls = [];
+  const toastBodies = [];
+  const calls = [];
+  const contextAfter = {};
+  const client = {
+    session: {
+      get: async (input) => {
+        const id = input?.path?.id;
+        sessionGetCalls.push(id);
+        return { data: (fixture.sessions ?? {})[id] ?? {} };
+      },
+      messages: async (input) => {
+        const id = input?.path?.id;
+        sessionMessagesCalls.push(id);
+        return { data: (fixture.sessionMessages ?? {})[id] ?? [] };
+      },
+      prompt: async (input) => {
+        promptCalls.push({ path: input?.path, body: input?.body });
+        return { data: {} };
+      },
+    },
+    tui: {
+      showToast: async (input) => {
+        toastBodies.push(input?.body ?? input ?? null);
+        return { data: true };
+      },
+    },
+  };
+  const { hooks } = await mod.default.server({ client, directory: fixture.directory ?? pkgDir });
+  let promptPresent = false;
+  let promptValue = null;
+  async function runCall(label, invoke) {
+    const startedAt = Date.now();
+    const guard = new Promise((resolve) => setTimeout(() => resolve("guard"), 3000));
+    const outcome = await Promise.race([invoke().then(() => "hook"), guard]);
+    calls.push({ hook: label, settled: outcome === "hook", elapsedMs: Date.now() - startedAt });
+  }
+  const steps = fixture.steps ?? ["chat.message", "compacting", "compacted"];
+  for (const step of steps) {
+    const descriptor = typeof step === "string" ? { hook: step } : step;
+    const hookName = descriptor.hook;
+    const sessionID = descriptor.sessionID ?? "sess-A";
+    if (hookName === "chat.message") {
+      if (descriptor.sessionID !== undefined) {
+        throw new Error("fixture error: a chat.message step always fires sess-OTHER");
+      }
+      const output = { message: { parts: [{ type: "text", text: "hi" }] } };
+      await runCall("chat.message", () => hooks["chat.message"]({ sessionID: "sess-OTHER" }, output));
+    } else if (hookName === "compacting") {
+      const output = { context: [] };
+      await runCall("compacting", () =>
+        hooks["experimental.session.compacting"]({ sessionID }, output)
+      );
+      contextAfter[sessionID] = output.context;
+      promptPresent = Object.prototype.hasOwnProperty.call(output, "prompt");
+      promptValue = output.prompt === undefined ? null : output.prompt;
+    } else if (hookName === "compacted") {
+      const repeat = descriptor.compactedRepeat ?? fixture.compactedRepeat ?? 1;
+      for (let index = 0; index < repeat; index += 1) {
+        const properties = descriptor.compactedNoId === true ? {} : { sessionID };
+        await runCall("compacted", () =>
+          hooks.event({ event: { type: "session.compacted", properties } })
+        );
+      }
+    } else {
+      throw new Error("unknown fixture step: " + hookName);
+    }
+  }
+  writeRecord({
+    contextAfter,
+    promptPresent,
+    promptValue,
+    promptCalls,
+    toastBodies,
+    sessionGetCalls,
+    sessionMessagesCalls,
+    calls,
+  });
+  process.exit(0);
+}
+
 if (mode === "v2") {
   const mod = await import(pathToFileURL(path.join(pkgDir, "dist", "v2", "plugin.js")));
   let registeredRpc = null;
   const sessionHooks = new Map();
   const toastEmits = [];
+  const sessionGetCalls = [];
+  const consoleErrors = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => {
+    consoleErrors.push(args.map((arg) => String(arg)).join(" "));
+  };
+  // The handled signal fires only after the consumer asks for the NEXT value,
+  // which a for-await loop does after awaiting the handler for the current
+  // one. That is what makes the record honest without polling.
+  let handledResolve = null;
+  const handled = new Promise((resolve) => {
+    handledResolve = resolve;
+  });
   const ctx = {
     location: fixture.location,
     session: {
@@ -240,11 +366,21 @@ if (mode === "v2") {
         sessionHooks.set(name, callback);
       },
       context: async () => fixture.session?.context ?? [],
-      get: async ({ sessionID }) => fixture.session?.get?.[sessionID] ?? null,
+      get: async ({ sessionID }) => {
+        sessionGetCalls.push(sessionID);
+        return fixture.session?.get?.[sessionID] ?? null;
+      },
     },
     event: {
       async *subscribe({ signal }) {
-        for (const event of fixture.events ?? []) yield event;
+        for (const event of fixture.events ?? []) {
+          yield event;
+          if (handledResolve !== null) {
+            const resolve = handledResolve;
+            handledResolve = null;
+            resolve();
+          }
+        }
         await new Promise((resolve) => {
           if (signal.aborted) { resolve(); return; }
           signal.addEventListener("abort", () => resolve(), { once: true });
@@ -270,8 +406,7 @@ if (mode === "v2") {
   if (fixture.rpc?.registered === true && registeredRpc !== "opencode-mem") {
     throw new Error("the v2 entry did not register the toast rpc descriptor");
   }
-  // The V2 prompt hook is the path setup → legacy client → notifyHost → toast.
-  // Firing it here is what exercises the toast RPC from the V2 side at all.
+  // The V2 prompt hook is the path setup -> legacy client -> notifyHost -> toast.
   if (fixture.prompt) {
     const promptHook = sessionHooks.get("prompt");
     if (typeof promptHook !== "function") {
@@ -279,18 +414,24 @@ if (mode === "v2") {
     }
     await promptHook(fixture.prompt);
   }
-  const deadline = Date.now() + 10000;
-  let captureLine = null;
-  for (;;) {
-    captureLine = readWire().find((message) => message && message.method === "capture") ?? null;
-    if (captureLine !== null) break;
-    if (Date.now() > deadline) break;
-    await new Promise((resolve) => setTimeout(resolve, 20));
+  if ((fixture.events ?? []).length > 0) {
+    await Promise.race([handled, new Promise((resolve) => setTimeout(resolve, 5000))]);
   }
+  let captureLine = null;
+  if (fixture.pollForCapture !== false) {
+    const deadline = Date.now() + 10000;
+    for (;;) {
+      captureLine = readWire().find((message) => message && message.method === "capture") ?? null;
+      if (captureLine !== null) break;
+      if (Date.now() > deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  console.error = originalConsoleError;
   const wire = readWire();
   const helloCount = wire.filter((message) => message && message.method === "hello").length;
   const injectCount = wire.filter((message) => message && message.method === "inject").length;
-  writeRecord({ helloCount, captureLine, injectCount, toastEmits });
+  writeRecord({ helloCount, captureLine, injectCount, toastEmits, sessionGetCalls, consoleErrors });
   process.exit(0);
 }
 

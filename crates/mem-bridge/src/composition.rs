@@ -28,6 +28,7 @@ use mem_store::platform::{Platform, SystemProcessProbe};
 use mem_store::shard_manager::ShardManager;
 
 use crate::capture::{CaptureService, CaptureWriterDeps, DefaultTier1Writer};
+use crate::compaction::CompactionPolicy;
 use crate::inject::InjectService;
 
 /// The composed runtime (shared with [`EngineRuntime`]).
@@ -247,6 +248,7 @@ pub async fn build_composed_runtime(
     // exactly what `test_composed_runtime_wires_the_profile_tier_into_inject`
     // catches, and the tier reports `NotWired` (logged) until it is here.
     .with_profile(profile.clone(), ProfileInjectPolicy::from_core(config));
+    let inject = inject.with_compaction(CompactionPolicy::from_core(&config.compaction));
 
     // Q8: the consolidator behind the scheduler. Same provider, same
     // embedder, same probe, the tree's `DEFAULT_BATCH_LIMIT` (rows per agent

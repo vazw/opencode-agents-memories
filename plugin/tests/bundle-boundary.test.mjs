@@ -30,6 +30,7 @@ test("test_bundle_only_shipped_entries", () => {
   assert.deepEqual(
     shipped,
     [
+      "compaction.js",
       "plugin.js",
       "tui.js",
       "v2/adapter.js",

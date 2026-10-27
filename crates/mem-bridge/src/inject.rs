@@ -29,7 +29,9 @@ use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::time::Instant;
 
 use mem_core::logging::log;
-use mem_core::logging::signatures::PROFILE_INJECT;
+use mem_core::logging::signatures::{
+    COMPACTION_HANDLER_ERROR, COMPACTION_MEMORY_INJECTED, PROFILE_INJECT,
+};
 use mem_core::scope::Scope;
 use mem_embed::embedder::Embedder;
 use mem_episodic::record::AgentSession;
@@ -44,6 +46,7 @@ use mem_store::shard_manager::ShardManager;
 use mem_store::vector::list_memories_by_container_tag;
 
 use crate::capture::{AUTO_CAPTURE_SOURCE, CAPTURE_SUMMARY_SOURCE_METADATA_KEY};
+use crate::compaction::{CompactionMode, CompactionPolicy, render};
 use crate::project_scope::{ProjectScopeError, ResolvedProjectScope};
 use crate::scope_resolver::ProjectScopeResolver;
 
@@ -116,6 +119,9 @@ pub struct InjectParams {
     /// The wrapper sends none, so the scope's git identity is the production
     /// path.
     pub user_id: Option<String>,
+    /// The hook's own session id. The compaction leg keys the tier-1 read on
+    /// it; every other path ignores it (the field is additive and optional).
+    pub session_id: Option<String>,
 }
 
 /// The result body (frozen response schema).
@@ -206,6 +212,10 @@ pub struct InjectService {
     /// `None` until [`InjectService::with_profile`] is called — the tier then
     /// reports [`ProfileInjection::NotWired`] instead of silently vanishing.
     profile: Option<ProfileTier>,
+    /// The two compaction keys (issue 33). `Default` is the core defaults, so
+    /// an unwired service still answers the compaction modes; the production
+    /// composition rebinds it from `config.compaction`.
+    compaction: CompactionPolicy,
 }
 
 impl InjectService {
@@ -226,6 +236,7 @@ impl InjectService {
             embedder,
             probe,
             profile: None,
+            compaction: CompactionPolicy::default(),
         }
     }
 
@@ -234,6 +245,13 @@ impl InjectService {
     /// [`ProfileInjection::NotWired`], which is a distinct, logged state.
     pub fn with_profile(mut self, store: Arc<ProfileStore>, policy: ProfileInjectPolicy) -> Self {
         self.profile = Some(ProfileTier { store, policy });
+        self
+    }
+
+    /// Wires the compaction policy (issue 33). Called once, from the
+    /// production composition root, immediately after `.with_profile(..)`.
+    pub fn with_compaction(mut self, policy: CompactionPolicy) -> Self {
+        self.compaction = policy;
         self
     }
 
@@ -253,7 +271,14 @@ impl InjectService {
         };
 
         let budget_bytes = byte_budget(params.token_budget)?;
-        let (recent_count, query_text) = include_options(&params.include);
+        let (recent_count, query_text, compaction_mode) = include_options(&params.include);
+        // 0b. The compaction seam (issue 33): `include.compaction` selects the
+        // session-scoped render instead of the project chat block. The A2 guard
+        // above already answered `Ok(empty)` for an absent/blank scope, so the
+        // leg needs no scope check of its own.
+        if let Some(mode) = compaction_mode {
+            return self.compaction_leg(params, mode, scope_input).await;
+        }
         let project_id: &str = scope_input;
 
         // 1. The ONE scope resolution (capture used the same triple).
@@ -452,6 +477,135 @@ impl InjectService {
         })
     }
 
+    /// The compaction seam's one emission site (issue 33).
+    ///
+    /// **Statement order is the contract:** (1) the `policy.enabled` check
+    /// comes before ANY store access — before `scope_resolver.resolve`, before
+    /// `self.shards`, before the session-id read. The disabled-path oracle
+    /// observes the absence of a shard-file re-creation, so a leg that reads
+    /// first and only then renders `None` turns a real difference into a false
+    /// pass. (2) the hook's own session id, trimmed and non-empty. (3) the read
+    /// plus the exact `resolve_session_id` filter. (4) `render`. (5) the
+    /// `COMPACTION_MEMORY_INJECTED` emission, then the block.
+    ///
+    /// Every failure arm after step 1 is the same `Ok(empty)` after one
+    /// `COMPACTION_HANDLER_ERROR` log — never `-32602`, never a throw.
+    /// `memory_count` is the RENDERED count (`filtered.len().min(limit)`),
+    /// never the read count; `tokens` is the crate's one accounting rule on the
+    /// emitted block; `profile` is [`ProfileInjection::NoProjectScope`] on every
+    /// arm because this tier never ran (its `A2:` prefix is a naming artifact —
+    /// ADR-0017 records it).
+    async fn compaction_leg(
+        &self,
+        params: &InjectParams,
+        mode: CompactionMode,
+        project_id: &str,
+    ) -> Result<InjectResult, InjectError> {
+        let started = Instant::now();
+
+        // 1. Disabled FIRST: no store access of any kind below this line.
+        if !self.compaction.enabled {
+            return Ok(empty(started));
+        }
+
+        // 2. The hook's own id — never the wrapper's captured session id.
+        let Some(session_id) = params
+            .session_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+        else {
+            return Ok(empty(started));
+        };
+
+        // 3. The read plus the exact filter.
+        let rows = match self.compaction_rows(project_id, &session_id).await {
+            Ok(rows) => rows,
+            Err(_) => {
+                log(
+                    COMPACTION_HANDLER_ERROR,
+                    Some(&serde_json::json!({
+                        "session_id": session_id,
+                        "class": "read",
+                    })),
+                );
+                return Ok(empty(started));
+            }
+        };
+        // Keep only rows whose OWN session identity is this session: explicit
+        // non-empty wins, else metadata (unlike an `A or B` union, this drops a
+        // row that belongs to another session but mentions this one).
+        let filtered: Vec<Row> = rows
+            .into_iter()
+            .filter(|row| {
+                mem_store::vector::resolve_session_id(
+                    row.text("session_id"),
+                    row.text("metadata").as_deref(),
+                )
+                .as_deref()
+                    == Some(session_id.as_str())
+            })
+            .collect();
+        let memory_count = (filtered.len().min(self.compaction.memory_limit as usize)) as u64;
+
+        // 4. Render (the only truncation site, on the same limit).
+        let Some(block) = render(mode, filtered, &self.compaction) else {
+            return Ok(empty(started));
+        };
+
+        // 5. Emit once, then return the block.
+        let tokens = emitted_tokens(Some(block.as_str()));
+        log(
+            COMPACTION_MEMORY_INJECTED,
+            Some(&serde_json::json!({
+                "session_id": session_id,
+                "memory_count": memory_count,
+            })),
+        );
+        Ok(InjectResult {
+            block: Some(block),
+            memory_count,
+            tokens,
+            truncated: false,
+            handling_ms: ms(started),
+            profile: ProfileInjection::NoProjectScope,
+        })
+    }
+
+    /// The session-scoped tier-1 read: every project shard of the resolved
+    /// scope, queried by session id. `get_memories_by_session_id` returns raw
+    /// rows (its LIKE arm over-matches); the leg's exact filter contains it.
+    async fn compaction_rows(
+        &self,
+        project_id: &str,
+        session_id: &str,
+    ) -> Result<Vec<Row>, InjectError> {
+        let scope = self
+            .scope_resolver
+            .resolve(project_id)
+            .map_err(InjectError::Scope)?;
+        let infos = self
+            .shards
+            .get_all_shards(Scope::Project, Some(&scope.scope_hash))
+            .await
+            .map_err(|error| InjectError::Store(error.to_string()))?;
+        let mut rows: Vec<Row> = Vec::new();
+        for info in infos {
+            let db = self
+                .shards
+                .open_shard(&info.db_path)
+                .await
+                .map_err(|error| InjectError::Store(error.to_string()))?;
+            rows.extend(
+                mem_store::vector::get_memories_by_session_id(db.as_ref(), session_id)
+                    .await
+                    .map_err(|error| InjectError::Store(error.to_string()))?,
+            );
+        }
+        Ok(rows)
+    }
+
     /// Runs the profile tier for one `assemble` call.
     ///
     /// The ladder is total and fail-soft: every arm returns `(None, <outcome>)`
@@ -613,7 +767,9 @@ fn byte_budget(token_budget: Option<u64>) -> Result<usize, InjectError> {
     usize::try_from(bytes).map_err(|_| InjectError::Overflow)
 }
 
-fn include_options(include: &Option<mem_store::serde_json::Value>) -> (u32, Option<String>) {
+fn include_options(
+    include: &Option<mem_store::serde_json::Value>,
+) -> (u32, Option<String>, Option<CompactionMode>) {
     match include {
         Some(value) if value.is_object() => {
             let recent_count = value
@@ -627,9 +783,23 @@ fn include_options(include: &Option<mem_store::serde_json::Value>) -> (u32, Opti
                 .get("query")
                 .and_then(|v| v.as_str())
                 .map(str::to_string);
-            (recent_count, query)
+            // The compaction mode is additive: absent (or an unknown string)
+            // keeps the historical chat-block path byte-identically.
+            let compaction = value
+                .get("compaction")
+                .and_then(|v| v.as_str())
+                .and_then(parse_compaction_mode);
+            (recent_count, query, compaction)
         }
-        _ => (DEFAULT_RECENT_COUNT, None),
+        _ => (DEFAULT_RECENT_COUNT, None, None),
+    }
+}
+
+fn parse_compaction_mode(mode: &str) -> Option<CompactionMode> {
+    match mode {
+        "ingest" => Some(CompactionMode::Ingest),
+        "restore" => Some(CompactionMode::Restore),
+        _ => None,
     }
 }
 
