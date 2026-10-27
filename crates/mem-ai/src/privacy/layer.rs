@@ -34,7 +34,7 @@ use crate::provider::provider_trait::{AiProvider, AiProviderStructured, Completi
 use crate::provider::request::{CompletionRequest, EmbedRequest, ModelInfo, Role};
 
 /// Configuration for [`PrivacyFilterLayer`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrivacyConfig {
     /// Replace `<private>…</private>` regions with `[REDACTED]`.
     pub strip_private: bool,
@@ -60,6 +60,50 @@ impl Default for PrivacyConfig {
                 .map(|marker| (*marker).to_owned())
                 .collect(),
         }
+    }
+}
+
+impl PrivacyConfig {
+    /// The only production constructor: the resolved config is the source.
+    ///
+    /// `strip_private` has no config key and capture strips unconditionally;
+    /// the field stays `true` so the layer's behaviour matches today's (52.8).
+    pub fn from_core(config: &mem_core::config::Config) -> Self {
+        Self {
+            strip_private: true,
+            filter_injected_prompts: config.chat_message.filter_injected_prompts,
+            // The RESOLVED vector: defaults plus user entries, produced by
+            // `normalize_injection_markers`.
+            blocklist: config.chat_message.injection_markers.clone(),
+            // `allowlist` is `Vec<String>`, never `&[&str]`: the assignment is
+            // element-wise, the same mapping `Default` performs above.
+            allowlist: crate::privacy::injection::DEFAULT_INTERNAL_PROMPT_MARKERS
+                .iter()
+                .map(|marker| (*marker).to_owned())
+                .collect(),
+        }
+    }
+
+    /// The part/text filter this configuration describes.
+    pub fn injection_filter(&self) -> InjectionFilter {
+        InjectionFilter::new(self.blocklist.clone(), self.allowlist.clone())
+    }
+
+    /// Injected regions removed from `text`; verbatim when the flag is off.
+    pub fn filter_injected_text(&self, text: &str) -> String {
+        if !self.filter_injected_prompts {
+            return text.to_owned();
+        }
+        self.injection_filter().filter_text(text)
+    }
+
+    /// True when `text` is non-blank and nothing but injected content;
+    /// `false` when the flag is off.
+    pub fn prompt_is_fully_injected(&self, text: &str) -> bool {
+        if !self.filter_injected_prompts {
+            return false;
+        }
+        self.injection_filter().is_fully_injected(text)
     }
 }
 

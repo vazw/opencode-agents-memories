@@ -20,6 +20,9 @@
 #[path = "privacy/injected_prompt_filter.rs"]
 mod injected_prompt_filter;
 
+#[path = "privacy/injection_text_regions.rs"]
+mod injection_text_regions;
+
 #[path = "privacy/malformed_tags.rs"]
 mod malformed_tags;
 

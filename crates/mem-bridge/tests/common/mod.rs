@@ -319,7 +319,11 @@ impl mem_bridge::capture_prompt::CaptureSummarizer for SkipSummarizer {
         'a,
         Result<mem_bridge::capture::CaptureSummaryOutput, mem_episodic::error::EpisodicError>,
     > {
-        Box::pin(async { Ok(mem_bridge::capture::CaptureSummaryOutput::Skip) })
+        Box::pin(async {
+            Ok(mem_bridge::capture::CaptureSummaryOutput::Skip(
+                mem_bridge::capture::SkipReason::NoContext,
+            ))
+        })
     }
 }
 

@@ -495,8 +495,10 @@ pub struct CaptureExtension {
 /// extension.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CaptureSummaryOutput {
-    /// Non-technical / incomplete: writes NEITHER tier, completes the item.
-    Skip,
+    /// Non-technical / incomplete / no context: writes NEITHER tier,
+    /// completes the item. The reason is carried so "injected-only" is never
+    /// confused with "blank" (D-52-5).
+    Skip(SkipReason),
     Capture {
         summary: String,
         memory_type: String,
@@ -504,6 +506,28 @@ pub enum CaptureSummaryOutput {
         /// `filesTouched` / `completedWork` / `decisions` / `openThreads`.
         extension: CaptureExtension,
     },
+}
+
+/// Why a capture produced neither tier (D-52-5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipReason {
+    /// No prompt and no context to attach to it.
+    NoContext,
+    /// The prompt consisted entirely of injected boilerplate.
+    InjectedOnly,
+    /// The provider answered `type: "skip"`.
+    ProviderSkipped,
+}
+
+impl SkipReason {
+    /// The log-safe label (`AUTO_CAPTURE_SKIPPED`'s `reason` field).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NoContext => "no_context",
+            Self::InjectedOnly => "injected_only",
+            Self::ProviderSkipped => "provider_skip",
+        }
+    }
 }
 
 /// One entry's drain outcome (every dequeued entry ends in one of these).
@@ -578,6 +602,11 @@ pub struct CaptureService {
     sound_memory: SoundMemorySettings,
     /// W8a: optional session-end vault feeder.
     vault_feeder: Option<Arc<VaultFeeder>>,
+    /// D-52-3: the injection-filter configuration this service applies at
+    /// its five store-path sites. Defaults to `PrivacyConfig::default()`
+    /// (filter ON) — fail-closed: a missing `.with_privacy` weakens config
+    /// fidelity (custom markers, the flag), never the filter itself.
+    privacy: mem_ai::privacy::PrivacyConfig,
 }
 
 impl CaptureService {
@@ -603,11 +632,12 @@ impl CaptureService {
             drains: std::sync::atomic::AtomicU64::new(0),
             sound_memory: SoundMemorySettings::default(),
             vault_feeder: None,
+            privacy: mem_ai::privacy::PrivacyConfig::default(),
         }
     }
 
     /// W7.1 — sets the sound-memory flags. A builder setter, deliberately:
-    /// the ten existing `CaptureService::new` call sites keep their exact
+    /// the sixteen existing `CaptureService::new` call sites keep their exact
     /// argument list, and the default remains OFF.
     pub fn with_sound_memory(mut self, settings: SoundMemorySettings) -> Self {
         self.sound_memory = settings;
@@ -619,6 +649,19 @@ impl CaptureService {
     pub fn with_vault_feeder(mut self, feeder: Option<Arc<VaultFeeder>>) -> Self {
         self.vault_feeder = feeder;
         self
+    }
+
+    /// D-52-3 — the injection-filter configuration. Builder setter, default
+    /// `PrivacyConfig::default()` (filter ON), mirroring
+    /// `with_sound_memory`/`with_vault_feeder`.
+    pub fn with_privacy(mut self, privacy: mem_ai::privacy::PrivacyConfig) -> Self {
+        self.privacy = privacy;
+        self
+    }
+
+    /// The privacy configuration in force (composition diagnostics/tests).
+    pub fn privacy(&self) -> &mem_ai::privacy::PrivacyConfig {
+        &self.privacy
     }
 
     /// The sound-memory settings in force (composition diagnostics/tests).
@@ -726,7 +769,14 @@ impl CaptureService {
         // extension (the provider path supplies both via `assemble_summary`).
         let memory_type = "memory".to_string();
         let extension = CaptureExtension::default();
-        let retention = match self.resolve_retention(&params, params.transcript.as_deref()) {
+        // D-52-3 site 3: the flush path's transcript, filtered at the call
+        // site. This site adds NO stripper — the only strip on this path is
+        // the pre-existing one inside `resolve_retention`.
+        let filtered_transcript = params
+            .transcript
+            .as_deref()
+            .map(|text| self.privacy.filter_injected_text(text));
+        let retention = match self.resolve_retention(&params, filtered_transcript.as_deref()) {
             Ok(retention) => retention,
             Err(reason) => return self.dead_letter_now(entry, reason).await,
         };
@@ -803,11 +853,36 @@ impl CaptureService {
         };
 
         // 2. Private content is stripped from every free text BEFORE any
-        // durable write.
+        // durable write. D-52-3 site 1: the injection filter wraps that
+        // stripped value (strip -> filter). The stripper's statement is left
+        // byte-identical and the filter is a second binding, which is what
+        // 52.8's mechanical gate diffs.
         let transcript = params
             .transcript
             .as_deref()
             .map(mem_ai::privacy::strip_private_content);
+        let transcript = transcript.map(|text| self.privacy.filter_injected_text(&text));
+
+        // 2a. D-52-3 site 2: the refusal reads the RAW effective prompt, and
+        // it runs before `resolve_retention` so a payload that is going to be
+        // skipped never reaches the retention rules. `&params`: `params` is
+        // owned here and `effective_prompt` takes `&CaptureParams`; the
+        // transcript leg comes from `params`, NEVER from the local
+        // `transcript` binding site 1 overwrote.
+        let raw_prompt = effective_prompt(&params, params.transcript.as_deref());
+        if raw_prompt.is_some_and(|prompt| self.privacy.prompt_is_fully_injected(prompt)) {
+            let _ = self.inbox.mark_done(&entry.capture_id).await;
+            log(
+                AUTO_CAPTURE_SKIPPED,
+                Some(&serde_json::json!({
+                    "captureId": &entry.capture_id,
+                    "sessionId": &params.session_id,
+                    "type": "skip",
+                    "reason": SkipReason::InjectedOnly.as_str(),
+                })),
+            );
+            return EntryOutcome::Done;
+        }
 
         // 2b. W7.1 — validate the retention payload BEFORE the summarizer:
         // a rejected raw context or agent role dead-letters the entry and
@@ -823,7 +898,7 @@ impl CaptureService {
             Err(_) => return self.retryable_or_dead(entry).await,
         };
         let (summary, memory_type, tags, extension) = match output {
-            CaptureSummaryOutput::Skip => {
+            CaptureSummaryOutput::Skip(reason) => {
                 let _ = self.inbox.mark_done(&entry.capture_id).await;
                 log(
                     AUTO_CAPTURE_SKIPPED,
@@ -831,6 +906,7 @@ impl CaptureService {
                         "captureId": &entry.capture_id,
                         "sessionId": &params.session_id,
                         "type": "skip",
+                        "reason": reason.as_str(),
                     })),
                 );
                 return EntryOutcome::Done;
@@ -988,8 +1064,15 @@ impl CaptureService {
                 agent_role,
             });
         }
-        let supplied = params
+        // D-52-3 site 4: filter the SUPPLIED raw context only, before its own
+        // blank guard. The owned `String` is bound first so `supplied` keeps
+        // `Option<&str>` (a one-step `.map(..).filter(..)` would not compile
+        // against `supplied.or(transcript)`).
+        let filtered_supplied = params
             .raw_context
+            .as_deref()
+            .map(|raw| self.privacy.filter_injected_text(raw));
+        let supplied = filtered_supplied
             .as_deref()
             .filter(|raw| !raw.trim().is_empty());
         let candidate = supplied.or(transcript).filter(|raw| !raw.trim().is_empty());
@@ -1133,9 +1216,10 @@ impl CaptureService {
             transcript,
             self.max_context_bytes,
             LatestMemoryReader::None,
+            &self.privacy,
         ) {
             Some(context) => context,
-            None => return Ok(CaptureSummaryOutput::Skip),
+            None => return Ok(CaptureSummaryOutput::Skip(SkipReason::NoContext)),
         };
         match self.summarizer.as_ref() {
             Some(summarizer) => summarizer.summarize(&context).await,
@@ -1192,17 +1276,21 @@ fn split_tags_suffix(summary: &str) -> (String, Vec<String>) {
 /// (`userPrompt`, `textResponses`, `toolCalls`, optional `latestMemory`
 /// —the wrapper is allowed to send the block, and the Rust builder may obtain
 /// it through the same scope) or the raw transcript.
+///
+/// D-52-3 site 5: the prompt is filtered **before** `build_markdown_context`
+/// (a region cut in half by the truncation would no longer have a closer), the
+/// pre-existing strip follows, and the assembled context is filtered after it
+/// (that second filter covers `textResponses`/`toolCalls`, which are host text
+/// too). A present `userPrompt` wins even when blank: no transcript fallback
+/// is introduced (r4 item 9).
 fn auto_capture_context(
     metadata: &Option<Json>,
     transcript: Option<&str>,
     max_context_bytes: usize,
     _latest: LatestMemoryReader,
+    privacy: &mem_ai::privacy::PrivacyConfig,
 ) -> Option<String> {
-    let user_prompt = metadata
-        .as_ref()
-        .and_then(|m| m.get("autoCaptureContext"))
-        .and_then(|ctx| ctx.get("userPrompt"))
-        .and_then(Json::as_str);
+    let user_prompt = metadata_user_prompt(metadata);
     let text_responses: Vec<String> = metadata
         .as_ref()
         .and_then(|m| m.get("autoCaptureContext"))
@@ -1239,23 +1327,54 @@ fn auto_capture_context(
         .unwrap_or_default();
 
     if let Some(prompt) = user_prompt {
+        // Site 5's blank eligibility: after filtering, a present-and-blank
+        // prompt with no responses and no tool calls has no context at all.
+        // A non-blank transcript beside it is NOT a fallback — the same
+        // branch, not a different one.
+        let prompt = privacy.filter_injected_text(prompt);
+        if prompt.trim().is_empty() && text_responses.is_empty() && tool_calls.is_empty() {
+            return None;
+        }
         let latest_memory: Option<&str> = metadata
             .as_ref()
             .and_then(|m| m.get("autoCaptureContext"))
             .and_then(|ctx| ctx.get("latestMemory"))
             .and_then(Json::as_str);
         let context = crate::capture_context::build_markdown_context(
-            prompt,
+            &prompt,
             &text_responses,
             &tool_calls,
             latest_memory,
             max_context_bytes,
         );
+        // Prompt: filter -> build; assembled: filter -> strip. The second
+        // filter covers `textResponses`/`toolCalls` (host text too); running
+        // it BEFORE the existing stripper is byte-equivalent because the two
+        // mechanisms act on disjoint constructs (`<private>…</private>`
+        // versus marker regions), and it keeps the stripper's call site
+        // byte-identical — 52.8's mechanical gate diffs exactly that line.
+        let context = privacy.filter_injected_text(&context);
         return Some(mem_ai::privacy::strip_private_content(&context));
     }
 
-    // Transcript fallback (strip first).
+    // Transcript fallback: the caller already filtered it (site 1).
     transcript.map(|text| text.to_string())
+}
+
+/// The `metadata.autoCaptureContext.userPrompt` reader shared by the filter
+/// sites, so the preference is single-sourced.
+fn metadata_user_prompt(metadata: &Option<Json>) -> Option<&str> {
+    metadata
+        .as_ref()?
+        .get("autoCaptureContext")?
+        .get("userPrompt")?
+        .as_str()
+}
+
+/// The prompt the summarizer will actually be handed: the metadata prompt
+/// when present, else the transcript.
+fn effective_prompt<'a>(params: &'a CaptureParams, transcript: Option<&'a str>) -> Option<&'a str> {
+    metadata_user_prompt(&params.metadata).or(transcript)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

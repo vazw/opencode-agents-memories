@@ -267,8 +267,8 @@ pub fn normalize_memory_temperature(
 
 /// Markers that identify a text block as machine-injected rather than typed
 /// (upstream `injected-prompt-filter.ts`). The merge semantics land here;
-/// the filter functions themselves are the injected-prompt-filter port of a
-/// later wave.
+/// the filter functions are the injected-prompt-filter port in
+/// `crates/mem-ai/src/privacy/injection.rs`.
 pub const DEFAULT_INJECTION_MARKERS: &[&str] = &[
     "<system-reminder>",
     "<!-- OMO_INTERNAL_INITIATOR -->",

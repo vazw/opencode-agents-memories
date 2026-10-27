@@ -81,8 +81,8 @@
 //!   and chunked tag-splitting would be a *new* leak surface.
 //! - **D6 — "allowlist" = internal prompts are exempt from the injection
 //!   blocklist.** [`is_internal_prompt`] is the faithful port of upstream
-//!   `isStructuredSummaryPromptMessage`. Phase 5's `plugin-host-config` wave must
-//!   *import* this predicate rather than port it a second time.
+//!   `isStructuredSummaryPromptMessage`. Issue 52 wires it into the capture
+//!   seam; *import* this predicate rather than porting it a second time.
 //! - **D7 — shape validation is malformed-content rejection, not a vendor
 //!   allow-list.** Unknown key prefixes must stay acceptable (Atlas Cloud /
 //!   OrcaRouter take arbitrary keys); the rule set is conservative (non-empty,
@@ -109,7 +109,7 @@
 //!
 //! D5 chunk-incremental stripper; D9 config→resolver wiring; per-call secret
 //! re-read caching; a better message for owner-unreadable exposed modes; and
-//! Phase 5 importing [`is_internal_prompt`] instead of re-porting it.
+//! importing [`is_internal_prompt`] instead of re-porting it (issue 52).
 
 pub mod injection;
 pub mod layer;

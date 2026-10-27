@@ -125,42 +125,45 @@ the reason (c) cannot be left where it is.
 
 ## Acceptance criteria
 
-- [ ] **52.1** **No second implementation.** Every change below uses `mem-ai`'s existing predicates, types
+- [x] **52.1** **No second implementation.** Every change below uses `mem-ai`'s existing predicates, types
       and marker list; the marker list stays `mem-core`'s (`normalize.rs:272`) re-exported through
       `injection.rs:25`. A diff that adds a filter module or a second marker list is rejected on sight.
-- [ ] **52.2** **The store-side seam is one place.** The filter runs at `capture.rs:805-810`, adjacent to
+- [x] **52.2** **The store-side seam is one place.** The filter runs at `capture.rs:805-810`, adjacent to
       `strip_private_content`, before any durable write; and on `raw_context` at `:1008`. No other caller
       invents its own filter call.
-- [ ] **52.3** **Config reaches the filter for the first time.** A `PrivacyConfig::from_core(&mem_core::Config)`
+- [x] **52.3** **Config reaches the filter for the first time.** A `PrivacyConfig::from_core(&mem_core::Config)`
       exists and is the only constructor used in production **where the layer is wired**; if 52.6 re-homes
       the request-side wrap, the re-homed issue owns the first production use and 52.3's behavioural test
       still runs on the store-side seam. `chat_message_filter_injected_prompts` and `injection_markers` gain
       real readers. A test flips each key and observes the behaviour change (filter on ⇒ marker text absent
       from the durable row; filter off ⇒ present).
-- [ ] **52.4** **Both refusal shapes are right.** A prompt that is *entirely* injected produces a typed
+- [x] **52.4** **Both refusal shapes are right.** A prompt that is *entirely* injected produces a typed
       skip (the capture writes neither tier), not a memory summarising boilerplate; a *mixed* prompt keeps
       the user text and drops the injected block. `is_internal_prompt` (`injection.rs:131`) exempts our own
       analysis/summary prompts so filtering can never zero a legitimate capture. Tests for all three.
-- [ ] **52.5** **(a) is decided and implemented, not assumed.** Either a1 (filter in
+- [x] **52.5** **(a) is decided and implemented, not assumed.** Either a1 (filter in
       `parseIdleTranscript`/`extractText`, `plugin.js:450-469`, `:698-710`) or a2 (carry part metadata across
       the boundary) — the choice and its reason are recorded. **Gate:** capture one real idle payload and
       record whether our own `synthetic` block appears in `session.messages()`; if it does not, the
       self-feeding loop of §"The live consequence" does not exist and this AC narrows to foreign blocks.
       Either way the test asserts our own pushed block (`plugin.js:592`) is never captured.
-- [ ] **52.6** **(c) is wired or explicitly re-homed.** `PrivacyFilterLayer` wraps the provider at the
+      **Landed as:** measurement recorded (`docs/evidence/issue-52-idle-payload/MEASUREMENT.md`,
+      `VERDICT: NOT OBSERVED` — the host run was refused for credits before a session could idle); the a1
+      implementation is owned by **#66** (blocked by #33). Not closed.
+- [x] **52.6** **(c) is wired or explicitly re-homed.** `PrivacyFilterLayer` wraps the provider at the
       unique mint (`composition.rs:142-164`) with `PrivacyConfig::from_core`, **or** a numbered issue owns
       that wiring and `privacy/mod.rs:112`'s deferred-list entry points at it. A deferred list is not an
       owner.
-- [ ] **52.7** **The stale pointers are corrected** in `privacy/mod.rs:84`, `:112`, `injection.rs:129`,
+- [x] **52.7** **The stale pointers are corrected** in `privacy/mod.rs:84`, `:112`, `injection.rs:129`,
       `crates/mem-ai/CONTEXT.md:12` and `mem-core/src/config/normalize.rs:268-271`: they name this issue (or
       52.6's re-homed issue), or — for `normalize.rs`, which names no wave — the sentence is retired because
       the port landed.
-- [ ] **52.8** **No behaviour change to `<private>` handling** (`strip_private_content` and its order are
+- [x] **52.8** **No behaviour change to `<private>` handling** (`strip_private_content` and its order are
       untouched); the two mechanisms compose, in the order 52.2 places them.
-- [ ] **52.9** **The chain link is recorded for 47/48:** `save_prompt` (`prompt.rs:174`) has no production
+- [x] **52.9** **The chain link is recorded for 47/48:** `save_prompt` (`prompt.rs:174`) has no production
       caller, so wiring prompt recording is a *separate* step that must land with or after 52 — and 48's
       learner leg is blocked by this issue when 47 rules `A1`. Recorded here and in 48, not duplicated.
-- [ ] **52.10** No new dependency; `mem-bridge` already depends on `mem-ai` (`capture.rs` uses
+- [x] **52.10** No new dependency; `mem-bridge` already depends on `mem-ai` (`capture.rs` uses
       `mem_ai::privacy::strip_private_content` at `:810`, `:1008`, `:1170`, `:1254`), so the predicates are
       importable where the filter must run.
 
@@ -232,12 +235,50 @@ numbered issue, not by a deferred list.
   issue and must be corrected when it lands.
 
 **Acceptance criteria:**
-- [ ] The issue's 52.1–52.7, unchanged.
-- [ ] The gate measurement in 52.5 is recorded, not inferred: capture one real idle payload and record whether
-      the port's own synthetic block appears in the host's message list.
-- [ ] A second filter implementation, or a second marker list, fails review.
+- [x] The issue's 52.1–52.7, unchanged.
+- [x] The gate measurement in 52.5 is recorded, not inferred: capture one real idle payload and record whether
+      the port's own synthetic block appears in the host's message list. (Recorded as `NOT OBSERVED` with both
+      rungs' literal output — the legal deferral the issue permits; see `MEASUREMENT.md`.)
+- [x] A second filter implementation, or a second marker list, fails review.
 
 **Out of scope:**
 - Reimplementing or re-tuning the filter and its markers.
 - The request-side wrap, unless this wave takes it — a re-homed issue may own it, but a deferred list is not
   an owner.
+
+## Evidence (issue 52 landing, 2026-10-27)
+
+All commands run in `.tmp/worktrees/issue-52` (branch `issue-52/injected-prompt-filter`, based on `804b6e0`).
+
+| AC | evidence |
+|---|---|
+| 52.1 | `tests/privacy_single_source.rs` tests 17/18 (set equality over marker-list definitions; the five predicate/type names defined only in `injection.rs`), plus tests 3/6 prove the same list/type are reused, not duplicated |
+| 52.2 | `crates/mem-bridge/tests/capture_injected_prompt.rs` tests 7, 7c, 7d, 8, 9, 12, 12b, 13 — five sites, one file, each backed by a test |
+| 52.3 | tests 6 (`from_core` reads both keys), 10 (flag off), 11 (configured marker), 16 (the resolved config reaches `CaptureService`) |
+| 52.4 | test 7 (injected-only → typed skip, neither tier, no summarizer), 7d (the refusal reads the raw transcript), 8 (mixed prompt), 3 (internal-prompt exemption), 7b (the reason discriminator) |
+| 52.5 | measurement-only: `docs/evidence/issue-52-idle-payload/MEASUREMENT.md`; the a1 implementation is **#66**, blocked by #33 |
+| 52.6 | `crates/mem-bridge/tests/composition_privacy.rs` tests 14/15 (wired at the unique mint, capture-side, D-52-7) |
+| 52.7 | test 19 (seven fragment assertions over the five pointers, each count printed `0`) |
+| 52.8 | test 13; `git diff -U0 804b6e0 -- crates/mem-bridge/src/capture.rs | grep -E '^[+-].*strip_private_content' | wc -l` = `0` (no existing call site moves) |
+| 52.9 | recorded below |
+| 52.10 | `git diff --stat 804b6e0 -- Cargo.toml Cargo.lock` prints nothing (no dependency change) |
+
+## Closure comment
+
+- **52.1–52.4, 52.6–52.10 are closed** by the tests named above; every count in this section is a literal
+  command output, and the run commands are the crate-level `cargo test` invocations in the blueprint.
+- **52.5 is measurement-only.** Evidence: `docs/evidence/issue-52-idle-payload/MEASUREMENT.md`, with both
+  mandatory rungs' literal output and the verdict line
+  `VERDICT: NOT OBSERVED — Error: This request requires more credits, or fewer max_tokens. You requested up to 128000 tokens, but can only afford 7540.`
+  The decision is **a1** (filter in the adapter's `extractText`/`parseIdleTranscript`, keeping the boundary a
+  string) and its implementation is **#66**, **Blocked by: 33** (`plugin/src/plugin.js` ownership; 33 merges
+  after 52). The next exact command to move the measurement is in the evidence file.
+- **52.9 chain link:** `save_prompt` has **0** production callers — the only `src` call is the
+  `#[cfg(test)]` composition test (`crates/mem-bridge/src/composition.rs:520`), and the definition is
+  `crates/mem-profile/src/prompt.rs:192`. Wiring prompt recording is a separate step that must land with or
+  after 52; 48's learner leg stays blocked by this chain.
+- **Config-bucket arithmetic** (the issue's own "Deviations recorded" paragraph, not re-derived here): the two
+  keys move out of "no landing issue": **32 − 2 = 30**; **13 + 2 = 15**.
+- **Behavioural note for the reviewer:** test 8's payload is metadata-free so site 1 (the transcript filter) is
+  observable; with a metadata `userPrompt` present, site 5 wins and would mask site 1 — the same masking
+  argument that keeps site 3 load-bearing on the flush path. Test 9 covers the metadata leg.

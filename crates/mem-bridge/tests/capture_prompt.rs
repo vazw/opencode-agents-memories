@@ -3,7 +3,7 @@
 //! short-circuits `type: "skip"`, and the frozen schema/system prompt
 //! literals are exported for the engine composition.
 
-use mem_bridge::capture::CaptureSummaryOutput;
+use mem_bridge::capture::{CaptureSummaryOutput, SkipReason};
 use mem_bridge::capture_prompt::parse_capture_output;
 
 #[test]
@@ -22,14 +22,17 @@ fn test_capture_summary_extraction_schema_and_skip() {
             assert_eq!(memory_type, "bug");
             assert_eq!(tags, vec!["auth".to_string(), "bug".to_string()]);
         }
-        CaptureSummaryOutput::Skip => panic!("a technical capture must not be Skip"),
+        CaptureSummaryOutput::Skip(_) => panic!("a technical capture must not be Skip"),
     }
 
     // (b) `type == "skip"` short-circuits: whatever the other fields say,
     // nothing tier of anything gets written for it.
     let skip = parse_capture_output(r#"{"summary": "", "type": "skip", "tags": []}"#)
         .expect("skip output parses");
-    assert_eq!(skip, CaptureSummaryOutput::Skip);
+    assert_eq!(
+        skip,
+        CaptureSummaryOutput::Skip(SkipReason::ProviderSkipped)
+    );
 
     // (c) A capture with an EMPTY summary fails closed (never a blank row).
     let blank = parse_capture_output(r#"{"summary": "   ", "type": "bug", "tags": []}"#);

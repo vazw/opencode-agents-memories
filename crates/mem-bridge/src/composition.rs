@@ -58,6 +58,16 @@ pub struct ComposedRuntime {
     pub scope_resolver: Arc<dyn crate::scope_resolver::ProjectScopeResolver>,
     /// Whether an LLM-backed capture summarizer was wirable.
     pub summarizer_available: bool,
+    /// The provider handed to the **capture** summarizer, post-wrap (D-52-4):
+    /// the unique mint's product wrapped once by `PrivacyFilterLayer`. Exposed
+    /// for the same reason `prompts` and `profile` are — a layer that is
+    /// constructed and never wrapped emits byte-identical traffic to no layer
+    /// at all.
+    ///
+    /// **Written only by `build_composed_runtime`.** Issue 33 must not touch
+    /// this field or its initialiser. The consolidation summarizer
+    /// deliberately keeps the UNWRAPPED handle (D-52-7).
+    pub provider: Option<Arc<dyn mem_ai::provider::AiProvider>>,
 }
 
 /// Builds the runtime over `storage_root` from the resolved config.
@@ -171,7 +181,18 @@ pub async fn build_composed_runtime(
             )
         }
     };
-    let summarizer_probe = provider
+    // D-52-4/D-52-7: the capture summarizer's provider, post-wrap. `wrap`
+    // allocates and returns `Arc<PrivacyFilterProvider>` — an `Arc::new(..)`
+    // around it would be `Arc<Arc<_>>` and would not coerce to
+    // `Arc<dyn AiProvider>`. The consolidation handle below keeps the
+    // UNWRAPPED `provider` on purpose (a wrapped consolidation summarizer
+    // turns a legacy marker-bearing memory into a silent permanent skip).
+    let privacy = mem_ai::privacy::PrivacyConfig::from_core(config);
+    let layer = mem_ai::privacy::PrivacyFilterLayer::new(privacy);
+    let capture_provider = provider
+        .as_ref()
+        .map(|inner| layer.wrap(inner.clone()) as Arc<dyn mem_ai::provider::AiProvider>);
+    let summarizer_probe = capture_provider
         .clone()
         .map(|provider| {
             let model = config
@@ -210,7 +231,8 @@ pub async fn build_composed_runtime(
         enabled: config.feature_flags.sound_memory,
         raw_context_required: config.sound_memory.raw_context_required,
     })
-    .with_vault_feeder(Some(vault_feeder));
+    .with_vault_feeder(Some(vault_feeder))
+    .with_privacy(mem_ai::privacy::PrivacyConfig::from_core(config));
 
     let consolidation_active = Arc::new(AtomicBool::new(false));
     let inject = InjectService::new(
@@ -275,6 +297,7 @@ pub async fn build_composed_runtime(
         consolidation_runner,
         scope_resolver: resolver,
         summarizer_available: summarizer_probe.is_some(),
+        provider: capture_provider,
     })
 }
 

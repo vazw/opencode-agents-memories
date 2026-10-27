@@ -12,7 +12,7 @@ use mem_embed::embedder::BoxFuture;
 
 use mem_episodic::record::{Decision, WorkItem, WorkKind};
 
-use crate::capture::{CaptureExtension, CaptureSummaryOutput};
+use crate::capture::{CaptureExtension, CaptureSummaryOutput, SkipReason};
 
 /// The capture system prompt (upstream's capture system prompt with the
 /// language line resolved by the configured `auto_capture_language`, whose
@@ -102,7 +102,7 @@ pub fn parse_capture_output(
         .unwrap_or_default()
         .trim();
     if memory_type.eq_ignore_ascii_case("skip") {
-        return Ok(CaptureSummaryOutput::Skip);
+        return Ok(CaptureSummaryOutput::Skip(SkipReason::ProviderSkipped));
     }
     let summary = value
         .get("summary")
