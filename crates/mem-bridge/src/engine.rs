@@ -30,6 +30,7 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::task::JoinHandle;
 
+use mem_episodic::store::EpisodicStore;
 use mem_profile::profile_store::ProfileStore;
 use mem_profile::prompt::UserPromptManager;
 use mem_store::shard_manager::ShardManager;
@@ -607,6 +608,10 @@ pub struct WebStoreDeps {
     pub prompts: Arc<UserPromptManager>,
     /// The user-profile store (likewise first opened in W6.7).
     pub profile: Arc<ProfileStore>,
+    /// The composed episodic store — a CLONE of `ComposedRuntime.store`, the
+    /// same store capture and inject write through. The root crate wraps it in
+    /// `episodic_session_port(..)` for `.with_sessions(..)`.
+    pub episodic: Arc<EpisodicStore>,
     /// The engine's embedder, wrapped by the root into the mem-web embed port.
     pub embedder: Arc<dyn mem_embed::embedder::Embedder>,
 }
@@ -951,6 +956,7 @@ pub async fn run_in_runtime(
         shards: (*runtime.shards).clone(),
         prompts: runtime.prompts.clone(),
         profile: runtime.profile.clone(),
+        episodic: runtime.store.clone(),
         embedder: runtime.embedder.clone(),
     });
     let web = match launcher

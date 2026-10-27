@@ -23,8 +23,11 @@ mod common;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
+
 use common::fakes::{MEMORY_ID, PROMPT_ID, SKILL_ID, USER_ID, fake_services};
-use common::{RawResponse, api_request, app_state_with_api, oneshot_response};
+use common::{RawResponse, api_request, app_state_with_api, oneshot_response, router_request};
 use mem_web::api::{ROUTE_TABLE, RouteExpectation, RouteSpec};
 use mem_web::server::build_router;
 use mem_web::web_auth::WebAuth;
@@ -535,4 +538,86 @@ async fn test_the_catalog_paths_require_the_token_on_a_non_loopback_bind() {
             "the token unlocks the catalog path: {path}"
         );
     }
+}
+
+/// AC4.1 / B3 (claim 1) — the local token is admitted ONLY on the custom
+/// `x-opencode-mem-token` header, never through `Authorization`.
+///
+/// This is a GUARD PIN over the standalone posture (`api_token: None`,
+/// `local_token: Some(..)`): it is green before and after the issue-37 wiring
+/// change. Wrong implementations it kills, with the bytes that differ:
+/// - gate step 4 deleted → Bearer and Basic are both admitted (status is not
+///   401) instead of 401;
+/// - `Authorization: Bearer <local token>` accepted → not-401 instead of 401
+///   (the Bearer comparison runs only against the configured API token, which
+///   is unset here);
+/// - a well-formed `Authorization: Basic base64("user:<local token>")`
+///   accepted → not-401 instead of 401 (the credential is base64-encoded on
+///   purpose: a malformed Basic header and an accepting implementation both
+///   emit a plain 200);
+/// - `x-opencode-mem-token` no longer read → 401 instead of admission.
+///
+/// The first case asserts GATE ADMISSION (`status != 401`), not `== 200`: the
+/// fake handler's success shape is not this oracle's subject.
+#[tokio::test]
+async fn test_the_local_token_is_accepted_only_on_the_custom_header() {
+    let (backend, services) = fake_services();
+    backend.seed_pending_cleanup();
+    let state = app_state_with_api(
+        WebAuth::new(None, None, "user"),
+        None,
+        Some(LOCAL_TOKEN),
+        PathBuf::from("/tmp/unused-dist"),
+        common::throwaway_log_dir(),
+        services,
+        USER_ID,
+        LOOPBACK,
+    );
+    let router = build_router(Arc::new(state));
+
+    let admitted = router_request(
+        router.clone(),
+        "GET",
+        "/api/memories",
+        &[("x-opencode-mem-token", LOCAL_TOKEN)],
+    )
+    .await;
+    assert_ne!(
+        admitted.status,
+        401,
+        "the custom header is the admitted local-token carrier: {}",
+        admitted.body_string()
+    );
+
+    let bearer = format!("Bearer {LOCAL_TOKEN}");
+    let refused = router_request(
+        router.clone(),
+        "GET",
+        "/api/memories",
+        &[("authorization", &bearer)],
+    )
+    .await;
+    assert_eq!(
+        refused.status,
+        401,
+        "a Bearer Authorization carrying the local token is never admitted: {}",
+        refused.body_string()
+    );
+
+    let basic = format!("user:{LOCAL_TOKEN}");
+    let encoded = STANDARD.encode(basic);
+    let basic_header = format!("Basic {encoded}");
+    let refused = router_request(
+        router,
+        "GET",
+        "/api/memories",
+        &[("authorization", &basic_header)],
+    )
+    .await;
+    assert_eq!(
+        refused.status,
+        401,
+        "a well-formed Basic Authorization is a different credential, not the local token: {}",
+        refused.body_string()
+    );
 }

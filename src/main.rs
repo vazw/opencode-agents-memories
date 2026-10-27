@@ -46,7 +46,9 @@ use mem_vault::CRATE_NAME as MEM_VAULT;
 use mem_web::CRATE_NAME as MEM_WEB;
 use mem_web::api::deduplication::production_deduplication_port_with_cancel;
 use mem_web::api::ports::ApiServices;
-use mem_web::api::store_adapter::{ProductionDeps, ProductionEmbed, production_skill_port};
+use mem_web::api::store_adapter::{
+    ProductionDeps, ProductionEmbed, episodic_session_port, production_skill_port,
+};
 use opencode_agents_memory::web_dist::{self, ResolvedDist};
 
 /// The workspace crates in composition order — printed by
@@ -171,6 +173,7 @@ impl WebLauncher for RootWebLauncher {
                             embed: Arc::new(ProductionEmbed::new(Arc::new(service))),
                         })
                         .with_skills(skills_port)
+                        .with_sessions(episodic_session_port(deps.episodic.clone()))
                         .with_maintenance(
                             production_deduplication_port_with_cancel(
                                 deps.shards.clone(),

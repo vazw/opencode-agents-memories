@@ -334,3 +334,34 @@ which is why the default is shared rather than engine-only.
   logging of full request params is forbidden (capture params contain the transcript).
 - The status file carries no secret and no transcript.
 - `capture_id` collision loses one capture, never writes a wrong row.
+
+## 11. Local REST auth and failure contract
+
+- **The local token travels only in `x-opencode-mem-token`**
+  (`mem_web::AUTH_HEADER`, `crates/mem-web/src/lib.rs:7`). The gate reads that one
+  header as the local token (`crates/mem-web/src/gate.rs:89-93`); it never reads
+  `Authorization` for it. `Authorization: Bearer <local token>` is not accepted:
+  the Bearer comparison runs only against the configured `webServerApiToken`
+  (`crates/mem-web/src/gate.rs:94-97`), and standalone mode configures none
+  (`src/main.rs:138` passes `api_token: None` to the web-server settings), so the
+  API-token leg is off and only the local-token leg can admit a request.
+  `Authorization: Basic <base64("user:<local token>")>` is a different
+  credential — the shell/API Basic-auth gate
+  (`crates/mem-web/src/gate.rs:69-76`), disabled in standalone mode
+  (`src/main.rs:193` builds `WebAuth::new(None, None, "engine")`) — and a
+  request carrying it is refused with the same `401`
+  (`crates/mem-web/src/gate.rs:108`). Pinned by
+  `test_the_local_token_is_accepted_only_on_the_custom_header`
+  (`crates/mem-web/tests/api_route_auth.rs`).
+- **`501` and `500` carry different meanings and must not be conflated.** `501`
+  means the endpoint's service is absent *in this build*: it is emitted by the
+  absent-service class (`PortError::Unavailable`, mapped at
+  `crates/mem-web/src/api/mod.rs:552`) and its semantics are stable contract.
+  `500` means an internal fault: the detail is logged and never returned to the
+  client (the fall-through arm at `crates/mem-web/src/api/mod.rs:557-558`).
+  Pinned by `crates/mem-web/tests/api_port_failure_class.rs`.
+- **Per-endpoint availability is deliberately not enumerated here.** Which
+  endpoint answers `501` depends on the composition state of the running build
+  (a degraded launch wires the unavailable bundle; a composed launch attaches
+  the production ports) and on how the build was packaged, so it belongs in
+  release notes — this section is contract, never an endpoint inventory.

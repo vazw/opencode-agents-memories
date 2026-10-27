@@ -33,6 +33,11 @@ use std::time::{Duration, Instant};
 use mem_core::config::{Config, ConfigPaths};
 use mem_core::env::ProcessEnv;
 use mem_core::scope::Scope;
+use mem_embed::embedder::{BoxFuture, Embedder};
+use mem_embed::error::EmbedError;
+use mem_episodic::record::NewAgentSession;
+use mem_episodic::store::EpisodicStore;
+use mem_episodic::timeline::TimelineFilter;
 use mem_store::config::StoreConfig;
 use mem_store::connection::ConnectionManager;
 use mem_store::db::TursoConnectFactory;
@@ -50,6 +55,10 @@ const PROJECT_TAG: &str = "opencode_project_a1b2c3d4e5f67890";
 const MEMORY_ID: &str = "mem_w67_wiring_probe";
 /// The seeded row's content (asserted in the served body).
 const MEMORY_CONTENT: &str = "W6.7 composition-root wiring probe";
+/// The `project-beta` session summary: the positive control that proves the
+/// session timeline's project filter selected beta's own rows rather than
+/// hiding every foreign row.
+const FOREIGN_PROJECT_SUMMARY: &str = "AC2-FOREIGN-PROJECT-SESSION";
 /// The older of two byte-identical rows (inserted with `created_at` 2_000).
 const DEDUP_OLD_ID: &str = "mem_54_dedup_old";
 /// The newer of two byte-identical rows (inserted with `created_at` 3_000): the
@@ -345,6 +354,106 @@ fn seed_row(storage: &Path, store_config: &StoreConfig) {
             vector: vec![0.25_f32; store_config.embedding_dimensions as usize],
         }],
     );
+}
+
+/// A fixed-vector embedder sized to the store config: the episodic store's
+/// dimension check passes and no ONNX model or network is involved.
+struct FixedEmbedder {
+    dimensions: usize,
+}
+
+impl Embedder for FixedEmbedder {
+    fn warmup(&self) -> BoxFuture<'_, Result<(), EmbedError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn embed(&self, _text: &str) -> BoxFuture<'_, Result<Vec<f32>, EmbedError>> {
+        Box::pin(async move { Ok(vec![0.1; self.dimensions]) })
+    }
+}
+
+/// The row ids minted by [`seed_sessions`].
+struct SeededSessions {
+    project_a: Vec<String>,
+    project_b: String,
+}
+
+/// Seeds two `project-alpha` rows and one `project-beta` row through the REAL
+/// episodic store the engine will open, then re-reads both timelines as a
+/// fixture precondition.
+///
+/// The triples are distinct on `agent_sessions`' UNIQUE
+/// `(project_id, session_id, agent_id)` key, so no insert takes the store's
+/// `Conflict` arm. The beta row's summary is [`FOREIGN_PROJECT_SUMMARY`], the
+/// positive control the readers assert on. The store and its runtime drop
+/// before the child is spawned, exactly as [`seed_rows`] does.
+fn seed_sessions(storage: &Path, store_config: &StoreConfig) -> SeededSessions {
+    let runtime = mem_store::tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("the seed's own current_thread runtime builds");
+    runtime.block_on(async {
+        let store = EpisodicStore::new(storage.to_path_buf(), store_config.clone());
+        store.ready().await.expect("the episodic store opens");
+        let embedder = FixedEmbedder {
+            dimensions: store_config.embedding_dimensions as usize,
+        };
+        let rows = [
+            (
+                "project-alpha",
+                "session-alpha-1",
+                "agent-alpha-1",
+                "Alpha session one",
+                "Agent Alpha One",
+            ),
+            (
+                "project-alpha",
+                "session-alpha-2",
+                "agent-alpha-2",
+                "Alpha session two",
+                "Agent Alpha Two",
+            ),
+            (
+                "project-beta",
+                "session-beta-1",
+                "agent-beta-1",
+                FOREIGN_PROJECT_SUMMARY,
+                "Agent Beta One",
+            ),
+        ];
+        let mut ids = Vec::with_capacity(rows.len());
+        for (project_id, session_id, agent_id, summary, agent_name) in rows {
+            let id = store
+                .insert_session(
+                    NewAgentSession {
+                        project_id: project_id.to_string(),
+                        session_id: session_id.to_string(),
+                        agent_id: agent_id.to_string(),
+                        summary: summary.to_string(),
+                        agent_name: agent_name.to_string(),
+                        ..Default::default()
+                    },
+                    &embedder,
+                )
+                .await
+                .expect("the fixture row must insert");
+            ids.push(id);
+        }
+        let alpha = store
+            .timeline("project-alpha", &TimelineFilter::default())
+            .await
+            .expect("the seeded alpha timeline reads back");
+        assert_eq!(alpha.len(), 2, "the fixture seeded both alpha rows");
+        let beta = store
+            .timeline("project-beta", &TimelineFilter::default())
+            .await
+            .expect("the seeded beta timeline reads back");
+        assert_eq!(beta.len(), 1, "the fixture seeded the beta row");
+        SeededSessions {
+            project_a: vec![ids[0].clone(), ids[1].clone()],
+            project_b: ids[2].clone(),
+        }
+    })
 }
 
 /// Spawns a standalone engine with its stdout/stderr redirected to FILES,
@@ -765,6 +874,333 @@ fn test_production_wiring_serves_a_seeded_memory() {
             "{path} answers a success envelope — body: {raw}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// AC6.1/AC6.3 — the composition-root session-history oracles
+// ---------------------------------------------------------------------------
+
+/// AC6.1 / B1 + B2 (read half) — the binary's own composition root attaches the
+/// episodic session port, so the project timeline serves the seeded rows and
+/// scopes them in both directions.
+///
+/// Wrong implementations it kills, with the bytes that differ:
+/// - no `.with_sessions(..)` → `501`
+///   `{"success":false,"error":"Session history endpoints land with W6.3"}`
+///   instead of `200 {"success":true,"data":[..]}`;
+/// - a port that drops the project predicate → alpha lists 3 rows and the
+///   unseeded project lists 3 instead of 2 / 0;
+/// - a port hardcoded to one project → beta lists 2 rows without a marker and
+///   the unseeded project lists 2 instead of 1 / 0;
+/// - a store opened over a different storage root → 0 rows everywhere.
+#[test]
+fn test_production_wiring_serves_the_seeded_session_history() {
+    let _lock = serial();
+    let root = scratch_dir("sessions-live");
+    let home = root.join("home");
+    let storage = root.join("storage");
+    let dist = root.join("dist");
+    std::fs::create_dir_all(&home).expect("create the sandbox home");
+    std::fs::create_dir_all(&storage).expect("create storage root");
+    write_shell(&dist);
+
+    // The same resolved config the child loads; only the storage path differs.
+    let config = resolve_sandbox_config(&home);
+    let mut store_config = mem_store::config::from_core(&config);
+    store_config.storage_path = storage.clone();
+    let seeded = seed_sessions(&storage, &store_config);
+
+    let port = free_port();
+    let stderr_path = root.join("engine.err");
+    let _child = spawn_engine_with_home(&storage, port, &dist, &stderr_path, &home);
+    wait_for_port(port);
+
+    // Decision 4: the token is minted by the first token-less request.
+    let (status, raw) = http_get(port, "/api/memories", None);
+    assert_eq!(
+        status, 401,
+        "a token-less /api/memories request must answer 401 (and write the token): {raw}"
+    );
+    let token = wait_for_token(&storage.join(".auth-token"));
+
+    // project-alpha: exactly its two rows, none of the beta marker.
+    let (status, raw) = http_get(port, "/api/projects/project-alpha/sessions", Some(&token));
+    assert_eq!(
+        status, 200,
+        "the binary's own composition root must attach the session port, not \
+         the stub's 501 — body: {raw}"
+    );
+    let body: serde_json::Value =
+        serde_json::from_str(response_body(&raw)).expect("the session list answers JSON");
+    assert_eq!(body["success"], serde_json::Value::Bool(true), "{body}");
+    let sessions = body["data"]
+        .as_array()
+        .expect("the session list carries a data array");
+    assert_eq!(
+        sessions.len(),
+        2,
+        "alpha lists exactly its two rows: {body}"
+    );
+    let listed: std::collections::BTreeSet<&str> = sessions
+        .iter()
+        .map(|session| {
+            session["id"]
+                .as_str()
+                .unwrap_or_else(|| panic!("every row carries an id: {body}"))
+        })
+        .collect();
+    let expected: std::collections::BTreeSet<&str> =
+        seeded.project_a.iter().map(String::as_str).collect();
+    assert_eq!(
+        listed, expected,
+        "alpha lists exactly the seeded row ids: {body}"
+    );
+    assert!(
+        !raw.contains(FOREIGN_PROJECT_SUMMARY),
+        "no beta row leaks into the alpha timeline: {raw}"
+    );
+
+    // project-beta: exactly its one row — the positive control that makes the
+    // alpha absence a filter rather than an empty store.
+    let (status, raw) = http_get(port, "/api/projects/project-beta/sessions", Some(&token));
+    assert_eq!(status, 200, "beta lists its own timeline: {raw}");
+    let body: serde_json::Value =
+        serde_json::from_str(response_body(&raw)).expect("the beta list answers JSON");
+    let sessions = body["data"]
+        .as_array()
+        .expect("the beta list carries a data array");
+    assert_eq!(sessions.len(), 1, "beta lists exactly its one row: {body}");
+    assert_eq!(
+        sessions[0]["id"], seeded.project_b,
+        "beta's row is the seeded one: {body}"
+    );
+    assert!(
+        raw.contains(FOREIGN_PROJECT_SUMMARY),
+        "beta's own row reaches the beta timeline: {raw}"
+    );
+
+    // An unseeded project: the filter is honoured in the empty direction too
+    // (both "filter dropped" and "hardcoded project" answer 2+ here).
+    let (status, raw) = http_get(
+        port,
+        "/api/projects/project-nobody-seeded/sessions",
+        Some(&token),
+    );
+    assert_eq!(
+        status, 200,
+        "an unseeded project answers an empty list: {raw}"
+    );
+    let body: serde_json::Value =
+        serde_json::from_str(response_body(&raw)).expect("the empty list answers JSON");
+    assert_eq!(
+        body["data"],
+        serde_json::json!([]),
+        "an unseeded project has no rows: {body}"
+    );
+}
+
+/// AC6.3 / B2 (write half) — DELETE reaches the same store, soft-deletes the
+/// row, and is project-scoped.
+///
+/// Wrong implementations it kills, with the bytes that differ:
+/// - no `.with_sessions(..)` → the first DELETE answers `501` instead of `200
+///   {"success":true}`;
+/// - a 200-without-writing handler → the follow-up alpha GET still lists 2
+///   rows instead of 1 (the effect assertion is what kills it, not the status);
+/// - an unscoped delete → `DELETE alpha/{beta row}` answers `200` instead of
+///   the fixed `404 {"success":false,"error":"Session not found"}`, and the
+///   beta timeline drops to 0 rows while the marker disappears.
+#[test]
+fn test_production_wiring_session_delete_is_project_scoped() {
+    let _lock = serial();
+    let root = scratch_dir("sessions-delete");
+    let home = root.join("home");
+    let storage = root.join("storage");
+    let dist = root.join("dist");
+    std::fs::create_dir_all(&home).expect("create the sandbox home");
+    std::fs::create_dir_all(&storage).expect("create storage root");
+    write_shell(&dist);
+
+    let config = resolve_sandbox_config(&home);
+    let mut store_config = mem_store::config::from_core(&config);
+    store_config.storage_path = storage.clone();
+    let seeded = seed_sessions(&storage, &store_config);
+
+    let port = free_port();
+    let stderr_path = root.join("engine.err");
+    let _child = spawn_engine_with_home(&storage, port, &dist, &stderr_path, &home);
+    wait_for_port(port);
+
+    let (status, raw) = http_get(port, "/api/memories", None);
+    assert_eq!(
+        status, 401,
+        "a token-less /api/memories request must answer 401 (and write the token): {raw}"
+    );
+    let token = wait_for_token(&storage.join(".auth-token"));
+
+    // A scoped delete: 200, no data key, one of alpha's rows gone.
+    let target = seeded.project_a[0].clone();
+    let (status, raw) = http_request(
+        port,
+        "DELETE",
+        &format!("/api/projects/project-alpha/sessions/{target}"),
+        Some(&token),
+    );
+    assert_eq!(status, 200, "the wired DELETE answers 200: {raw}");
+    assert_eq!(
+        response_body(&raw).trim(),
+        r#"{"success":true}"#,
+        "a data-less success omits the data key"
+    );
+
+    let (status, raw) = http_get(port, "/api/projects/project-alpha/sessions", Some(&token));
+    assert_eq!(status, 200, "the alpha timeline after the delete: {raw}");
+    let body: serde_json::Value =
+        serde_json::from_str(response_body(&raw)).expect("the alpha list answers JSON");
+    let sessions = body["data"]
+        .as_array()
+        .expect("the alpha list carries a data array");
+    assert_eq!(
+        sessions.len(),
+        1,
+        "the delete removed exactly one row: {body}"
+    );
+    assert_eq!(
+        sessions[0]["id"], seeded.project_a[1],
+        "the surviving row is alpha's other seed: {body}"
+    );
+    assert!(
+        !raw.contains(&target),
+        "the deleted row id is gone from the timeline: {raw}"
+    );
+
+    // A cross-project delete: the beta row named under alpha must not be
+    // deleted, and the answer is the fixed 404 (no existence leak).
+    let (status, raw) = http_request(
+        port,
+        "DELETE",
+        &format!("/api/projects/project-alpha/sessions/{}", seeded.project_b),
+        Some(&token),
+    );
+    assert_eq!(status, 404, "a wrong-project delete answers 404: {raw}");
+    assert_eq!(
+        response_body(&raw).trim(),
+        r#"{"success":false,"error":"Session not found"}"#,
+        "the fixed not-found answer leaks no existence information"
+    );
+
+    let (status, raw) = http_get(port, "/api/projects/project-beta/sessions", Some(&token));
+    assert_eq!(
+        status, 200,
+        "the beta timeline after the cross-project delete: {raw}"
+    );
+    let body: serde_json::Value =
+        serde_json::from_str(response_body(&raw)).expect("the beta list answers JSON");
+    let sessions = body["data"]
+        .as_array()
+        .expect("the beta list carries a data array");
+    assert_eq!(sessions.len(), 1, "the foreign row survives: {body}");
+    assert_eq!(sessions[0]["id"], seeded.project_b, "{body}");
+    assert!(
+        raw.contains(FOREIGN_PROJECT_SUMMARY),
+        "the foreign row's marker survives the cross-project delete: {raw}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The degrade arm — a pin, not a RED
+// ---------------------------------------------------------------------------
+
+/// B5 + AC6.3 — when composition fails, the root launches the documented
+/// unavailable service set: sessions stay on the W6.3 stub, and the whole
+/// service set is unavailable (memories 501, skills still 200 from its own
+/// storage-root-only port).
+///
+/// This is a GUARD PIN: it is green before and after the wiring change and
+/// exists to kill future regressions. Wrong implementations it kills:
+/// - a crash instead of a degrade → no server binds (`wait_for_port` fails
+///   even though the dist shell and storage root exist);
+/// - the `None` arm building production services over a store it does not have
+///   → `/api/memories` answers 200 with an empty listing and sessions answer
+///   200, instead of 501/501;
+/// - the `None` arm losing `.with_skills` → `/api/skills` answers 501 instead
+///   of 200;
+/// - a sessions-only stub that leaves memories wired → `/api/memories` answers
+///   200 instead of 501.
+///
+/// The poisoned `storage/episodic.db` is a DIRECTORY inside an otherwise valid
+/// storage root, so only the store open fails (a missing root would be a
+/// different, indistinguishable failure).
+#[test]
+fn test_sessions_stay_on_the_documented_stub_when_composition_fails() {
+    let _lock = serial();
+    let root = scratch_dir("degrade");
+    let home = root.join("home");
+    let storage = root.join("storage");
+    let dist = root.join("dist");
+    std::fs::create_dir_all(&home).expect("create the sandbox home");
+    std::fs::create_dir_all(&storage).expect("create storage root");
+    // The poisoned entry lives INSIDE the existing storage root: the launch must
+    // fail at the episodic store open, not at a missing directory.
+    std::fs::create_dir_all(storage.join("episodic.db"))
+        .expect("create the poisoned episodic entry");
+    // The dist shell is required: with `ResolvedDist::Missing` the web server is
+    // never launched and `wait_for_port` would die on a fixture fact.
+    write_shell(&dist);
+
+    let port = free_port();
+    let stderr_path = root.join("engine.err");
+    let _child = spawn_engine_with_home(&storage, port, &dist, &stderr_path, &home);
+    wait_for_port(port);
+
+    let (status, raw) = http_get(port, "/api/memories", None);
+    assert_eq!(
+        status, 401,
+        "a token-less /api/memories request must answer 401 (and write the token): {raw}"
+    );
+    let token = wait_for_token(&storage.join(".auth-token"));
+
+    // The premise: a REAL composition failure, not a 501 on a wired server.
+    let stderr = std::fs::read_to_string(&stderr_path).expect("read the child's stderr file");
+    assert!(
+        stderr.contains("engine.composition_failed"),
+        "the launch must have failed composition, not skipped it: {stderr}"
+    );
+
+    let (status, raw) = http_get(port, "/api/health", None);
+    assert_eq!(status, 200, "the liveness probe still answers: {raw}");
+
+    // The structural discriminator: the whole service set is the unavailable
+    // one. A wired root answers 200 over an empty listing here.
+    let (status, raw) = http_get(port, "/api/memories", Some(&token));
+    assert_eq!(
+        status, 501,
+        "the degraded root answers from the absent-service class: {raw}"
+    );
+
+    let (status, raw) = http_get(port, "/api/skills", Some(&token));
+    assert_eq!(status, 200, "the skills port is wired in both arms: {raw}");
+    assert!(
+        raw.contains("\"success\":true"),
+        "the skills listing answers a success envelope: {raw}"
+    );
+
+    let (status, raw) = http_get(port, "/api/projects/project-alpha/sessions", Some(&token));
+    assert_eq!(
+        status, 501,
+        "sessions stay on the documented stub when composition failed: {raw}"
+    );
+
+    let (status, raw) = http_request(
+        port,
+        "DELETE",
+        "/api/projects/project-alpha/sessions/session-alpha-1",
+        Some(&token),
+    );
+    assert_eq!(
+        status, 501,
+        "the degraded DELETE stays on the documented stub: {raw}"
+    );
 }
 
 #[test]

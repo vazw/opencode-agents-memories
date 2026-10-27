@@ -620,10 +620,10 @@ impl ApiServices {
     /// `MemoryPort` / `PromptPort` / `ProfilePort` are the adapters in
     /// [`super::store_adapter`]; the embedder is injected (production wraps
     /// `EmbeddingService`, the tests inject a fixed-vector fake). Skills stay
-    /// unavailable until W6.4, and sessions keep the `UnavailablePort` until
-    /// the W5.x composition root calls
-    /// `.with_sessions(episodic_session_port(store))` — production answers the
-    /// documented `501` by design until then. The composition root injects the
+    /// unavailable until W6.4. The root composition root attaches the session
+    /// port through `.with_sessions(episodic_session_port(store))` (issue 37);
+    /// `production()` itself keeps the unavailable default for every port it
+    /// does not take in `ProductionDeps`. The composition root injects the
     /// deduplication port through `.with_maintenance(..)`; every migration
     /// method keeps answering `Unavailable` until the W5.x readiness gate
     /// supplies a `MigrationService`. The `with_skills` / `with_sessions` /

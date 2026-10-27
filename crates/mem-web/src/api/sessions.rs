@@ -3,9 +3,10 @@
 //! `GET /api/projects/{project_id}/sessions` and
 //! `DELETE /api/projects/{project_id}/sessions/{session_id}` are **new** in the
 //! port (upstream has no episodic REST surface). W6.2 lands the route shapes,
-//! the auth seam and the [`SessionPort`] seam; the shipped port is the
-//! unavailable one, so both answer the documented `501` until W6.3 supplies the
-//! implementation (D-13).
+//! the auth seam and the [`SessionPort`] seam; the root composition root
+//! attaches the production port through
+//! `.with_sessions(episodic_session_port(store))` (issue 37), and the
+//! unavailable arm remains the degrade path (D-13).
 //!
 //! **Traversal safety:** `project_id` / `session_id` are **data, not
 //! authority** — they select rows through the port and are carried as bound
