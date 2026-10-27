@@ -1,8 +1,10 @@
 # 0017 — The Compaction Hook (ingest before, restore after)
 
 - **Status:** Proposed
-- **Date:** 2026-10-27 — measured at `fc41bbd` (issue 37 and issue 52 landed), blueprint
-  `20261027-0824-w5-5-compaction-hook-r17` (SYS-APPROVED 2026-10-27T14:43Z).
+- **Date:** 2026-10-27 — measurement bases: `fc41bbd` (the lane's branch point; issue 37 and issue 52
+  landed) and `6f8801b` (the lane's commit). Every `file:line` pointer states its base; an unlabelled
+  number is at `6f8801b`. Blueprint `20261027-0824-w5-5-compaction-hook-r17` (SYS-APPROVED
+  2026-10-27T14:43Z).
 - **Binding on:** `plugin/src/plugin.js`, `plugin/src/compaction.js`, `plugin/package.json`,
   `crates/mem-bridge/src/{compaction,inject,composition}.rs`,
   `crates/mem-core/src/logging/signatures.rs`, and the two new JS test files.
@@ -51,9 +53,10 @@ Measured 2026-10-27; each line supports a different premise:
 two-line `composition.rs` insertion at the existing `InjectService` construction site.**
 `InjectService` holds no `Config`; its only production construction site is the
 `let inject = InjectService::new(` chain that closes at
-`.with_profile(profile.clone(), ProfileInjectPolicy::from_core(config));` (measured `:238`-`:249`
-at `fc41bbd`). The chain is semicolon-terminated, so an inline `.with_compaction(..)` would be a
-deletion; the accepted form is a `use crate::compaction::CompactionPolicy;` line plus a
+`.with_profile(profile.clone(), ProfileInjectPolicy::from_core(config));` (measured `:239`-`:250`
+at `6f8801b`; `:238`-`:249` at `fc41bbd`, before this lane's insertions). The chain is
+semicolon-terminated, so an inline `.with_compaction(..)` would be a deletion; the accepted form is
+a `use crate::compaction::CompactionPolicy;` line plus a
 **rebind** immediately after the `.with_profile(...)` statement and before the `// Q8` comment:
 `let inject = inject.with_compaction(CompactionPolicy::from_core(&config.compaction));`.
 `git diff --numstat` for the file therefore reads `2 0`. Issue 52's `.with_privacy(..)` hangs off
@@ -77,7 +80,8 @@ capture gate the gate becomes redundant but stays correct; the tests pin the obs
 **DECISION 3 — the pre-compaction context is the session-scoped tier-1 render.** The port's own
 injected `<project_agent_session_history>` block and the episodic `## Recent sessions` /
 `## Related older sessions` legs are never appended: they are part of *that* block
-(`HEADING_RECENT`/`HEADING_OLDER` at `crates/mem-bridge/src/inject.rs:74-75`), so appending them
+(`HEADING_RECENT`/`HEADING_OLDER` at `crates/mem-bridge/src/inject.rs:77-78` at `6f8801b`; `:74-75`
+at `fc41bbd`), so appending them
 would double-count. The row-level overlap with `## Captured session summaries` is intentional and
 bounded by `memory_limit`: the guarantee is that the facts survive compaction, not that the block
 does.
@@ -114,7 +118,7 @@ config; the wrapper owns only the host capabilities. The renderer exposes exactl
 entry point, `render(mode, rows, policy)`; there is no `render_ingest`/`render_restore` twin.
 
 **DECISION 7 — the compaction calls use a 2 s request timeout.** `sendRequest` defaults to 15 s
-(`plugin/src/plugin.js:38`); a wedged engine would stall the host's compaction for 15 s.
+(`plugin/src/plugin.js:46` at `6f8801b`); a wedged engine would stall the host's compaction for 15 s.
 `COMPACTION_REQUEST_TIMEOUT_MS = 2000` sits beside `REQUEST_TIMEOUT_MS` and both compaction calls
 pass it explicitly. The driver guard is 3000 ms, not 2000: the harness registers its guard before
 the hook call, so an equal 2000 ms guard wins the race on timer-registration order.
@@ -191,7 +195,7 @@ then renders `None` re-creates the shard file and turns a real difference into a
 failure arm after it is the same `Ok(empty)` after one `COMPACTION_HANDLER_ERROR` log — never a
 `-32602`, never a throw. `memory_count` is the **rendered** count
 (`filtered.len().min(memory_limit)`), never the read count; `tokens` is `emitted_tokens(Some(&block))`
-(the crate's one accounting rule, `inject.rs:443`), and `profile` is
+(the crate's one accounting rule, `inject.rs:468` at `6f8801b`), and `profile` is
 `ProfileInjection::NoProjectScope` on every arm — deliberately, because it is the crate's only
 "the tier never ran" value and `Default` would read `Disabled`. Its `A2:` prefix does not apply to a
 compaction request; that is recorded here rather than papered over. `profile` never reaches the
@@ -206,8 +210,8 @@ The `session.compacted` branch dispatches on the envelope's `event.type` — `Ev
 `properties.type`: that key is V2's `toLegacyEvent` merge
 (`plugin/src/v2/legacy-client.js:142-156`), and the adapter reads the top-level `event.type` itself
 (`plugin/src/v2/adapter.js:66`). The adjacent idle branch's `properties.type` read
-(`plugin/src/plugin.js:669`) is the V2-merged shape and is left alone — changing it would be a V2
-regression, not this lane's. Two reads, two questions: `event.type` **dispatches**;
+(`plugin/src/plugin.js:752` at `6f8801b`) is the V2-merged shape and is left alone — changing it
+would be a V2 regression, not this lane's. Two reads, two questions: `event.type` **dispatches**;
 `event.properties.sessionID` **identifies**. The fixture keeps `type` on the envelope and never
 moves it into `properties`.
 
@@ -216,6 +220,22 @@ moves it into `properties`.
 Two `session.compacted` events restore twice, exactly as upstream
 (`example/opencode-mem/src/index.ts:1301-1362` has no dedupe). No cache is invented; the per-process
 `NOTIFIED` set deliberately does not cover the restore toast.
+
+## Known limitations
+
+**Engine-version skew is ungated (known, unfixed).** ADR-0007 D-43 accepts an older same-major engine
+(`engine.protocol >= wrapper.min_protocol`; both lines are `1.0.0`), and nothing in `hello` says
+whether the engine's `inject` understands `include.compaction`. An engine built before this lane
+ignores that key and answers the compaction request with the ordinary project chat block, which the
+wrapper appends verbatim (`plugin/src/plugin.js:717-718` at `6f8801b`: the
+`Array.isArray(output.context)` guard, then `output.context.push(result.block)`); the restore prompt
+would carry the same block. That is exactly the double-count AC 1 forbids, and it is silent. It is
+reachable through a stale gitignored `plugin/engine/<platform>-<arch>/` staging directory (a previous
+build left beside the wrapper), and non-blocking only because the shipped wrapper and engine come from
+one build. D-43's `hello.result.capabilities` is the additive home for the fix — advertise
+`capabilities.compaction`, and make the wrapper fall back to a no-op when it is absent (or raise
+`MIN_PROTOCOL`). Tracked as **issue 68**
+(`.scratch/rust-port/issues/68-engine-skew-ungated.md`).
 
 ## The follow-up
 
