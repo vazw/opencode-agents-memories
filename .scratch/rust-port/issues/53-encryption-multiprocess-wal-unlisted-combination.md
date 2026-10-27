@@ -1,6 +1,7 @@
 # 53 — Storage · A supported config lands in a combination turso's manual excludes: encryption × multiprocess WAL
 
-Status: ready-for-human — 2026-10-27 (the code forces built-in encryption + multiprocess WAL on every non-Windows vault open; the remaining work is an owner ruling plus a two-process measurement neither source reading nor a wave can settle)
+Status: ready-for-human — 2026-10-28 (measured: G1/G2/G3 + the inversion arm all PASS, evidence merged at
+`b7054b6`; the only remaining work is the O1–O4 ruling. The recommendation has moved to **O3**.)
 experimental multiprocess WAL — a cell turso's manual excludes for page-codec databases — and a user who
 enables `databaseEncryptionEnabled` puts every shard there too.** Reachability is a source read; the harm is
 `needs_validation` (gate below).
@@ -160,3 +161,28 @@ Whichever is chosen, this issue owns **only** the cell. It does not re-open 43's
   dispatched as a measurement. The O1–O4 ruling follows the results, not the other way round. If the probes
   pass, O2 (drop the flag when the key is on) is the working recommendation; if they fail on the control too,
   the issue collapses into 45.
+
+- **2026-10-28 — the gate ran; no harm observed.** Evidence:
+  `docs/evidence/issue-53-encryption-multiprocess/` (README, both probe files, raw logs, verdict files),
+  merged as `b7054b6`. The probes are `#[ignore]`d; production code is untouched.
+
+  | probe | result |
+  |---|---|
+  | **G1** — fresh encrypted DB + MP WAL, writer live, second process RO then RW, parent commits, reopen | **PASS** — `REOPEN-IDS [1, 2, 3, 4, 100] (exact)`, `REOPEN-INTEGRITY ok`, child RO/RW both ok |
+  | **G2** — the vault surface, own scope/key, 17 parent + child + 1 entry | **PASS** — `REOPEN-HASHES count=19 exact match`, `REOPEN-INTEGRITY ok`, child RW put ok |
+  | **G3** — control: encryption off, MP WAL on | **PASS** — `KEYLESS-READ ok ids=[1, 2, 3, 4, 100]` |
+  | **Inversion** — encryption on, MP WAL off | **PASS** — integrity ok; the concurrent form is `NOT OBSERVED` because the engine's single-process lock serialises (`File is locked by another process`) |
+  | G1B / G1C, G3B / G3C — clean-close backfill; flag-off → flag-on upgrade (the `nbackfills > 0` shape) | **PASS** — G1C: `-wal=1734552`/`db=4096` with **no** `-tshm` → `-tshm=86016`, integrity ok |
+
+  **Limits that qualify the result:** no simultaneous in-flight commits; no crash/power-loss arm; the probe
+  roots are on tmpfs; one engine version (turso 0.8.3) on x86_64 Linux.
+
+  **Implication, not a ruling.** O1 is not forced by observed corruption and still costs the vault its
+  openability on non-Windows. O2 is correctness-viable but a second writable vault process is then refused
+  by the exclusive lock instead of coordinating. **O3 is consistent with every measured cell**, and the
+  manual-vs-engine divergence stays documentable debt either way. O4 is neither advanced nor blocked; G1C is
+  the exact transition existing encrypted databases would take if W6 drops the flag, and it passed.
+
+  **Recommendation updated to O3.** My earlier lean to O2 was precautionary; the measurement removed its
+  urgency. Keeping the combination preserves the vault's `.tshm` coordination and is now supported by
+  numbers, with the divergence written where a user meets it (AC 53.6).
