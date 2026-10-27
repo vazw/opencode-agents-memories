@@ -1,10 +1,8 @@
 # 56 — Dedup · the cap, the cost curve and DEDUP-001's magnitude are all debug-profile numbers
 
-Status: ready-for-human — 2026-10-27. Instrument fixed (detected profile) and the release ladder measured:
-`c_iter_release = 658.9 ns/pair` (k = 20.470, 5.2 % spread), evidence in
-`/home/vaz/Code/Personal/Rust/opencode-agents-memory/docs/evidence/dedup-release-profile-2026-10-26/`.
-`MAX_NEAR_SCAN_PAIRS` is unchanged at 740,000; the re-derivation to 15000000 is an owner decision against the
-pre-registered `T_SCAN_MAX = 10 s` (table in the evidence README).
+Status: ready-for-agent — 2026-10-28 (owner ruled: re-affirm `T_SCAN_MAX = 10 s` for the release profile and
+raise `MAX_NEAR_SCAN_PAIRS` to **15,000,000** — 9.88 s of the pre-registered budget, coverage 2.4 % → 11.0 %.
+A one-step wave: the constant, its derivation test, and the ruling record; no re-measurement.)
 
 ## PREMISE — the numbers, and the profile they came from
 
@@ -86,3 +84,9 @@ which `opsec` closed on the branch (`dedup/near-scan-inline-runtime-thread` → 
   `T_SCAN_MAX = 10 s`.
 - **Record.** Raw runs, the scripts, the aggregation (`derived.txt`), the cap table and the README are
   committed in `docs/evidence/dedup-release-profile-2026-10-26/` (UTC date), not in `.tmp/`.
+
+- **2026-10-28 — owner ruling: raise the cap.** `T_SCAN_MAX = 10 s` is re-affirmed **for the release profile**;
+  `MAX_NEAR_SCAN_PAIRS` goes from 740,000 to **15,000,000**. The derivation is the pre-registered rule against
+  the measured `c_iter_release = 658.9 ns/pair`: 15,000,000 × 658.9 ns ≈ 9.88 s, coverage 1,217 → 5,477
+  survivors (2.4 % → 11.0 % of a 50k shard). The debug figure stays in the record as the conservative input.
+  The wave is one step: the constant, the derivation test, and this ruling's record; **no re-measurement**.

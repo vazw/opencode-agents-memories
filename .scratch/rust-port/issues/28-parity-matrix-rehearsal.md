@@ -1,6 +1,6 @@
 # 28 — W7.2 · Parity matrix & drop-in rehearsal
 
-Status: ready-for-human — 2026-10-27 (matrix 87/110 and no rehearsal transcript; the rest is a manual install/uninstall property plus the §0b D3 hatch ruling)
+Status: ready-for-human — 2026-10-28 (split: the 23 missing matrix rows are **issue 71**; this issue is the manual drop-in rehearsal and the §0b D3 hatch ruling.)
 
 ## What to build
 
@@ -8,7 +8,7 @@ The final gate: a coverage matrix for **all 110 upstream `*.test.ts` files** wit
 
 ## Acceptance criteria
 
-- [ ] Parity matrix document: every upstream test file has a disposition; all ported tests green.
+- [ ] Parity matrix document — **moved to issue 71** (23 missing rows; 87/110 today).
 - [ ] Drop-in rehearsal transcript: same project dir, TS removed, Rust installed → memories intact, UI functional, capture/injection working.
 - [ ] §0b D3 hatch closed or expressly reconfirmed as deferred.
 

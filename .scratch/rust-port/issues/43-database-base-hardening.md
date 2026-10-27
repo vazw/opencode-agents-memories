@@ -595,3 +595,9 @@ brief rather than a fourth status on this one.
 
 **Not done here, deliberately:** no code, no ADR text, no wave filed. The only change this triage makes is
 the status line plus the preserved audit.
+
+- **2026-10-28 — next moves recorded.** ADR-0019's substance is **already decided** in decisions 6–7 (the
+  artefact split with `PendingErase`); no new ruling is needed, only the ADR text. The next code wave is
+  **W2 → W3** (schema then authority), because W3 is what retention consumes. The scope-wide delete-by-id
+  residual (W1b's note) is split out as **issue 72** — it is small, self-contained, and blocks 39's delete
+  path more directly than the remaining waves.

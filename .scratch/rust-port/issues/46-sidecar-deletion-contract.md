@@ -1,9 +1,8 @@
 # 46 — Storage · The sidecar-deletion contract: exclusivity is asserted, refused, or the file is not unlinked
 
-Status: ready-for-human — 2026-10-27 (hazard confirmed at `f41b9ef`; one ruling is needed before a wave:
-what satisfies exclusivity now that issue 45's `.tshm` probe direction was refused by O3. The premise is
-`needs_validation`: nothing proves no other process holds the sidecars, and one site unlinks the file out
-from under its own open handle. See `## Agent Brief`.)
+Status: ready-for-agent — 2026-10-28 (owner ruled **option 1**: require `EngineLock` + `ProbeOutcome::Free`
+before any unlink, accepting a foreign multiprocess holder as a stated residual; the engine lock must be
+hoisted above the recovery paths. G1 runs first in the wave. See `## Agent Brief` and the ruling comment.)
 
 ## PREMISE — `needs_validation` (read before implementing)
 
@@ -267,3 +266,10 @@ Once ruled, the wave is fully specified.
 
 **Out of scope:** `-tshm` reaping policy (W7 / ADR-0019 own it); the open guard's probe changes unless
 option 2 is ruled; issue 43 decisions 1–9.
+
+- **2026-10-28 — owner ruling: option 1.** Exclusivity is `EngineLock` **and** `ProbeOutcome::Free` before any
+  unlink. A foreign multiprocess holder is an **accepted residual**, stated in the contract and in ADR-0020's
+  or the contract's doc text — not a claim the tree can prove. The engine lock must be hoisted above the
+  recovery paths (`migration_service.rs` currently takes only the operation lock). G1 (the self-holder write
+  loss) runs first in the wave; G2 and its inversion arm follow. The `.tshm` probe stays unimplemented; issue
+  45's O3 is not re-opened.

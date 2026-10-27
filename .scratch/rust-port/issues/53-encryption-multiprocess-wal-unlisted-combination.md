@@ -154,3 +154,9 @@ Whichever is chosen, this issue owns **only** the cell. It does not re-open 43's
   the excluded pair is forced on every vault open. The engine has no built-in-encryption × multiprocess check
   (`turso_core-0.8.3/database.rs:913-928` rejects external-codec combinations only). The harm is **UNVERIFIABLE**
   without a two-process encrypted probe; this needs the O1–O4 ruling and G1/G2/G3, not a code wave.
+
+- **2026-10-28 — owner direction: measure before ruling.** G1 (fresh encrypted DB + multiprocess WAL, two
+  processes), G2 (the vault), G3 (encryption off) and the inversion arm (multiprocess off, encryption on) are
+  dispatched as a measurement. The O1–O4 ruling follows the results, not the other way round. If the probes
+  pass, O2 (drop the flag when the key is on) is the working recommendation; if they fail on the control too,
+  the issue collapses into 45.
