@@ -1,0 +1,46 @@
+   Compiling mem-vault v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-53-measurement/crates/mem-vault)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.95s
+     Running tests/issue53_vault_probe.rs (target/debug/deps/issue53_vault_probe-3090567fc8e6bc98)
+
+running 2 tests
+test issue53_g2_vault_encrypted_multiprocess ... [G2] ROOT /tmp/mem-vault-issue53-g2-28639-0
+[G2] DB /tmp/mem-vault-issue53-g2-28639-0/vault/0123456789abcdef/vault.db
+[G2] PARENT-PUT-1 ok e6174ae220bf62313ec33b1b4badbc6883f193b0416ff8ceddf6e9c14186dca1
+[G2] PARENT-FILLER-COUNT 16 of 16
+[G2] PARENT-INTEGRITY ok
+[G2] KEY-PATH /tmp/mem-vault-issue53-g2-28639-0/vault-keys/0123456789abcdef.key
+[G2] INVENTORY-WRITTEN .vault-encrypted-v1=17 vault.db-tshm=86016 vault.db-wal=379072 vault.db=4096
+[vault-child-ro] 
+[vault-child-ro] running 1 test
+[vault-child-ro] test issue53_vault_child_entry ... VAULT-CHILD-CELL mode=ro
+[vault-child-ro] VAULT-CHILD-OPEN-OK
+[vault-child-ro] VAULT-CHILD-HASHES 117255ab497bafc9d7832073fad1b5ebe536275e42ccca80a9904fe7593a7ba0,16f0a1d190b7df1ca3dd361010f0fa50cbdcff60bd82aac5769762fc03651cce,1d5a325512fc28972003ac7084f4f911d9b39070ef7754d77996eb53ca27d621,228151770cb5babee354f009a448ee3630511457a30a504c97885f94f1aee7a8,3b4a9c861eaa25fd0ddfebbe8f30f8caf0ddb543730e757ad8c339ea72a30396,46abe9063ba4bbf19163765b82f7f47ae5d54844ee673bb76c1bf0321c53f34b,537f1c58803f5a4a6fb17fcd0ca73418f9b905e2848973b85478549b0736de1f,53bd1ba7b087b6b53152cde63073f28b2d6305e89ff3b03d341c5c46838744c1,616a79ce5fa1b2211719156baad5c3b3342206ef5fc49471e55475e988ad54ba,7dfcd7b172292924776e16667288a28a6958bf6a2a24f36696f918da5e14d909,9f724d649267d34a7ab46353e212138305d657d2e7cd5fdc26423ae774008bbb,dbcbe37df2bffd30c5f920ce6ded7ee6d14332c43152bcee153a43c3cbcdd565,e6174ae220bf62313ec33b1b4badbc6883f193b0416ff8ceddf6e9c14186dca1,eac6e49c940e29b82b1cfd1255ad33440dd37bf79fd5ec903c849fc785d06da9,ef412f2936bfbf7abc53bf96019f9843c27d1b74442a5a99e00eb8725dc96e7b,f50bd7b6a6cf6788284db55d41279bfb5babba03c751a7304ae358c6f1b6e3ce,f90d96f7eda91d459d1ae477a5c097c6833e7e53ba0148543b6a79fccff9b5de
+[vault-child-ro] VAULT-CHILD-INTEGRITY ok
+[vault-child-ro] VAULT-CHILD-DONE
+[G2] VAULT-CHILD-RO saw the parent's entry
+[vault-child-rw] 
+[vault-child-rw] running 1 test
+[vault-child-rw] test issue53_vault_child_entry ... VAULT-CHILD-CELL mode=rw
+[vault-child-rw] VAULT-CHILD-OPEN-OK
+[vault-child-rw] VAULT-CHILD-HASHES 117255ab497bafc9d7832073fad1b5ebe536275e42ccca80a9904fe7593a7ba0,16f0a1d190b7df1ca3dd361010f0fa50cbdcff60bd82aac5769762fc03651cce,1d5a325512fc28972003ac7084f4f911d9b39070ef7754d77996eb53ca27d621,228151770cb5babee354f009a448ee3630511457a30a504c97885f94f1aee7a8,3b4a9c861eaa25fd0ddfebbe8f30f8caf0ddb543730e757ad8c339ea72a30396,46abe9063ba4bbf19163765b82f7f47ae5d54844ee673bb76c1bf0321c53f34b,537f1c58803f5a4a6fb17fcd0ca73418f9b905e2848973b85478549b0736de1f,53bd1ba7b087b6b53152cde63073f28b2d6305e89ff3b03d341c5c46838744c1,616a79ce5fa1b2211719156baad5c3b3342206ef5fc49471e55475e988ad54ba,7dfcd7b172292924776e16667288a28a6958bf6a2a24f36696f918da5e14d909,9f724d649267d34a7ab46353e212138305d657d2e7cd5fdc26423ae774008bbb,dbcbe37df2bffd30c5f920ce6ded7ee6d14332c43152bcee153a43c3cbcdd565,e6174ae220bf62313ec33b1b4badbc6883f193b0416ff8ceddf6e9c14186dca1,eac6e49c940e29b82b1cfd1255ad33440dd37bf79fd5ec903c849fc785d06da9,ef412f2936bfbf7abc53bf96019f9843c27d1b74442a5a99e00eb8725dc96e7b,f50bd7b6a6cf6788284db55d41279bfb5babba03c751a7304ae358c6f1b6e3ce,f90d96f7eda91d459d1ae477a5c097c6833e7e53ba0148543b6a79fccff9b5de
+[vault-child-rw] VAULT-CHILD-INTEGRITY ok
+[vault-child-rw] VAULT-CHILD-PUT ok 730834a3d556335c4bedb11ae730150b16c06f8b3af9091ec067177d2d451ec6
+[vault-child-rw] VAULT-CHILD-DONE
+[G2] VAULT-CHILD-RW put ok 730834a3d556335c4bedb11ae730150b16c06f8b3af9091ec067177d2d451ec6
+[G2] PARENT-PUT-2 ok 4a7c49f626f23170d1b924623e9c773cefe64de4231f88447ffeb23e2d482bbf
+[G2] PARENT-INTEGRITY-AFTER ok
+[G2] INVENTORY-POST-CHILD .vault-encrypted-v1=17 vault.db-tshm=86016 vault.db-wal=403792 vault.db=4096
+[G2] REOPEN ok
+[G2] REOPEN-INTEGRITY ok
+[G2] REOPEN-HASHES count=19 exact match
+[G2] REOPEN-GET e6174ae220bf62313ec33b1b4badbc6883f193b0416ff8ceddf6e9c14186dca1 ok (20 bytes)
+[G2] REOPEN-GET 4a7c49f626f23170d1b924623e9c773cefe64de4231f88447ffeb23e2d482bbf ok (24 bytes)
+[G2] REOPEN-GET 730834a3d556335c4bedb11ae730150b16c06f8b3af9091ec067177d2d451ec6 ok (20 bytes)
+[G2] KEYLESS-OPEN ERR keyless vault open: Database is encrypted but no encryption options provided
+[G2] INVENTORY-FINAL .vault-encrypted-v1=17 vault.db-tshm=86016 vault.db-wal=403792 vault.db=4096
+PROBE G2 RESULT: PASS
+ok
+test issue53_vault_child_entry ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+

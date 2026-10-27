@@ -1,0 +1,17 @@
+Linux Ocean 7.2.12_1 #1 SMP PREEMPT_DYNAMIC Sun Oct 25 03:59:52 UTC 2026 x86_64 GNU/Linux
+rustc 1.98.0 (88d9e12ae 2026-08-18)
+cargo 1.98.0 (797e8a9bc 2026-08-05)
+12
+model name	: AMD Ryzen 5 6600U with Radeon Graphics
+/dev/mapper/void-home xfs  1658584800 1057499372 601085428  64% /home
+2026-10-27T22:19:13Z
+--- /tmp (probe roots) ---
+tmpfs          tmpfs  16777216 2534752  14242464  16% /tmp
+tmpfs tmpfs /tmp
+--- turso crates ---
+name = "turso"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+name = "turso_core"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,315 @@
+   Compiling mem-store v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-53-measurement/crates/mem-store)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.59s
+     Running tests/issue53_probe.rs (target/debug/deps/issue53_probe-4bd2ccb3ac451c74)
+
+running 9 tests
+test issue53_child_entry ... ok
+test issue53_g1_fresh_encrypted_multiprocess_wal ... [G1] CELL encryption=true multiprocess_wal=true read_only=false
+[G1] LIFETIME LiveDuringSecondOpen
+[G1] OPENING Fresh
+[G1] ROOT /tmp/mem-store-w12-issue53-G1-27861-0-37139338
+[G1] WRITER-OPEN ok
+[G1] WRITER-CREATE ok
+[G1] WRITER-IDS [1, 2, 3]
+[G1] WRITER-FILLER rows=128 max_len=4096
+[G1] WRITER-INTEGRITY ok
+[G1] INVENTORY-WRITTEN .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1734552 probe.db=4096
+[child-ro] 
+[child-ro] running 1 test
+[child-ro] test issue53_child_entry ... CHILD-CELL encryption=true multiprocess_wal=true read_only=true
+[child-ro] CHILD-OPEN-OK
+[child-ro] CHILD-IDS 1,2,3
+[child-ro] CHILD-INTEGRITY ok
+[child-ro] CHILD-DONE
+[G1] child-ro: CHILD-OPEN-OK
+[child-rw] 
+[child-rw] running 1 test
+[child-rw] test issue53_child_entry ... CHILD-CELL encryption=true multiprocess_wal=true read_only=false
+[child-rw] CHILD-OPEN-OK
+[child-rw] CHILD-IDS 1,2,3
+[child-rw] CHILD-INTEGRITY ok
+[child-rw] CHILD-WRITE ok
+[child-rw] CHILD-IDS-AFTER 1,2,3,100
+[child-rw] CHILD-INTEGRITY-AFTER ok
+[child-rw] CHILD-DONE
+[G1] child-rw: CHILD-OPEN-OK
+[G1] POST-CHILD-COMMIT ok (id 4)
+[G1] POST-CHILD-INTEGRITY ok
+[G1] INVENTORY-POST-CHILD .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1742792 probe.db=4096
+[G1] REOPEN ok
+[G1] REOPEN-IDS [1, 2, 3, 4, 100] (exact)
+[G1] REOPEN-FILLER rows=128 max_len=4096
+[G1] REOPEN-INTEGRITY ok
+[G1] KEYLESS-OPEN ERR factory open (encryption=true multiprocess_wal=true read_only=true): file is not a database
+[G1] INVENTORY-FINAL .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1742792 probe.db=4096
+PROBE G1 RESULT: PASS
+ok
+test issue53_g1b_backfill_after_clean_close ... [G1B] CELL encryption=true multiprocess_wal=true read_only=false
+[G1B] LIFETIME ClosedBeforeSecondOpen
+[G1B] OPENING Fresh
+[G1B] ROOT /tmp/mem-store-w12-issue53-G1B-27861-1-807523688
+[G1B] WRITER-OPEN ok
+[G1B] WRITER-CREATE ok
+[G1B] WRITER-IDS [1, 2, 3]
+[G1B] WRITER-FILLER rows=128 max_len=4096
+[G1B] WRITER-INTEGRITY ok
+[G1B] INVENTORY-WRITTEN .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1734552 probe.db=4096
+[G1B] WRITER-CLOSED clean
+[G1B] INVENTORY-CLOSED .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1734552 probe.db=4096
+[child-ro] 
+[child-ro] running 1 test
+[child-ro] test issue53_child_entry ... CHILD-CELL encryption=true multiprocess_wal=true read_only=true
+[child-ro] CHILD-OPEN-OK
+[child-ro] CHILD-IDS 1,2,3
+[child-ro] CHILD-INTEGRITY ok
+[child-ro] CHILD-DONE
+[G1B] child-ro: CHILD-OPEN-OK
+[child-rw] 
+[child-rw] running 1 test
+[child-rw] test issue53_child_entry ... CHILD-CELL encryption=true multiprocess_wal=true read_only=false
+[child-rw] CHILD-OPEN-OK
+[child-rw] CHILD-IDS 1,2,3
+[child-rw] CHILD-INTEGRITY ok
+[child-rw] CHILD-WRITE ok
+[child-rw] CHILD-IDS-AFTER 1,2,3,100
+[child-rw] CHILD-INTEGRITY-AFTER ok
+[child-rw] CHILD-DONE
+[G1B] child-rw: CHILD-OPEN-OK
+[G1B] POST-CHILD-OPEN ok
+[G1B] POST-CHILD-COMMIT ok (id 4)
+[G1B] POST-CHILD-INTEGRITY ok
+[G1B] INVENTORY-POST-CHILD .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1742792 probe.db=4096
+[G1B] REOPEN ok
+[G1B] REOPEN-IDS [1, 2, 3, 4, 100] (exact)
+[G1B] REOPEN-FILLER rows=128 max_len=4096
+[G1B] REOPEN-INTEGRITY ok
+[G1B] KEYLESS-OPEN ERR factory open (encryption=true multiprocess_wal=true read_only=true): file is not a database
+[G1B] INVENTORY-FINAL .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1742792 probe.db=4096
+PROBE G1B RESULT: PASS
+ok
+test issue53_g1c_upgrade_from_single_process_encrypted ... [G1C] CELL encryption=true multiprocess_wal=true read_only=false
+[G1C] LIFETIME LiveDuringSecondOpen
+[G1C] OPENING After(Cell { encryption: true, multiprocess_wal: false, read_only: false })
+[G1C] ROOT /tmp/mem-store-w12-issue53-G1C-27861-2-581682440
+[G1C] PRIOR-CELL encryption=true multiprocess_wal=false read_only=false
+[G1C] PRIOR-OPEN ok
+[G1C] PRIOR-CREATE ok
+[G1C] INVENTORY-PRIOR probe.db-wal=1734552 probe.db=4096
+[G1C] PRIOR-CLOSED clean
+[G1C] WRITER-OPEN ok
+[G1C] WRITER-OPENED-EXISTING ok
+[G1C] WRITER-IDS [1, 2, 3]
+[G1C] WRITER-FILLER rows=128 max_len=4096
+[G1C] WRITER-INTEGRITY ok
+[G1C] INVENTORY-WRITTEN .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1734552 probe.db=4096
+[child-ro] 
+[child-ro] running 1 test
+[child-ro] test issue53_child_entry ... CHILD-CELL encryption=true multiprocess_wal=true read_only=true
+[child-ro] CHILD-OPEN-OK
+[child-ro] CHILD-IDS 1,2,3
+[child-ro] CHILD-INTEGRITY ok
+[child-ro] CHILD-DONE
+[G1C] child-ro: CHILD-OPEN-OK
+[child-rw] 
+[child-rw] running 1 test
+[child-rw] test issue53_child_entry ... CHILD-CELL encryption=true multiprocess_wal=true read_only=false
+[child-rw] CHILD-OPEN-OK
+[child-rw] CHILD-IDS 1,2,3
+[child-rw] CHILD-INTEGRITY ok
+[child-rw] CHILD-WRITE ok
+[child-rw] CHILD-IDS-AFTER 1,2,3,100
+[child-rw] CHILD-INTEGRITY-AFTER ok
+[child-rw] CHILD-DONE
+[G1C] child-rw: CHILD-OPEN-OK
+[G1C] POST-CHILD-COMMIT ok (id 4)
+[G1C] POST-CHILD-INTEGRITY ok
+[G1C] INVENTORY-POST-CHILD .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1742792 probe.db=4096
+[G1C] REOPEN ok
+[G1C] REOPEN-IDS [1, 2, 3, 4, 100] (exact)
+[G1C] REOPEN-FILLER rows=128 max_len=4096
+[G1C] REOPEN-INTEGRITY ok
+[G1C] KEYLESS-OPEN ERR factory open (encryption=true multiprocess_wal=true read_only=true): file is not a database
+[G1C] INVENTORY-FINAL .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1742792 probe.db=4096
+PROBE G1C RESULT: PASS
+ok
+test issue53_g3_plaintext_multiprocess_wal ... [G3] CELL encryption=false multiprocess_wal=true read_only=false
+[G3] LIFETIME LiveDuringSecondOpen
+[G3] OPENING Fresh
+[G3] ROOT /tmp/mem-store-w12-issue53-G3-27861-3-460741624
+[G3] WRITER-OPEN ok
+[G3] WRITER-CREATE ok
+[G3] WRITER-IDS [1, 2, 3]
+[G3] WRITER-FILLER rows=128 max_len=4096
+[G3] WRITER-INTEGRITY ok
+[G3] INVENTORY-WRITTEN .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1734552 probe.db=4096
+[child-ro] 
+[child-ro] running 1 test
+[child-ro] test issue53_child_entry ... CHILD-CELL encryption=false multiprocess_wal=true read_only=true
+[child-ro] CHILD-OPEN-OK
+[child-ro] CHILD-IDS 1,2,3
+[child-ro] CHILD-INTEGRITY ok
+[child-ro] CHILD-DONE
+[G3] child-ro: CHILD-OPEN-OK
+[child-rw] 
+[child-rw] running 1 test
+[child-rw] test issue53_child_entry ... CHILD-CELL encryption=false multiprocess_wal=true read_only=false
+[child-rw] CHILD-OPEN-OK
+[child-rw] CHILD-IDS 1,2,3
+[child-rw] CHILD-INTEGRITY ok
+[child-rw] CHILD-WRITE ok
+[child-rw] CHILD-IDS-AFTER 1,2,3,100
+[child-rw] CHILD-INTEGRITY-AFTER ok
+[child-rw] CHILD-DONE
+[G3] child-rw: CHILD-OPEN-OK
+[G3] POST-CHILD-COMMIT ok (id 4)
+[G3] POST-CHILD-INTEGRITY ok
+[G3] INVENTORY-POST-CHILD .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1742792 probe.db=4096
+[G3] REOPEN ok
+[G3] REOPEN-IDS [1, 2, 3, 4, 100] (exact)
+[G3] REOPEN-FILLER rows=128 max_len=4096
+[G3] REOPEN-INTEGRITY ok
+[G3] KEYLESS-READ ok ids=[1, 2, 3, 4, 100]
+[G3] INVENTORY-FINAL .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1742792 probe.db=4096
+PROBE G3 RESULT: PASS
+ok
+test issue53_g3b_plaintext_backfill_after_clean_close ... [G3B] CELL encryption=false multiprocess_wal=true read_only=false
+[G3B] LIFETIME ClosedBeforeSecondOpen
+[G3B] OPENING Fresh
+[G3B] ROOT /tmp/mem-store-w12-issue53-G3B-27861-4-589104733
+[G3B] WRITER-OPEN ok
+[G3B] WRITER-CREATE ok
+[G3B] WRITER-IDS [1, 2, 3]
+[G3B] WRITER-FILLER rows=128 max_len=4096
+[G3B] WRITER-INTEGRITY ok
+[G3B] INVENTORY-WRITTEN .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1734552 probe.db=4096
+[G3B] WRITER-CLOSED clean
+[G3B] INVENTORY-CLOSED .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1734552 probe.db=4096
+[child-ro] 
+[child-ro] running 1 test
+[child-ro] test issue53_child_entry ... CHILD-CELL encryption=false multiprocess_wal=true read_only=true
+[child-ro] CHILD-OPEN-OK
+[child-ro] CHILD-IDS 1,2,3
+[child-ro] CHILD-INTEGRITY ok
+[child-ro] CHILD-DONE
+[G3B] child-ro: CHILD-OPEN-OK
+[child-rw] 
+[child-rw] running 1 test
+[child-rw] test issue53_child_entry ... CHILD-CELL encryption=false multiprocess_wal=true read_only=false
+[child-rw] CHILD-OPEN-OK
+[child-rw] CHILD-IDS 1,2,3
+[child-rw] CHILD-INTEGRITY ok
+[child-rw] CHILD-WRITE ok
+[child-rw] CHILD-IDS-AFTER 1,2,3,100
+[child-rw] CHILD-INTEGRITY-AFTER ok
+[child-rw] CHILD-DONE
+[G3B] child-rw: CHILD-OPEN-OK
+[G3B] POST-CHILD-OPEN ok
+[G3B] POST-CHILD-COMMIT ok (id 4)
+[G3B] POST-CHILD-INTEGRITY ok
+[G3B] INVENTORY-POST-CHILD .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1742792 probe.db=4096
+[G3B] REOPEN ok
+[G3B] REOPEN-IDS [1, 2, 3, 4, 100] (exact)
+[G3B] REOPEN-FILLER rows=128 max_len=4096
+[G3B] REOPEN-INTEGRITY ok
+[G3B] KEYLESS-READ ok ids=[1, 2, 3, 4, 100]
+[G3B] INVENTORY-FINAL .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1742792 probe.db=4096
+PROBE G3B RESULT: PASS
+ok
+test issue53_g3c_upgrade_from_single_process_plaintext ... [G3C] CELL encryption=false multiprocess_wal=true read_only=false
+[G3C] LIFETIME LiveDuringSecondOpen
+[G3C] OPENING After(Cell { encryption: false, multiprocess_wal: false, read_only: false })
+[G3C] ROOT /tmp/mem-store-w12-issue53-G3C-27861-5-718576842
+[G3C] PRIOR-CELL encryption=false multiprocess_wal=false read_only=false
+[G3C] PRIOR-OPEN ok
+[G3C] PRIOR-CREATE ok
+[G3C] INVENTORY-PRIOR probe.db-wal=1734552 probe.db=4096
+[G3C] PRIOR-CLOSED clean
+[G3C] WRITER-OPEN ok
+[G3C] WRITER-OPENED-EXISTING ok
+[G3C] WRITER-IDS [1, 2, 3]
+[G3C] WRITER-FILLER rows=128 max_len=4096
+[G3C] WRITER-INTEGRITY ok
+[G3C] INVENTORY-WRITTEN .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1734552 probe.db=4096
+[child-ro] 
+[child-ro] running 1 test
+[child-ro] test issue53_child_entry ... CHILD-CELL encryption=false multiprocess_wal=true read_only=true
+[child-ro] CHILD-OPEN-OK
+[child-ro] CHILD-IDS 1,2,3
+[child-ro] CHILD-INTEGRITY ok
+[child-ro] CHILD-DONE
+[G3C] child-ro: CHILD-OPEN-OK
+[child-rw] 
+[child-rw] running 1 test
+[child-rw] test issue53_child_entry ... CHILD-CELL encryption=false multiprocess_wal=true read_only=false
+[child-rw] CHILD-OPEN-OK
+[child-rw] CHILD-IDS 1,2,3
+[child-rw] CHILD-INTEGRITY ok
+[child-rw] CHILD-WRITE ok
+[child-rw] CHILD-IDS-AFTER 1,2,3,100
+[child-rw] CHILD-INTEGRITY-AFTER ok
+[child-rw] CHILD-DONE
+[G3C] child-rw: CHILD-OPEN-OK
+[G3C] POST-CHILD-COMMIT ok (id 4)
+[G3C] POST-CHILD-INTEGRITY ok
+[G3C] INVENTORY-POST-CHILD .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1742792 probe.db=4096
+[G3C] REOPEN ok
+[G3C] REOPEN-IDS [1, 2, 3, 4, 100] (exact)
+[G3C] REOPEN-FILLER rows=128 max_len=4096
+[G3C] REOPEN-INTEGRITY ok
+[G3C] KEYLESS-READ ok ids=[1, 2, 3, 4, 100]
+[G3C] INVENTORY-FINAL .wal-mode=113 probe.db-tshm=86016 probe.db-wal=1742792 probe.db=4096
+PROBE G3C RESULT: PASS
+ok
+test issue53_inversion_encrypted_single_process ... [INVERSION] CELL encryption=true multiprocess_wal=false read_only=false
+[INVERSION] LIFETIME ClosedBeforeSecondOpen
+[INVERSION] OPENING Fresh
+[INVERSION] ROOT /tmp/mem-store-w12-issue53-INVERSION-27861-6-862559902
+[INVERSION] WRITER-OPEN ok
+[INVERSION] WRITER-CREATE ok
+[INVERSION] WRITER-IDS [1, 2, 3]
+[INVERSION] WRITER-FILLER rows=128 max_len=4096
+[INVERSION] WRITER-INTEGRITY ok
+[INVERSION] INVENTORY-WRITTEN probe.db-wal=1734552 probe.db=4096
+[INVERSION] WRITER-CLOSED clean
+[INVERSION] INVENTORY-CLOSED probe.db-wal=1734552 probe.db=4096
+[child-ro] 
+[child-ro] running 1 test
+[child-ro] test issue53_child_entry ... CHILD-CELL encryption=true multiprocess_wal=false read_only=true
+[child-ro] CHILD-OPEN-OK
+[child-ro] CHILD-IDS 1,2,3
+[child-ro] CHILD-INTEGRITY ok
+[child-ro] CHILD-DONE
+[INVERSION] child-ro: CHILD-OPEN-OK
+[child-rw] 
+[child-rw] running 1 test
+[child-rw] test issue53_child_entry ... CHILD-CELL encryption=true multiprocess_wal=false read_only=false
+[child-rw] CHILD-OPEN-OK
+[child-rw] CHILD-IDS 1,2,3
+[child-rw] CHILD-INTEGRITY ok
+[child-rw] CHILD-WRITE ok
+[child-rw] CHILD-IDS-AFTER 1,2,3,100
+[child-rw] CHILD-INTEGRITY-AFTER ok
+[child-rw] CHILD-DONE
+[INVERSION] child-rw: CHILD-OPEN-OK
+[INVERSION] POST-CHILD-OPEN ok
+[INVERSION] POST-CHILD-COMMIT ok (id 4)
+[INVERSION] POST-CHILD-INTEGRITY ok
+[INVERSION] INVENTORY-POST-CHILD probe.db-wal=1742792 probe.db=4096
+[INVERSION] REOPEN ok
+[INVERSION] REOPEN-IDS [1, 2, 3, 4, 100] (exact)
+[INVERSION] REOPEN-FILLER rows=128 max_len=4096
+[INVERSION] REOPEN-INTEGRITY ok
+[INVERSION] KEYLESS-OPEN ERR raw builder open (encryption=true multiprocess_wal=false read_only=true): file is not a database
+[INVERSION] INVENTORY-FINAL probe.db-wal=1742792 probe.db=4096
+PROBE INVERSION RESULT: PASS
+ok
+test issue53_observation_writable_second_opener_without_the_flag ... [child-rw-concurrent] 
+[child-rw-concurrent] running 1 test
+[child-rw-concurrent] test issue53_child_entry ... CHILD-CELL encryption=true multiprocess_wal=false read_only=false
+[child-rw-concurrent] CHILD-OPEN-ERR raw builder open (encryption=true multiprocess_wal=false read_only=false): Locking error: Failed locking file '/tmp/mem-store-w12-issue53-INVERSION-CONCURRENT-27861-7-654587284/probe.db'. File is locked by another process
+[child-rw-concurrent] CHILD-DONE
+OBSERVATION INVERSION-CONCURRENT: writable second opener refused while the first handle is live (single-process semantics): CHILD-OPEN-ERR raw builder open (encryption=true multiprocess_wal=false read_only=false): Locking error: Failed locking file '/tmp/mem-store-w12-issue53-INVERSION-CONCURRENT-27861-7-654587284/probe.db'. File is locked by another process
+ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.63s
+
