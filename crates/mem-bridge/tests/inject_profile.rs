@@ -260,6 +260,146 @@ async fn test_inject_profile_tier_refuses_without_an_identity() {
     }
 }
 
+/// A scope with a user NAME but no email — the exact shape D6 guarantees in
+/// production when no git email exists (`user_name` falls back to `git
+/// user.name` -> `$USER` -> `USERNAME` -> `"anonymous"`).
+struct NameOnlyScopeResolver;
+
+impl ProjectScopeResolver for NameOnlyScopeResolver {
+    fn resolve(
+        &self,
+        project_id: &str,
+    ) -> Result<
+        mem_bridge::project_scope::ResolvedProjectScope,
+        mem_bridge::project_scope::ProjectScopeError,
+    > {
+        let mut scope = mem_bridge::project_scope::apply_resolved_scope(
+            project_id,
+            "opencode_project_0123456789abcdef",
+            "0123456789abcdef",
+        )?;
+        scope.user_name = Some("anonymous".to_string());
+        Ok(scope)
+    }
+}
+
+/// A scope `user_name` is NOT an identity. After D6 every resolved scope
+/// carries a name (possibly the literal `"anonymous"`), so a name fallback in
+/// `resolve_user_id` would make `NoIdentity` unreachable and key the profile
+/// tier on a non-unique display name. The email is NULL here, so the tier must
+/// refuse — even though a profile row exists under the name the wrong
+/// implementation would look up.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_inject_profile_tier_refuses_a_scope_user_name_as_identity() {
+    let dir = TestDir::new("inject-profile-name-only");
+    let profile = profile_store(&dir);
+    seed_profile(&profile, "anonymous", &stored_profile("pref name keyed")).await;
+
+    let (service, _store) = service(
+        &dir,
+        Arc::new(NameOnlyScopeResolver),
+        Some((profile, policy(true))),
+    )
+    .await;
+
+    let result = service
+        .assemble(&params("/srv/proj", None, Some(2_000)))
+        .await
+        .expect("assemble stays Ok");
+
+    assert_eq!(
+        result.profile,
+        ProfileInjection::NoIdentity,
+        "a scope user_name is not an identity: {:?}",
+        result.profile
+    );
+    assert_eq!(result.block, None, "a name must never key the tier");
+}
+
+// ---------------------------------------------------------------------------
+// D3 — the remaining typed outcomes (NoProfile / Empty / NoProjectScope)
+// ---------------------------------------------------------------------------
+
+/// `NoProfile`: the identity resolved, the store was read, and no ACTIVE row
+/// exists. Distinct from `NoIdentity` (nothing to look up) and `Empty` (a row
+/// that parses but renders nothing) — folding these arms into one must fail.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_inject_profile_tier_reports_no_profile_when_no_row_exists() {
+    let dir = TestDir::new("inject-profile-no-row");
+    let profile = profile_store(&dir);
+    let (service, _store) = service(
+        &dir,
+        Arc::new(common::FixedScopeResolver::default()),
+        Some((profile, policy(true))),
+    )
+    .await;
+
+    let result = service
+        .assemble(&params(
+            "/srv/proj",
+            Some("nobody@example.com"),
+            Some(2_000),
+        ))
+        .await
+        .expect("assemble stays Ok");
+
+    assert_eq!(result.profile, ProfileInjection::NoProfile);
+    assert_eq!(result.block, None);
+    assert_eq!(result.tokens, 0);
+}
+
+/// `Empty`: a parseable stored profile that renders no items yields NO block
+/// and the `Empty` outcome — never `Rendered` with an empty wrapper.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_inject_profile_tier_reports_empty_when_the_row_renders_nothing() {
+    let dir = TestDir::new("inject-profile-empty-row");
+    let profile = profile_store(&dir);
+    seed_profile(&profile, "empty@example.com", &ProfileData::default()).await;
+    let (service, _store) = service(
+        &dir,
+        Arc::new(common::FixedScopeResolver::default()),
+        Some((profile, policy(true))),
+    )
+    .await;
+
+    let result = service
+        .assemble(&params("/srv/proj", Some("empty@example.com"), Some(2_000)))
+        .await
+        .expect("assemble stays Ok");
+
+    assert_eq!(result.profile, ProfileInjection::Empty);
+    assert_eq!(result.block, None);
+    assert_eq!(result.tokens, 0);
+}
+
+/// `NoProjectScope`: A2 short-circuits before the tier runs, so a seeded
+/// profile must not render and the outcome must say why it did not.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_inject_profile_tier_does_not_run_without_a_project_scope() {
+    let dir = TestDir::new("inject-profile-no-scope");
+    let profile = profile_store(&dir);
+    seed_profile(
+        &profile,
+        "probe@example.com",
+        &stored_profile("pref no scope"),
+    )
+    .await;
+    let (service, _store) = service(
+        &dir,
+        Arc::new(common::FixedScopeResolver::default()),
+        Some((profile, policy(true))),
+    )
+    .await;
+    let mut blank = params("/srv/proj", None, Some(2_000));
+    blank.project_id = Some("   ".to_string());
+
+    let result = service.assemble(&blank).await.expect("assemble stays Ok");
+
+    assert_eq!(result.profile, ProfileInjection::NoProjectScope);
+    assert_eq!(result.block, None);
+    assert_eq!(result.tokens, 0);
+}
+
 // ---------------------------------------------------------------------------
 // T25 — the resolved scope email gates and feeds the tier (D6, 44.11)
 // ---------------------------------------------------------------------------
