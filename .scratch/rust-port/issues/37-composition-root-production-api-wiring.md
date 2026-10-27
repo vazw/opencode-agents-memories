@@ -1,6 +1,6 @@
 # 37 — W6.2 follow-up · Wire the production API services into the composition root
 
-Status: ready-for-agent — 2026-10-27 (verified open at HEAD: `.with_sessions(...)` has **no caller** and `WebStoreDeps` has no episodic field — AC6; and `docs/bridge-schema.md` states neither the token header nor the 501/500 distinction — AC4; brief under `## Agent Brief`)
+Status: open — 2026-10-27: AC4 + AC6 landed and verified (see the ## Comments entry of the same date; implementation commit c03338843b72b3b29f044ff9bb18c462a8a10b26), **open pending docs/web-skeleton-smoke.md:422** — the D-13 row still says the production wiring answers the sessions 501 "by design until the composition root injects the port", which this wave falsifies; issue 65's sweep does not cover it, so this issue owns the correction and does not close on it.
 AC6 = sessions wiring ONLY — the maintenance half moved to issue 39. Anchors are symbol-precise,
 line numbers demoted to hints. See "2026-10-25 re-scope" below.)
 
@@ -168,7 +168,7 @@ Bearer authenticates the CONFIGURED `api_token`, which is `None` in standalone m
       the seeded row. It went RED first on the stub's `500 {"success":false,"error":"Internal Server
       Error"}`. A second oracle, `test_no_mem_bridge_to_mem_web_edge`, keeps the forbidden
       `mem-bridge`→`mem-web` edge absent (ADR-0007:584).
-- [ ] **AC4 (re-scoped 2026-10-25, contract-only)** — `docs/bridge-schema.md` states, as contract
+- [x] **AC4 (re-scoped 2026-10-25, contract-only)** — `docs/bridge-schema.md` states, as contract
       rather than inventory:
       1. the local-token header shape: `x-opencode-mem-token` (`crate::AUTH_HEADER`), and that
          neither `Authorization: Basic <token>` nor `Authorization: Bearer <token>` works — Bearer
@@ -185,7 +185,7 @@ Bearer authenticates the CONFIGURED `api_token`, which is `None` in standalone m
       `crates/mem-web/src/api_auth.rs`, the gate order in `crates/mem-web/src/gate.rs`, and
       `crates/mem-web/src/api/maintenance.rs` before writing.
 
-- [ ] **AC6 (re-scoped 2026-10-25, sessions only)** — wire the sessions port at the composition root.
+- [x] **AC6 (re-scoped 2026-10-25, sessions only)** — wire the sessions port at the composition root.
       Anchors are symbols; line numbers are hints at HEAD `065ffdb` and **must be re-located before
       use**.
 
@@ -234,6 +234,31 @@ Bearer authenticates the CONFIGURED `api_token`, which is `None` in standalone m
   this AC, so neither owns that wiring. The residual is recorded on issue 40's status line; assigning it
   is not this issue's work — and that assignment has since been made: the wiring is **owned by issue 54**
   (`54-dedup-port-wiring-unreachable`), filed 2026-10-25.
+- **2026-10-27 — AC4 + AC6 landed (implementation commit `c03338843b72b3b29f044ff9bb18c462a8a10b26`).**
+  Wiring: `WebStoreDeps` gained `pub episodic: Arc<EpisodicStore>`, filled once at its single
+  construction site from `runtime.store.clone()`, and the root composition root calls
+  `.with_sessions(episodic_session_port(deps.episodic.clone()))` after `.with_skills(skills_port)`;
+  the `None` arm is unchanged. Verified by three new root oracles plus one gate pin:
+  `test_production_wiring_serves_the_seeded_session_history` (both routes `200`; alpha lists exactly
+  its two seeded rows, beta exactly its one row with the `AC2-FOREIGN-PROJECT-SESSION` marker, an
+  unseeded project `data: []`), `test_production_wiring_session_delete_is_project_scoped` (scoped
+  delete `200 {"success":true}` and the row disappears; a cross-project delete `404
+  {"success":false,"error":"Session not found"}` and the foreign row survives),
+  `test_sessions_stay_on_the_documented_stub_when_composition_fails` (poisoned `storage/episodic.db`
+  → `engine.composition_failed` on stderr, health `200`, memories `501`, skills `200`, both session
+  routes `501`), and `test_the_local_token_is_accepted_only_on_the_custom_header` (custom header
+  admitted; Bearer and well-formed Basic both `401`). Mutation proof: deleting the `.with_sessions(..)`
+  line turned both session oracles RED with the documented `501 {"success":false,"error":"Session
+  history endpoints land with W6.3"}` body; restored file hash matched the pre-mutation hash and the
+  oracles re-passed after recompilation. AC4: `docs/bridge-schema.md` §11 states the three contract
+  statements (custom-header-only local token, 501-vs-500, no endpoint inventory) and names the pinning
+  oracles; `ports.rs` and `sessions.rs` doc comments corrected accordingly. Full battery: `cargo fmt
+  --all --check`, both clippy gates and `cargo test --workspace` all exit 0 (`test result: ok. 9
+  passed; 0 failed` for `tests/production_api_wiring.rs`; 235 `test result: ok` suite lines, 0
+  failures across the workspace). **Residual, owned here:** `docs/web-skeleton-smoke.md:422` (the D-13
+  row) still says the production wiring answers the sessions `501` "by design until the composition
+  root injects the port"; this wave falsifies that sentence, the smoke doc is issue 65's file and was
+  deliberately not edited, and issue 65's sweep does not cover it — hence this issue stays open.
 
 ## Agent Brief
 
