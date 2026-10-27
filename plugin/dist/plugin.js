@@ -455,6 +455,47 @@ function fireCapture(payload) {
   })();
 }
 
+// ── toast intents (W5.2) ────────────────────────────────────────────────
+// A V2 host gives the plugin no `ui.toast`; the only user-visible channel is
+// the toast RPC the TUI companion renders (`plugin/src/tui.js`). The one
+// producer is the inject failure alternate below. This function is
+// fire-and-forget by contract: it never awaits, so a host that hangs or
+// refuses the capability can neither delay nor fail a turn. Deduped per reason
+// per process — the wrapper cannot read the engine's config (no JS config
+// path, D8), so one toast per failure reason is the functional equivalent of
+// the upstream gate. The payload is a fixed string: never the error text,
+// never a transcript fragment, never a path.
+
+const NOTIFIED = new Set();
+
+function notifyHost(client, reason) {
+  if (NOTIFIED.has(reason)) return;
+  NOTIFIED.add(reason);
+  let showToast;
+  try {
+    showToast = client?.tui?.showToast;
+  } catch {
+    showToast = undefined;
+  }
+  if (typeof showToast !== "function") {
+    logInfo("toast.not_delivered", { reason });
+    return;
+  }
+  try {
+    Promise.resolve(
+      showToast.call(client.tui, {
+        body: {
+          title: "opencode-mem",
+          message: "Memory injection failed; memory may be disabled.",
+          variant: "warning",
+        },
+      })
+    ).catch((err) => logWarn("toast.failed", { reason, message: shortError(err) }));
+  } catch (err) {
+    logWarn("toast.failed", { reason, message: shortError(err) });
+  }
+}
+
 // ── capture/best-effort transcript extraction (never throws) ────────────
 
 function extractText(node) {
@@ -594,6 +635,7 @@ export const server = async function server(input) {
           }
         } catch (err) {
           logWarn("inject.failed", { message: shortError(err) });
+          notifyHost(hostInputRef()?.client, "inject.failed");
         }
         if (
           block !== null &&
@@ -767,4 +809,15 @@ function parseIdleTranscript(messages) {
 
 const id = pkg.name;
 
-export default { id, server };
+// The V2 host contract is a different entry (`{ id, setup }`), but upstream's
+// loader-contract test requires the installable entry to expose BOTH. The
+// import is deferred to call time: `dist/plugin.js` is the file the host loads
+// on every path, so a top-level await would make module evaluation
+// asynchronous for V1 users and would read the plugin.js ↔ v2/plugin.js edge
+// at evaluation order.
+export async function setup(ctx) {
+  const mod = await import("./v2/plugin.js");
+  return mod.setup(ctx);
+}
+
+export default { id, server, setup };
