@@ -1,10 +1,9 @@
 # 50 — Inject · Context assembly: the owner's rulings get a home, and the framing gets built
 
-Status: landed — awaiting re-review — 2026-10-28. `feat(50)` is **`604222a`** (rebased onto main
-`e6b5d1b`, base `f01ec63`); this record is the `docs(50)` commit that follows it on the branch.
-Round-2 blocking findings closed: O3's fixture reseeded (recency-only and id-asc mutations both red) and
-`search_memories_by_content` clamped to the hydrate builder's 1000-id bound with its 1001-row/limit-600
-regression test.
+Status: done — 2026-10-28. `feat(50)` is **`604222a`**, merged fast-forward as **`4d2c8dd`** onto
+`e6b5d1b` (base `f01ec63`). Review round 2 approved after re-running both blocking mutations: O3's
+fixture reseeded (recency-only and id-asc both red) and `search_memories_by_content` clamped to the
+hydrate builder's 1000-id bound with its 1001-row/limit-600 regression test.
 
 ## The finding
 
