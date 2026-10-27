@@ -1,6 +1,6 @@
 # 20 — W5.2 · V2 adapter, toast-RPC & TUI companion (US 5.2)
 
-Status: landed 2026-10-27 in <sha> — only the V1 wrapper was present at filing; the V2 entry, the adapter, the toast RPC and the TUI companion landed under `issue-20/v2-adapter-tui`, with the pre-V2 pin inverted in `plugin/tests/bundle-boundary.test.mjs` — residual: provider connectivity, owned by issue 62. Brief under `## Agent Brief`.
+Status: landed 2026-10-27 in 1a71abc — only the V1 wrapper was present at filing; the V2 entry, the adapter, the toast RPC and the TUI companion landed under `issue-20/v2-adapter-tui`, with the pre-V2 pin inverted in `plugin/tests/bundle-boundary.test.mjs` — residual: provider connectivity, owned by issue 62. Brief under `## Agent Brief`.
 
 ## What to build
 
