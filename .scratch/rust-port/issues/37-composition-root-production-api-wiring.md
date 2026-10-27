@@ -1,6 +1,6 @@
 # 37 — W6.2 follow-up · Wire the production API services into the composition root
 
-Status: open — 2026-10-27: AC4 + AC6 landed and verified (see the ## Comments entry of the same date; implementation commit c03338843b72b3b29f044ff9bb18c462a8a10b26), **open pending docs/web-skeleton-smoke.md:422** — the D-13 row still says the production wiring answers the sessions 501 "by design until the composition root injects the port", which this wave falsifies; issue 65's sweep does not cover it, so this issue owns the correction and does not close on it.
+Status: open — 2026-10-27: AC4 + AC6 landed and verified (see the ## Comments entry of the same date; implementation commit c03338843b72b3b29f044ff9bb18c462a8a10b26), **open pending docs/web-skeleton-smoke.md:422, :326-328 and :505-506** — three residual sites still describe the pre-wiring world: the D-13 row (:422) and the §F prose (:326-328) say the production wiring answers the sessions 501 "by design" today, and route-sheet rows 36–37 (:505-506) say `.with_sessions(episodic_session_port(...))` is "not wired"; all are falsified by this wave, the smoke doc is issue 65's file and was deliberately not edited, and issue 65's delivery items are scoped to the skills rows (:498-504) and docs/agents/testing.md, so this issue owns all three corrections and does not close on them.
 AC6 = sessions wiring ONLY — the maintenance half moved to issue 39. Anchors are symbol-precise,
 line numbers demoted to hints. See "2026-10-25 re-scope" below.)
 
@@ -255,10 +255,13 @@ Bearer authenticates the CONFIGURED `api_token`, which is `None` in standalone m
   oracles; `ports.rs` and `sessions.rs` doc comments corrected accordingly. Full battery: `cargo fmt
   --all --check`, both clippy gates and `cargo test --workspace` all exit 0 (`test result: ok. 9
   passed; 0 failed` for `tests/production_api_wiring.rs`; 235 `test result: ok` suite lines, 0
-  failures across the workspace). **Residual, owned here:** `docs/web-skeleton-smoke.md:422` (the D-13
-  row) still says the production wiring answers the sessions `501` "by design until the composition
-  root injects the port"; this wave falsifies that sentence, the smoke doc is issue 65's file and was
-  deliberately not edited, and issue 65's sweep does not cover it — hence this issue stays open.
+  failures across the workspace). **Residuals, owned here:** three sites in `docs/web-skeleton-smoke.md`
+  still describe the pre-wiring world and are falsified by this wave — the §F prose at `:326-328` and
+  the D-13 row at `:422` say the production wiring answers the sessions `501` "by design" today, and
+  route-sheet rows 36–37 at `:505-506` say `.with_sessions(episodic_session_port(...))` is "not wired".
+  The smoke doc is issue 65's file and was deliberately not edited; issue 65's delivery items are
+  scoped to the skills rows (`:498-504`) and `docs/agents/testing.md`, so it does not cover these —
+  hence this issue stays open on all three.
 
 ## Agent Brief
 

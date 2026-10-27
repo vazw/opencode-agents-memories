@@ -342,9 +342,12 @@ which is why the default is shared rather than engine-only.
   header as the local token (`crates/mem-web/src/gate.rs:89-93`); it never reads
   `Authorization` for it. `Authorization: Bearer <local token>` is not accepted:
   the Bearer comparison runs only against the configured `webServerApiToken`
-  (`crates/mem-web/src/gate.rs:94-97`), and standalone mode configures none
-  (`src/main.rs:138` passes `api_token: None` to the web-server settings), so the
-  API-token leg is off and only the local-token leg can admit a request.
+  (`crates/mem-web/src/gate.rs:94-97`, reading `AppState.api_token`), and
+  standalone mode leaves it unset: `src/main.rs:194` sets
+  `AppState.api_token: None`, while `src/main.rs:138` passes `api_token: None`
+  to the web-server settings, which only the network-auth guard reads
+  (`crates/mem-web/src/server.rs:92-96`), so the API-token leg is off and only
+  the local-token leg can admit a request.
   `Authorization: Basic <base64("user:<local token>")>` is a different
   credential — the shell/API Basic-auth gate
   (`crates/mem-web/src/gate.rs:69-76`), disabled in standalone mode
