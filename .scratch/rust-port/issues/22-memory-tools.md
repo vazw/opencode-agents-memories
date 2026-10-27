@@ -1,6 +1,6 @@
 # 22 — W5.4 · Memory tools registration — existing tools + recall (US 1.4)
 
-Status: landed — residual (owned by issue 70) — 2026-10-27, implementing commit `e58e703` (canonical + legacy `recall` and the V2 `recall_project_sessions` tool with per-tool scope enforcement; the four ported behaviours — `tool-scope`, `memory-timeline-orphan` (tool path), `memory-portability-tool`, `profile-tool-runtime` — remain blocked on wire methods the frozen schema cannot add; see `## Comments`)
+Status: landed — residual (owned by issues 70 and 73) — 2026-10-27, implementing commit `e58e703` (canonical + legacy `recall` and the V2 `recall_project_sessions` tool with per-tool scope enforcement; the four ported behaviours — `tool-scope`, `memory-timeline-orphan` (tool path), `memory-portability-tool`, `profile-tool-runtime` — remain blocked on wire methods the frozen schema cannot add; see `## Comments`)
 
 ## What to build
 

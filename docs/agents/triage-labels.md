@@ -18,7 +18,7 @@ Edit the right-hand column to match whatever vocabulary you actually use.
 
 `paused` / `PAUSED` — blocked on another lane or an owner ruling. Keeps the issue out of the triage board
 until the blocker moves; the status line names the blocker. In use: 39 (behind 43), 41 (behind 39), 58
-(three unfixable zstd advisories).
+(three unfixable zstd advisories), 70 (wire methods for the four memory-tool behaviours).
 
 ## Local closure convention (not a mattpocock role)
 
