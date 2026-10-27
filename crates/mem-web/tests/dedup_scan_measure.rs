@@ -84,6 +84,14 @@ const TAG: &str = "tag_measure";
 /// spend, and therefore the numerator of the cap derivation.
 const T_SCAN_MAX_SECONDS: f64 = 10.0;
 
+/// The measured release figure (issue 56): median of three release runs at
+/// `n = 10_000`, 768 lanes, from
+/// `docs/evidence/dedup-release-profile-2026-10-26/derived.txt`.
+const C_ITER_RELEASE_SECONDS: f64 = 658.9e-9;
+
+/// The measured debug figure (issue 54b), kept as the conservative input.
+const C_ITER_DEBUG_SECONDS: f64 = 13_487.9e-9;
+
 /// The per-shard pair grid at `max_vectors_per_shard = 50_000`.
 const ONE_SHARD_GRID: f64 = 1_249_975_000.0;
 
@@ -770,14 +778,32 @@ fn test_expectation_guard_rejects_a_mismatched_profile_and_accepts_a_matching_on
 }
 
 #[test]
-fn test_derived_cap_at_the_recorded_debug_c_iter_reproduces_the_constant() {
+fn test_derived_cap_at_the_recorded_release_c_iter_reproduces_the_constant() {
     assert_eq!(
-        derive_cap(13_487.9e-9) as u64,
+        derive_cap(C_ITER_RELEASE_SECONDS) as u64,
         MAX_NEAR_SCAN_PAIRS,
-        "the pre-registered rule must still derive the shipped constant from the recorded debug c_iter"
+        "the pre-registered rule must derive the shipped constant from the recorded release c_iter"
     );
     assert_eq!(
-        MAX_NEAR_SCAN_PAIRS, 740_000,
-        "the cap is unchanged by this wave; raising it is the owner's decision"
+        MAX_NEAR_SCAN_PAIRS, 15_000_000,
+        "the 2026-10-28 ruling raised the cap from the debug-derived 740,000"
+    );
+    let spend_seconds = MAX_NEAR_SCAN_PAIRS as f64 * C_ITER_RELEASE_SECONDS;
+    assert!(
+        spend_seconds <= T_SCAN_MAX_SECONDS,
+        "the cap must stay inside the pre-registered budget: {spend_seconds} s > {T_SCAN_MAX_SECONDS} s"
+    );
+}
+
+#[test]
+fn test_recorded_debug_c_iter_derives_the_conservative_cap_below_the_shipped_one() {
+    let derived_cap_from_debug_c_iter = derive_cap(C_ITER_DEBUG_SECONDS) as u64;
+    assert_eq!(
+        derived_cap_from_debug_c_iter, 740_000,
+        "the recorded debug c_iter must still derive the cap that shipped before the ruling"
+    );
+    assert!(
+        derived_cap_from_debug_c_iter < MAX_NEAR_SCAN_PAIRS,
+        "the shipped cap must sit strictly above the debug-derived cap: shipped {MAX_NEAR_SCAN_PAIRS}"
     );
 }

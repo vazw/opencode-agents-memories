@@ -59,49 +59,55 @@ pub const RUNNING_MESSAGE: &str = "Deduplication already running";
 
 /// Hard ceiling on one pass's near-duplicate scan, in candidate comparisons.
 ///
-/// **Derivation (issue 54b, Step 1), debug profile.** `c_iter = 13,487.9 ns`
-/// per candidate comparison at 768 lanes, measured **in the debug profile**
-/// (`cargo test` without `--release`) at the largest completed rung
-/// (`n = 10,000`, 49,995,000 comparisons in 674.326 s) by
-/// `crates/mem-web/tests/dedup_scan_measure.rs`, so this number can never be
-/// quoted as a production figure. The 54b artifact is gone; the durable record
-/// of the release re-measurement (issue 56) is
-/// `docs/evidence/dedup-release-profile-2026-10-26/README.md`, with the raw runs
-/// committed beside it, and 54b's numbers are transcribed in
-/// `.scratch/rust-port/issues/54b-dedup-scan-bounding.md`. Issue 56 measured the
-/// same 768-lane ladder in release: `c_iter_release = 658.9 ns/pair`,
-/// k = 13,487.9 / 658.9 = 20.470 (median of three runs, 5.2 % spread). **This
-/// value is unchanged** pending the owner's re-derivation against
-/// `T_SCAN_MAX = 10 s`. With that budget pre-registered:
+/// **Derivation (issue 56 ruling, 2026-10-28), release profile.**
+/// `c_iter_release = 658.9 ns` per candidate comparison at 768 lanes, the
+/// median of three release runs at `n = 10,000` (49,995,000 comparisons per
+/// run, spread 5.2 %), measured by `crates/mem-web/tests/dedup_scan_measure.rs`
+/// and committed with its raw runs in
+/// `docs/evidence/dedup-release-profile-2026-10-26/`. With `T_SCAN_MAX = 10 s`
+/// re-affirmed for the release profile:
 ///
 /// ```text
-/// 10 s / c_iter                  = 741,405 pairs
-/// floor to 2 significant figures = 740,000
-/// min(max(250_000, 740_000), 1,250,000,000) = 740,000
+/// 10 s / c_iter                  = 15,176,810 pairs
+/// floor to 2 significant figures = 15,000,000
+/// min(max(250_000, 15,000,000), 1,250,000,000) = 15,000,000
+/// 15,000,000 × 658.9 ns          = 9.8835 s
 /// ```
 ///
 /// The floor guards a broken measurement; the ceiling is one shard's whole pair
 /// grid at `max_vectors_per_shard = 50_000` (1,249,975,000) rounded up so a
 /// single shard at capacity is never truncated *by the ceiling itself*. The
-/// measurement landed in branch **R3** (`t50 ≈ 4.68 h` in the debug profile,
-/// INFERRED from `c_iter`; `n = 50,000` was not run), so the derived value is
-/// far below the ceiling and **the cap binds**: a 50,000-row shard is truncated,
-/// and a whole pass covers only about `sqrt(2 × 740,000) ≈ 1,217` survivors in
-/// walk order.
+/// ceiling is ~83x the value, so it does not bind; the cap does: a 50,000-row
+/// shard is truncated, and a whole pass covers about
+/// `sqrt(2 × 15,000,000) ≈ 5,477` survivors in walk order (11.0 % of a 50k
+/// shard) against the previous 740,000's `sqrt(2 × 740,000) ≈ 1,217` (2.4 %).
+/// The 50,000-row rung was not measured: `t50_release ≈ 823.6 s` is INFERRED
+/// from `c_iter_release`.
+///
+/// **The debug figure is retained as the conservative input (issue 54b).**
+/// `c_iter = 13,487.9 ns` per candidate comparison at 768 lanes, measured in
+/// the debug profile (`cargo test` without `--release`) at `n = 10,000`
+/// (49,995,000 comparisons in 674.326 s). 54b's artifact is gone; its numbers
+/// are transcribed in `.scratch/rust-port/issues/54b-dedup-scan-bounding.md`.
+/// That figure derives 740,000, the cap that shipped before this ruling, and
+/// spends 0.49 s at the release figure. The measured debug/release factor is
+/// k = 13,487.9 / 658.9 = 20.470.
+///
+/// **Tail, recorded not smoothed.** At the slowest measured release run
+/// (677.1 ns) the cap spends 10.16 s, 1.6 % above the pre-registered budget;
+/// the ruling is stated against the recorded median, as the rule specifies.
 ///
 /// It is a GLOBAL per-pass budget, so a multi-shard pass at capacity can reach
 /// it and truncate — that is the case it exists for, and shard count is
 /// unbounded (no `max_shards` key). If the ceiling ever binds, the value is
 /// non-binding per shard, not absent: only a validity-gate measurement (a
-/// harness that is not measuring cosines) gets there, and this one is four
-/// orders of magnitude clear of it.
+/// harness that is not measuring cosines) gets there, and this one is ~83x
+/// clear of it.
 ///
-/// Debug profile: the ladder ran under `cargo test` (no `--release`), so the
-/// derived value is conservative against a release build — release is faster
-/// and the same budget then buys less than 10 s. Measured (issue 56):
-/// a factor of 20.470 faster in release, so the same 740,000 pairs buy 0.49 s there;
-/// evidence in `docs/evidence/dedup-release-profile-2026-10-26/README.md`.
-pub const MAX_NEAR_SCAN_PAIRS: u64 = 740_000;
+/// The rule is pinned by the derivation gate in
+/// `crates/mem-web/tests/dedup_scan_measure.rs`, which re-implements it rather
+/// than reading it back: `derive_cap(658.9e-9)` must equal this constant.
+pub const MAX_NEAR_SCAN_PAIRS: u64 = 15_000_000;
 
 /// One shard the pass walks; opaque to the engine (it is handed back
 /// verbatim).
