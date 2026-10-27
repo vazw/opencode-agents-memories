@@ -1,8 +1,6 @@
 # 44 — W5.4 · User-profile injection tier: the ranked renderer
 
-Status: ready-for-agent — 2026-10-27 (verified absent at HEAD: no renderer, no escaping, `InjectService` holds no `ProfileStore`; issue 47 no longer blocks it — brief under `## Agent Brief`)
-(`.tmp/drafts/20261025-context-assembly-decision.md`).** No dependency on 43's blockers; this is
-independent work that can run in parallel with the W6/guard line.
+Status: landed 2026-10-27 as merge `4b078e6` (branch `issue-44/profile-injection-renderer`: implementation `2a56ae9`, oracle rework `dc00333`) — reviewer APPROVED after re-running every gate and driving **its own** 18-entry mutation matrix (18 killed, 0 survivors). The merged tree is byte-identical to the reviewed tree (`git diff 4b078e6 dc00333` empty). Residual: the **store-side** identity key, owned by issue 64; the learner stays read-only this release (47.1 Leg A = A2). Brief under `## Agent Brief`.
 
 ## What to build
 
@@ -235,3 +233,40 @@ never from `max_profile_items`. Output is byte-identical across runs for identic
 - The `<memory_context>` wrapper, tier order and `relevance` attribute — issue 50 owns those.
 - Scoring the profile tier: a scored profile would be a different design.
 - Any schema change, and any `agent_id` column on `memories`.
+
+## Landing — 2026-10-27
+
+Merged as `4b078e6`; the merged tree is byte-identical to the reviewed commit (`git diff 4b078e6
+dc00333` empty), so the review covers exactly what shipped.
+
+**Two reviews, neither finding a code defect.** The first rejected three oracles that could not
+fail the implementation they were named for:
+
+1. `resolve_user_id`'s rule that a scope `user_name` is **not** an identity — adding an
+   `or(scope.user_name)` fallback left 10/10 bridge tests green. After D6, `user_name` is always
+   `Some` in the NULL-email branch, which is the only branch where `NoIdentity` can fire — so the
+   mutation makes the refusal unreachable in production and keys the tier on a display name
+   (`$USER`, or the literal `"anonymous"`).
+2. The preference **primary metric** — `Metric::Confidence` → `Metric::Frequency` left 21/21
+   green, because T3 equalised every confidence and T4's out-of-window item was last under
+   confidence, frequency *and* alphabet.
+3. Two of the five `escape_profile_text` **call sites** — bypassing the funnel for workflow
+   *steps* or the learning-path *topic* left 21/21 green, so a hostile payload there could forge
+   `User Workflows:` or close `</user_profile>`.
+
+A `debugger` then mutated **every** guard in the diff rather than the three named ones and found
+**eight more** unpinned: the pattern category and description escapes, the pattern and workflow
+frequency rankings, the `frequency || 1` tie-break, the `from_core` cap mapping, the
+`inject_profile` → `enabled` mapping, and the counter's placement — the last two provably invisible
+to the grep gates, because a grep counts one literal line and cannot see control flow.
+
+**The rework was test-only** (`dc00333`, 3 files, +415 −25). 31 tests became 37: six additions,
+including a new `inject_profile_counter` binary that installs a process-global `LogSink` and counts
+emissions across three assembles (0 / 0 / 1), which is what finally pinned "emitted once, on
+`Rendered` only". After it: **18/18 mutations killed, 0 survivors.**
+
+**Recorded debt.** The store-side identity key is still wrong — `src/main.rs:203` hard-codes
+`user_id: "unknown"` and no production code writes a profile row — so the tier renders only via an
+explicit `?userId=` or an import. That is **issue 64**, and D6 is explicitly necessary, not
+sufficient. The store-`Err` → `Unusable` arm also remains unpinned by choice: pinning it needs a
+failing `ConnectFactory`, and the outcome is indistinguishable at the call site.
