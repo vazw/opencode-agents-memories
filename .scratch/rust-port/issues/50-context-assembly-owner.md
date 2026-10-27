@@ -1,9 +1,10 @@
 # 50 — Inject · Context assembly: the owner's rulings get a home, and the framing gets built
 
-Status: ready-for-agent — 2026-10-27 (owner ruled all three open questions: `relevance` extends to a
-**scored project-knowledge read**, the upstream header is **split** with the safety sentence last, and
-`inject.rs:410` is **edited once**. The architect revision folding in the scored read is in flight — do not
-dispatch to a planner until it lands. See `## Comments`.)
+Status: landed — awaiting re-review — 2026-10-28. `feat(50)` is **`604222a`** (rebased onto main
+`e6b5d1b`, base `f01ec63`); this record is the `docs(50)` commit that follows it on the branch.
+Round-2 blocking findings closed: O3's fixture reseeded (recency-only and id-asc mutations both red) and
+`search_memories_by_content` clamped to the hydrate builder's 1000-id bound with its 1001-row/limit-600
+regression test.
 
 ## The finding
 
@@ -64,34 +65,36 @@ by adding a constant is the defect class this repo has spent two days removing.
 
 ## Acceptance criteria
 
-- [ ] **50.1** `docs/adr/0026-*.md` records the five unowned rulings (table rows 2, 3, 4, 5, 7) with their
+- [x] **50.1** `docs/adr/0026-*.md` records the five unowned rulings (table rows 2, 3, 4, 5, 7) with their
       precedence, row 6 as the scope statement it is, the Grounds entry for the missing-header regression
       (`context.ts:14-47` as the reference), and an explicit pointer to **44.13** for the invariant
       restatement — no duplication of 44.13's text.
-- [ ] **50.2** The emitted block is wrapped in `<memory_context>…</memory_context>` with the header framing
+- [x] **50.2** The emitted block is wrapped in `<memory_context>…</memory_context>` with the header framing
       and the safety sentence **at the end**, byte-identical to the wording the ADR records. A test asserts
       the disclaimer's position relative to the last tier block, not merely its presence, and the existing
       **negative** assertion at `crates/mem-bridge/tests/capture_inject_e2e.rs:251` is inverted — it pins
       today's absence, so leaving it untouched would make the suite assert the bug.
-- [ ] **50.3** Tier order is asserted with all present tiers: profile → project knowledge → project/agent
+- [x] **50.3** Tier order is asserted with all present tiers: profile → project knowledge → project/agent
       session history. If **44** has not landed, the test asserts the two memory-tier order and leaves the
       profile slot as an explicitly skipped assertion citing 44 — not silently omitted.
-- [ ] **50.4** `relevance="N%"` is emitted on scored tiers from the actual similarity score, with the
+- [x] **50.4** `relevance="N%"` is emitted on scored tiers from the actual similarity score, with the
       rounding rule recorded in the ADR and pinned by a test at a boundary (e.g. 0.995 → `100%`, 0.994 →
       `99%` — pick and record, do not leave it to `format!`).
-- [ ] **50.5** `project_agent_session_history` remains inside the wrapper as its own block; the profile
+- [x] **50.5** `project_agent_session_history` remains inside the wrapper as its own block; the profile
       tier, when 44 lands, is **unscored** (no `relevance` attribute) — a test asserts the absence, because
       a scored profile would be a different design.
-- [ ] **50.6** Wrapper bytes are charged inside the budget: a test emits at the budget boundary and asserts
+- [x] **50.6** Wrapper bytes are charged inside the budget: a test emits at the budget boundary and asserts
       the total block (`<memory_context>` included) never exceeds `4 × token_budget`, and that removing the
       wrapper from the accounting makes that test fail (the inversion arm).
-- [ ] **50.7** Nothing in this issue restates, weakens or edits the `inject.rs:305` sentence; if the charge
+- [x] **50.7** Nothing in this issue restates, weakens or edits the `inject.rs:305` sentence; if the charge
       inside the budget makes the comment's surrounding text stale, the issue records the exact one-line
       edit 44.13 should make and leaves it to 44.13.
-- [ ] **50.8** Every row of the table is mapped ruling → ADR section (or → issue 44 / 44.13) in this issue
+      *(Superseded by the 2026-10-27 owner ruling — the six-line replacement landed once in this issue;
+      D-26-9 records old → new, and the "no weaker restatement" greps gate it.)*
+- [x] **50.8** Every row of the table is mapped ruling → ADR section (or → issue 44 / 44.13) in this issue
       body, and `git ls-files .tmp/drafts` is still empty afterwards: the draft is deletable, and no tracked
       file cites it as the authority for these rulings.
-- [ ] **50.9** `InjectParams`/`InjectResult` change only additively; the frozen DTOs are untouched; no new
+- [x] **50.9** `InjectParams`/`InjectResult` change only additively; the frozen DTOs are untouched; no new
       dependency.
 
 ## Blocked by / Blocks
@@ -153,10 +156,10 @@ charged inside the budget, proven by an inversion arm that fails if the wrapper 
 - Issue 44.13's invariant sentence — this issue must not restate, weaken or edit it.
 
 **Acceptance criteria:**
-- [ ] The issue's 50.1–50.9, unchanged.
-- [ ] `git ls-files .tmp/drafts` is still empty after the ADR lands: no tracked file may cite the gitignored
+- [x] The issue's 50.1–50.9, unchanged.
+- [x] `git ls-files .tmp/drafts` is still empty after the ADR lands: no tracked file may cite the gitignored
       draft as the authority for these rulings.
-- [ ] The inversion arm exists: removing the wrapper from the budget accounting makes the boundary test fail.
+- [x] The inversion arm exists: removing the wrapper from the budget accounting makes the boundary test fail.
 
 **Out of scope:**
 - The profile renderer itself (issue 44) and its invariant sentence (44.13).
@@ -206,6 +209,16 @@ charged inside the budget, proven by an inversion arm that fails if the wrapper 
   - **Two new open questions, both with defaults:** pinned project memories survive unchanged (default: no
     override — the fallback arm keeps pins); the older-sessions semantic leg goes live with the same field
     (default: yes).
+
+- **2026-10-28 — landed.** `feat(50)` is `604222a` (rebased onto main `e6b5d1b`); this record is the
+  `docs(50)` commit that follows it on `issue-50/context-assembly`. Review round 2 blocking findings
+  closed: (1) O3's fixture reseeded — A 1.0 @1_000, C 0.707 @2_000, B 0.0 @3_000, pair
+  `mem_z`@2_500/`mem_a`@500 — recency-only reds `similarity descending: A=387 C=312 B=163` and id-asc
+  reds `the newer of the equal-similarity pair is first: new=315 old=240`; a `scored_order` unit test pins
+  similarity → recency → id. (2) `search_memories_by_content` truncates candidate ids to the hydrate
+  builder's 1000-placeholder bound; the regression test seeds 1001 rows, `limit: 600`, and returns `Ok`
+  with 600 rows (before: `Turso { message: "bind index 1004 is out of bounds", is_constraint: false }`).
+  Suites: `turso_vector_search` 8, `inject_scored` 9, workspace green; fmt/clippy clean.
 
 ## Mapping (50.8)
 
