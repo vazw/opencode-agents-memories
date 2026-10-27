@@ -90,11 +90,30 @@ impl PrivacyConfig {
     }
 
     /// Injected regions removed from `text`; verbatim when the flag is off.
+    ///
+    /// This is the filter alone: it does **not** strip `<private>` regions, and
+    /// running it before `strip_private_content` on text that contains both
+    /// can delete a `<private>` opener. Use [`Self::strip_then_filter_text`]
+    /// when the text has not already been stripped.
     pub fn filter_injected_text(&self, text: &str) -> String {
         if !self.filter_injected_prompts {
             return text.to_owned();
         }
         self.injection_filter().filter_text(text)
+    }
+
+    /// Strip `<private>` regions **first**, then drop injected regions.
+    ///
+    /// The order is load-bearing, not stylistic: `InjectionFilter::filter_text`
+    /// can delete a `<private>` opener that falls inside a marker region, after
+    /// which a later `strip_private_content` sees only a stray closer and
+    /// emits the secret as plain text. Every capture site that filters text
+    /// with no stripper above it uses this method; `filter_injected_text`
+    /// stays the filter alone for text that is already stripped. The strip is
+    /// unconditional (52.8); only the filter half is gated by
+    /// `filter_injected_prompts`.
+    pub fn strip_then_filter_text(&self, text: &str) -> String {
+        self.filter_injected_text(&strip_private_content(text))
     }
 
     /// True when `text` is non-blank and nothing but injected content;

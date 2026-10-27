@@ -586,11 +586,12 @@ async fn test_an_injected_only_transcript_is_not_retained_as_the_raw_context() {
 async fn test_private_stripping_and_the_injection_filter_both_fire_on_one_transcript() {
     // Wrong implementations this kills: the filter replacing the stripper ->
     // `secret token` survives; the stripper replacing the filter ->
-    // `boilerplate` survives. It does NOT discriminate site 1's order:
-    // `<private>` and marker regions are disjoint, so strip-then-filter and
-    // filter-then-strip produce the same bytes here. The order is fixed by
-    // construction (the existing `map(strip_private_content)` binding, then
-    // the filter) — do not claim this test as an order oracle.
+    // `boilerplate` survives. It does NOT discriminate site 1's order: on this
+    // fixture strip-then-filter and filter-then-strip produce the same bytes,
+    // because the `<private>` region here does not meet a marker region (the
+    // overlap shape test 13c prices is where the two orders diverge). The order
+    // is fixed by construction (the existing `map(strip_private_content)`
+    // binding, then the filter) — do not claim this test as an order oracle.
     let dir = TestDir::new("i52-both-mechanisms");
     let both_fixture = fixture(&dir, PrivacyConfig::default(), OFF).await;
     let mut capture = params("i52-cap-13");
@@ -613,4 +614,142 @@ async fn test_private_stripping_and_the_injection_filter_both_fire_on_one_transc
     assert!(contexts[0].contains("[REDACTED]"), "{contexts:?}");
     assert!(!contexts[0].contains("secret token"), "{contexts:?}");
     assert!(!contexts[0].contains("boilerplate"), "{contexts:?}");
+}
+
+// ---------------------------------------------------------------------------
+// Step 13c — every capture filter runs AFTER the private strip (review R2)
+// ---------------------------------------------------------------------------
+
+/// The shared overlap shape: a marker region that MEETS a `<private>` opener.
+/// Filtering before stripping deletes the opener with the marker region, and
+/// the stripper then sees only a stray `</private>` and emits the secret.
+const OVERLAP: &str = "keep\n<system-reminder>\n<private>\n</system-reminder>\nsecret\n</private>";
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_every_capture_filter_runs_after_the_private_strip() {
+    // Five legs, one per filter site that can see host text. Each names the
+    // wrong implementation it prices; the pre-fix worktree fails (b), (c),
+    // (d) and (e) with `secret`; (a) is the green-on-arrival oracle that
+    // fails when the assembled filter is deleted.
+    //
+    // (a) site 5, assembled — the filter's OWN oracle, unmasked by (b): the
+    //     marker lives in `toolCalls.input` and the prompt is clean. With the
+    //     assembled filter deleted, `boilerplate` reaches the summarizer.
+    let a_dir = TestDir::new("i52-order-a");
+    let a = fixture(&a_dir, PrivacyConfig::default(), OFF).await;
+    let mut capture = params("i52-cap-13c-a");
+    capture.transcript = Some("authored text".to_string());
+    capture.metadata = Some(json!({
+        "promptId": "p-1",
+        "autoCaptureContext": {
+            "userPrompt": "authored text",
+            "textResponses": [],
+            "toolCalls": [
+                { "name": "read", "input": "<system-reminder>\nboilerplate\n</system-reminder>" }
+            ]
+        }
+    }));
+    a.service.enqueue(&capture).await.expect("enqueue");
+    assert_eq!(a.service.drain_once().await.expect("drain").done, 1);
+    let contexts = a.summarizer.contexts();
+    assert_eq!(contexts.len(), 1, "one summarizer call");
+    assert!(
+        contexts[0].contains("authored text"),
+        "the authored prompt must survive: {contexts:?}"
+    );
+    assert!(
+        !contexts[0].contains("<system-reminder>") && !contexts[0].contains("boilerplate"),
+        "(a) the assembled context must be filtered, not only the prompt: {contexts:?}"
+    );
+
+    // (b) site 5, assembled — the Reviewer's leak. Pre-fix the summarizer
+    //     received `... ok\n\nsecret\n\n---`.
+    let b_dir = TestDir::new("i52-order-b");
+    let b = fixture(&b_dir, PrivacyConfig::default(), OFF).await;
+    let mut capture = params("i52-cap-13c-b");
+    capture.transcript = Some("authored text".to_string());
+    capture.metadata = Some(json!({
+        "promptId": "p-1",
+        "autoCaptureContext": {
+            "userPrompt": "authored text",
+            "textResponses": ["ok", OVERLAP]
+        }
+    }));
+    b.service.enqueue(&capture).await.expect("enqueue");
+    assert_eq!(b.service.drain_once().await.expect("drain").done, 1);
+    let contexts = b.summarizer.contexts();
+    assert_eq!(contexts.len(), 1, "one summarizer call");
+    assert!(
+        !contexts[0].contains("secret") && !contexts[0].contains("<system-reminder>"),
+        "(b) the assembled context must be stripped before it is filtered: {contexts:?}"
+    );
+
+    // (c) site 5, prompt — the prompt filter runs before the builder, so it
+    //     must strip first: moving only the ASSEMBLED filter after the strip
+    //     still leaks here. A filter-before-strip prompt filter emits `secret`.
+    let c_dir = TestDir::new("i52-order-c");
+    let c = fixture(&c_dir, PrivacyConfig::default(), OFF).await;
+    let mut capture = params("i52-cap-13c-c");
+    capture.transcript = Some("authored text".to_string());
+    capture.metadata = Some(json!({
+        "promptId": "p-1",
+        "autoCaptureContext": { "userPrompt": OVERLAP, "textResponses": ["done"] }
+    }));
+    c.service.enqueue(&capture).await.expect("enqueue");
+    assert_eq!(c.service.drain_once().await.expect("drain").done, 1);
+    let contexts = c.summarizer.contexts();
+    assert_eq!(contexts.len(), 1, "one summarizer call");
+    assert!(
+        !contexts[0].contains("secret") && !contexts[0].contains("<system-reminder>"),
+        "(c) the prompt must be stripped before it is filtered: {contexts:?}"
+    );
+
+    // (d) site 4 — the supplied raw context. Pre-fix the store retained
+    //     `keep\nsecret\n`; deleting site 4's filter stores the marker line.
+    let d_dir = TestDir::new("i52-order-d");
+    let d = fixture(&d_dir, PrivacyConfig::default(), ON).await;
+    let mut capture = params("i52-cap-13c-d");
+    capture.summary = Some("the captured summary".to_string());
+    capture.raw_context = Some(OVERLAP.to_string());
+    d.service.enqueue(&capture).await.expect("enqueue");
+    let report = d.service.drain_once().await.expect("drain");
+    assert_eq!(report.done, 1);
+    let retained = d
+        .store
+        .raw_context_for_session(PROJECT, SESSION, AGENT)
+        .await
+        .expect("raw context")
+        .expect("the mixed raw context is retained");
+    assert!(
+        !retained.raw_context.contains("secret")
+            && !retained.raw_context.contains("<system-reminder>"),
+        "(d) the raw context must be stripped before it is filtered: {retained:?}"
+    );
+
+    // (e) site 3 — the flush path's transcript, no `raw_context`. Pre-fix the
+    //     store retained `keep\nsecret\n`; deleting site 3's filter stores
+    //     the marker line.
+    let e_dir = TestDir::new("i52-order-e");
+    let e = fixture(&e_dir, PrivacyConfig::default(), ON).await;
+    let mut capture = params("i52-cap-13c-e");
+    capture.summary = Some("the captured summary".to_string());
+    capture.transcript = Some(OVERLAP.to_string());
+    e.service.enqueue(&capture).await.expect("enqueue");
+    let report = e
+        .service
+        .flush_supplied_summary_queued()
+        .await
+        .expect("flush");
+    assert_eq!(report.done, 1);
+    let retained = e
+        .store
+        .raw_context_for_session(PROJECT, SESSION, AGENT)
+        .await
+        .expect("raw context")
+        .expect("the mixed transcript is retained");
+    assert!(
+        !retained.raw_context.contains("secret")
+            && !retained.raw_context.contains("<system-reminder>"),
+        "(e) the flush transcript must be stripped before it is filtered: {retained:?}"
+    );
 }

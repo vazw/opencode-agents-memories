@@ -16,12 +16,25 @@
 //! disagreed on the number of list-literal consts, and the set is the
 //! assertion.
 //!
-//! The line-wise accumulator closes on the Rust item terminator (`;`): a
-//! `const`/`static` item always ends there, so a multi-line string const (for
-//! example `capture.rs`'s `RAW_CONTEXT_REQUIRED_MESSAGE`) closes itself and no
-//! longer swallows the items that follow it. A constructor-built list remains
-//! D-52-6's fifth blind spot (its initialiser begins with an identifier, so
-//! the shape predicate excludes it); the predicate itself is not widened.
+//! The line-wise accumulator closes when the last non-whitespace character of
+//! a line is a `;` **outside a trailing `//` comment** (`item_closes`), so a
+//! multi-line string const (for example `capture.rs`'s
+//! `RAW_CONTEXT_REQUIRED_MESSAGE`) closes itself and no longer swallows the
+//! items that follow it, while `const L: [&str; 2] = [ // note;` and an
+//! interior `// note;` line do not close it early. Six shapes were measured
+//! against the predicate: an appended multi-line `LEAKED_MARKERS` at EOF
+//! (missed by the old `];` rule, caught by the R4 `;` rule and by
+//! `item_closes`); `… = [ // note;` (caught, missed, caught); an interior
+//! `// note;` line (missed by R4, caught); `const MAX: u8 = 1; // note`
+//! preceding the leak (missed by R4, caught); a closing `]; // note` (missed
+//! by both earlier rules, caught); and a one-line `… ]; // note` (missed by
+//! both, caught). A constructor-built list remains D-52-6's fifth blind spot
+//! (its initialiser begins with an identifier, so the shape predicate excludes
+//! it); the predicate itself is not widened. The sixth blind spot is the close
+//! predicate's own, and two residual shapes remain: a `;` ending an
+//! **unrecognised** comment line (an unterminated block comment `/* note;`,
+//! or a `//` hidden behind a `"` in a char literal) and a `;` at the end of a
+//! line inside a multi-line raw string. Both are declared, not caught.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -115,6 +128,39 @@ fn declaration_name(line: &str) -> Option<String> {
     }
 }
 
+/// True when `line` ends a `const`/`static` item: its last non-whitespace
+/// character is a `;` outside a trailing `//` comment.
+///
+/// The comment rule is load-bearing in both directions: `const L: [&str; 2] =
+/// [ // note;` and an interior `// note;` line end in a `;` that is not the
+/// item terminator, while `const MAX: u8 = 1; // note` and a closing `]; //
+/// note` do end the item even though the raw line does not end in `;`. A `//`
+/// inside a double-quoted string (`"http://…"`) is not a comment.
+fn item_closes(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+        } else if byte == b'"' {
+            in_string = true;
+        } else if byte == b'/' && bytes.get(index + 1) == Some(&b'/') {
+            return line[..index].trim_end().ends_with(';');
+        }
+        index += 1;
+    }
+    line.trim_end().ends_with(';')
+}
+
 /// Marker-bearing list items in one file, as `(item name, matched markers)`.
 fn marker_list_items(source: &str) -> Vec<(String, usize)> {
     let lines: Vec<&str> = source.lines().collect();
@@ -126,7 +172,7 @@ fn marker_list_items(source: &str) -> Vec<(String, usize)> {
             continue;
         };
         let text;
-        if lines[index].trim_end().ends_with(';') {
+        if item_closes(lines[index]) {
             text = lines[index].to_string();
             index += 1;
         } else {
@@ -136,10 +182,7 @@ fn marker_list_items(source: &str) -> Vec<(String, usize)> {
             while index < lines.len() {
                 accumulated.push(lines[index]);
                 index += 1;
-                if accumulated
-                    .last()
-                    .is_some_and(|line| line.trim_end().ends_with(';'))
-                {
+                if accumulated.last().is_some_and(|line| item_closes(line)) {
                     closed = true;
                     break;
                 }

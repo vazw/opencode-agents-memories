@@ -769,13 +769,15 @@ impl CaptureService {
         // extension (the provider path supplies both via `assemble_summary`).
         let memory_type = "memory".to_string();
         let extension = CaptureExtension::default();
-        // D-52-3 site 3: the flush path's transcript, filtered at the call
-        // site. This site adds NO stripper — the only strip on this path is
-        // the pre-existing one inside `resolve_retention`.
+        // D-52-3 site 3: the flush path's transcript, stripped and filtered at
+        // the call site. The strip is load-bearing — filtering first would
+        // delete a `<private>` opener that meets a marker region; the
+        // pre-existing strip inside `resolve_retention` stays untouched and is
+        // a no-op on the already-stripped value.
         let filtered_transcript = params
             .transcript
             .as_deref()
-            .map(|text| self.privacy.filter_injected_text(text));
+            .map(|text| self.privacy.strip_then_filter_text(text));
         let retention = match self.resolve_retention(&params, filtered_transcript.as_deref()) {
             Ok(retention) => retention,
             Err(reason) => return self.dead_letter_now(entry, reason).await,
@@ -1064,14 +1066,17 @@ impl CaptureService {
                 agent_role,
             });
         }
-        // D-52-3 site 4: filter the SUPPLIED raw context only, before its own
-        // blank guard. The owned `String` is bound first so `supplied` keeps
-        // `Option<&str>` (a one-step `.map(..).filter(..)` would not compile
-        // against `supplied.or(transcript)`).
+        // D-52-3 site 4: strip and filter the SUPPLIED raw context only, before
+        // its own blank guard. The strip is load-bearing — filtering first
+        // would delete a `<private>` opener that meets a marker region; the
+        // strip inside `resolve_retention` stays untouched and is a no-op on
+        // the already-stripped value. The owned `String` is bound first so
+        // `supplied` keeps `Option<&str>` (a one-step `.map(..).filter(..)`
+        // would not compile against `supplied.or(transcript)`).
         let filtered_supplied = params
             .raw_context
             .as_deref()
-            .map(|raw| self.privacy.filter_injected_text(raw));
+            .map(|raw| self.privacy.strip_then_filter_text(raw));
         let supplied = filtered_supplied
             .as_deref()
             .filter(|raw| !raw.trim().is_empty());
@@ -1221,6 +1226,18 @@ impl CaptureService {
             Some(context) => context,
             None => return Ok(CaptureSummaryOutput::Skip(SkipReason::NoContext)),
         };
+        // D-52-3 site 5, assembled half: filter AFTER the builder's
+        // pre-existing strip (which runs inside `auto_capture_context`), so a
+        // marker region that meets a `<private>` opener cannot delete the
+        // opener before the stripper sees it. Only the BUILT context is
+        // filtered here: the transcript fallback was already filtered by site
+        // 1 (`process_entry`), and filtering it again would leave test 8 green
+        // with site 1 deleted.
+        let context = if metadata_user_prompt(&params.metadata).is_some() {
+            self.privacy.filter_injected_text(&context)
+        } else {
+            context
+        };
         match self.summarizer.as_ref() {
             Some(summarizer) => summarizer.summarize(&context).await,
             None => Err(EpisodicError::Io {
@@ -1277,12 +1294,15 @@ fn split_tags_suffix(summary: &str) -> (String, Vec<String>) {
 /// —the wrapper is allowed to send the block, and the Rust builder may obtain
 /// it through the same scope) or the raw transcript.
 ///
-/// D-52-3 site 5: the prompt is filtered **before** `build_markdown_context`
-/// (a region cut in half by the truncation would no longer have a closer), the
-/// pre-existing strip follows, and the assembled context is filtered after it
-/// (that second filter covers `textResponses`/`toolCalls`, which are host text
-/// too). A present `userPrompt` wins even when blank: no transcript fallback
-/// is introduced (r4 item 9).
+/// D-52-3 site 5: the prompt is **stripped and** filtered before
+/// `build_markdown_context` (a region cut in half by the truncation would no
+/// longer have a closer, and filtering before stripping would delete a
+/// `<private>` opener that meets a marker region). The pre-existing strip
+/// follows; `assemble_summary` filters the built context **after** this
+/// function returns (`strip → filter`, covering `textResponses`/`toolCalls`,
+/// which are host text too), and the transcript fallback is not filtered again
+/// because site 1 already did. A present `userPrompt` wins even when blank: no
+/// transcript fallback is introduced (r4 item 9).
 fn auto_capture_context(
     metadata: &Option<Json>,
     transcript: Option<&str>,
@@ -1327,11 +1347,15 @@ fn auto_capture_context(
         .unwrap_or_default();
 
     if let Some(prompt) = user_prompt {
-        // Site 5's blank eligibility: after filtering, a present-and-blank
-        // prompt with no responses and no tool calls has no context at all.
-        // A non-blank transcript beside it is NOT a fallback — the same
-        // branch, not a different one.
-        let prompt = privacy.filter_injected_text(prompt);
+        // Site 5's blank eligibility: after stripping and filtering, a present-
+        // and-blank prompt with no responses and no tool calls has no context
+        // at all. A non-blank transcript beside it is NOT a fallback — the
+        // same branch, not a different one.
+        //
+        // The prompt filter runs BEFORE the builder so truncation cannot cut a
+        // region in half; it strips first because filtering before the strip
+        // would delete a `<private>` opener that meets a marker region.
+        let prompt = privacy.strip_then_filter_text(prompt);
         if prompt.trim().is_empty() && text_responses.is_empty() && tool_calls.is_empty() {
             return None;
         }
@@ -1347,13 +1371,10 @@ fn auto_capture_context(
             latest_memory,
             max_context_bytes,
         );
-        // Prompt: filter -> build; assembled: filter -> strip. The second
-        // filter covers `textResponses`/`toolCalls` (host text too); running
-        // it BEFORE the existing stripper is byte-equivalent because the two
-        // mechanisms act on disjoint constructs (`<private>…</private>`
-        // versus marker regions), and it keeps the stripper's call site
-        // byte-identical — 52.8's mechanical gate diffs exactly that line.
-        let context = privacy.filter_injected_text(&context);
+        // The strip stays here, byte-identical (52.8): the assembled filter
+        // runs in `assemble_summary` AFTER this returns (strip -> filter), so
+        // a marker region that meets a `<private>` opener cannot delete the
+        // opener before the stripper sees it.
         return Some(mem_ai::privacy::strip_private_content(&context));
     }
 
