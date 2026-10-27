@@ -1,8 +1,9 @@
 // W5.2 shared test harness for the staged-package cases. NOT a test file:
 // `node --test` only matches `*.test.mjs`, so this module has no cases of its
-// own — its correctness is proved by its two users, `v2-plugin-adapter.test.mjs`
-// (the end-to-end capture, `mode: "v2"`) and `wrapper-toast.test.mjs` (the four
-// toast cases, `mode: "v1"`).
+// own — its correctness is proved by its five users: `v2-plugin-adapter.test.mjs`
+// and `compaction-v2-inheritance.test.mjs` (`mode: "v2"`),
+// `wrapper-toast.test.mjs` (`mode: "v1"`), `compaction-hook.test.mjs`
+// (`mode: "v1-compaction"`) and `memory-tools.test.mjs` (`mode: "v2-tool"`).
 //
 // Why a subprocess and not an import: `plugin/src/plugin.js` spawns the engine
 // with piped stdio and no `detached`/`unref` (`:365-368`), and the stub exits
@@ -171,13 +172,15 @@ function respond(parsed) {
 
 /**
  * The driver script, written into the case's temp dir by its consumer. One
- * source, two modes (`DRIVER_MODE`), both reading their fixture from the JSON
+ * source, four modes (`DRIVER_MODE`), each reading its fixture from the JSON
  * file whose path the parent passes as argv[3]:
  *
  *   "v1" — imports the staged `dist/plugin.js`, builds `server()` from the
  *          fixture's client spec, fires its `chat.message` events, races each
  *          hook call against a 2 s guard started immediately before the call,
  *          and writes `{ settled, elapsedMs, toastCalls }`.
+ *   "v1-compaction" — drives the staging/compaction hooks in fixture order and
+ *          writes the recorded call outcomes.
  *   "v2" — imports the staged `dist/v2/plugin.js`, materializes the fixture's
  *          serializable ctx into real functions, calls `setup(ctx)`, fires the
  *          recorded `prompt` hook when the fixture carries one (the V2→legacy
@@ -185,6 +188,10 @@ function respond(parsed) {
  *          through the recorded subscription, polls the stub's wire log for the
  *          `capture` line and writes
  *          `{ helloCount, captureLine, injectCount, toastEmits }`.
+ *   "v2-tool" — imports the staged `dist/plugin.js`, calls `setup(ctx)` against
+ *          an async fake tool surface, invokes the registered
+ *          `recall_project_sessions` tool and writes
+ *          `{ names, payloadText, wire }`.
  */
 export const DRIVER_SOURCE = `import fs from "node:fs";
 import path from "node:path";
@@ -432,6 +439,39 @@ if (mode === "v2") {
   const helloCount = wire.filter((message) => message && message.method === "hello").length;
   const injectCount = wire.filter((message) => message && message.method === "inject").length;
   writeRecord({ helloCount, captureLine, injectCount, toastEmits, sessionGetCalls, consoleErrors });
+  process.exit(0);
+}
+
+if (mode === "v2-tool") {
+  const mod = await import(pathToFileURL(path.join(pkgDir, "dist", "plugin.js")));
+  const added = [];
+  const ctx = {
+    location: { directory: fixture.directory, project: { directory: fixture.directory } },
+    session: { hook: async () => {} },
+    event: {
+      // No events are fed (that is the "never-yielding" part), but the body
+      // MUST resolve on abort: registerV2Adapter's cleanup is
+      // controller.abort() then await watcher, so a body that awaits a
+      // never-resolving promise hangs await cleanup() and the parent only
+      // sees runDriver's 30 s SIGKILL (timedOut: true).
+      subscribe: async function* ({ signal }) {
+        if (signal.aborted) return;
+        await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+      },
+    },
+    tool: {
+      transform: async (callback) => {
+        await callback({ add: (tool) => added.push(tool) });
+        return { dispose: async () => {} };
+      },
+    },
+  };
+  const cleanup = await mod.setup(ctx);
+  const tool = added.find((entry) => entry.name === "recall_project_sessions");
+  const result = await tool.execute({ projectId: fixture.directory }, { sessionID: fixture.sessionID });
+  const wire = readWire();
+  await cleanup();
+  writeRecord({ names: added.map((entry) => entry.name), payloadText: result.content, wire });
   process.exit(0);
 }
 

@@ -20,7 +20,13 @@ use mem_bridge::jsonrpc::Response;
 use mem_episodic::store::EpisodicStore;
 use mem_store::serde_json::{Value, json};
 
-fn runtime_services(dir: &TestDir) -> (Arc<CaptureService>, Arc<InjectService>) {
+fn runtime_services(
+    dir: &TestDir,
+) -> (
+    Arc<CaptureService>,
+    Arc<InjectService>,
+    Arc<mem_bridge::recall::RecallService>,
+) {
     let store = Arc::new(EpisodicStore::new(
         dir.path().to_path_buf(),
         dir.store_config(),
@@ -44,6 +50,10 @@ fn runtime_services(dir: &TestDir) -> (Arc<CaptureService>, Arc<InjectService>) 
         Arc::new(FixedScopeResolver::default()),
         131_072,
     );
+    // Built BEFORE `InjectService::new`, which moves `store` and `embedder` by
+    // value: a `RecallService` constructed afterwards would have nothing left
+    // to build from.
+    let recall = mem_bridge::recall::RecallService::new(store.clone(), embedder.clone());
     let inject = InjectService::new(
         store,
         shards,
@@ -52,13 +62,17 @@ fn runtime_services(dir: &TestDir) -> (Arc<CaptureService>, Arc<InjectService>) 
         embedder,
         Arc::new(mem_store::platform::SystemProcessProbe),
     );
-    (Arc::new(capture), Arc::new(inject))
+    (Arc::new(capture), Arc::new(inject), Arc::new(recall))
 }
 
 fn engine(dir: &TestDir) -> Arc<Engine> {
     // `store.ready()` runs the migrations before the engine starts.
-    let (capture, inject) = runtime_services(dir);
-    let runtime = mem_bridge::engine::EngineRuntime { capture, inject };
+    let (capture, inject, recall) = runtime_services(dir);
+    let runtime = mem_bridge::engine::EngineRuntime {
+        capture,
+        inject,
+        recall,
+    };
     Arc::new(Engine::with_runtime(
         EngineConfig::default(),
         Arc::new(runtime),
@@ -168,7 +182,7 @@ async fn test_host_driven_idle_capture_persist_then_next_chat_message_injects() 
     );
 
     // ── Phase 2: restart/replay → BOTH writes ────────────────────────────
-    let (capture, inject) = runtime_services(&dir);
+    let (capture, inject, _recall) = runtime_services(&dir);
     let _ = &inject;
     let replay = capture.drain_once().await.expect("startup replay drain");
     assert_eq!(

@@ -30,6 +30,7 @@ import {
   resolveSessionModel,
   restorePromptBody,
 } from "./compaction.js";
+import { registerMemoryTools } from "./tools.js";
 
 const PROTOCOL = "1.0.0";
 const MIN_PROTOCOL = "1.0.0";
@@ -947,7 +948,18 @@ const id = pkg.name;
 // at evaluation order.
 export async function setup(ctx) {
   const mod = await import("./v2/plugin.js");
-  return mod.setup(ctx);
+  const adapterCleanup = await mod.setup(ctx);
+  // Issue 22: the one agent-facing memory tool rides the V2 `setup` path's
+  // `ctx.tool.transform` door (the only registration surface the live host
+  // exposes). Registration is fail-open: a host without it keeps capture and
+  // injection.
+  const toolCleanup = await registerMemoryTools(ctx, {
+    sendRecall: (params) => sendRequest("recall", params, REQUEST_TIMEOUT_MS),
+  });
+  return async () => {
+    await toolCleanup();
+    await adapterCleanup();
+  };
 }
 
 export default { id, server, setup };

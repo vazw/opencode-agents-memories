@@ -1,0 +1,21 @@
+{
+  "name": "recall_project_sessions",
+  "description": "Recall past agent sessions for a project as a chronological, filtered or semantically ranked timeline.",
+  "input": {
+    "type": "object",
+    "properties": {
+      "projectId": { "type": "string" },
+      "mode": { "type": "string", "enum": ["chronological", "semantic", "filtered"] },
+      "query": { "type": "string" },
+      "since": { "type": "integer" },
+      "until": { "type": "integer" },
+      "lastNSessions": { "type": "integer", "minimum": 0, "maximum": 500 },
+      "touchedFiles": { "type": "array", "items": { "type": "string" } },
+      "agentId": { "type": "string" },
+      "sessionId": { "type": "string" },
+      "includeFullSessions": { "type": "boolean" }
+    },
+    "required": ["projectId"],
+    "additionalProperties": false
+  }
+}

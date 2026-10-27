@@ -39,6 +39,7 @@ use crate::capture::{CaptureParams, CaptureService};
 use crate::error_map::{self, ErrorKind};
 use crate::inject::{InjectParams, InjectService};
 use crate::jsonrpc::{ParseLineError, Request, Response, encode_response, parse_line};
+use crate::recall::{RecallRequest, RecallService};
 
 /// The protocol version this engine speaks (ADR-0007 D-43 baseline).
 pub const PROTOCOL_VERSION: &str = "1.0.0";
@@ -156,9 +157,11 @@ pub struct Engine {
     /// Number of internal lifecycle tasks spawned through [`Engine::spawn_tracked`]
     /// and not yet finished (step 10's no-live-tasks oracle reads it).
     live_tasks: Arc<AtomicUsize>,
-    /// The W5.3 runtime services. `None` is the FIXTURE-only engine
-    /// (`Engine::new`): `capture`/`inject` degrade (-32001) and never
-    /// touch storage; `hello`/`health`/`shutdown` are unchanged.
+    /// The W5.3 runtime services plus the W5.4 one-tool read service. `None`
+    /// is the FIXTURE-only engine (`Engine::new`): `capture`/`inject`/`recall`
+    /// degrade (-32001) and never touch storage; `hello`/`health`/`shutdown`
+    /// are unchanged. The legacy `recall` shape needs no runtime (it reads
+    /// nothing).
     runtime: Option<Arc<EngineRuntime>>,
 }
 
@@ -167,6 +170,7 @@ pub struct Engine {
 pub struct EngineRuntime {
     pub capture: Arc<CaptureService>,
     pub inject: Arc<InjectService>,
+    pub recall: Arc<RecallService>,
 }
 
 impl Engine {
@@ -221,7 +225,7 @@ impl Engine {
         match request.method.as_str() {
             "capture" => self.call_capture(request).await,
             "inject" => self.call_inject(request).await,
-            "recall" => self.stub_recall(request),
+            "recall" => self.call_recall(request).await,
             "health" => self.health(request),
             "shutdown" => self.shutdown(request),
             _ => Response::error(
@@ -391,12 +395,50 @@ impl Engine {
         }
     }
 
-    /// `recall` stub: an empty result list (W5.1).
-    fn stub_recall(&self, request: &Request) -> Response {
-        Response::result(
-            request.id.clone(),
-            serde_json::json!({ "count": 0, "items": [] }),
-        )
+    /// `recall`: two accepted parameter shapes (D3). The legacy shape answers
+    /// one logged empty page and never needs a runtime (D4); the canonical
+    /// shape degrades without one (-32001) and answers the project-scoped page
+    /// otherwise.
+    async fn call_recall(&self, request: &Request) -> Response {
+        let recall_request = match RecallRequest::from_params(&request.params) {
+            Ok(recall_request) => recall_request,
+            Err(_) => {
+                return Response::error(
+                    request.id.clone(),
+                    error_map::code_for(ErrorKind::InvalidParams),
+                    error_map::message_for(ErrorKind::InvalidParams),
+                );
+            }
+        };
+        let args = match recall_request {
+            RecallRequest::Legacy => {
+                return Response::result(request.id.clone(), RecallService::legacy_page());
+            }
+            RecallRequest::Canonical(args) => args,
+        };
+        let runtime = match &self.runtime {
+            Some(runtime) => runtime,
+            None => {
+                return Response::error(
+                    request.id.clone(),
+                    error_map::code_for(ErrorKind::Degraded),
+                    error_map::message_for(ErrorKind::Degraded),
+                );
+            }
+        };
+        match runtime.recall.recall(&args).await {
+            Ok(page) => Response::result(request.id.clone(), page),
+            Err(crate::recall::RecallError::InvalidParams) => Response::error(
+                request.id.clone(),
+                error_map::code_for(ErrorKind::InvalidParams),
+                error_map::message_for(ErrorKind::InvalidParams),
+            ),
+            Err(crate::recall::RecallError::Internal) => Response::error(
+                request.id.clone(),
+                error_map::code_for(ErrorKind::Internal),
+                error_map::message_for(ErrorKind::Internal),
+            ),
+        }
     }
 
     /// `health` full/degraded report (frozen schema).
@@ -1005,6 +1047,10 @@ pub async fn run_in_runtime(
             Arc::new(EngineRuntime {
                 capture: runtime.capture.clone(),
                 inject: runtime.inject.clone(),
+                recall: Arc::new(RecallService::new(
+                    runtime.store.clone(),
+                    runtime.embedder.clone(),
+                )),
             }),
         ),
         None => Engine::new(engine_config),

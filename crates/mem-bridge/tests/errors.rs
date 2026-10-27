@@ -375,5 +375,6 @@ async fn oracle_runtime(storage_root: &std::path::Path) -> mem_bridge::engine::E
     mem_bridge::engine::EngineRuntime {
         capture: fixture.capture,
         inject: fixture.inject,
+        recall: fixture.recall,
     }
 }

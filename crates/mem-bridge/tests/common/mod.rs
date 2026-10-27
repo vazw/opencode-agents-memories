@@ -397,6 +397,12 @@ impl mem_bridge::capture_prompt::CaptureSummarizer for FixedSummarizer {
 pub struct RuntimeFixture {
     pub capture: Arc<mem_bridge::capture::CaptureService>,
     pub inject: Arc<mem_bridge::inject::InjectService>,
+    pub recall: Arc<mem_bridge::recall::RecallService>,
+    /// The composed episodic store (shared with every service above): the
+    /// W5.4 `recall` oracles seed it directly.
+    pub store: Arc<EpisodicStore>,
+    /// The fixture's embedder, for the same direct seeding.
+    pub embedder: Arc<dyn Embedder>,
 }
 
 pub async fn build_fixture_runtime(storage_root: &Path) -> RuntimeFixture {
@@ -433,5 +439,11 @@ pub async fn build_fixture_runtime(storage_root: &Path) -> RuntimeFixture {
     RuntimeFixture {
         capture: Arc::new(capture),
         inject: Arc::new(inject),
+        recall: Arc::new(mem_bridge::recall::RecallService::new(
+            store.clone(),
+            embedder.clone(),
+        )),
+        store,
+        embedder,
     }
 }

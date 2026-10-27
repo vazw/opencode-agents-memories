@@ -60,9 +60,11 @@ function stagePackage(tmpRoot) {
   fs.mkdirSync(path.join(pkgDir, "dist"), { recursive: true });
   fs.copyFileSync(path.join(realPkgRoot, "dist", "plugin.js"), path.join(pkgDir, "dist", "plugin.js"));
   fs.copyFileSync(path.join(realPkgRoot, "dist", "compaction.js"), path.join(pkgDir, "dist", "compaction.js"));
+  fs.copyFileSync(path.join(realPkgRoot, "dist", "tools.js"), path.join(pkgDir, "dist", "tools.js"));
   fs.mkdirSync(path.join(pkgDir, "src"), { recursive: true });
   fs.copyFileSync(path.join(realPkgRoot, "src", "plugin.js"), path.join(pkgDir, "src", "plugin.js"));
   fs.copyFileSync(path.join(realPkgRoot, "src", "compaction.js"), path.join(pkgDir, "src", "compaction.js"));
+  fs.copyFileSync(path.join(realPkgRoot, "src", "tools.js"), path.join(pkgDir, "src", "tools.js"));
   fs.copyFileSync(path.join(realPkgRoot, "index.js"), path.join(pkgDir, "index.js"));
   return pkgDir;
 }

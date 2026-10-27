@@ -55,6 +55,7 @@ fn full_engine() -> Engine {
     let runtime = mem_bridge::engine::EngineRuntime {
         capture: fixture.capture,
         inject: fixture.inject,
+        recall: fixture.recall,
     };
     // The temp dir's lifetime: the guard is dropped with the engine's test
     // run (a leaked TestDir is bounded by the test count).
