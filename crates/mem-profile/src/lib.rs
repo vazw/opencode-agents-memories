@@ -15,6 +15,9 @@
 //! - [`erasure`] — the B2′ vocabulary: the watermark predicate, the
 //!   `ProfileEraser` seam `delete_prompt` calls before it deletes the source
 //!   row, and the two-table `EraseReport`.
+//! - [`profile_context`] — the `<user_profile>` injection renderer: the four
+//!   ranked sections, the single escaping/sanitising funnel and the
+//!   item-capped block the injector prepends (`ProfileInjectPolicy`, D-44-x).
 //!
 //! Upstream reference: `example/opencode-mem/src/services/user-prompt/*`,
 //! `src/services/user-profile/*`, `src/services/user-memory-learning.ts`
@@ -36,6 +39,7 @@ pub mod incremental_cleanup;
 pub mod language_detector;
 pub mod learning_lock;
 pub mod learning_service;
+pub mod profile_context;
 pub mod profile_store;
 pub mod profile_utils;
 pub mod prompt;

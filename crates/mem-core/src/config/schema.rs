@@ -347,6 +347,10 @@ pub struct FileConfig {
     pub embedding_dtype: Option<Value>,
     pub similarity_threshold: Option<f64>,
     pub max_memories: Option<u32>,
+    /// Upstream's `maxProfileItems`, parsed for compatibility and
+    /// **deliberately unread**: no consumer exists, and the injection caps come
+    /// from the three `userProfileInject*` knobs (issue 44.9). Do not wire it
+    /// to a cap — that is the whole point of the AC.
     pub max_profile_items: Option<u32>,
     pub inject_profile: Option<bool>,
     pub container_tag_prefix: Option<String>,
@@ -492,6 +496,9 @@ pub struct Defaults {
     pub embedding_pooling: EmbeddingPooling,
     pub similarity_threshold: f64,
     pub max_memories: u32,
+    /// Upstream's `maxProfileItems` default, copied verbatim into
+    /// `Config::max_profile_items`. It is deliberately unread everywhere: the
+    /// injection caps are the three `userProfileInject*` knobs (issue 44.9).
     pub max_profile_items: u32,
     pub inject_profile: bool,
     pub container_tag_prefix: &'static str,
@@ -648,6 +655,9 @@ pub struct Config {
 
     pub similarity_threshold: f64,
     pub max_memories: u32,
+    /// Upstream's `maxProfileItems`, resolved for compatibility and
+    /// **deliberately unread**: it never reaches the renderer, whose caps are
+    /// the three `userProfileInject*` knobs (issue 44.9).
     pub max_profile_items: u32,
     pub inject_profile: bool,
     pub container_tag_prefix: String,

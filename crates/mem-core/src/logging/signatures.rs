@@ -35,10 +35,14 @@ pub const AUTO_CAPTURE_MEMORY_PERSISTED: &str = "Auto-capture memory persisted";
 /// auto-capture context, so neither tier is written).
 pub const AUTO_CAPTURE_SKIPPED: &str = "Auto-capture skipped";
 
-/// `profileInjections` counter. **Dormant:** no profile-context builder and no
-/// `chat.message` hook exist; `inject_profile` is a config flag only
-/// (`mem_core::config`), and `mem_bridge::inject` is the episodic tier-1 block,
-/// not the user profile. Follow-up gated on a user-profile injection path.
+/// `profileInjections` counter. Emitted by
+/// `crates/mem-bridge/src/inject.rs` (`InjectService::assemble`, the
+/// `ProfileInjection::Rendered` arm) — one event per rendered
+/// `<user_profile>` block. `data` is `None`: the payload is model-derived
+/// profile text and the identity is a git email, so neither is ever logged.
+///
+/// The `chat.message` hook does not exist in this port; the wrapper applies
+/// the returned block, so the injector is the emit site.
 pub const PROFILE_INJECT: &str = "profile inject";
 
 /// `compactionInjections` counter. **Dormant:** the engine has no compaction
