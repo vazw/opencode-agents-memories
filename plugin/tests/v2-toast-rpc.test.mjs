@@ -75,6 +75,8 @@ test("test_v2_toast_rpc_drops_unknown_variants_and_non_finite_durations", async 
         variant: "bogus",
         duration: Number.POSITIVE_INFINITY,
         sessionID: "",
+        extra: "smuggled",
+        path: "/etc/passwd",
       },
     }),
     { message: "message survives" },

@@ -106,6 +106,17 @@ test(
       `the hook must not wait on the host toast (took ${record.elapsedMs} ms)`
     );
     assert.equal(record.toastCalls, 1, "the failing inject made exactly one toast attempt");
+    assert.deepEqual(
+      record.toastBodies,
+      [
+        {
+          title: "opencode-mem",
+          message: "Memory injection failed; memory may be disabled.",
+          variant: "warning",
+        },
+      ],
+      "the payload is the fixed warning — never the engine error text, a transcript fragment or a path"
+    );
   }
 );
 

@@ -153,10 +153,12 @@ function respond(parsed) {
  *          hook call against a 2 s guard started immediately before the call,
  *          and writes `{ settled, elapsedMs, toastCalls }`.
  *   "v2" — imports the staged `dist/v2/plugin.js`, materializes the fixture's
- *          serializable ctx into real functions, calls `setup(ctx)`, lets the
- *          supplied host events flow through the recorded subscription, polls
- *          the stub's wire log for the `capture` line and writes
- *          `{ helloCount, captureLine }`.
+ *          serializable ctx into real functions, calls `setup(ctx)`, fires the
+ *          recorded `prompt` hook when the fixture carries one (the V2→legacy
+ *          client→`notifyHost`→toast path), lets the supplied host events flow
+ *          through the recorded subscription, polls the stub's wire log for the
+ *          `capture` line and writes
+ *          `{ helloCount, captureLine, injectCount, toastEmits }`.
  */
 export const DRIVER_SOURCE = `import fs from "node:fs";
 import path from "node:path";
@@ -191,17 +193,20 @@ if (mode === "v1") {
     client.session = { messages: async () => ({ data: spec.sessionMessages }) };
   }
   let toastCalls = 0;
+  const toastBodies = [];
   if (spec.showToast === "counting") {
     client.tui = {
-      showToast: async () => {
+      showToast: async (input) => {
         toastCalls += 1;
+        toastBodies.push(input?.body ?? input ?? null);
         return { data: true };
       },
     };
   } else if (spec.showToast === "never") {
     client.tui = {
-      showToast: () => {
+      showToast: (input) => {
         toastCalls += 1;
+        toastBodies.push(input?.body ?? input ?? null);
         return new Promise(() => {});
       },
     };
@@ -219,17 +224,21 @@ if (mode === "v1") {
     settled = outcome === "hook";
     elapsedMs = Date.now() - startedAt;
   }
-  writeRecord({ settled, elapsedMs, toastCalls });
+  writeRecord({ settled, elapsedMs, toastCalls, toastBodies });
   process.exit(0);
 }
 
 if (mode === "v2") {
   const mod = await import(pathToFileURL(path.join(pkgDir, "dist", "v2", "plugin.js")));
   let registeredRpc = null;
+  const sessionHooks = new Map();
+  const toastEmits = [];
   const ctx = {
     location: fixture.location,
     session: {
-      hook: async () => {},
+      hook: async (name, callback) => {
+        sessionHooks.set(name, callback);
+      },
       context: async () => fixture.session?.context ?? [],
       get: async ({ sessionID }) => fixture.session?.get?.[sessionID] ?? null,
     },
@@ -247,13 +256,28 @@ if (mode === "v2") {
     ctx.rpc = {
       register: async (definition) => {
         registeredRpc = definition?.id ?? null;
-        return { events: { emit: async () => {} } };
+        return {
+          events: {
+            emit: async (name, data) => {
+              toastEmits.push({ name, data });
+            },
+          },
+        };
       },
     };
   }
   await mod.setup(ctx);
   if (fixture.rpc?.registered === true && registeredRpc !== "opencode-mem") {
     throw new Error("the v2 entry did not register the toast rpc descriptor");
+  }
+  // The V2 prompt hook is the path setup → legacy client → notifyHost → toast.
+  // Firing it here is what exercises the toast RPC from the V2 side at all.
+  if (fixture.prompt) {
+    const promptHook = sessionHooks.get("prompt");
+    if (typeof promptHook !== "function") {
+      throw new Error("the v2 entry did not register a prompt hook");
+    }
+    await promptHook(fixture.prompt);
   }
   const deadline = Date.now() + 10000;
   let captureLine = null;
@@ -263,8 +287,10 @@ if (mode === "v2") {
     if (Date.now() > deadline) break;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  const helloCount = readWire().filter((message) => message && message.method === "hello").length;
-  writeRecord({ helloCount, captureLine });
+  const wire = readWire();
+  const helloCount = wire.filter((message) => message && message.method === "hello").length;
+  const injectCount = wire.filter((message) => message && message.method === "inject").length;
+  writeRecord({ helloCount, captureLine, injectCount, toastEmits });
   process.exit(0);
 }
 

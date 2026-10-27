@@ -82,4 +82,20 @@ test("test_v2_loader_contract_setup_delegates_to_the_v2_entry", async () => {
     /v2 adapter requires ctx\.session\.hook/,
     "main.setup must reach dist/v2/plugin.js's setup"
   );
+
+  // A valid-enough V2 ctx through the MAIN entry: the delegation must return
+  // the adapter's cleanup — a same-message local throw does not satisfy this —
+  // and a registry that refuses the toast descriptor must degrade, not fail.
+  const ctx = {
+    location: { directory: "/workspace/project" },
+    session: { hook: async () => {} },
+    rpc: {
+      register: async () => {
+        throw new Error("registry refused the descriptor");
+      },
+    },
+  };
+  const cleanup = await main.setup(ctx);
+  assert.equal(typeof cleanup, "function", "a V2 host gets the adapter's cleanup");
+  await cleanup();
 });

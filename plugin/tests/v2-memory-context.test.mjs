@@ -1,7 +1,7 @@
 // W5.2 `js` shard — the adapter's memory-context cache lifecycle, the half of
 // upstream `tests/v2-memory-context.test.ts` this lane owns (blueprint D6.1).
 // Five cases: three assert upstream case intents (`:28` retained across model
-// steps, `:44` sessions isolated, `:58`-empty injects nothing) and two are
+// steps, `:44` sessions isolated, `:58` empty/failed refresh) and two are
 // net-new adapter semantics with no upstream oracle (refresh per prompt,
 // compaction drop). The file's *store-backed* subject has no port counterpart:
 // its nine upstream cases are partitioned with an owner each in
@@ -77,7 +77,7 @@ function contextOf(hooks, sessionID) {
   return hooks.get("context")(event).then(() => event.system.map((part) => part.text));
 }
 
-test("test_v2_memory_context_retains_the_injection_across_model_steps", async () => {
+test("test_v2_memory_context_retains_the_injection_across_model_steps", { timeout: 5000 }, async () => {
   const { registerV2Adapter } = await import(ADAPTER_MODULE);
   const harness = createHarness();
   const prompts = [];
@@ -103,7 +103,7 @@ test("test_v2_memory_context_retains_the_injection_across_model_steps", async ()
   await cleanup();
 });
 
-test("test_v2_memory_context_isolates_sessions", async () => {
+test("test_v2_memory_context_isolates_sessions", { timeout: 5000 }, async () => {
   const { registerV2Adapter } = await import(ADAPTER_MODULE);
   const harness = createHarness();
   const cleanup = await registerV2Adapter(
@@ -120,32 +120,57 @@ test("test_v2_memory_context_isolates_sessions", async () => {
   await cleanup();
 });
 
-test("test_v2_memory_context_injects_nothing_when_the_v1_hook_injects_nothing", async () => {
+test("test_v2_memory_context_injects_nothing_when_the_v1_hook_injects_nothing", { timeout: 5000 }, async () => {
   const { registerV2Adapter } = await import(ADAPTER_MODULE);
   const harness = createHarness();
-  const cleanup = await registerV2Adapter(
-    harness.ctx,
-    createLegacyHooks([null, "after empty lookup"])
-  );
+  const legacy = createLegacyHooks(["stale block", null, "after empty lookup"]);
+  const cleanup = await registerV2Adapter(harness.ctx, legacy);
 
+  // Seed the cache FIRST: with a fresh adapter, "removed the stale block" and
+  // "there never was a block" are indistinguishable.
   await harness.hooks.get("prompt")({ sessionID: "ses-1", messageID: "msg-1", prompt: { text: "first" } });
+  assert.deepEqual(await contextOf(harness.hooks, "ses-1"), ["stale block"]);
+
+  // Upstream `:58`, empty half: a refresh that injects nothing drops it.
+  await harness.hooks.get("prompt")({ sessionID: "ses-1", messageID: "msg-2", prompt: { text: "second" } });
   assert.deepEqual(
     await contextOf(harness.hooks, "ses-1"),
     [],
     "an empty injection leaves no stale context behind"
   );
 
-  await harness.hooks.get("prompt")({ sessionID: "ses-1", messageID: "msg-2", prompt: { text: "second" } });
+  await harness.hooks.get("prompt")({ sessionID: "ses-1", messageID: "msg-3", prompt: { text: "third" } });
   assert.deepEqual(
     await contextOf(harness.hooks, "ses-1"),
     ["after empty lookup"],
     "a later prompt recovers"
   );
 
+  // Upstream `:58`, failed half: the adapter drops the block BEFORE the V1 hook
+  // runs, so a throwing refresh cannot leave the previous block behind.
+  legacy["chat.message"] = async () => {
+    throw new Error("refresh lookup failed");
+  };
+  await assert.rejects(
+    () =>
+      harness.hooks.get("prompt")({
+        sessionID: "ses-1",
+        messageID: "msg-4",
+        prompt: { text: "fourth" },
+      }),
+    /refresh lookup failed/,
+    "the V1 hook's failure surfaces — the adapter does not swallow it"
+  );
+  assert.deepEqual(
+    await contextOf(harness.hooks, "ses-1"),
+    [],
+    "a failed refresh drops the stale block too"
+  );
+
   await cleanup();
 });
 
-test("test_v2_memory_context_refreshes_the_injection_on_each_prompt", async () => {
+test("test_v2_memory_context_refreshes_the_injection_on_each_prompt", { timeout: 5000 }, async () => {
   const { registerV2Adapter } = await import(ADAPTER_MODULE);
   const harness = createHarness();
   const cleanup = await registerV2Adapter(
@@ -166,7 +191,7 @@ test("test_v2_memory_context_refreshes_the_injection_on_each_prompt", async () =
   await cleanup();
 });
 
-test("test_v2_memory_context_clears_the_injection_after_a_compaction", async () => {
+test("test_v2_memory_context_clears_the_injection_after_a_compaction", { timeout: 5000 }, async () => {
   const { registerV2Adapter } = await import(ADAPTER_MODULE);
   const harness = createHarness();
   const cleanup = await registerV2Adapter(harness.ctx, createLegacyHooks(["before compaction", "after compaction"]));

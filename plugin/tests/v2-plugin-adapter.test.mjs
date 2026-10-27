@@ -51,6 +51,7 @@ function createHarness() {
       },
       get: async (input) => {
         getCalls.push(input);
+        if (input?.sessionID === "ses-boom") throw new Error("host lookup failed");
         return { location: { directory: "/workspace/project" } };
       },
     },
@@ -66,6 +67,9 @@ function createHarness() {
             if (handled) handled();
           }
         } finally {
+          // Deferred by a macrotask so the assertion can tell an awaited
+          // teardown from a cleanup that returns before the watcher ends.
+          await new Promise((resolve) => setTimeout(resolve, 0));
           closed = true;
         }
       },
@@ -88,7 +92,7 @@ function createHarness() {
   return { ctx, hooks, getCalls, closed: () => closed, deliver };
 }
 
-test("test_v2_adapter_prompt_hook_runs_the_v1_chat_message_hook", async () => {
+test("test_v2_adapter_prompt_hook_runs_the_v1_chat_message_hook", { timeout: 5000 }, async () => {
   const { registerV2Adapter } = await import(ADAPTER_MODULE);
 
   await assert.rejects(
@@ -140,7 +144,7 @@ test("test_v2_adapter_prompt_hook_runs_the_v1_chat_message_hook", async () => {
   await cleanup();
 });
 
-test("test_v2_adapter_context_hook_injects_only_the_cached_text", async () => {
+test("test_v2_adapter_context_hook_injects_only_the_cached_text", { timeout: 5000 }, async () => {
   const { registerV2Adapter } = await import(ADAPTER_MODULE);
   const harness = createHarness();
   const cleanup = await registerV2Adapter(harness.ctx, {
@@ -172,7 +176,7 @@ test("test_v2_adapter_context_hook_injects_only_the_cached_text", async () => {
   await cleanup();
 });
 
-test("test_v2_adapter_invalidates_the_session_cache_only_for_compaction_at_this_location", async () => {
+test("test_v2_adapter_invalidates_the_session_cache_only_for_compaction_at_this_location", { timeout: 5000 }, async () => {
   const { registerV2Adapter } = await import(ADAPTER_MODULE);
   const harness = createHarness();
   let revision = 1;
@@ -230,7 +234,7 @@ test("test_v2_adapter_invalidates_the_session_cache_only_for_compaction_at_this_
   await cleanup();
 });
 
-test("test_v2_adapter_forwards_location_filtered_events_to_the_v1_event_hook", async () => {
+test("test_v2_adapter_forwards_location_filtered_events_to_the_v1_event_hook", { timeout: 5000 }, async () => {
   const { registerV2Adapter } = await import(ADAPTER_MODULE);
   const harness = createHarness();
   const delivered = [];
@@ -265,18 +269,100 @@ test("test_v2_adapter_forwards_location_filtered_events_to_the_v1_event_hook", a
     properties: { sessionID: "ses-1", type: "message.updated" },
   });
 
+  // The upstream envelope shapes, each one decision the filter must make.
+  // A trailing slash is the same project after resolve().
+  await harness.deliver({
+    type: "session.execution.succeeded",
+    location: { directory: "/workspace/project/" },
+    data: { sessionID: "ses-1" },
+  });
+  assert.equal(delivered.length, 3, "a trailing slash compares equal after resolve()");
+
+  // A payload-wrapped envelope: the wrapper is unwrapped, the version suffix
+  // stripped, and the location decides.
+  await harness.deliver({
+    payload: {
+      type: "session.execution.succeeded.1",
+      location: { directory: "/workspace/project" },
+      data: { sessionID: "ses-1" },
+    },
+  });
+  assert.deepEqual(
+    delivered[3],
+    {
+      type: "session.idle",
+      properties: { sessionID: "ses-1", type: "session.idle" },
+    },
+    "a payload-wrapped envelope is unwrapped and its location decides"
+  );
+
+  // An id behind `data.session.id` resolves through the host.
+  await harness.deliver({ type: "message.updated", data: { session: { id: "ses-1" } } });
+  assert.equal(delivered.length, 5, "an id at data.session.id resolves by session");
+
+  // Every directory-bearing shape is read BEFORE the session fallback: a
+  // foreign directory carried alongside a session that resolves HERE is
+  // dropped only when its own directory source is consulted.
+  for (const foreign of [
+    { type: "message.updated", directory: "/elsewhere", data: { sessionID: "ses-1" } },
+    {
+      type: "message.updated",
+      payload: { type: "message.updated", directory: "/elsewhere", data: { sessionID: "ses-1" } },
+    },
+    {
+      type: "message.updated",
+      payload: {
+        type: "message.updated",
+        location: { directory: "/elsewhere" },
+        data: { sessionID: "ses-1" },
+      },
+    },
+    {
+      type: "message.updated",
+      data: { info: { directory: "/elsewhere", id: "ses-1" } },
+    },
+  ]) {
+    await harness.deliver(foreign);
+  }
+  assert.equal(
+    delivered.length,
+    5,
+    "every upstream directory source decides before the session fallback"
+  );
+
+  // A host lookup error drops that event and never kills the subscription.
+  await harness.deliver({ type: "message.updated", data: { sessionID: "ses-boom" } });
+  assert.equal(delivered.length, 5, "a throwing session lookup drops the event");
+  await harness.deliver({
+    type: "message.updated",
+    location: { directory: "/workspace/project" },
+    data: { sessionID: "ses-1" },
+  });
+  assert.equal(delivered.length, 6, "the subscription survives a lookup error");
+
+  await harness.deliver({ type: "message.updated" });
+  assert.equal(delivered.length, 6, "an event with no directory and no session id is dropped");
+
   await cleanup();
 });
 
-test("test_v2_adapter_cleanup_aborts_the_subscription_and_is_idempotent", async () => {
+test("test_v2_adapter_cleanup_aborts_the_subscription_and_is_idempotent", { timeout: 5000 }, async () => {
   const { registerV2Adapter } = await import(ADAPTER_MODULE);
   const harness = createHarness();
   const delivered = [];
   const cleanup = await registerV2Adapter(harness.ctx, {
+    "chat.message": async (_input, output) => {
+      output.message.parts.push({ type: "text", text: "cached before cleanup" });
+    },
     event: async ({ event }) => {
       delivered.push(event);
     },
   });
+  const readContext = async (sessionID) => {
+    const event = { sessionID, system: [] };
+    await harness.hooks.get("context")(event);
+    return event.system.map((part) => part.text);
+  };
 
   await harness.deliver({
     type: "message.updated",
@@ -285,13 +371,30 @@ test("test_v2_adapter_cleanup_aborts_the_subscription_and_is_idempotent", async 
   });
   assert.equal(delivered.length, 1);
 
+  await harness.hooks.get("prompt")({ sessionID: "ses-1", messageID: "msg-1", prompt: { text: "prompt" } });
+  assert.deepEqual(await readContext("ses-1"), ["cached before cleanup"]);
+
   await cleanup();
   assert.equal(harness.closed(), true, "cleanup aborts the controller and awaits the watcher");
+  assert.deepEqual(
+    await readContext("ses-1"),
+    [],
+    "cleanup drops the cached block, so a late context hook injects nothing"
+  );
   await cleanup();
   assert.equal(harness.closed(), true, "a second cleanup must not throw or reopen the subscription");
+
+  // A stream that throws is contained: the watcher resolves, cleanup returns,
+  // and no unhandled rejection reaches the host loop.
+  const failing = createHarness();
+  failing.ctx.event.subscribe = async function* () {
+    throw new Error("stream failed");
+  };
+  const failingCleanup = await registerV2Adapter(failing.ctx, { event: async () => {} });
+  await failingCleanup();
 });
 
-test("test_v2_adapter_registers_no_tool_and_no_skills", async () => {
+test("test_v2_adapter_registers_no_tool_and_no_skills", { timeout: 5000 }, async () => {
   const { registerV2Adapter } = await import(ADAPTER_MODULE);
   const harness = createHarness();
   const transformed = [];
@@ -326,6 +429,9 @@ test("test_v2_adapter_registers_no_tool_and_no_skills", async () => {
 // `session.execution.succeeded` event produces exactly one wire `capture`,
 // through ONE staged engine child, carrying the mapped prompt and the host
 // directory as the project id — the same V1 closure, the same five methods.
+// It also fires the recorded `prompt` hook against an erroring stub, so the
+// toast path (`setup` → legacy client → `notifyHost` → RPC emit) is exercised
+// under V2, the one route the V1-only driver can never reach.
 // It drives `mode: "v2"` of the shared harness, so the engine child belongs to
 // a subprocess and never sits on `node:test`'s event loop.
 test(
@@ -337,7 +443,7 @@ test(
     const requestLogPath = path.join(tmp, "stub-requests.ndjson");
     const manifestPath = path.join(tmp, "stub-manifest.json");
     const donePath = path.join(tmp, "driver-done.json");
-    stageStubEngine(pkgDir, { requestLogPath, manifestPath, injectMode: "success" });
+    stageStubEngine(pkgDir, { requestLogPath, manifestPath, injectMode: "error" });
     t.after(() => assertReaped(manifestPath));
 
     const directory = path.join(tmp, "project");
@@ -362,6 +468,7 @@ test(
           ],
           get: { "ses-1": { location: { directory } } },
         },
+        prompt: { sessionID: "ses-1", messageID: "msg-p1", prompt: { text: "first turn" } },
         events: [
           {
             type: "session.execution.succeeded",
@@ -417,6 +524,28 @@ test(
       capture.params.session_id,
       "ses-1",
       "H4: the hook's session id, never the synthetic oc-bridge-<pid>"
+    );
+
+    // The V2 toast path: the prompt hook's failing inject reached the host
+    // through the legacy client's RPC emit — one inject on the wire, one toast.
+    assert.equal(
+      record.injectCount,
+      1,
+      "the prompt hook reached the engine's inject exactly once"
+    );
+    assert.deepEqual(
+      record.toastEmits,
+      [
+        {
+          name: "toast",
+          data: {
+            title: "opencode-mem",
+            message: "Memory injection failed; memory may be disabled.",
+            variant: "warning",
+          },
+        },
+      ],
+      "a failed inject under V2 emits one toast intent — never the error text, a path or a transcript"
     );
   }
 );

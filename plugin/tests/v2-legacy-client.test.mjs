@@ -240,6 +240,7 @@ test("test_v2_legacy_client_marks_synthetic_and_compaction_messages", async () =
     { type: "system", id: "msg-s2", text: "system text" },
     { type: "compaction", id: "msg-c1" },
     { type: "mystery" },
+    { type: "assistant", id: "msg-a0", agent: "build" },
   ];
   const client = createLegacyClient(
     createContext({ session: { context: async () => messages } })
@@ -262,6 +263,10 @@ test("test_v2_legacy_client_marks_synthetic_and_compaction_messages", async () =
   );
   assert.equal(data[3].info.role, "assistant");
   assert.deepEqual(data[3].parts, []);
+  // A host that emits an assistant message with no content array must not
+  // throw here: one throw fails the whole transcript and silently drops the
+  // turn's capture.
+  assert.deepEqual(data[4].parts, [], "a content-less assistant message maps to no parts");
 });
 
 test("test_v2_legacy_client_requires_a_session_id", async () => {
