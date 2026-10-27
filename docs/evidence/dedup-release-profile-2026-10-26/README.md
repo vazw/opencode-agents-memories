@@ -1,5 +1,10 @@
 # Release-profile dedup scan ladder — issue 56
 
+> **Status: implemented 2026-10-28.** The recommendation below was adopted: `MAX_NEAR_SCAN_PAIRS` is now
+> `15_000_000` (release-derived; `T_SCAN_MAX = 10 s` re-affirmed for the release profile). The sections
+> below are the 2026-10-26 measurement as written and keep their original tense; the addendum at the end
+> records the ruling, the arithmetic and the gates that pin it.
+
 ## Why this directory exists
 
 `MAX_NEAR_SCAN_PAIRS = 740_000` is a production bound whose whole derivation input is a **debug**
@@ -315,3 +320,42 @@ sh .tmp/scripts/cargo-serialized.sh cargo test -p mem-web --release --test dedup
 | `run-debug-probe.sh` | the debug witness |
 | `derive.sh`, `derived.txt` | the aggregation and its verbatim output |
 | `cap-table.sh`, `cap-table.txt` | the two-candidate cap/coverage table and its verbatim output |
+
+## Addendum — 2026-10-28 — the ruling, implemented
+
+**Owner ruling, quoted** (repo-relative: `.scratch/rust-port/issues/56-dedup-cap-and-magnitude-are-debug-numbers.md`):
+"`T_SCAN_MAX = 10 s` is re-affirmed **for the release profile**; `MAX_NEAR_SCAN_PAIRS` goes from 740,000
+to **15,000,000**. … The debug figure stays in the record as the conservative input. … one step: the
+constant, the derivation test, and this ruling's record; **no re-measurement**."
+
+| quantity | value | source |
+|---|---|---|
+| rule | `min(max(250_000, floor2(T_SCAN_MAX / c_iter)), 1_250_000_000)` | issue 54b, pre-registered |
+| `T_SCAN_MAX` | 10 s | re-affirmed 2026-10-28 |
+| `c_iter_release` | 658.9 ns/pair (median of 3, `n = 10_000`, 768 lanes) | `derived.txt`, this directory |
+| raw quotient | 15,176,809.8 pairs | 10 s / 658.9 ns |
+| `floor2` | 15,000,000 pairs | the rule; clamp is a no-op |
+| spend at the cap | 9.8835 s | 15,000,000 × 658.9 ns |
+| coverage | 5,477 survivors = 11.0 % of a 50k shard | sqrt(2 × cap) |
+| previous cap | 740,000, spends 0.49 s | `cap-table.txt`, `current (debug-derived)` row |
+
+The debug input is retained: `c_iter_debug = 13,487.9 ns` derives 740,000, and the shipped value is
+20.27× it. `cap-table.txt` is a 2026-10-26 artifact and was not edited; its `current (debug-derived)`
+row now names the cap that shipped **before** this ruling, and its `release-derived` row is the value
+that ships now.
+
+**Superseded constraint.** The 2026-10-26 line in issue 56 — "any diff line touching the declaration is
+a rejection of this wave" — constrained the *measurement* wave, which was forbidden to decide. The
+2026-10-28 ruling authorizes exactly one such diff line, and the `release-derived` row above is that
+line's derivation; the constraint does not apply to the implementation wave.
+
+**Tail, recorded not smoothed:** at the slowest measured release run (677.1 ns) the cap spends 10.16 s,
+1.6 % above the budget. The ruling is stated against the recorded median, as the pre-registered rule
+specifies. No action.
+
+**Gates** (both run in the default suite; neither is `#[ignore]`d):
+- `test_derived_cap_at_the_recorded_release_c_iter_reproduces_the_constant` —
+  `derive_cap(658.9e-9) == MAX_NEAR_SCAN_PAIRS`, `MAX_NEAR_SCAN_PAIRS == 15_000_000`, and
+  `MAX_NEAR_SCAN_PAIRS × 658.9 ns ≤ 10 s`.
+- `test_recorded_debug_c_iter_derives_the_conservative_cap_below_the_shipped_one` —
+  `derive_cap(13,487.9e-9) == 740_000` and `740_000 < MAX_NEAR_SCAN_PAIRS`.
