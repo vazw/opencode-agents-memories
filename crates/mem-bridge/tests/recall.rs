@@ -199,6 +199,16 @@ fn test_recall_classifies_the_legacy_shape_and_not_every_scopeless_request() {
         RecallRequest::from_params(&json!({"session_id": "sess-1", "query": 5})),
         Err(RecallError::InvalidParams)
     ));
+
+    // 8. The envelope strip removes `session_id` only: the W4.2 filter
+    // `sessionId` is a different key and must survive into the args.
+    let params = json!({"session_id": "sess-1", "projectId": "project-a", "sessionId": "filter-1"});
+    match RecallRequest::from_params(&params) {
+        Ok(RecallRequest::Canonical(args)) => {
+            assert_eq!(args.session_id.as_deref(), Some("filter-1"))
+        }
+        other => panic!("expected the canonical shape, got {other:?}"),
+    }
 }
 
 #[test]

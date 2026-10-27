@@ -91,6 +91,20 @@ test("test_recall_tool_sends_the_host_project_and_the_call_time_session", async 
     sessionId: "filter-1",
   });
   assert.deepEqual(await payload(first), { summaries: [] });
+
+  // A non-normalised host directory must travel RAW (D5): capture writes the
+  // raw directory as `project_id`, so a resolved wire value queries nothing.
+  const rawWire = recordingSendRecall();
+  const rawTool = createRecallTool({
+    projectId: "/workspace/project/",
+    sendRecall: rawWire.sendRecall,
+  });
+  await rawTool.execute({ projectId: "/workspace/project" }, { sessionID: "ses-4" });
+  assert.equal(
+    rawWire.calls[0].projectId,
+    "/workspace/project/",
+    "the host directory is sent raw; resolving it would query a different project_id"
+  );
 });
 
 test("test_recall_tool_refuses_a_foreign_project", async () => {
@@ -260,6 +274,8 @@ test("test_setup_registers_the_recall_tool", async () => {
   assert.deepEqual(added[0].input, fixture.input);
   await cleanup();
   assert.deepEqual(lifecycle, ["tool", "adapter"], "tool cleanup precedes the adapter cleanup");
+  await cleanup();
+  assert.deepEqual(lifecycle, ["tool", "adapter"], "the cleanup is idempotent");
 });
 
 test("test_setup_survives_a_host_without_a_tool_surface", async () => {
