@@ -16,6 +16,8 @@
   wrapper spawns the engine child and degrades fail-open when absent.
 - **hello handshake** — the wrapper's first request; the wrapper applies the
   major-equal + floor compat rule on the reply. `hello` is not a runtime method.
+  The reply's additive `capabilities` object is how the wrapper learns which
+  behaviours this build serves — e.g. `compaction` (issue 68).
 - **session_id** — the required top-level parameter of every runtime method
   (1..=128 chars); DATA, never authority.
 - **capture_id** — the client-minted UUIDv7-shaped, ≤64-char identifier added to

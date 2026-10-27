@@ -1,9 +1,11 @@
 // W5.2 shared test harness for the staged-package cases. NOT a test file:
 // `node --test` only matches `*.test.mjs`, so this module has no cases of its
-// own — its correctness is proved by its five users: `v2-plugin-adapter.test.mjs`
+// own — its correctness is proved by its six users: `v2-plugin-adapter.test.mjs`
 // and `compaction-v2-inheritance.test.mjs` (`mode: "v2"`),
 // `wrapper-toast.test.mjs` (`mode: "v1"`), `compaction-hook.test.mjs`
-// (`mode: "v1-compaction"`) and `memory-tools.test.mjs` (`mode: "v2-tool"`).
+// (`mode: "v1-compaction"`), `compaction-capability.test.mjs`
+// (`mode: "v1-compaction"`, the capability gate) and `memory-tools.test.mjs`
+// (`mode: "v2-tool"`).
 //
 // Why a subprocess and not an import: `plugin/src/plugin.js` spawns the engine
 // with piped stdio and no `detached`/`unref` (`:365-368`), and the stub exits
@@ -53,11 +55,25 @@ export function stagePackageTree(tmpRoot) {
  *   "success" → `inject` answers the canonical empty block, so no catch runs
  *               and no toast may be emitted.
  */
-export function stageStubEngine(pkgDir, { requestLogPath, manifestPath, injectMode = "error" }) {
+// Additive (D-43): each key is `true` exactly when the stub serves it. Issue
+// 69 adds `skills` here; the wrapper reads known keys and ignores the rest.
+export const DEFAULT_STUB_CAPABILITIES = {
+  compaction: true,
+  fire_and_forget_capture: true,
+  standalone: true,
+  web: true,
+};
+
+export function stageStubEngine(pkgDir, {
+  requestLogPath,
+  manifestPath,
+  injectMode = "error",
+  capabilities = DEFAULT_STUB_CAPABILITIES,
+}) {
   const dir = path.join(pkgDir, "engine", `${process.platform}-${process.arch}`);
   fs.mkdirSync(dir, { recursive: true });
   const binPath = path.join(dir, "opencode-agents-memory");
-  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath }), {
+  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities }), {
     mode: 0o755,
   });
   fs.chmodSync(binPath, 0o755);
@@ -67,8 +83,8 @@ export function stageStubEngine(pkgDir, { requestLogPath, manifestPath, injectMo
 // Static body (no template interpolation inside the script beyond CONFIG):
 // answers the canned protocol-1.0.0 results, records its own pid, exits on
 // SIGTERM or stdin EOF.
-function stubEngineSource({ injectMode, requestLogPath, manifestPath }) {
-  const config = JSON.stringify({ injectMode, requestLogPath, manifestPath });
+function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities }) {
+  const config = JSON.stringify({ injectMode, requestLogPath, manifestPath, capabilities });
   const blocks = JSON.stringify({
     restore:
       "## Restored Session Memory\n\n### Memory 1\nRetries are capped at three\n\nTags: project, opencode-mem\n\n### Memory 2\nDeploys go through the staging gate first\n\nTags: project, opencode-mem\n\n",
@@ -81,7 +97,7 @@ function stubEngineSource({ injectMode, requestLogPath, manifestPath }) {
 const CONFIG = ${config};
 const BLOCKS = ${blocks};
 import fs from "node:fs";
-const { injectMode, requestLogPath, manifestPath } = CONFIG;
+const { injectMode, requestLogPath, manifestPath, capabilities } = CONFIG;
 function logLine(object) {
   try { fs.appendFileSync(requestLogPath, JSON.stringify(object) + "\\n"); } catch {}
 }
@@ -119,7 +135,9 @@ function respond(parsed) {
   let result = null;
   if (method === "hello") {
     result = {
-      capabilities: { fire_and_forget_capture: true, standalone: true, web: true },
+      // \`capabilities === null\` means "no capabilities object at all": the
+      // undefined key is dropped by JSON.stringify — the pre-D-43 shape.
+      capabilities: capabilities === null ? undefined : capabilities,
       engine_version: "0.1.0",
       methods: ["capture", "inject", "recall", "health", "shutdown"],
       protocol: "1.0.0",

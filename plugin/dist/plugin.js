@@ -243,6 +243,9 @@ let child = null;
 let childClosed = null;
 let childListenersInstalled = false;
 let engineCompatible = false;
+let engineCapabilities = null;   // hello.result.capabilities, or null when absent/unusable
+let engineProtocolLine = null;   // hello.result.protocol, for the mismatch line
+const CAPABILITY_GAPS_LOGGED = new Set();  // one line per capability per process
 let capturedSessionId = null;
 let pendingCaptures = 0;
 let requestCounter = 1; // ids: "hello-1", then "capture-2", ...
@@ -310,6 +313,31 @@ function protocolCompatible(engineProtocol) {
   return left[0] === right[0] && semverCompare(engineProtocol, MIN_PROTOCOL) >= 0;
 }
 
+// Issue 68: a pre-`include.compaction` engine answers the compaction request
+// with the ordinary chat block, which the hooks would append — a silent
+// double count. The handshake's flag is the only signal: absent means no-op,
+// never "send it and inspect the answer".
+function engineCapability(name) {
+  return engineCapabilities !== null && engineCapabilities[name] === true;
+}
+
+// The handshake must have happened before the flag can be read (the first hook
+// of a fresh process is cold), so this awaits `ensureStarted()` exactly as
+// `sendRequest` does. No engine = the hooks' existing fail-open no-op.
+async function compactionCapability() {
+  if (!(await ensureStarted())) return false;
+  if (engineCapability("compaction")) return true;
+  if (!CAPABILITY_GAPS_LOGGED.has("compaction")) {
+    CAPABILITY_GAPS_LOGGED.add("compaction");
+    logWarn("engine.capability_missing", {
+      capability: "compaction",
+      engine_protocol: engineProtocolLine ?? "unknown",
+      min_protocol: MIN_PROTOCOL,
+    });
+  }
+  return false;
+}
+
 function handleWireLine(rawLine) {
   const line = rawLine.trim();
   if (line.length === 0) return;
@@ -350,6 +378,8 @@ function childClosedPromise() {
 function teardownChild(reason) {
   const active = child;
   child = null;
+  engineCapabilities = null;
+  engineProtocolLine = null;
   rejectPending(reason);
   if (active !== null) {
     try {
@@ -429,6 +459,12 @@ async function startBridge() {
       teardownChild("incompatible engine");
       return false;
     }
+    const capabilities = hello !== null && typeof hello === "object" ? hello.capabilities : null;
+    engineCapabilities =
+      capabilities !== null && typeof capabilities === "object" && !Array.isArray(capabilities)
+        ? capabilities
+        : null;
+    engineProtocolLine = engineProtocol;
     engineCompatible = true;
     bridgeState = "installed";
     return true;
@@ -709,6 +745,7 @@ export const server = async function server(input) {
             ? hookInput.sessionID
             : null;
         if (sessionID === null) return;
+        if (!(await compactionCapability())) return;
         const client = hostInputRef()?.client;
         const session = await readSession(client, sessionID);
         if (isChildSession(session)) return;
@@ -784,6 +821,7 @@ export const server = async function server(input) {
   async function handleCompacted(sessionID) {
     try {
       if (typeof sessionID !== "string" || sessionID.length === 0) return;
+      if (!(await compactionCapability())) return;
       const client = hostInputRef()?.client;
       const session = await readSession(client, sessionID);
       if (isChildSession(session)) return;

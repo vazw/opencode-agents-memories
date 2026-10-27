@@ -87,10 +87,12 @@ bounded by `memory_limit`: the guarantee is that the facts survive compaction, n
 does.
 
 **DECISION 4 — no frozen-schema change.** `session_id` is already a documented `inject` param
-(`docs/bridge-schema.md:83`) and `include` is already the additive options object
+(`docs/bridge-schema.md:89`) and `include` is already the additive options object
 (`crates/mem-bridge/src/inject.rs:107-120`). The compaction request rides
 `params.session_id` plus `include: {compaction: "ingest" | "restore"}`. No new wire method, no new
-response key, no fixture adjustment, no edit to the frozen document.
+response key, no fixture adjustment, no edit to the frozen document. This decision governs the
+`inject` request and response only; issue 68's `hello` capability is the additive change D-43
+permits and moves `hello-response.json` with it.
 
 **DECISION 5 — V2: the `session.compacted` half is inherited and pinned; the
 `experimental.session.compacting` half is not wired.** The V2 host exposes compaction under a
@@ -223,19 +225,32 @@ Two `session.compacted` events restore twice, exactly as upstream
 
 ## Known limitations
 
-**Engine-version skew is ungated (known, unfixed).** ADR-0007 D-43 accepts an older same-major engine
-(`engine.protocol >= wrapper.min_protocol`; both lines are `1.0.0`), and nothing in `hello` says
-whether the engine's `inject` understands `include.compaction`. An engine built before this lane
-ignores that key and answers the compaction request with the ordinary project chat block, which the
-wrapper appends verbatim (`plugin/src/plugin.js:717-718` at `6f8801b`: the
-`Array.isArray(output.context)` guard, then `output.context.push(result.block)`); the restore prompt
-would carry the same block. That is exactly the double-count AC 1 forbids, and it is silent. It is
-reachable through a stale gitignored `plugin/engine/<platform>-<arch>/` staging directory (a previous
-build left beside the wrapper), and non-blocking only because the shipped wrapper and engine come from
-one build. D-43's `hello.result.capabilities` is the additive home for the fix — advertise
-`capabilities.compaction`, and make the wrapper fall back to a no-op when it is absent (or raise
-`MIN_PROTOCOL`). Tracked as **issue 68**
+**RESOLVED (issue 68, 2026-10-28) — engine-version skew is capability-gated.**
+
+ADR-0007 D-43 accepts an older same-major engine (`engine.protocol >= wrapper.min_protocol`; both
+lines are `1.0.0`), and before issue 68 nothing in `hello` said whether the engine's `inject`
+understood `include.compaction`. An engine built before this lane ignored that key and answered the
+compaction request with the ordinary project chat block, which the wrapper appended verbatim
+(`plugin/src/plugin.js:717-718` at `6f8801b`: the `Array.isArray(output.context)` guard, then
+`output.context.push(result.block)`); the restore prompt would have carried the same block. That was
+exactly the double-count AC 1 forbids, and it was silent. It was reachable through a stale gitignored
+`plugin/engine/<platform>-<arch>/` staging directory (a previous build left beside the wrapper), and
+non-blocking only because the shipped wrapper and engine come from one build. Tracked as **issue 68**
 (`.scratch/rust-port/issues/68-engine-skew-ungated.md`).
+
+The mechanism that closes it: the engine's `hello` advertises `capabilities.compaction: true` exactly
+when its `inject` honours `include.compaction` (`crates/mem-bridge/src/engine.rs::handshake_result`),
+the wrapper records that additive object at the handshake, and both compaction hooks read it with
+`=== true` before any host read or wire write. An absent key, a non-object or a non-boolean-`true`
+value means both hooks no-op and one `engine.capability_missing` line names the gap — the capability
+name and two protocol lines only, never a session id, transcript, path or error text. Raising
+`MIN_PROTOCOL` was rejected: it refuses every pre-33 engine wholesale instead of degrading one
+capability.
+
+**R1 — the flag/behaviour coupling is a contract, not a runtime check.** A future engine that stops
+honouring `include.compaction` must drop the flag in the same change; nothing enforces the coupling at
+runtime. The inverted world is `test_include_compaction_restore_never_returns_the_chat_block` going
+red while `test_hello_response_schema_equal_after_mask` stays green.
 
 ## The follow-up
 
