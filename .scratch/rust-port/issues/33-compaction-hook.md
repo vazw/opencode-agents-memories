@@ -1,6 +1,6 @@
 # 33 — W5.5 · Compaction hook: ingest before, restore after (US 1.2)
 
-Status: ready-for-agent — 2026-10-27 (dependency verified landed at HEAD: capture writes tier-1 rows carrying `session_id`; brief under `## Agent Brief`)
+Status: landed 2026-10-27 as merge `f1006f6` (branch `issue-33/compaction-hook`: implementation `6f8801b`, ADR pointer rebase + engine-skew record `f1006f6`) — residual: the V2 `compaction` hook is owned by issue 67, and the ungated engine-version skew by issue 68
 
 ## What to build
 
