@@ -14,6 +14,12 @@ When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the 
 
 Edit the right-hand column to match whatever vocabulary you actually use.
 
+## Other local states (not mattpocock roles)
+
+`paused` / `PAUSED` — blocked on another lane or an owner ruling. Keeps the issue out of the triage board
+until the blocker moves; the status line names the blocker. In use: 39 (behind 43), 41 (behind 39), 58
+(three unfixable zstd advisories).
+
 ## Local closure convention (not a mattpocock role)
 
 `done` — terminal state for finished issues: wave completed and verified, evidence digest under `## Comments`. Close-out applies it as `Status: done — <yyyy-mm-dd>`. Adopted 2026-10-18 (issues 01–04 backfilled).

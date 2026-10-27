@@ -1,7 +1,8 @@
 # 50 — Inject · Context assembly: the owner's rulings get a home, and the framing gets built
 
-Status: ready-for-agent — 2026-10-27 (verified absent: no wrapper, no `relevance`, no ADR 0026, and a negative assertion currently pins the absence; brief under `## Agent Brief`)
-draft, and the `<memory_context>` framing they describe is absent from the emitted block entirely.**
+Status: ready-for-human — 2026-10-27 (the architect pre-draft resolves the 50.6/50.7 contradiction and the
+budget rule, but three owner rulings remain before a planner: whether `relevance` is emitted only on the
+scored tier, the exact header/safety byte split, and the `:410` amendment. See `## Comments`.)
 
 ## The finding
 

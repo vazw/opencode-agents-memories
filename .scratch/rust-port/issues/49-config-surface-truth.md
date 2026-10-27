@@ -1,7 +1,8 @@
-# 49 — Config · The inert half of the config surface: 45 dead keys, one of them a kill switch
+# 49 — Config · The inert half of the config surface: at most 35 dead keys, one of them a kill switch
 
-Status: needs-triage — 2026-10-27 (the kill-switch defect is real, but the 98/45 census and the dedup attribution are stale at HEAD — re-derive before a census wave)
-47% — and the sharpest of them, `chatMessage.enabled`, is a documented kill switch that kills nothing.**
+Status: ready-for-agent — 2026-10-27 (re-verified at `8023dd8`: the kill-switch defect is real and
+unchanged; 10 of the audit's 45 dead fields now have readers, so dead is at most 35. Brief under
+`## Agent Brief`.)
 
 ## What to build
 
@@ -16,11 +17,26 @@ Make the config surface honest. Three deliverables, in this order:
 
 ### The corrected numbers — do not reuse the brief's
 
-| | brief claimed | re-derived |
+| | brief claimed | audit (2026-10-25) | at `8023dd8` |
+|---|---|---|---|
+| resolved fields | 112 | **98** (82 `Config` + 16 nested) | `Config` alone is **83** (the `+1` is `allow_unguarded_open`, live); my extraction of the nested structs sums to 15, not 16, so the total is **unreconciled** until the census wave's type-aware pass |
+| no production reader | 53 | **45** (45.9%) | **at most 35** — ten of those 45 now have readers (table below) |
+| live | 59 | **53** | **at least 63** by the same subtraction; the census must pin it |
+
+The ten that moved to live, with the reader that moved them — all `READ` at `8023dd8`, none inherited:
+
+| field | reader | landed |
 |---|---|---|
-| resolved fields | 112 | **98** (82 `Config` + 16 nested) |
-| no production reader | 53 | **45** (45.9%) |
-| live | 59 | **53** |
+| `compaction.enabled` | `inject.rs:507` | 33 |
+| `compaction.memory_limit` | `inject.rs:550` | 33 |
+| `inject_profile` | `profile_context.rs:91` | 44 |
+| `user_profile_inject_preferences` | `profile_context.rs:93` | 44 |
+| `user_profile_inject_patterns` | `profile_context.rs:94` | 44 |
+| `user_profile_inject_workflows` | `profile_context.rs:95` | 44 |
+| `deduplication_enabled` | `src/main.rs:180` | 54 |
+| `deduplication_similarity_threshold` | `src/main.rs:181` | 54 |
+| `chat_message.filter_injected_prompts` | `layer.rs:74` | 52 |
+| `chat_message.injection_markers` | `layer.rs:77` | 52 |
 
 Source: `.tmp/scratch/opsec-design-concerns-run-1/REPORT.md` §3.3 — verdict `WRONG (counts)`, record
 `mem-core/config/inert-field-count`. The brief's 53 was the *live* count, i.e. an inversion. **"Lower
@@ -89,6 +105,11 @@ is "wire, issue 52", and this issue gives them no reader of its own.
       is absent from the census (scraping precedent: `mem_core::logging::signatures`), **or** the issue
       records why such a test is infeasible and what replaces it. A census that silently misses a new key
       is the same defect one level up.
+      **Method constraint (2026-10-27):** a grep census is not an oracle. Re-deriving this one produced a
+      false positive (`.auto_cleanup_enabled` matched `mem-profile`'s own `ProfileConfig`,
+      `profile_store.rs:66`) and a false negative (`episodic.consolidation_age_days`, whose reader binds a
+      local named `episodic`, `mem-episodic/src/consolidation.rs:84`). The test must resolve types, or the
+      census must publish its measured error rate on a hand-checked sample.
 - [ ] **49.6** At startup, the engine logs **once** the inert keys the user explicitly set in a jsonc file
       (`crates/mem-core/src/config/mod.rs:80-101` are the candidates), naming whether each has a landing
       issue, capped at ten with a `+N more` tail, and pointing at the census. Test: a fixture setting three
@@ -103,15 +124,17 @@ is "wire, issue 52", and this issue gives them no reader of its own.
 - [ ] **49.9** The `deduplication_*` attribution is corrected in the census: they gate the **manual**
       endpoint (upstream `example/opencode-mem/src/services/deduplication-service.ts:37`), not
       capture-time dedup. The route is real (`crates/mem-web/src/api/maintenance.rs:245`, registered
-      `crates/mem-web/src/api/mod.rs:180-186`, commit `6bf7b28`); the factory
-      `production_deduplication_port` (`crates/mem-web/src/api/deduplication/mod.rs:264`) has **no
-      production caller** — its only caller is a test (`crates/mem-web/tests/dedup_endpoint.rs:33`). So
-      the keys' status is "factory uncalled", not "endpoint unstubbed", and the census says so.
+      `crates/mem-web/src/api/mod.rs:180-186`, commit `6bf7b28`); and **the factory is now called in
+      production** — `src/main.rs:178` calls `production_deduplication_port_with_cancel` with
+      `core_config.deduplication_enabled` and `core_config.deduplication_similarity_threshold`
+      (`src/main.rs:180`–`:181`). So both keys are live, the attribution to the *manual* endpoint stands,
+      and the census records them live rather than "factory uncalled".
 - [ ] **49.10** No behaviour change to any key outside 49.1 and 49.6; no manifest change; `schema.rs`'s
       resolution behaviour and every default are untouched.
-- [ ] **49.11** **The bucket arithmetic is restated once, visibly.** Filing issue **52** moves
-      `chat_message_filter_injected_prompts` and `injection_markers` from bucket (a) to bucket (b): the
-      audit's **32 / 13** becomes **30 / 15**, of 45 dead (30 + 15 = 45). The live-field correction
+- [ ] **49.11** **The bucket arithmetic is restated once, visibly.** Issue **52 landed**, and its two
+      keys now have production readers (`layer.rs:74`, `:77`), so they leave the dead set entirely
+      rather than moving from bucket (a) to bucket (b); the audit's **32 / 13** partition is therefore
+      superseded by the HEAD count above, not shifted by two. The live-field correction
       (`episodic.consolidation_age_days`) stays outside the partition and is not counted in either shift.
       This is *my* re-bucketing of the audit's numbers, not a re-derivation; a reader must be able to see
       which two rows moved and why. **Also reconcile bucket (a)'s itemised list with its stated 32** — the
@@ -161,3 +184,48 @@ is "wire, issue 52", and this issue gives them no reader of its own.
   config gate. But the census has drifted — `Config` now resolves ~99 fields (issue 45 added
   `allow_unguarded_open`), and issue 54 wired `production_deduplication_port`, making two more keys live, so the
   dead count is at most 43, not 45. A census wave must re-derive at HEAD rather than transcribe this issue.
+
+- **2026-10-27 — re-verified at `8023dd8` (defect real; arithmetic now wrong by ten).**
+  `chat_message.enabled` still has zero readers outside config resolution, `call_inject` (`engine.rs:358`)
+  consults no config, and the adapter hook (`plugin.js:670`–`:697`) injects unconditionally — `enabled:
+  false` still injects. But ten of the audit's 45 dead fields now have production readers:
+  `compaction.enabled` (`inject.rs:507`) and `compaction.memory_limit` (`inject.rs:550`) — 33;
+  `inject_profile` and the three `user_profile_inject_*` (`profile_context.rs:91,93,94,95`) — 44;
+  `deduplication_enabled` / `deduplication_similarity_threshold` (`src/main.rs:180,181`) — 54;
+  `chat_message.filter_injected_prompts` / `chat_message.injection_markers` (`layer.rs:74,77`) — 52.
+  So dead is **at most 35**, not 45, before bucket (a)'s own 31-vs-32 list discrepancy. `Config` now
+  defines **83** fields, and the `+1` (`allow_unguarded_open`) is live (`mem-store/src/db.rs:286`).
+  Two ACs are falsified: **49.9** — the dedup factory has a production caller at `src/main.rs:178`, so
+  the keys are not "factory uncalled"; and **49.11** — the two 52 keys are wired on the capture path, not
+  merely re-homed between buckets.
+  **Method warning for 49.5:** a grep census is not rot-proof. Re-deriving it produced a false positive
+  (`.auto_cleanup_enabled` matching `mem-profile`'s different `ProfileConfig`) and a false negative
+  (`episodic.consolidation_age_days`, whose reader binds a local named `episodic`, not `config.episodic`).
+  The census oracle needs type-aware resolution, or the census must publish its residual error rate.
+  **State not changed at triage time.**
+
+## Agent Brief
+
+> *This was generated by AI during triage.*
+
+**Category:** bug
+**Summary:** make `chat_message.enabled` a real gate, then produce a census that cannot lie.
+
+**Current behaviour (verified at `8023dd8`):** `chat_message_enabled` is parsed, defaulted and resolved and
+read by nothing; `call_inject` (`crates/mem-bridge/src/engine.rs:358`) consults no config; the adapter's
+`chat.message` hook (`plugin/src/plugin.js:670`–`:697`) pushes whatever block the engine returns, with no
+config read. `enabled: false` still injects. Ten of the audit's 45 dead fields have since gained readers
+(table above), so the dead count is at most 35.
+
+**Desired behaviour:** gate the block at the engine's chat.message injection seam (49.1), then produce the
+census (49.2) from a type-aware pass — a grep pass is demonstrated to have both false positives and false
+negatives. Every dead key gets exactly one disposition. The startup diagnostic names the inert keys the user
+actually set.
+
+**Key interfaces:** `Config.chat_message`, `Engine::call_inject`, the census document, the startup logger.
+The injection-marker list belongs to issue 50, not to this lane.
+
+**Acceptance criteria:** 49.1–49.11, with 49.5's method constraint, 49.9's corrected dedup attribution
+(`src/main.rs:178`–`:181`) and 49.11's corrected bucket arithmetic.
+
+**Out of scope:** wiring the other seven `ChatMessage` keys; issue 50's budget/order rules; the frozen DTOs.
