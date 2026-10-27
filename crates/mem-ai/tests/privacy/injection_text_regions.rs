@@ -146,6 +146,13 @@ fn test_an_unterminated_opening_tag_swallows_the_tail() {
     // "Drop the opener line only" would leak the body as `"keep\nboiler"`.
     let text = "keep\n<system-reminder>\nboiler";
     assert_eq!(filter().filter_text(text), "keep\n");
+
+    // A marker that carries its own `>` must not be misread as self-closing
+    // because a later `/>` appears on the same line: the first `>` at or after
+    // the end of the NAME is the marker's own, whose predecessor is `r` — not
+    // `/` — so the region is fail-closed and the tail is swallowed.
+    let misread = "keep\n<system-reminder> x />\nafter";
+    assert_eq!(filter().filter_text(misread), "keep\n");
 }
 
 // ---------------------------------------------------------------------------

@@ -350,7 +350,7 @@ fn marker_region_end(marker: &str, lower: &[String], i: usize) -> usize {
     let line = &lower[i];
     let name_end = line
         .find(marker)
-        .map(|start| start + marker.len())
+        .map(|start| start + 1 + name.len())
         .unwrap_or_default();
     if let Some(offset) = line[name_end..].find('>') {
         let greater = name_end + offset;

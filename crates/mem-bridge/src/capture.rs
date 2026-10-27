@@ -637,7 +637,7 @@ impl CaptureService {
     }
 
     /// W7.1 — sets the sound-memory flags. A builder setter, deliberately:
-    /// the sixteen existing `CaptureService::new` call sites keep their exact
+    /// the seventeen existing `CaptureService::new` call sites keep their exact
     /// argument list, and the default remains OFF.
     pub fn with_sound_memory(mut self, settings: SoundMemorySettings) -> Self {
         self.sound_memory = settings;

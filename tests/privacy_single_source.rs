@@ -16,15 +16,12 @@
 //! disagreed on the number of list-literal consts, and the set is the
 //! assertion.
 //!
-//! **Measured run-on limitation of the line-wise accumulator** (in addition to
-//! D-52-6's five declared blind spots): an item whose declaration line does
-//! not end with `;` keeps accumulating until the next line ending `];`. A
-//! multi-line *string* const (e.g. `capture.rs`'s
-//! `RAW_CONTEXT_REQUIRED_MESSAGE`) therefore swallows every following item
-//! until some later line ends `];`, and a list literal placed after it is
-//! dropped with the swallowed item. Placing such a list **before** the first
-//! multi-line non-list const keeps it visible; the predicate itself is not
-//! widened to paper over this.
+//! The line-wise accumulator closes on the Rust item terminator (`;`): a
+//! `const`/`static` item always ends there, so a multi-line string const (for
+//! example `capture.rs`'s `RAW_CONTEXT_REQUIRED_MESSAGE`) closes itself and no
+//! longer swallows the items that follow it. A constructor-built list remains
+//! D-52-6's fifth blind spot (its initialiser begins with an identifier, so
+//! the shape predicate excludes it); the predicate itself is not widened.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -141,7 +138,7 @@ fn marker_list_items(source: &str) -> Vec<(String, usize)> {
                 index += 1;
                 if accumulated
                     .last()
-                    .is_some_and(|line| line.trim_end().ends_with("];"))
+                    .is_some_and(|line| line.trim_end().ends_with(';'))
                 {
                     closed = true;
                     break;

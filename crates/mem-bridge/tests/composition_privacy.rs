@@ -197,6 +197,10 @@ async fn test_the_minted_layer_reads_filter_injected_prompts() {
     let home = temp_dir("composition-flag-home");
     let mut config = load_config(&root, &home);
     config.chat_message.filter_injected_prompts = false;
+    config
+        .chat_message
+        .injection_markers
+        .push("<my-banner>".to_string());
 
     let recorder = Arc::new(RecordingProvider::new());
     let runtime = build_composed_runtime(
