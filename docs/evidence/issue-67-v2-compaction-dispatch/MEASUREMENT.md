@@ -22,10 +22,10 @@ grep -n 'readonly compaction: SessionCompaction' packages/plugin/src/promise/ses
 ```
 
 `SessionHooks` opens at `:139` and lists twelve fields, `prompt` and `context` included; `compaction` is
-the third. `SessionContext extends SessionRequest` (`:38-41` of the same file) is
-`{sessionID, model, system: SystemPart[], messages, options, agent, tools}` (`:30-41`), and
-`SessionCompaction` adds `result?: SessionCompactionResult {summary, native?, metadata?, tokens?}`
-(`:38-49`).
+the third. `SessionContext extends SessionRequest` (`:33-36` of the same file) is
+`{sessionID, model, system: SystemPart[], messages, options, agent, tools}` (`:25-36`, `SessionRequest`
+opening at `:25`), and `SessionCompaction` adds
+`result?: SessionCompactionResult {summary, native?, metadata?, tokens?}` (`:46-49`).
 
 ### 2. The compaction model request triggers the hook
 

@@ -7,7 +7,9 @@
   2026-10-27T14:43Z).
 - **Binding on:** `plugin/src/plugin.js`, `plugin/src/compaction.js`, `plugin/src/v2/adapter.js`,
   `plugin/package.json`, `crates/mem-bridge/src/{compaction,inject,composition}.rs`,
-  `crates/mem-core/src/logging/signatures.rs`, and the two new JS test files.
+  `crates/mem-core/src/logging/signatures.rs`, and the three JS test files that pin this seam
+  (`plugin/tests/compaction-hook.test.mjs`, `plugin/tests/compaction-capability.test.mjs`,
+  `plugin/tests/v2-compaction-hook.test.mjs`).
 - **Supersedes / amends:** implements the last host-lifecycle seam left by
   `docs/bridge-schema.md` (frozen; no wire change). Records a deliberate non-use of
   `experimental.compaction.autocontinue`.
@@ -114,7 +116,7 @@ the re-derivation greps and their output are in
    promise is an Effect defect that aborts the host's compaction, not a no-op.
 
 The callback takes a **single input and has no output pair** (`SessionContext extends SessionRequest`,
-`system: Array<SystemPart>`, `packages/plugin/src/promise/session.ts:30-41`). The adapter therefore calls
+`system: Array<SystemPart>`, `packages/plugin/src/promise/session.ts:25-36`). The adapter therefore calls
 the V1 closure with `{sessionID: event.sessionID}`, collects `output.context`, and pushes every non-empty
 string onto `event.system` as `{type: "text", text}` — the array the request builder reads back. Never
 `event.messages` (a render there becomes a user-role transcript message) and never `event.result` (setting

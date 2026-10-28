@@ -1,8 +1,9 @@
-// W5.5 — the V2 inheritance pin. The V2 adapter registers only `prompt` and
-// `context`, but it forwards every location-matching host event to the V1
+// W5.5 — the V2 inheritance pin. The V2 adapter registers `prompt`, `context`
+// and `compaction`, forwards every location-matching host event to the V1
 // `event` hook, and `LEGACY_EVENT_ALIASES` maps `session.compaction.ended` to
-// `session.compacted`. So the restore half is inherited; the pre-compaction
-// half is not (see ADR-0017 DECISION 5 and issue 67).
+// `session.compacted`. So the restore half is inherited and pinned here; the
+// pre-compaction ingest is `v2-compaction-hook.test.mjs`'s subject (issue 67,
+// ADR-0017 DECISION 5).
 //
 // The fake ctx is COMPLETE on purpose: `eventBelongsToLocation` resolves a
 // location-less event through `ctx.session.get`, so a partial ctx silently
