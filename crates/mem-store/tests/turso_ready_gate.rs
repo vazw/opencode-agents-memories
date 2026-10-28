@@ -450,7 +450,13 @@ async fn test_ready_gate_recovers_interrupted_reembed_swap_before_engine_convers
     let active = common::copy_diskann_fixture(&scope_dir, "project_a1b2c3d4e5f60003_shard_0.db");
     let staged = std::path::PathBuf::from(format!("{}.reembed-fixture.tmp", active.display()));
     let backup = std::path::PathBuf::from(format!("{}.pre-reembed-fixture.bak", active.display()));
-    mem_store::sqlite_files::rename_sqlite_database(&active, &staged).expect("move to staged");
+    let proof = common::exclusive_root(&storage);
+    let active_claim = proof.claim(&active).expect("the source is inside the root");
+    let staged_claim = proof
+        .claim(&staged)
+        .expect("the staged path is inside the root");
+    mem_store::sqlite_files::rename_sqlite_database(active_claim, staged_claim)
+        .expect("move to staged");
     assert!(!active.exists() && staged.exists());
     let state = common::write_reembed_swap_state(&active, &staged, &backup);
 

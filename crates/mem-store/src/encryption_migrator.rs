@@ -360,11 +360,13 @@ pub async fn dump_and_reload_encrypted(
         });
     };
     let db_claim = proof.claim(db_path)?;
+    let backup_claim = proof.claim(&backup)?;
+    let staged_claim = proof.claim(&staged)?;
     crate::sqlite_files::with_sqlite_file_lock_retry(
         || -> Result<(), StoreError> {
-            crate::sqlite_files::copy_sqlite_database(db_path, &backup)?;
+            crate::sqlite_files::copy_sqlite_database(db_path, backup_claim)?;
             crate::sqlite_files::remove_sqlite_database(db_claim)?;
-            crate::sqlite_files::rename_sqlite_database(&staged, db_path)?;
+            crate::sqlite_files::rename_sqlite_database(staged_claim, db_claim)?;
             Ok(())
         },
         crate::sqlite_files::FILE_LOCK_RETRY_DELAYS_MS.len(),
@@ -393,14 +395,16 @@ pub async fn dump_and_reload_encrypted(
         }
     };
     if let Err(error) = verify_result {
-        // Remove the unverifiable encrypted file (best-effort: only under the
-        // root's proof), then restore the backup.
-        if let Some(proof) = connections.exclusive_root()
-            && let Ok(claim) = proof.claim(db_path)
-        {
-            let _ = crate::sqlite_files::remove_sqlite_database(claim);
+        // Remove the unverifiable encrypted file, then restore the backup —
+        // both best-effort and both only under the root's proof.
+        if let Some(proof) = connections.exclusive_root() {
+            if let Ok(db_claim) = proof.claim(db_path) {
+                let _ = crate::sqlite_files::remove_sqlite_database(db_claim);
+            }
+            if let (Ok(backup_claim), Ok(db_claim)) = (proof.claim(&backup), proof.claim(db_path)) {
+                let _ = crate::sqlite_files::rename_sqlite_database(backup_claim, db_claim);
+            }
         }
-        let _ = crate::sqlite_files::rename_sqlite_database(&backup, db_path);
         return Err(error);
     }
 

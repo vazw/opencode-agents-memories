@@ -161,12 +161,18 @@ async fn rollback_move(
     if mv.backup_path.exists() {
         remove_file_helper(connections, &mv.new_path).await?;
         remove_file_helper(connections, &mv.old_path).await?;
+        let Some(proof) = connections.exclusive_root() else {
+            return Err(StoreError::NoExclusiveRoot {
+                db_path: mv.old_path.clone(),
+            });
+        };
+        let from_claim = proof.claim(&mv.backup_path)?;
+        let to_claim = proof.claim(&mv.old_path)?;
         with_sqlite_file_lock_retry(
-            || rename_sqlite_database(&mv.backup_path, &mv.old_path),
+            || rename_sqlite_database(from_claim, to_claim),
             FILE_LOCK_RETRY_DELAYS_MS.len(),
             &crate::sqlite_files::system_retry_context(),
-        )
-        .map_err(StoreError::from)?;
+        )?;
     }
     remove_file_helper(connections, &mv.staged_path).await?;
     if mv.old_path.exists() {
@@ -196,12 +202,18 @@ async fn rollback_archived(
         return Ok(());
     }
     remove_file_helper(connections, &archived.original_path).await?;
+    let Some(proof) = connections.exclusive_root() else {
+        return Err(StoreError::NoExclusiveRoot {
+            db_path: archived.original_path.clone(),
+        });
+    };
+    let from_claim = proof.claim(archive)?;
+    let to_claim = proof.claim(&archived.original_path)?;
     with_sqlite_file_lock_retry(
-        || rename_sqlite_database(archive, &archived.original_path),
+        || rename_sqlite_database(from_claim, to_claim),
         FILE_LOCK_RETRY_DELAYS_MS.len(),
         &crate::sqlite_files::system_retry_context(),
-    )
-    .map_err(StoreError::from)?;
+    )?;
     registry
         .register_existing_shard(
             Scope::Project,
@@ -848,7 +860,16 @@ impl PathMigrationService {
             remove_file_helper(&self.connections, &mv.staged_path)
                 .await
                 .map_err(|error| error.to_string())?;
-            crate::sqlite_files::copy_sqlite_database(&mv.old_path, &mv.staged_path)
+            let Some(proof) = self.connections.exclusive_root() else {
+                return Err(StoreError::NoExclusiveRoot {
+                    db_path: mv.staged_path.clone(),
+                }
+                .to_string());
+            };
+            let staged_claim = proof
+                .claim(&mv.staged_path)
+                .map_err(|error| error.to_string())?;
+            crate::sqlite_files::copy_sqlite_database(&mv.old_path, staged_claim)
                 .map_err(|error| error.to_string())?;
 
             let staged = self
@@ -914,20 +935,38 @@ impl PathMigrationService {
                 .close_connection(&mv.old_path)
                 .await
                 .map_err(|error| error.to_string())?;
+            let Some(proof) = self.connections.exclusive_root() else {
+                return Err(StoreError::NoExclusiveRoot {
+                    db_path: mv.old_path.clone(),
+                }
+                .to_string());
+            };
+            let old_claim = proof
+                .claim(&mv.old_path)
+                .map_err(|error| error.to_string())?;
+            let backup_claim = proof
+                .claim(&mv.backup_path)
+                .map_err(|error| error.to_string())?;
+            let staged_claim = proof
+                .claim(&mv.staged_path)
+                .map_err(|error| error.to_string())?;
+            let new_claim = proof
+                .claim(&mv.new_path)
+                .map_err(|error| error.to_string())?;
             with_sqlite_file_lock_retry(
-                || rename_sqlite_database(&mv.old_path, &mv.backup_path),
+                || rename_sqlite_database(old_claim, backup_claim),
                 FILE_LOCK_RETRY_DELAYS_MS.len(),
                 &crate::sqlite_files::system_retry_context(),
             )
             .map_err(|error| error.to_string())?;
             if let Err(restore_error) = with_sqlite_file_lock_retry(
-                || rename_sqlite_database(&mv.staged_path, &mv.new_path),
+                || rename_sqlite_database(staged_claim, new_claim),
                 FILE_LOCK_RETRY_DELAYS_MS.len(),
                 &crate::sqlite_files::system_retry_context(),
             ) {
                 // Rename staged -> new failed; restore the backup then throw.
                 let _ = with_sqlite_file_lock_retry(
-                    || rename_sqlite_database(&mv.backup_path, &mv.old_path),
+                    || rename_sqlite_database(backup_claim, old_claim),
                     FILE_LOCK_RETRY_DELAYS_MS.len(),
                     &crate::sqlite_files::system_retry_context(),
                 );

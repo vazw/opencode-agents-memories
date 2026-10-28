@@ -716,12 +716,17 @@ async fn test_recovers_interrupted_swap_during_storage_ready_gate() {
         .query("PRAGMA wal_checkpoint(TRUNCATE)", Vec::new())
         .await;
     drop(baseline);
-    mem_store::sqlite_files::copy_sqlite_database(&old_path, &new_path).expect("copy to new");
+    let proof = common::exclusive_root(&storage);
+    let new_claim = proof
+        .claim(&new_path)
+        .expect("the target is inside the root");
+    mem_store::sqlite_files::copy_sqlite_database(&old_path, new_claim).expect("copy to new");
     let backup = old_path.with_file_name(format!(
         "{}.pre-path-migrate-crash.bak",
         old_path.file_name().unwrap().to_string_lossy()
     ));
-    mem_store::sqlite_files::copy_sqlite_database(&old_path, &backup).expect("copy to backup");
+    let backup_claim = proof.claim(&backup).expect("the backup is inside the root");
+    mem_store::sqlite_files::copy_sqlite_database(&old_path, backup_claim).expect("copy to backup");
     std::fs::remove_file(&old_path).expect("simulate old->backup rename");
 
     write_swap_fixture(

@@ -231,7 +231,12 @@ async fn test_resumes_from_backup_after_interrupted_migration() {
     // must still hold (upstream needed no such care: their fixture closes
     // with a plain checkpointed WAL).
     let backup = PathBuf::from(format!("{}.legacy.bak", db_path.display()));
-    mem_store::sqlite_files::rename_sqlite_database(&db_path, &backup).expect("move to backup");
+    let proof = common::exclusive_root(&rig.storage);
+    let from_claim = proof
+        .claim(&db_path)
+        .expect("the source is inside the root");
+    let to_claim = proof.claim(&backup).expect("the backup is inside the root");
+    mem_store::sqlite_files::rename_sqlite_database(from_claim, to_claim).expect("move to backup");
     let fresh_db = rig
         .connections
         .get_connection(&db_path)

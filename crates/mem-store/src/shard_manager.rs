@@ -1071,10 +1071,15 @@ impl ShardManager {
             return Err(StoreError::ArchivePathEscape { path: archive_path });
         }
         if full_path.exists() {
-            let from = full_path.clone();
-            let to = archive_path.clone();
+            let Some(proof) = self.connections.exclusive_root() else {
+                return Err(StoreError::NoExclusiveRoot {
+                    db_path: full_path.clone(),
+                });
+            };
+            let from_claim = proof.claim(&full_path)?;
+            let to_claim = proof.claim(&archive_path)?;
             with_sqlite_file_lock_retry(
-                || rename_sqlite_database(&from, &to),
+                || rename_sqlite_database(from_claim, to_claim),
                 FILE_LOCK_RETRY_DELAYS_MS.len(),
                 &crate::sqlite_files::RetryContext::system(),
             )?;
@@ -1085,11 +1090,14 @@ impl ShardManager {
         {
             Ok(_) => {}
             Err(error) => {
-                if archive_path.exists() && !full_path.exists() {
-                    let from = archive_path.clone();
-                    let to = full_path.clone();
+                if archive_path.exists()
+                    && !full_path.exists()
+                    && let Some(proof) = self.connections.exclusive_root()
+                    && let (Ok(from_claim), Ok(to_claim)) =
+                        (proof.claim(&archive_path), proof.claim(&full_path))
+                {
                     let _ = with_sqlite_file_lock_retry(
-                        || rename_sqlite_database(&from, &to),
+                        || rename_sqlite_database(from_claim, to_claim),
                         FILE_LOCK_RETRY_DELAYS_MS.len(),
                         &crate::sqlite_files::RetryContext::system(),
                     );

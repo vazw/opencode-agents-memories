@@ -330,8 +330,16 @@ async fn test_recovers_a_crash_between_source_backup_and_replacement_rename() {
     // already been moved to the backup, the journal is on disk.
     let staged = PathBuf::from(format!("{}.reembed-crash.tmp", shard.db_path.display()));
     let backup = PathBuf::from(format!("{}.pre-reembed-crash.bak", shard.db_path.display()));
-    copy_sqlite_database(&shard.db_path, &staged).expect("copy staged replacement");
-    mem_store::sqlite_files::rename_sqlite_database(&shard.db_path, &backup)
+    let proof = common::exclusive_root(&fixture.storage);
+    let staged_claim = proof
+        .claim(&staged)
+        .expect("the staged path is inside the root");
+    copy_sqlite_database(&shard.db_path, staged_claim).expect("copy staged replacement");
+    let from_claim = proof
+        .claim(&shard.db_path)
+        .expect("the source is inside the root");
+    let to_claim = proof.claim(&backup).expect("the backup is inside the root");
+    mem_store::sqlite_files::rename_sqlite_database(from_claim, to_claim)
         .expect("move source to backup");
     let state = common::write_reembed_swap_state(&shard.db_path, &staged, &backup);
 

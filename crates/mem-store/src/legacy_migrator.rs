@@ -264,8 +264,13 @@ async fn restore_from_backup(
     }
     let from = backup.clone();
     let to = db_path.to_path_buf();
+    let Some(proof) = connections.exclusive_root() else {
+        return Err(StoreError::NoExclusiveRoot { db_path: to });
+    };
+    let from_claim = proof.claim(&from)?;
+    let to_claim = proof.claim(&to)?;
     with_sqlite_file_lock_retry(
-        || rename_sqlite_database(&from, &to),
+        || rename_sqlite_database(from_claim, to_claim),
         FILE_LOCK_RETRY_DELAYS_MS.len(),
         &RetryContext::system(),
     )?;
@@ -499,8 +504,13 @@ async fn migrate_memory_shard(
     if db_path.exists() {
         let from = db_path.to_path_buf();
         let to = backup.clone();
+        let Some(proof) = connections.exclusive_root() else {
+            return Err(StoreError::NoExclusiveRoot { db_path: from });
+        };
+        let from_claim = proof.claim(&from)?;
+        let to_claim = proof.claim(&to)?;
         with_sqlite_file_lock_retry(
-            || rename_sqlite_database(&from, &to),
+            || rename_sqlite_database(from_claim, to_claim),
             FILE_LOCK_RETRY_DELAYS_MS.len(),
             &RetryContext::system(),
         )?;
@@ -711,13 +721,13 @@ async fn recover_one_swap(
         };
         let expected_claim = proof.claim(&expected_db)?;
         let expected = expected_db.clone();
-        let staged_for_rename = staged.clone();
+        let staged_claim = proof.claim(&staged)?;
         with_sqlite_file_lock_retry(
             || -> Result<(), StoreError> {
                 if expected.exists() {
                     remove_sqlite_database(expected_claim)?;
                 }
-                rename_sqlite_database(&staged_for_rename, &expected)?;
+                rename_sqlite_database(staged_claim, expected_claim)?;
                 Ok(())
             },
             FILE_LOCK_RETRY_DELAYS_MS.len(),
@@ -732,12 +742,13 @@ async fn recover_one_swap(
         let expected_claim = proof.claim(&expected_db)?;
         let expected = expected_db.clone();
         let backup_for_rename = backup.clone();
+        let backup_claim = proof.claim(&backup_for_rename)?;
         with_sqlite_file_lock_retry(
             || -> Result<(), StoreError> {
                 if expected.exists() {
                     remove_sqlite_database(expected_claim)?;
                 }
-                rename_sqlite_database(&backup_for_rename, &expected)?;
+                rename_sqlite_database(backup_claim, expected_claim)?;
                 Ok(())
             },
             FILE_LOCK_RETRY_DELAYS_MS.len(),

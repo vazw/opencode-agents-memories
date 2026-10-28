@@ -22,9 +22,7 @@ use std::path::{Path, PathBuf};
 
 use crate::db::{BatchMode, Db, Statement, query_one};
 use crate::error::StoreError;
-use crate::sqlite_files::{
-    FILE_LOCK_RETRY_DELAYS_MS, RetryContext, copy_sqlite_database, with_sqlite_file_lock_retry,
-};
+use crate::sqlite_files::{FILE_LOCK_RETRY_DELAYS_MS, RetryContext, with_sqlite_file_lock_retry};
 
 /// A single versioned schema step; statements run as ONE write batch.
 #[derive(Debug, Clone)]
@@ -77,7 +75,10 @@ fn backup_before_destructive(
     if let Some(parent) = backup_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    copy_sqlite_database(db_path, &backup_path)?;
+    // Step-4 treatment: the destination is minted here and the root only
+    // arrives with Step 5's fourth argument, so the copy goes through the
+    // counted shim (deleted in Step 5).
+    crate::sqlite_files::copy_sqlite_database_without_proof(db_path, &backup_path)?;
     Ok(Some(backup_path))
 }
 

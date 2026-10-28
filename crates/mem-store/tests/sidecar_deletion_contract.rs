@@ -195,24 +195,18 @@ async fn test_g1_self_holder_write_loss_is_silent() {
 
 /// 46.6/46.2: a live legacy holder refuses the unlink **before any unlink**.
 ///
-/// The holder is an in-process `F_WRLCK` POSIX lock on byte 0 — the probe's OFD
-/// attempt conflicts with it (the measured `t2 S7` shape in `open_guard.rs`), so
-/// this exercises the same refusal a cross-process legacy holder produces
-/// (Step 9 adds that arm). Every file must survive, byte-identical.
-///
-/// Inverted world: delete the probe from `remove_sqlite_database` → the call
-/// unlinks and the "still present" assertions fail.
-///
 /// The holder is an in-process **OFD** write lock (`F_OFD_SETLK`, Linux): it
 /// belongs to the holder's open file description, so the probe's open/close
 /// cannot release it. A POSIX (`F_SETLK`) holder would be released by the
 /// probe's own `close()` (open_guard's measured `t2 S4/S6/S7`), making the
-/// fixture vacuous after its first probe.
+/// fixture vacuous after its first probe. Step 9 adds the cross-process arm.
+/// Every file must survive, byte-identical.
+///
+/// Inverted world: delete the probe from `remove_sqlite_database` → the call
+/// unlinks and the "still present" assertions fail.
 #[cfg(target_os = "linux")]
 #[test]
 fn test_remove_refuses_a_legacy_holder_before_any_unlink() {
-    use std::os::unix::io::AsRawFd;
-
     let dir = common::temp_dir("remove-refused");
     let proof = common::exclusive_root(&dir);
     let db = dir.join("held.db");
@@ -221,27 +215,7 @@ fn test_remove_refuses_a_legacy_holder_before_any_unlink() {
         std::fs::write(sidecar(&db, suffix), suffix.as_bytes()).expect("seed a sidecar");
     }
 
-    let holder = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&db)
-        .expect("open the holder");
-    // SAFETY: `libc::flock` is plain old data; all-zero is a valid bit pattern
-    // and every meaningful field is overwritten below.
-    let mut lock: libc::flock = unsafe { std::mem::zeroed() };
-    lock.l_type = libc::F_WRLCK as _;
-    lock.l_whence = libc::SEEK_SET as _;
-    lock.l_start = 0;
-    lock.l_len = 1;
-    lock.l_pid = 0;
-    // SAFETY: `holder` owns the fd for the whole call and `lock` outlives it.
-    let taken = unsafe { libc::fcntl(holder.as_raw_fd(), libc::F_OFD_SETLK, &lock) };
-    assert_eq!(
-        taken,
-        0,
-        "the fixture's OFD write lock must be taken: {}",
-        std::io::Error::last_os_error()
-    );
+    let holder = OfdHolder::acquire(&db);
     assert_eq!(
         mem_store::open_guard::probe_database_file(&db),
         mem_store::open_guard::ProbeOutcome::Held,
@@ -258,9 +232,6 @@ fn test_remove_refuses_a_legacy_holder_before_any_unlink() {
 
     // Release the holder only after the assertions; the files must be untouched
     // by then.
-    lock.l_type = libc::F_UNLCK as _;
-    // SAFETY: same owned fd, same still-live `flock`.
-    let _ = unsafe { libc::fcntl(holder.as_raw_fd(), libc::F_SETLK, &lock) };
     drop(holder);
 
     for suffix in ["", "-wal", "-shm", "-tshm"] {
@@ -270,6 +241,185 @@ fn test_remove_refuses_a_legacy_holder_before_any_unlink() {
         );
     }
     assert_eq!(std::fs::read(&db).expect("db bytes"), b"main");
+    let _ = common::cleanup_temp_dir(&dir);
+}
+
+/// An in-process **OFD** write lock (`F_OFD_SETLK`, Linux) on byte 0 of one
+/// file. It belongs to this open file description, so the probe's own
+/// `open`/`close` cannot release it (unlike a POSIX `F_SETLK` holder, which
+/// `close()` drops — open_guard's measured `t2 S4/S6/S7`). The probe's OFD
+/// attempt conflicts with it, so it reads `Held`.
+#[cfg(target_os = "linux")]
+struct OfdHolder {
+    file: std::fs::File,
+}
+
+#[cfg(target_os = "linux")]
+impl OfdHolder {
+    fn acquire(path: &Path) -> Self {
+        use std::os::unix::io::AsRawFd;
+
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .expect("open the holder");
+        // SAFETY: `libc::flock` is plain old data; all-zero is a valid bit
+        // pattern and every meaningful field is overwritten below.
+        let mut lock: libc::flock = unsafe { std::mem::zeroed() };
+        lock.l_type = libc::F_WRLCK as _;
+        lock.l_whence = libc::SEEK_SET as _;
+        lock.l_start = 0;
+        lock.l_len = 1;
+        lock.l_pid = 0;
+        // SAFETY: `file` owns the fd for the whole call and `lock` outlives it.
+        let taken = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_OFD_SETLK, &lock) };
+        assert_eq!(
+            taken,
+            0,
+            "the fixture's OFD write lock must be taken: {}",
+            std::io::Error::last_os_error()
+        );
+        Self { file }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for OfdHolder {
+    fn drop(&mut self) {
+        use std::os::unix::io::AsRawFd;
+
+        // SAFETY: same owned fd; releasing is best-effort on the way out.
+        let mut lock: libc::flock = unsafe { std::mem::zeroed() };
+        lock.l_type = libc::F_UNLCK as _;
+        lock.l_whence = libc::SEEK_SET as _;
+        lock.l_start = 0;
+        lock.l_len = 1;
+        let _ = unsafe { libc::fcntl(self.file.as_raw_fd(), libc::F_OFD_SETLK, &lock) };
+    }
+}
+
+/// 46.3: a copy claims **only** the destination — the source is a documented
+/// snapshot.
+///
+/// The source is held by a live OFD lock, so a copy that (wrongly) probed the
+/// source would answer `Held` and refuse. It succeeds, copies main + sidecars,
+/// and leaves the source's own bytes untouched.
+///
+/// Inverted world: add a source probe to `copy_sqlite_database` → this test
+/// fails with `ExclusivityRefused`.
+#[cfg(target_os = "linux")]
+#[test]
+fn test_copy_allows_a_live_source_but_claims_only_the_destination() {
+    let dir = common::temp_dir("copy-live-source");
+    let proof = common::exclusive_root(&dir);
+    let source = dir.join("source.db");
+    let destination = dir.join("snapshot.db");
+    std::fs::write(&source, b"source-main").expect("seed the source");
+    std::fs::write(sidecar(&source, "-wal"), b"source-wal").expect("seed the source wal");
+    let holder = OfdHolder::acquire(&source);
+
+    let destination_claim = proof.claim(&destination).expect("inside the root");
+    mem_store::sqlite_files::copy_sqlite_database(&source, destination_claim)
+        .expect("a live source does not block a snapshot copy");
+
+    assert_eq!(
+        std::fs::read(&source).expect("source bytes"),
+        b"source-main"
+    );
+    assert_eq!(
+        std::fs::read(sidecar(&source, "-wal")).expect("source wal"),
+        b"source-wal"
+    );
+    assert_eq!(
+        std::fs::read(&destination).expect("destination bytes"),
+        b"source-main"
+    );
+    assert_eq!(
+        std::fs::read(sidecar(&destination, "-wal")).expect("destination wal"),
+        b"source-wal"
+    );
+
+    drop(holder);
+    let _ = common::cleanup_temp_dir(&dir);
+}
+
+/// 46.3: a held destination refuses **before** its stale sidecars are dropped.
+///
+/// Inverted world: drop the `to` probe from `copy_sqlite_database` → the stale
+/// destination `-wal` is deleted before the copy and this fails.
+#[cfg(target_os = "linux")]
+#[test]
+fn test_copy_refuses_when_the_destination_is_held() {
+    let dir = common::temp_dir("copy-held-destination");
+    let proof = common::exclusive_root(&dir);
+    let source = dir.join("source.db");
+    let destination = dir.join("held.db");
+    std::fs::write(&source, b"source-main").expect("seed the source");
+    std::fs::write(&destination, b"destination-main").expect("seed the destination");
+    std::fs::write(sidecar(&destination, "-wal"), b"stale-wal").expect("seed a stale sidecar");
+    let holder = OfdHolder::acquire(&destination);
+
+    let destination_claim = proof.claim(&destination).expect("inside the root");
+    let error = mem_store::sqlite_files::copy_sqlite_database(&source, destination_claim)
+        .expect_err("a held destination must refuse the copy");
+    assert!(
+        matches!(error, StoreError::ExclusivityRefused { .. }),
+        "the refusal must be the typed exclusivity error, got {error:?}"
+    );
+    assert_eq!(
+        std::fs::read(&destination).expect("destination bytes"),
+        b"destination-main",
+        "the refused copy must leave the destination's main file untouched"
+    );
+    assert!(
+        sidecar(&destination, "-wal").exists(),
+        "the refused copy must not have dropped the destination's stale sidecars"
+    );
+
+    drop(holder);
+    let _ = common::cleanup_temp_dir(&dir);
+}
+
+/// 46.3: a rename probes **both** ends before the main file moves.
+///
+/// The source is held, so the refusal must leave the main file and every
+/// source sidecar where they were and the destination absent.
+///
+/// Inverted world: drop the `from` probe from `rename_sqlite_database` → the
+/// main file moves and the absence assertion fails.
+#[cfg(target_os = "linux")]
+#[test]
+fn test_rename_refuses_and_changes_nothing_when_an_end_is_held() {
+    let dir = common::temp_dir("rename-held-end");
+    let proof = common::exclusive_root(&dir);
+    let from = dir.join("from.db");
+    let to = dir.join("to.db");
+    std::fs::write(&from, b"from-main").expect("seed the source");
+    std::fs::write(sidecar(&from, "-wal"), b"from-wal").expect("seed the source wal");
+    let holder = OfdHolder::acquire(&from);
+
+    let from_claim = proof.claim(&from).expect("inside the root");
+    let to_claim = proof.claim(&to).expect("inside the root");
+    let error = mem_store::sqlite_files::rename_sqlite_database(from_claim, to_claim)
+        .expect_err("a held rename end must refuse");
+    assert!(
+        matches!(error, StoreError::ExclusivityRefused { .. }),
+        "the refusal must be the typed exclusivity error, got {error:?}"
+    );
+
+    assert!(from.exists(), "the refused rename must not move the source");
+    assert_eq!(std::fs::read(&from).expect("source bytes"), b"from-main");
+    assert!(
+        sidecar(&from, "-wal").exists(),
+        "the refused rename must not move the source sidecars"
+    );
+    assert!(
+        !to.exists(),
+        "the refused rename must not create the target"
+    );
+
+    drop(holder);
     let _ = common::cleanup_temp_dir(&dir);
 }
 

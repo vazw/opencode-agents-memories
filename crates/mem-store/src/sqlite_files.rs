@@ -29,12 +29,63 @@ use crate::platform::{Platform, SleepFn};
 pub const SIDECAR_SUFFIXES: [&str; 3] = ["-wal", "-shm", "-tshm"];
 
 /// Rename a SQLite/Turso database file together with its WAL/SHM/TSHM
-/// sidecars. A stale sidecar at the target is removed first (leaving one
-/// behind drops commits). `NotFound` on incidental unlink targets is
-/// tolerated (upstream `existsSync` + `unlinkSync` semantics).
-pub fn rename_sqlite_database(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::rename(from, to)?;
-    for sidecar in sidecar_paths(from, to) {
+/// sidecars — **only under exclusivity proofs for both ends**.
+///
+/// Both claims are probed **before the first mutation** (the main-file rename),
+/// so a refusal leaves the main file and the destination's stale sidecars
+/// untouched. Then the main file moves, and per sidecar the destination's stale
+/// file is removed and the source's renamed in.
+///
+/// A claim covers its database and the three sidecars; the same argument as for
+/// [`remove_sqlite_database`] makes one probe per end sound.
+///
+/// # Examples
+///
+/// Bare paths have no proof, so this call must not compile:
+///
+/// ```compile_fail
+/// use std::path::Path;
+/// use mem_store::sqlite_files::rename_sqlite_database;
+///
+/// let _ = rename_sqlite_database(Path::new("/tmp/from.db"), Path::new("/tmp/to.db"));
+/// ```
+///
+/// Two claims from a live proof (the adjacent positive control):
+///
+/// ```
+/// use std::sync::Arc;
+///
+/// use mem_store::delete_guard::ExclusiveRoot;
+/// use mem_store::engine_lock::{EngineLockOutcome, acquire_engine_lock};
+/// use mem_store::platform::SystemProcessProbe;
+/// use mem_store::sqlite_files::rename_sqlite_database;
+///
+/// let root = std::env::temp_dir().join(format!(
+///     "mem-store-doctest-rename-{}",
+///     std::process::id()
+/// ));
+/// std::fs::create_dir_all(&root).expect("create the root");
+/// let lock = match acquire_engine_lock(&root, Arc::new(SystemProcessProbe)).expect("acquire") {
+///     EngineLockOutcome::Acquired(lock) => lock,
+///     EngineLockOutcome::Lost { .. } => panic!("a fresh temp root is free"),
+/// };
+/// let proof = ExclusiveRoot::new(lock);
+/// let from = root.join("from.db");
+/// let to = root.join("to.db");
+/// std::fs::write(&from, b"main").expect("seed the source");
+/// let from_claim = proof.claim(&from).expect("inside the root");
+/// let to_claim = proof.claim(&to).expect("inside the root");
+/// rename_sqlite_database(from_claim, to_claim).expect("both ends are free");
+/// assert!(!from.exists());
+/// assert_eq!(std::fs::read(&to).expect("target bytes"), b"main");
+/// drop(proof);
+/// let _ = std::fs::remove_dir_all(&root);
+/// ```
+pub fn rename_sqlite_database(from: FileClaim<'_>, to: FileClaim<'_>) -> Result<(), StoreError> {
+    from.assert_exclusive()?;
+    to.assert_exclusive()?;
+    std::fs::rename(from.path(), to.path())?;
+    for sidecar in sidecar_paths(from.path(), to.path()) {
         if sidecar.to.exists() {
             std::fs::remove_file(&sidecar.to)?;
         }
@@ -45,9 +96,29 @@ pub fn rename_sqlite_database(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Copy a SQLite/Turso database file together with its WAL/SHM/TSHM
-/// sidecars (source stays intact).
-pub fn copy_sqlite_database(from: &Path, to: &Path) -> std::io::Result<()> {
+/// Copy a SQLite/Turso database file together with its WAL/SHM/TSHM sidecars
+/// (source stays intact) — **only the destination is claimed**.
+///
+/// The destination is probed **before its stale sidecars are dropped**, so a
+/// refusal leaves them and the main file untouched. The source is a
+/// **documented snapshot**, never mutated: a copy of a live source is a
+/// point-in-time read, not an exclusive operation. Every production copy
+/// destination is minted in the same call (`{db}.schema-v{v}-{millis}.bak`,
+/// `{db}.pre-encrypt-*.bak`, `{db}.path-migrate-{nonce}.tmp`).
+pub fn copy_sqlite_database(from: &Path, to: FileClaim<'_>) -> Result<(), StoreError> {
+    to.assert_exclusive()?;
+    copy_sqlite_files(from, to.path())
+}
+
+// shortcut: no exclusivity proof; the schema runner's backup destination is minted in
+// backup_before_destructive and cannot obtain a root until Step 5. Deleted in Step 5.
+// Re-decision: Step 5 of this wave.
+pub(crate) fn copy_sqlite_database_without_proof(from: &Path, to: &Path) -> Result<(), StoreError> {
+    copy_sqlite_files(from, to)
+}
+
+/// The copy body shared by the claimed function and the counted Step-4 shim.
+fn copy_sqlite_files(from: &Path, to: &Path) -> Result<(), StoreError> {
     std::fs::copy(from, to)?;
     for sidecar in sidecar_paths(from, to) {
         if sidecar.to.exists() {

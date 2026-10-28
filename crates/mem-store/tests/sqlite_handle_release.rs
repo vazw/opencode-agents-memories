@@ -217,7 +217,10 @@ fn test_rename_moves_database_and_sidecars_and_drops_stale_target_sidecars() {
     // stale sidecars at the target must not survive the swap
     write_file(&to.with_extension("db-wal"), b"stale");
 
-    mem_store::sqlite_files::rename_sqlite_database(&from, &to).unwrap();
+    let proof = common::exclusive_root(&dir);
+    let from_claim = proof.claim(&from).expect("the source is inside the root");
+    let to_claim = proof.claim(&to).expect("the target is inside the root");
+    mem_store::sqlite_files::rename_sqlite_database(from_claim, to_claim).unwrap();
 
     assert!(!from.exists(), "main file moved");
     assert_eq!(std::fs::read(&to).unwrap(), b"main");
@@ -247,7 +250,9 @@ fn test_copy_moves_database_and_sidecars_and_drops_stale_target_sidecars() {
     write_file(&from.with_file_name("backup-src.db-wal"), b"wal");
     write_file(&to.with_file_name("copy.db-shm"), b"stale-shm");
 
-    mem_store::sqlite_files::copy_sqlite_database(&from, &to).unwrap();
+    let proof = common::exclusive_root(&dir);
+    let to_claim = proof.claim(&to).expect("the target is inside the root");
+    mem_store::sqlite_files::copy_sqlite_database(&from, to_claim).unwrap();
 
     assert!(from.exists(), "copy keeps the source");
     assert_eq!(std::fs::read(&to).unwrap(), b"main");
@@ -420,11 +425,14 @@ mod step5 {
         // The file is immediately free for exclusive renames (Windows-shaped
         // invariant; harmless on Unix).
         let moved = config.storage_path.join("cycle-moved.db");
-        mem_store::sqlite_files::rename_sqlite_database(
-            &config.storage_path.join("cycle.db"),
-            &moved,
-        )
-        .expect("file released for rename after drop");
+        let cycle_db = config.storage_path.join("cycle.db");
+        let proof = common::exclusive_root(&config.storage_path);
+        let from_claim = proof
+            .claim(&cycle_db)
+            .expect("the source is inside the root");
+        let to_claim = proof.claim(&moved).expect("the target is inside the root");
+        mem_store::sqlite_files::rename_sqlite_database(from_claim, to_claim)
+            .expect("file released for rename after drop");
 
         // Reopen reads the committed row.
         let reopened = open_after_drop(&config, "cycle-moved.db").await;

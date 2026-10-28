@@ -557,24 +557,32 @@ impl MigrationService {
         connections.close_connection(db_path).await?;
 
         let ctx = RetryContext::system();
+        let Some(proof) = connections.exclusive_root() else {
+            return Err(StoreError::NoExclusiveRoot {
+                db_path: db_path.to_path_buf(),
+            });
+        };
+        let db_claim = proof.claim(db_path)?;
+        let backup_claim = proof.claim(backup_path)?;
+        let staged_claim = proof.claim(staged_path)?;
         with_sqlite_file_lock_retry(
-            || rename_sqlite_database(db_path, backup_path),
+            || rename_sqlite_database(db_claim, backup_claim),
             FILE_LOCK_RETRY_DELAYS_MS.len(),
             &ctx,
         )?;
         if let Err(error) = with_sqlite_file_lock_retry(
-            || rename_sqlite_database(staged_path, db_path),
+            || rename_sqlite_database(staged_claim, db_claim),
             FILE_LOCK_RETRY_DELAYS_MS.len(),
             &ctx,
         ) {
             // Restore the source before rethrowing (upstream rethrows the
             // ORIGINAL rename error, not the restore outcome).
             with_sqlite_file_lock_retry(
-                || rename_sqlite_database(backup_path, db_path),
+                || rename_sqlite_database(backup_claim, db_claim),
                 FILE_LOCK_RETRY_DELAYS_MS.len(),
                 &ctx,
             )?;
-            return Err(error.into());
+            return Err(error);
         }
 
         shards.set_vector_count(shard_id, staged_count).await?;
