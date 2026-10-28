@@ -1,6 +1,6 @@
 # 74 — `mem-ai`'s provider test binary has a real race on the process-global capture set
 
-Status: ready-for-agent — 2026-10-28 (found during issue 43 W2's review; pre-existing, branch-independent)
+Status: done — 2026-10-29 — landed at `99bf621` (merge of `78cbcb2`; three test files, `+32/−0`). The issue's AC #2 is closed by substitution as the blueprint ruled: the barrier reproducer is deleted (it calls `clear()` outside the gate and would fail on a correct fix); the after-side is the structural argument + the exact-binding inventory + `32 passed` at `--test-threads=16` × 100.
 
 ## What happened
 
