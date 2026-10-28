@@ -87,13 +87,13 @@ never grants access to another session's rows.
 |---|---|---|---|
 | `capture` | no (fire-and-forget ack) | `session_id` (req), `capture_id` (req), `project_id?`, `agent_id?`, `agent_name?`, `parent_session_id?`, `transcript?`, `summary?`, `metadata?` | `{"accepted":true}` |
 | `inject` | **yes** | `session_id` (req), `project_id?`, `agent_id?`, `token_budget?`, `include?` | `{"block":string\|null,"memory_count":int,"tokens":int,"truncated":bool,"handling_ms":int}` |
-| `recall` | no | `session_id` (req), `query` (req), `limit?`, `scope?`, `tags?` | `{"items":[…],"count":int}` |
+| `recall` | no | `session_id` (req); **canonical** when `projectId` is present (camelCase, no unknown keys): `projectId` (req), `mode?` (`"chronological"\|"semantic"\|"filtered"`), `query?` (semantic only), `since?`, `until?`, `lastNSessions?`, `touchedFiles?`, `agentId?`, `sessionId?` (filter key), `includeFullSessions?`; **legacy** otherwise: `query` (req, string), `limit?`, `scope?`, `tags?` (these keys only) | `{"items":[…],"count":int}` |
 | `health` | no | `session_id` (req) | `{"ok":bool,"mode":"full"\|"degraded","degraded_reason":string\|null,"protocol":semver,"engine_version":semver,"db":{"path":string,"ready":bool},"open_guard":{"override_active":bool},"uptime_ms":int,"sessions":int}` |
 | `shutdown` | teardown only | `session_id` (req) | `{"ok":true}` |
 
 `inject`'s `include?` accepts either the frozen `["summary","metadata"]` array or the additive options object `{"recent_count"?: int, "compaction"?: "ingest"|"restore", "query"?: string}`: `recent_count` bounds the episodic rows, `compaction` selects the session-scoped render (issue 33), and `query` carries the authored prompt (max 2000 code points; absent or blank keeps the tag-listed read). Unknown keys are ignored; no other field exists.
 
-W5.1 ships `capture`, `inject` and `recall` as **stubs**:
+W5.1 shipped `capture` and `inject` as **stubs**:
 
 - `capture` answers `{"accepted":true}`. **The ack carries no durability guarantee in
   W5.1.** D-48's "an ack means durably queued" arrives with W5.3's inbox, which is W5.3's
@@ -101,7 +101,10 @@ W5.1 ships `capture`, `inject` and `recall` as **stubs**:
   `{"level":"warn","component":"engine","event":"capture.stub_not_durable"}` with **no
   params** (the params include the transcript, and no transcript may reach stderr).
 - `inject` answers `{"block":null,"memory_count":0,"tokens":0,"truncated":false,"handling_ms":<n>}`.
-- `recall` answers `{"items":[],"count":0}`.
+- `recall` is no longer a stub: the **canonical** shape (above) reads the episodic store and
+  returns its matching rows; only the **legacy** shape answers the logged empty page
+  `{"items":[],"count":0}` and emits the structured stderr event
+  `recall.legacy_shape_unscoped` at `warn` with a constant empty extras object.
 
 `capture_id` is client-minted, UUIDv7-shaped, ≤ 64 characters, and unique per capture
 attempt (D-36, security posture (h)). A collision loses one capture; it never writes a wrong
