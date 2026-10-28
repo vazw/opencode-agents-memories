@@ -271,18 +271,16 @@ pub async fn write_capture_summary(
                     };
                     let statement =
                         insert_vector_statement(&insert).map_err(CaptureWriterError::Failed)?;
-                    let statements = vec![
-                        statement,
-                        // SQLite allows DML batches; the count bump is
-                        // intentionally NOT here (the shard count reconciles
-                        // from the actual row count on rotation, and the bump
-                        // is manager-owned below the transaction).
-                    ];
+                    // W3: the insert and the statement-measured ABSOLUTE count
+                    // share one transaction; the registry then adopts the
+                    // shard's own value (never a `±1`).
+                    let statements =
+                        vec![statement, mem_store::shard_facts::sync_count_statement()];
                     db.batch(statements, BatchMode::Write)
                         .await
                         .map_err(CaptureWriterError::Failed)?;
                     deps.shards
-                        .increment_vector_count(info.id)
+                        .adopt_stored_count(db.as_ref(), info.id)
                         .await
                         .map_err(CaptureWriterError::Failed)?;
 

@@ -684,3 +684,65 @@ async fn test_capture_is_deferred_and_writes_nothing_when_a_registered_shard_is_
         "no row with C's id in the two surviving shards"
     );
 }
+
+// ---------------------------------------------------------------------------
+// W3 — the absolute count authority on the tier-1 write
+// ---------------------------------------------------------------------------
+
+/// AC18 — a tier-1 write keeps BOTH count authorities exact (1/1).
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_a_tier1_write_keeps_both_count_authorities_exact() {
+    let dir = TestDir::new("w53-tier1-count-authority");
+    let shards = common::shard_manager(dir.store_config());
+    let deps = mem_bridge::capture::CaptureWriterDeps {
+        shards: Arc::new(shards.clone()),
+        embedder: Arc::new(FakeEmbedder::with_vector(vec![
+            1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ])),
+    };
+    let scope = mem_bridge::project_scope::ResolvedProjectScope {
+        project_id: "/project/count-authority".to_string(),
+        container_tag: "opencode_project_a1b2c3d4e5f60006".to_string(),
+        scope_hash: "a1b2c3d4e5f60006".to_string(),
+        display_name: "count-authority".to_string(),
+        user_name: None,
+        user_email: None,
+        project_path: None,
+        project_name: None,
+        git_repo_url: None,
+    };
+
+    let outcome = write_capture_summary(&deps, &scope, &input("capture-count", "sess-count"))
+        .await
+        .expect("the tier-1 write succeeds");
+    assert_eq!(outcome, Tier1WriteOutcome::Written);
+
+    let shard = shards
+        .get_all_shards(mem_core::scope::Scope::Project, Some(&scope.scope_hash))
+        .await
+        .expect("registry rows")
+        .into_iter()
+        .next()
+        .expect("the write created a shard");
+    let db = shards
+        .open_shard(&shard.db_path)
+        .await
+        .expect("open the shard");
+    assert_eq!(
+        mem_store::shard_facts::read_stored_count(db.as_ref())
+            .await
+            .expect("shard_stats count"),
+        1,
+        "the tier-1 write measured the absolute count"
+    );
+    assert_eq!(
+        shards
+            .get_shard_by_id(shard.id)
+            .await
+            .expect("registry read")
+            .expect("registry row")
+            .vector_count,
+        1,
+        "the registry adopted the same value"
+    );
+}

@@ -334,11 +334,14 @@ fn seed_rows(storage: &Path, store_config: &StoreConfig, rows: &[SeedRow]) {
             )
             .await
             .expect("insert the seed row");
-            manager
-                .increment_vector_count(shard.id)
-                .await
-                .expect("bump the shard's vector count");
         }
+        let count = mem_store::shard_facts::sync_count(db.as_ref())
+            .await
+            .expect("sync the shard count");
+        manager
+            .set_vector_count(shard.id, count)
+            .await
+            .expect("adopt the shard's vector count");
     });
     // `runtime` drops here: the seeded connection is closed before the spawn.
 }
