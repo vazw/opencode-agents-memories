@@ -167,6 +167,11 @@ mod tests {
     /// `/root-u` probe below answers `Some` and the last assertion fails.
     #[test]
     fn test_delete_claim_is_constructible_from_a_live_engine_lock_only() {
+        // The registry assertions below must not observe another test's
+        // transient registry upgrade (issue 46 D1 stress).
+        let _registry = crate::engine_lock::REGISTRY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let root = temp_dir("claim");
         let other = temp_dir("claim-other");
         let lock = acquire(&root);

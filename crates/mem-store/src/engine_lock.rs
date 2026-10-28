@@ -142,6 +142,15 @@ fn engine_lock_path(storage_path: &Path) -> PathBuf {
 /// so it simply sees `None`.
 static LOCK_REGISTRY: Mutex<Vec<Weak<EngineLock>>> = Mutex::new(Vec::new());
 
+/// Serialises the lib tests that assert on the process-global registry: a
+/// concurrent [`registered_lock`] temporarily upgrades **every** live entry,
+/// so a proof can legitimately outlive its owner's `drop` by exactly that
+/// lookup's own clone. Assertions such as "the last drop withdraws the proof"
+/// must not observe another test's transient clone. Poison recovered: the
+/// guarded value is `()`.
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
 /// Adds `lock` and prunes entries whose lock has already been dropped.
 fn register(lock: &Arc<EngineLock>) {
     // Registry lock poison is recovered, never `unwrap`ed: the guarded value is
@@ -436,6 +445,15 @@ mod tests {
         }
     }
 
+    /// The registry-sensitive tests hold this for their whole body (see
+    /// [`REGISTRY_TEST_LOCK`]).
+    #[cfg(target_os = "linux")]
+    fn registry_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        REGISTRY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// 46.2: the registry publishes the root proof while the lock lives and
     /// withdraws it on the last drop; a different root is never matched.
     ///
@@ -444,6 +462,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn test_engine_lock_publishes_and_withdraws_the_root_proof() {
+        let _registry = registry_test_guard();
         let root = temp_dir("registry-publish");
         let other = temp_dir("registry-publish-other");
         let lock = acquire(&root);
@@ -476,6 +495,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn test_engine_lock_drop_does_not_remove_a_newer_registration() {
+        let _registry = registry_test_guard();
         let root = temp_dir("registry-newer");
         let a = acquire(&root);
         a.release();
