@@ -275,7 +275,9 @@ fn test_remove_deletes_database_and_sidecars() {
             suffix.as_bytes(),
         );
     }
-    mem_store::sqlite_files::remove_sqlite_database(&main).unwrap();
+    let proof = common::exclusive_root(&dir);
+    let claim = proof.claim(&main).expect("the database is inside the root");
+    mem_store::sqlite_files::remove_sqlite_database(claim).expect("a free database is removed");
     assert!(!main.exists());
     for suffix in ["-wal", "-shm", "-tshm"] {
         assert!(!PathBuf::from(format!("{}{}", main.display(), suffix)).exists());

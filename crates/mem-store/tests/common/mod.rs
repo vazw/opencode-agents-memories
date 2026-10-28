@@ -75,6 +75,51 @@ pub fn store_config(prefix: &str) -> StoreConfig {
     }
 }
 
+/// A live exclusivity proof for `storage_root`, memoised per **exact** path.
+///
+/// The engine lock is one per root per process (a second acquire answers
+/// `Lost`), so every test in this binary that touches a claimed mutation shares
+/// the one lock. Acquire with the **same path** the `ConnectionManager` was
+/// built with — `ExclusiveRoot::current` matches `storage_root()` exactly, so
+/// never `canonicalize` here.
+///
+/// The proof is deliberately kept alive for the whole test binary: a test that
+/// needs to observe `None` (the restore-without-lock arm) must acquire and drop
+/// its own manual `Arc<EngineLock>` instead.
+pub fn exclusive_root(
+    storage_root: &Path,
+) -> std::sync::Arc<mem_store::delete_guard::ExclusiveRoot> {
+    static ROOTS: std::sync::Mutex<
+        Vec<(
+            PathBuf,
+            std::sync::Arc<mem_store::delete_guard::ExclusiveRoot>,
+        )>,
+    > = std::sync::Mutex::new(Vec::new());
+    let mut roots = ROOTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((_, proof)) = roots.iter().find(|(root, _)| root == storage_root) {
+        return proof.clone();
+    }
+    let outcome = mem_store::engine_lock::acquire_engine_lock(
+        storage_root,
+        std::sync::Arc::new(mem_store::platform::SystemProcessProbe),
+    )
+    .expect("acquire the engine lock for a test root");
+    let lock = match outcome {
+        mem_store::engine_lock::EngineLockOutcome::Acquired(lock) => lock,
+        mem_store::engine_lock::EngineLockOutcome::Lost { holder_pid } => {
+            panic!(
+                "test root {} is already locked by pid {holder_pid}",
+                storage_root.display()
+            )
+        }
+    };
+    let proof = std::sync::Arc::new(mem_store::delete_guard::ExclusiveRoot::new(lock));
+    roots.push((storage_root.to_path_buf(), proof.clone()));
+    proof
+}
+
 // ---------------------------------------------------------------------------
 // FakeDb (blueprint step 4)
 // ---------------------------------------------------------------------------

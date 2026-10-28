@@ -30,7 +30,8 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, Weak};
 
 use crate::error::StoreError;
 use crate::operation_lock::{LockRecord, LockState, now_rfc3339_millis, read_live_lock};
@@ -57,8 +58,11 @@ const MAX_STATUS_CHARS: usize = 200;
 /// The outcome of [`acquire_engine_lock`].
 #[derive(Debug)]
 pub enum EngineLockOutcome {
-    /// This process owns the engine lock for as long as the handle lives.
-    Acquired(EngineLock),
+    /// This process owns the engine lock for as long as every handle lives.
+    /// The `Arc` is the registry entry [`crate::delete_guard::ExclusiveRoot`]
+    /// is built from: taking the lock by value would require `Arc::try_unwrap`,
+    /// which frees the allocation the registered `Weak` points at.
+    Acquired(Arc<EngineLock>),
     /// Another live engine owns it; `holder_pid` is the pid in the live lock.
     Lost {
         /// The pid recorded by the live holder.
@@ -66,11 +70,16 @@ pub enum EngineLockOutcome {
     },
 }
 
-/// A held engine lock. Dropping it releases the lock (lifetime scope).
+/// A held engine lock. Dropping the last handle releases the lock (lifetime
+/// scope) and withdraws the registered proof.
 pub struct EngineLock {
     storage_path: PathBuf,
     probe: Arc<dyn ProcessProbe>,
     pid: u32,
+    /// Per-lock idempotence for [`EngineLock::release`]: after a manual release
+    /// the file may already belong to a newer holder, so `Drop` must not
+    /// release (and thereby unlink) that newer holder's file.
+    released: AtomicBool,
 }
 
 impl std::fmt::Debug for EngineLock {
@@ -88,11 +97,24 @@ impl EngineLock {
         engine_lock_path(&self.storage_path)
     }
 
+    /// The storage root this lock covers. [`crate::delete_guard::ExclusiveRoot::current`]
+    /// matches it **exactly** (never by prefix).
+    pub fn storage_root(&self) -> &Path {
+        &self.storage_path
+    }
+
     /// Removes the lock when this process still owns it.
     ///
     /// A lock re-taken by another process is never unlinked. Best-effort: a
     /// release failure must not turn a clean shutdown into an error.
+    ///
+    /// Idempotent per lock (`released`): once this lock has released its file,
+    /// a later call is a no-op — the path may by then hold a **newer**
+    /// registration's lock, which this lock must not unlink.
     pub fn release(&self) {
+        if self.released.swap(true, Ordering::SeqCst) {
+            return;
+        }
         let live = read_live_lock(&self.storage_path, ENGINE_LOCK_FILE, self.probe.as_ref());
         if live.is_some_and(|current| current.pid == self.pid) {
             let _ = fs::remove_file(engine_lock_path(&self.storage_path));
@@ -103,11 +125,57 @@ impl EngineLock {
 impl Drop for EngineLock {
     fn drop(&mut self) {
         self.release();
+        deregister(self);
     }
 }
 
 fn engine_lock_path(storage_path: &Path) -> PathBuf {
     storage_path.join(ENGINE_LOCK_FILE)
+}
+
+/// The process-wide registry of live engine locks — the seam
+/// [`crate::delete_guard::ExclusiveRoot::current`] reads.
+///
+/// It publishes "this process holds the engine lock for this root" as a fact
+/// the *lock* controls; consumers still convert the absence of an entry into a
+/// typed refusal. `purge-session` is a legitimate second process with no lock,
+/// so it simply sees `None`.
+static LOCK_REGISTRY: Mutex<Vec<Weak<EngineLock>>> = Mutex::new(Vec::new());
+
+/// Adds `lock` and prunes entries whose lock has already been dropped.
+fn register(lock: &Arc<EngineLock>) {
+    // Registry lock poison is recovered, never `unwrap`ed: the guarded value is
+    // a list of weakly held handles, so a panicking writer cannot leave it
+    // half-updated (ADR-0013 D-2).
+    let mut registry = LOCK_REGISTRY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    registry.retain(|entry| entry.strong_count() > 0);
+    registry.push(Arc::downgrade(lock));
+}
+
+/// Withdraws `lock` **by identity**: only a dead entry or the entry whose
+/// `Weak` points at `lock` is removed. A path-keyed removal is forbidden —
+/// after `release()` another lock can be registered for the same root, and
+/// this lock's drop must not erase that live entry.
+fn deregister(lock: &EngineLock) {
+    let mut registry = LOCK_REGISTRY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let identity = lock as *const EngineLock;
+    registry.retain(|entry| entry.strong_count() > 0 && entry.as_ptr() != identity);
+}
+
+/// The live lock registered for `root`, matched **exactly** (`/root/u` must
+/// never satisfy `/root/users`). Poison recovered, never `unwrap`ed.
+pub(crate) fn registered_lock(root: &Path) -> Option<Arc<EngineLock>> {
+    let registry = LOCK_REGISTRY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    registry
+        .iter()
+        .filter_map(Weak::upgrade)
+        .find(|lock| lock.storage_root() == root)
 }
 
 /// Creates the lock file exclusively and writes the `LockRecord` body.
@@ -154,11 +222,14 @@ pub fn acquire_engine_lock(
     let pid = std::process::id();
     for _attempt in 0..2 {
         if try_create(storage_path, pid)? {
-            return Ok(EngineLockOutcome::Acquired(EngineLock {
+            let lock = Arc::new(EngineLock {
                 storage_path: storage_path.to_path_buf(),
                 probe,
                 pid,
-            }));
+                released: AtomicBool::new(false),
+            });
+            register(&lock);
+            return Ok(EngineLockOutcome::Acquired(lock));
         }
         // `read_live_lock` unlinks a dead-owner or corrupt lock as a side
         // effect; a live holder is returned unchanged.

@@ -250,9 +250,14 @@ async fn restore_from_backup(
     }
     connections.close_connection(db_path).await?;
     if db_path.exists() {
-        let path = db_path.to_path_buf();
+        let Some(proof) = connections.exclusive_root() else {
+            return Err(StoreError::NoExclusiveRoot {
+                db_path: db_path.to_path_buf(),
+            });
+        };
+        let claim = proof.claim(db_path)?;
         with_sqlite_file_lock_retry(
-            || remove_sqlite_database(&path),
+            || remove_sqlite_database(claim),
             FILE_LOCK_RETRY_DELAYS_MS.len(),
             &RetryContext::system(),
         )?;
@@ -617,7 +622,10 @@ struct ReembedSwapState {
 }
 
 /// Upstream `recoverInterruptedReembedSwaps` (L517-574).
-async fn recover_interrupted_reembed_swaps(storage_path: &Path) -> Result<(), StoreError> {
+async fn recover_interrupted_reembed_swaps(
+    storage_path: &Path,
+    connections: &Arc<ConnectionManager>,
+) -> Result<(), StoreError> {
     for dir_name in ["users", "projects"] {
         let dir = storage_path.join(dir_name);
         let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -631,20 +639,25 @@ async fn recover_interrupted_reembed_swaps(storage_path: &Path) -> Result<(), St
         names.sort();
         for name in names {
             let state_path = dir.join(name);
-            recover_one_swap(&state_path).await.map_err(|error| {
-                tracing::error!(state_path = %state_path.display(), error = %error.message(), "Re-embed swap recovery failed");
-                StoreError::internal(format!(
-                    "Failed to recover re-embed swap {}: {}",
-                    state_path.display(),
-                    error.message()
-                ))
-            })?;
+            recover_one_swap(&state_path, connections)
+                .await
+                .map_err(|error| {
+                    tracing::error!(state_path = %state_path.display(), error = %error.message(), "Re-embed swap recovery failed");
+                    StoreError::internal(format!(
+                        "Failed to recover re-embed swap {}: {}",
+                        state_path.display(),
+                        error.message()
+                    ))
+                })?;
         }
     }
     Ok(())
 }
 
-async fn recover_one_swap(state_path: &Path) -> Result<(), StoreError> {
+async fn recover_one_swap(
+    state_path: &Path,
+    connections: &Arc<ConnectionManager>,
+) -> Result<(), StoreError> {
     let state_text = state_path.to_string_lossy().to_string();
     let Some(expected_db) = state_text
         .strip_suffix(REEMBED_SWAP_SUFFIX)
@@ -676,9 +689,14 @@ async fn recover_one_swap(state_path: &Path) -> Result<(), StoreError> {
 
     if expected_db.exists() {
         if staged.exists() {
-            let staged = staged.clone();
+            let Some(proof) = connections.exclusive_root() else {
+                return Err(StoreError::NoExclusiveRoot {
+                    db_path: staged.clone(),
+                });
+            };
+            let claim = proof.claim(&staged)?;
             with_sqlite_file_lock_retry(
-                || remove_sqlite_database(&staged),
+                || remove_sqlite_database(claim),
                 FILE_LOCK_RETRY_DELAYS_MS.len(),
                 &RetryContext::system(),
             )?;
@@ -686,27 +704,41 @@ async fn recover_one_swap(state_path: &Path) -> Result<(), StoreError> {
     } else if staged.exists() {
         // Target is absent after a crash mid-swap; the retry covers Windows
         // EPERM while native handles release (engine/encryption pattern).
+        let Some(proof) = connections.exclusive_root() else {
+            return Err(StoreError::NoExclusiveRoot {
+                db_path: staged.clone(),
+            });
+        };
+        let expected_claim = proof.claim(&expected_db)?;
         let expected = expected_db.clone();
         let staged_for_rename = staged.clone();
         with_sqlite_file_lock_retry(
-            || {
+            || -> Result<(), StoreError> {
                 if expected.exists() {
-                    remove_sqlite_database(&expected)?;
+                    remove_sqlite_database(expected_claim)?;
                 }
-                rename_sqlite_database(&staged_for_rename, &expected)
+                rename_sqlite_database(&staged_for_rename, &expected)?;
+                Ok(())
             },
             FILE_LOCK_RETRY_DELAYS_MS.len(),
             &RetryContext::system(),
         )?;
     } else if backup.exists() {
+        let Some(proof) = connections.exclusive_root() else {
+            return Err(StoreError::NoExclusiveRoot {
+                db_path: backup.clone(),
+            });
+        };
+        let expected_claim = proof.claim(&expected_db)?;
         let expected = expected_db.clone();
         let backup_for_rename = backup.clone();
         with_sqlite_file_lock_retry(
-            || {
+            || -> Result<(), StoreError> {
                 if expected.exists() {
-                    remove_sqlite_database(&expected)?;
+                    remove_sqlite_database(expected_claim)?;
                 }
-                rename_sqlite_database(&backup_for_rename, &expected)
+                rename_sqlite_database(&backup_for_rename, &expected)?;
+                Ok(())
             },
             FILE_LOCK_RETRY_DELAYS_MS.len(),
             &RetryContext::system(),
@@ -840,7 +872,7 @@ pub async fn run_legacy_turso_migration(
         std::fs::create_dir_all(storage_path)?;
     }
 
-    recover_interrupted_reembed_swaps(storage_path).await?;
+    recover_interrupted_reembed_swaps(storage_path, connections).await?;
 
     // Recovery may put a libSQL shard back at its active path. Convert DiskANN
     // indexes before any legacy verification opens it with the Turso engine,

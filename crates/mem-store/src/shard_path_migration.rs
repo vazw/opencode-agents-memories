@@ -125,20 +125,27 @@ fn is_inside_storage_lexical(storage_path: &Path, path: &Path) -> bool {
     assert_path_inside_storage(storage_path, path).is_ok()
 }
 
-/// Upstream `removeFile`: close any open handle first, then remove under
-/// the file-lock retry (existsSync guard).
+/// Upstream `removeFile`: close any open handle first, then remove under the
+/// file-lock retry (existsSync guard). The unlink runs only under the root's
+/// exclusivity proof (issue 46): the probe is inside `remove_sqlite_database`,
+/// so every retry attempt re-probes.
 async fn remove_file_helper(
     connections: &ConnectionManager,
     path: &Path,
 ) -> Result<(), StoreError> {
     connections.close_connection(path).await?;
     if path.exists() {
+        let Some(proof) = connections.exclusive_root() else {
+            return Err(StoreError::NoExclusiveRoot {
+                db_path: path.to_path_buf(),
+            });
+        };
+        let claim = proof.claim(path)?;
         with_sqlite_file_lock_retry(
-            || remove_sqlite_database(path),
+            || remove_sqlite_database(claim),
             FILE_LOCK_RETRY_DELAYS_MS.len(),
             &crate::sqlite_files::system_retry_context(),
-        )
-        .map_err(StoreError::from)?;
+        )?;
     }
     Ok(())
 }

@@ -23,8 +23,7 @@ use std::path::{Path, PathBuf};
 use crate::db::{BatchMode, Db, Statement, query_one};
 use crate::error::StoreError;
 use crate::sqlite_files::{
-    FILE_LOCK_RETRY_DELAYS_MS, RetryContext, copy_sqlite_database, remove_sqlite_database,
-    with_sqlite_file_lock_retry,
+    FILE_LOCK_RETRY_DELAYS_MS, RetryContext, copy_sqlite_database, with_sqlite_file_lock_retry,
 };
 
 /// A single versioned schema step; statements run as ONE write batch.
@@ -84,8 +83,14 @@ fn backup_before_destructive(
 
 /// Upstream restore body inside `withSqliteFileLockRetry`: unlink originals
 /// (main + sidecars) then rename the backup back.
+///
+/// Step-3 treatment: the runner has no root of its own yet (it receives two
+/// paths, and `db_path.parent()` is not the storage root for every producer —
+/// the vault is `{root}/vault/{scope}/vault.db`), so the unlink goes through
+/// the counted Step-3 shim. Step 5 replaces this function with
+/// `MigrationRestorePending::restore`, which holds the caller's passed proof.
 fn restore_from_backup(db_path: &Path, backup_path: &Path) -> Result<(), StoreError> {
-    remove_sqlite_database(db_path)?;
+    crate::sqlite_files::remove_sqlite_database_without_proof(db_path)?;
     std::fs::rename(backup_path, db_path)?;
     Ok(())
 }

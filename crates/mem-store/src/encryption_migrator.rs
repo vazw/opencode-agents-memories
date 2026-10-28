@@ -344,15 +344,26 @@ pub async fn dump_and_reload_encrypted(
     drop(staged_db);
     if let Err(error) = copy {
         // Best-effort cleanup of the staged file created by the turso builder
-        // so a failed copy does not leave an orphaned `.encrypt-*.tmp`.
-        let _ = crate::sqlite_files::remove_sqlite_database(&staged);
+        // so a failed copy does not leave an orphaned `.encrypt-*.tmp`. Best-
+        // effort: no proof means we cannot legally unlink it, so we leave it.
+        if let Some(proof) = connections.exclusive_root()
+            && let Ok(claim) = proof.claim(&staged)
+        {
+            let _ = crate::sqlite_files::remove_sqlite_database(claim);
+        }
         return Err(error);
     }
 
+    let Some(proof) = connections.exclusive_root() else {
+        return Err(StoreError::NoExclusiveRoot {
+            db_path: db_path.to_path_buf(),
+        });
+    };
+    let db_claim = proof.claim(db_path)?;
     crate::sqlite_files::with_sqlite_file_lock_retry(
-        || -> std::io::Result<()> {
+        || -> Result<(), StoreError> {
             crate::sqlite_files::copy_sqlite_database(db_path, &backup)?;
-            crate::sqlite_files::remove_sqlite_database(db_path)?;
+            crate::sqlite_files::remove_sqlite_database(db_claim)?;
             crate::sqlite_files::rename_sqlite_database(&staged, db_path)?;
             Ok(())
         },
@@ -382,8 +393,13 @@ pub async fn dump_and_reload_encrypted(
         }
     };
     if let Err(error) = verify_result {
-        // Remove the unverifiable encrypted file, then restore the backup.
-        let _ = crate::sqlite_files::remove_sqlite_database(db_path);
+        // Remove the unverifiable encrypted file (best-effort: only under the
+        // root's proof), then restore the backup.
+        if let Some(proof) = connections.exclusive_root()
+            && let Ok(claim) = proof.claim(db_path)
+        {
+            let _ = crate::sqlite_files::remove_sqlite_database(claim);
+        }
         let _ = crate::sqlite_files::rename_sqlite_database(&backup, db_path);
         return Err(error);
     }

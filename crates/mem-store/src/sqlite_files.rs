@@ -17,6 +17,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::delete_guard::FileClaim;
+use crate::error::StoreError;
 use crate::platform::{Platform, SleepFn};
 
 // ---------------------------------------------------------------------------
@@ -58,9 +60,90 @@ pub fn copy_sqlite_database(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Remove a SQLite/Turso database file together with WAL/SHM/TSHM sidecars
-/// (`NotFound` tolerated either way — upstream unconditional-ish unlink).
-pub fn remove_sqlite_database(db_path: &Path) -> std::io::Result<()> {
+/// Remove a SQLite/Turso database file together with its WAL/SHM/TSHM
+/// sidecars — **only under an exclusivity proof**.
+///
+/// # The contract (46.1 / 46.10)
+///
+/// A deletion is legal iff this process holds the storage root's engine lock
+/// (the [`FileClaim`] only an [`crate::delete_guard::ExclusiveRoot`] can mint)
+/// **and** the database-file probe inside this call answers `Free` or
+/// `Missing`. `Held`/`Unknown` return [`StoreError::ExclusivityRefused`]
+/// **before** the first `remove_file`, so a refused deletion leaves the
+/// database and every sidecar untouched.
+///
+/// The mapping is cached and the suffixes fixed: the claimed path covers the
+/// database and its three sidecars (see the module docs for why one probe on
+/// the database is the sound proxy for all four). There is **no identity
+/// re-check** between the probe and the unlink — the probe answers liveness,
+/// not an inode witness — and the probe sits at the top of this function so
+/// every retry attempt re-probes.
+///
+/// `Missing` is a **permit**, deliberately: a sidecar whose database is gone
+/// cannot be found by the next opener, and refusing `Missing` would turn the
+/// exists-guarded no-op deletions into errors. `NotFound` on any individual
+/// unlink is still tolerated (upstream `existsSync` + `unlinkSync` semantics).
+///
+/// `-tshm` is turso-owned, format-versioned and runtime-resized; it is never a
+/// liveness signal, and the engine never unlinks it as one — 45.A5's marker
+/// lives in `.wal-mode`, never inside `-tshm`.
+///
+/// # Examples
+///
+/// A bare path has no proof, so this call must not compile — 46.2's structural
+/// half:
+///
+/// ```compile_fail
+/// use std::path::Path;
+/// use mem_store::sqlite_files::remove_sqlite_database;
+///
+/// let _ = remove_sqlite_database(Path::new("/tmp/not-a-claim.db"));
+/// ```
+///
+/// The proof is minted from a live engine lock (the adjacent positive control,
+/// so a rename of the parameter cannot make the `compile_fail` pass vacuously):
+///
+/// ```
+/// use std::sync::Arc;
+///
+/// use mem_store::delete_guard::ExclusiveRoot;
+/// use mem_store::engine_lock::{EngineLockOutcome, acquire_engine_lock};
+/// use mem_store::platform::SystemProcessProbe;
+/// use mem_store::sqlite_files::remove_sqlite_database;
+///
+/// let root = std::env::temp_dir().join(format!(
+///     "mem-store-doctest-remove-{}",
+///     std::process::id()
+/// ));
+/// std::fs::create_dir_all(&root).expect("create the root");
+/// let lock = match acquire_engine_lock(&root, Arc::new(SystemProcessProbe)).expect("acquire") {
+///     EngineLockOutcome::Acquired(lock) => lock,
+///     EngineLockOutcome::Lost { .. } => panic!("a fresh temp root is free"),
+/// };
+/// let proof = ExclusiveRoot::new(lock);
+/// let db = root.join("shard.db");
+/// std::fs::write(&db, b"main").expect("seed the database");
+/// let claim = proof.claim(&db).expect("the database is inside the root");
+/// remove_sqlite_database(claim).expect("a free database is removed");
+/// assert!(!db.exists());
+/// drop(proof);
+/// let _ = std::fs::remove_dir_all(&root);
+/// ```
+pub fn remove_sqlite_database(claim: FileClaim<'_>) -> Result<(), StoreError> {
+    claim.assert_exclusive()?;
+    unlink_sqlite_files(claim.path())
+}
+
+// shortcut: no exclusivity proof; only schema_migrations' failure path (which cannot yet obtain
+// one) may call this. Deleted in Step 5 when the restore becomes a MigrationRestorePending the
+// caller settles. Re-decision: Step 5 of this wave.
+pub(crate) fn remove_sqlite_database_without_proof(db_path: &Path) -> Result<(), StoreError> {
+    unlink_sqlite_files(db_path)
+}
+
+/// The unlink body shared by the claimed function and the counted Step-3 shim:
+/// database plus the three sidecars, `NotFound` tolerated either way.
+fn unlink_sqlite_files(db_path: &Path) -> Result<(), StoreError> {
     let mut targets = vec![db_path.to_path_buf()];
     for suffix in SIDECAR_SUFFIXES {
         targets.push(sidecar_path(db_path, suffix));
@@ -69,7 +152,7 @@ pub fn remove_sqlite_database(db_path: &Path) -> std::io::Result<()> {
         match std::fs::remove_file(&target) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
+            Err(error) => return Err(error.into()),
         }
     }
     Ok(())

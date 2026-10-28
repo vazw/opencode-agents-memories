@@ -1131,7 +1131,7 @@ pub async fn run_in_runtime(
 fn acquire_outcome(
     storage_root: &std::path::Path,
     probe: Arc<dyn mem_store::platform::ProcessProbe>,
-) -> Option<mem_store::engine_lock::EngineLock> {
+) -> Option<Arc<mem_store::engine_lock::EngineLock>> {
     use mem_store::engine_lock as el;
     match el::acquire_engine_lock(storage_root, probe) {
         Ok(el::EngineLockOutcome::Acquired(lock)) => Some(lock),

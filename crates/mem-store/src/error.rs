@@ -11,7 +11,7 @@
 //! non-`Clone` `#[from]` fields — a clone of the richer error would lose the
 //! chain anyway.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The mem-store operation error surface.
 #[derive(Debug, Clone, thiserror::Error)]
@@ -78,6 +78,33 @@ pub enum StoreError {
             .unwrap_or_default(),
     )]
     MigrationLocked { pid: u32, operation: Option<String> },
+    /// A sidecar mutation was refused because the database-file probe did not
+    /// prove exclusivity (`Held` or `Unknown`). Raised **before** the first
+    /// unlink, so nothing on disk has changed.
+    #[error("Refusing to mutate database {db_path}: exclusivity is not proven ({reason})")]
+    ExclusivityRefused {
+        /// The database the mutation would have touched.
+        db_path: PathBuf,
+        /// Why the probe refused (never a holder identity: the probe has none).
+        reason: String,
+    },
+    /// A destructive operation needed the storage root's exclusivity proof, and
+    /// this process holds no engine lock for it. The database is untouched.
+    #[error(
+        "Refusing to mutate database {db_path}: this process holds no engine lock \
+         (exclusivity proof) for its storage root"
+    )]
+    NoExclusiveRoot {
+        /// The database the operation would have touched. Carried instead of the
+        /// root because sites such as the schema runner only have `db_path` in
+        /// hand (`ConnectionManager` owns the root).
+        db_path: PathBuf,
+    },
+    /// A schema migration failed after taking a backup. The runner still borrows
+    /// the database handle, so it must not unlink the file it has open: the
+    /// caller drops its handle and settles the restore (issue 46.4).
+    #[error("{0}")]
+    MigrationRestorePending(Box<MigrationRestorePending>),
     /// Encryption is enabled but no key is resolvable. Upstream
     /// `resolveOrCreateDatabaseEncryptionKey` auto-provisions the default key
     /// file when encryption is enabled without an explicit key, so in practice
@@ -164,6 +191,48 @@ pub enum StoreError {
         db_path: PathBuf,
         mode: &'static str,
     },
+}
+
+/// The value a failing schema migration hands its caller: the runner never
+/// unlinks a database it has open. The caller closes its own handle, then calls
+/// [`MigrationRestorePending::restore`].
+///
+/// It lives beside [`StoreError`] because it *is* an error payload; the restore
+/// machinery itself lives in [`crate::schema_migrations`].
+#[derive(Debug, Clone)]
+pub struct MigrationRestorePending {
+    db_path: PathBuf,
+    backup_path: PathBuf,
+    original: StoreError,
+}
+
+impl MigrationRestorePending {
+    /// The schema failure the caller should re-raise after a successful restore.
+    pub fn original(&self) -> &StoreError {
+        &self.original
+    }
+
+    /// The database that still exists (the runner did not unlink it).
+    pub fn db_path(&self) -> &Path {
+        &self.db_path
+    }
+
+    /// The backup the caller's [`Self::restore`] moves back into place.
+    pub fn backup_path(&self) -> &Path {
+        &self.backup_path
+    }
+}
+
+impl std::fmt::Display for MigrationRestorePending {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "schema migration failed for {} and the restore from {} awaits the caller: {}",
+            self.db_path.display(),
+            self.backup_path.display(),
+            self.original
+        )
+    }
 }
 
 /// The direction the open guard saw, never the holder's identity: an OFD lock

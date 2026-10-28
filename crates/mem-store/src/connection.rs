@@ -450,6 +450,17 @@ impl ConnectionManager {
             })?
             .contains_key(db_path))
     }
+
+    /// This process's exclusivity proof for the manager's storage root, if it
+    /// holds the root's engine lock ([`crate::delete_guard::ExclusiveRoot::current`]).
+    ///
+    /// Matched on the **exact** `storage_path` the manager was built with —
+    /// never canonicalised, never by prefix. A `None` is a fact, not an error:
+    /// `purge-session` is a legitimate second process with no engine lock, and
+    /// every caller converts it into a typed [`StoreError::NoExclusiveRoot`].
+    pub fn exclusive_root(&self) -> Option<crate::delete_guard::ExclusiveRoot> {
+        crate::delete_guard::ExclusiveRoot::current(&self.storage_path)
+    }
 }
 
 #[cfg(test)]

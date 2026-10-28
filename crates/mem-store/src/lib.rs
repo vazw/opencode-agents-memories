@@ -11,6 +11,7 @@ pub const CRATE_NAME: &str = "mem-store";
 pub mod config;
 pub mod connection;
 pub mod db;
+pub mod delete_guard;
 pub mod encryption_key;
 pub mod encryption_migrator;
 pub mod engine_lock;

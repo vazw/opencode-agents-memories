@@ -437,10 +437,15 @@ impl MigrationService {
                 // journal only while the (untouched) source still exists.
                 connections.close_connection(&staged_path).await?;
                 if staged_path.exists() {
+                    let Some(proof) = connections.exclusive_root() else {
+                        return Err(StoreError::NoExclusiveRoot {
+                            db_path: staged_path.clone(),
+                        });
+                    };
+                    let claim = proof.claim(&staged_path)?;
                     let ctx = RetryContext::system();
-                    let staged = staged_path.as_path();
                     with_sqlite_file_lock_retry(
-                        || remove_sqlite_database(staged),
+                        || remove_sqlite_database(claim),
                         FILE_LOCK_RETRY_DELAYS_MS.len(),
                         &ctx,
                     )?;
