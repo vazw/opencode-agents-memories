@@ -782,50 +782,50 @@ impl ConsolidationFixture {
 }
 
 // ---------------------------------------------------------------------------
-// W4.3 fake vector-count bump
+// W4.3 fake vector-count resync (W3 verb)
 // ---------------------------------------------------------------------------
 
-/// A [`mem_episodic::promotion::VectorCountBump`] fake: records the bumped
-/// shard ids and can fail every bump.
-pub struct FakeVectorCountBump {
-    bumped: Mutex<Vec<i64>>,
+/// A [`mem_episodic::promotion::VectorCountSync`] fake: records the resynced
+/// shard ids and can fail every resync.
+pub struct FakeVectorCountSync {
+    resynced: Mutex<Vec<i64>>,
     fail: bool,
 }
 
-impl FakeVectorCountBump {
-    /// A bump that records every call and succeeds.
+impl FakeVectorCountSync {
+    /// A resync that records every call and succeeds.
     pub fn new() -> Self {
         Self {
-            bumped: Mutex::new(Vec::new()),
+            resynced: Mutex::new(Vec::new()),
             fail: false,
         }
     }
 
-    /// A bump that records every call and fails.
+    /// A resync that records every call and fails.
     pub fn failing() -> Self {
         Self {
-            bumped: Mutex::new(Vec::new()),
+            resynced: Mutex::new(Vec::new()),
             fail: true,
         }
     }
 
-    /// The bumped shard ids, in call order.
-    pub fn bumped(&self) -> Vec<i64> {
-        self.bumped.lock().expect("bump lock").clone()
+    /// The resynced shard ids, in call order.
+    pub fn resynced(&self) -> Vec<i64> {
+        self.resynced.lock().expect("resync lock").clone()
     }
 }
 
-impl mem_episodic::promotion::VectorCountBump for FakeVectorCountBump {
-    fn bump<'a>(
+impl mem_episodic::promotion::VectorCountSync for FakeVectorCountSync {
+    fn resync<'a>(
         &'a self,
         shard_id: i64,
     ) -> BoxFuture<'a, Result<(), mem_store::error::StoreError>> {
         let fail = self.fail;
-        self.bumped.lock().expect("bump lock").push(shard_id);
+        self.resynced.lock().expect("resync lock").push(shard_id);
         Box::pin(async move {
             if fail {
                 return Err(mem_store::error::StoreError::internal(
-                    "fake vector count bump failure",
+                    "fake vector count resync failure",
                 ));
             }
             Ok(())

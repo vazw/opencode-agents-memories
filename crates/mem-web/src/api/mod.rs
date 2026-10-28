@@ -550,6 +550,9 @@ pub fn port_failure(endpoint: &'static str, error: ports::PortError) -> Response
         // stubs answer, so a client can tell "not supported here" from
         // "broken here" without reading the body.
         ports::PortError::Unavailable => envelope::not_implemented(UNAVAILABLE_MESSAGE),
+        // W3: the typed model refusal is answered 409 with its own Display
+        // (the operator remedy rides in the message).
+        ports::PortError::ModelMismatch(report) => envelope::conflict(&report.to_string()),
         // MEASURED status quo (2026-10-27), not an endorsement: `NotFound` and
         // `Invalid` are pre-empted by every handler that documents 404/400/200
         // (sessions, skills, maintenance, profile), and on the generic path

@@ -21,6 +21,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use mem_core::scope::Scope;
 use mem_embed::embedder::EmbedTask;
+use mem_store::error::ShardModelMismatch;
 use serde_json::Value;
 
 /// A resolved shard (upstream `ShardInfo`, minus the registry bookkeeping the
@@ -388,6 +389,11 @@ pub enum PortError {
     /// A store/port failure; the detail is logged, never returned.
     #[error("{0}")]
     Store(String),
+    /// A shard's stored embedding identity disagrees with the configured one
+    /// (W3): answered 409 with the typed Display (ids, models, the remedy
+    /// command — never content and never a path).
+    #[error("{0}")]
+    ModelMismatch(Box<ShardModelMismatch>),
 }
 
 /// The memory store seam.
@@ -401,6 +407,16 @@ pub trait MemoryPort: Send + Sync {
         scope: Option<Scope>,
         scope_hash: Option<&str>,
     ) -> Result<Vec<ShardRef>, PortError>;
+
+    /// Verifies every shard's stored embedding identity against the
+    /// configured one (W3). REQUIRED, no default: a fail-open seam on a
+    /// security-relevant read is not acceptable.
+    ///
+    /// Collects every mismatch of the list before refusing (all shards of a
+    /// list share one scope by construction); a shard whose facts cannot be
+    /// read is logged and skipped (today's per-shard tolerance — it is not a
+    /// model mismatch).
+    async fn verify_shards(&self, shards: &[ShardRef]) -> Result<(), PortError>;
 
     async fn all_memories(&self, shard: &ShardRef) -> Result<Vec<MemoryRow>, PortError>;
 
@@ -695,6 +711,10 @@ impl MemoryPort for UnavailablePort {
         _scope: Option<Scope>,
         _scope_hash: Option<&str>,
     ) -> Result<Vec<ShardRef>, PortError> {
+        Err(PortError::Unavailable)
+    }
+
+    async fn verify_shards(&self, _shards: &[ShardRef]) -> Result<(), PortError> {
         Err(PortError::Unavailable)
     }
 

@@ -870,6 +870,11 @@ pub async fn search(
                 Ok(shards) => shards,
                 Err(error) => return port_failure("GET /api/search", error),
             };
+            // W3: the authority at shard selection, before ANY shard query or
+            // prompt read — a mismatched scope answers 409, never a partial.
+            if let Err(error) = state.api.memory.verify_shards(&shards).await {
+                return port_failure("GET /api/search", error);
+            }
             for shard in shards {
                 match state
                     .api
@@ -918,6 +923,10 @@ pub async fn search(
                 Ok(shards) => shards,
                 Err(error) => return port_failure("GET /api/search", error),
             };
+            // W3: same authority, same place, for the tag-filtered branch.
+            if let Err(error) = state.api.memory.verify_shards(&shards).await {
+                return port_failure("GET /api/search", error);
+            }
             for shard in shards {
                 match state
                     .api

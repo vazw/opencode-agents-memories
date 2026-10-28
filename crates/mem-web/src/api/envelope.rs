@@ -122,6 +122,12 @@ pub fn bad_request(message: &str) -> Response<Body> {
     json(StatusCode::BAD_REQUEST, error(message))
 }
 
+/// A `409` conflict carrying the typed refusal's Display (W3): ids, model
+/// names and the exact operator command — never content, never a path.
+pub fn conflict(message: &str) -> Response<Body> {
+    json(StatusCode::CONFLICT, error(message))
+}
+
 /// The fixed `500` answer (D-9 — the detail goes to the log, never here).
 pub fn internal_error() -> Response<Body> {
     json(StatusCode::INTERNAL_SERVER_ERROR, error(INTERNAL_ERROR))

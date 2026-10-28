@@ -52,12 +52,23 @@ pub fn new_store(label: &str) -> RealStore {
         Platform::current(),
         Arc::new(TursoConnectFactory),
     ));
+    // W3: the identity is wired so every fixture shard carries (and can
+    // prove) the configured fingerprint; a `None` manager would exercise the
+    // model fallback instead of the fingerprint arm.
     let manager = ShardManager::new(
         config.storage_path.clone(),
         config.clone(),
         connections,
         Arc::new(SystemProcessProbe),
-        None,
+        Some(mem_core::embedding::EmbeddingIdentity {
+            model: MODEL.to_string(),
+            dimensions: DIMENSIONS as u32,
+            pooling: mem_core::config::EmbeddingPooling::Mean,
+            dtype: None,
+            use_task_prefixes: false,
+            query_prefix: None,
+            document_prefix: None,
+        }),
     );
     RealStore { config, manager }
 }
@@ -110,11 +121,14 @@ pub async fn insert(
     )
     .await
     .expect("the fixture row inserts");
+    let count = mem_store::shard_facts::sync_count(db.as_ref())
+        .await
+        .expect("the fixture syncs the shard count");
     store
         .manager
-        .increment_vector_count(shard.id)
+        .set_vector_count(shard.id, count)
         .await
-        .expect("the fixture bumps the registry count");
+        .expect("the fixture adopts the registry count");
 }
 
 /// Re-reads the registry row (the registered vector count).

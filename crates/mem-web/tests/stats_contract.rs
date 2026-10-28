@@ -332,6 +332,10 @@ impl MemoryPort for FailingShardPort {
         Ok(self.shards.clone())
     }
 
+    async fn verify_shards(&self, _shards: &[ShardRef]) -> Result<(), PortError> {
+        Ok(())
+    }
+
     async fn all_memories(&self, shard: &ShardRef) -> Result<Vec<MemoryRow>, PortError> {
         if shard.scope == Scope::User {
             Ok(self.user_rows.clone())
@@ -567,6 +571,10 @@ impl MemoryPort for FailingListingPort {
         _scope_hash: Option<&str>,
     ) -> Result<Vec<ShardRef>, PortError> {
         Err(PortError::Store("listing failed".to_string()))
+    }
+
+    async fn verify_shards(&self, _shards: &[ShardRef]) -> Result<(), PortError> {
+        Ok(())
     }
 
     async fn all_memories(&self, _shard: &ShardRef) -> Result<Vec<MemoryRow>, PortError> {

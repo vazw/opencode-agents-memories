@@ -147,11 +147,9 @@ pub trait DedupStore: Send + Sync {
     /// Delete one row, then bring the shard's vector accounting in line with
     /// the present rows.
     ///
-    /// Today: `delete_memory_by_id` + `decrement_vector_count`. After
-    /// hardening 43.2 / ADR-0018: the delete plus an ABSOLUTE recount
-    /// (`sync_count_from_shard`). The trait, the service and every behavioural
-    /// assertion are identical across that migration; only the production
-    /// adapter's second call changes.
+    /// W3 / ADR-0018: the delete and a statement-measured ABSOLUTE
+    /// `COUNT(*)` land in one transaction (`delete_memories`), and the
+    /// registry adopts that value. No `±1` survives.
     async fn delete(&self, shard: &DedupShard, memory_id: &str) -> Result<(), PortError>;
 }
 

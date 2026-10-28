@@ -1,11 +1,10 @@
 //! The production [`DedupStore`]: one [`ShardManager`] over the real memory
 //! shards, plus the deterministic row order the pass depends on.
 //!
-//! This module is the fourth caller of the shard registry's counter API
-//! (`decrement_vector_count` here, alongside the memory/cleanup write paths).
-//! After hardening 43.2 / ADR-0018 that call becomes an absolute recount and
-//! the registry count stops being authoritative — see [`DedupStore`]'s
-//! `delete` doc and the body of [`ShardDedupStore`]'s implementation.
+//! W3 / ADR-0018: the shard's `shard_stats` count is the authority and the
+//! registry is its cache. [`ShardDedupStore::delete`] removes the row and
+//! writes the statement-measured ABSOLUTE count in the same transaction, then
+//! adopts it into the registry — see [`DedupStore`]'s `delete` doc.
 
 use async_trait::async_trait;
 use mem_core::scope::Scope;
@@ -108,15 +107,13 @@ impl DedupStore for ShardDedupStore {
             .open_shard(&shard.db_path)
             .await
             .map_err(store_failure)?;
-        vector::delete_memory_by_id(db.as_ref(), memory_id)
+        // W3: delete + the statement-measured absolute count, one transaction.
+        let count = vector::delete_memories(db.as_ref(), &[memory_id.to_string()])
             .await
             .map_err(store_failure)?;
-        // Two statements, no transaction (upstream-identical). After hardening
-        // 43.2 / ADR-0018 this second call becomes the ABSOLUTE
-        // `sync_count_from_shard(shard.shard_id)` recount; nothing else in
-        // this file changes.
+        // The registry is a CACHE of that value, never a `-1`.
         self.shards
-            .decrement_vector_count(shard.shard_id)
+            .set_vector_count(shard.shard_id, count)
             .await
             .map_err(store_failure)?;
         Ok(())

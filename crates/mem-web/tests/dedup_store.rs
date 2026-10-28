@@ -15,7 +15,7 @@ use common::real_store::{
 use mem_core::scope::Scope;
 use mem_store::vector;
 use mem_web::api::deduplication::store::{ShardDedupStore, order_rows};
-use mem_web::api::deduplication::{DedupMemory, DedupService};
+use mem_web::api::deduplication::{DedupMemory, DedupService, DedupShard, DedupStore};
 
 const HASH: &str = "a1b2c3d4e5f67890";
 const TAG: &str = "opencode_project_a1b2c3d4e5f67890";
@@ -319,4 +319,64 @@ async fn test_dedup_store_never_deduplicates_across_shards() {
     assert_eq!(row_ids(&store, &shard1).await, vec!["mem_in_1".to_string()]);
     assert_eq!(vector_count(&store, &shard0).await.vector_count, 1);
     assert_eq!(vector_count(&store, &shard1).await.vector_count, 1);
+}
+
+/// AC16 — `ShardDedupStore::delete` writes the absolute count into both
+/// authorities (a `-1` leaves `shard_stats` at 2).
+#[tokio::test]
+async fn test_dedup_delete_reconciles_both_count_authorities() {
+    let store = new_store("dedup-store-count-authority");
+    let shard = create_shard(&store, Scope::Project, HASH, 0).await;
+    insert(
+        &store,
+        &shard,
+        "mem_keep",
+        "same content",
+        TAG,
+        2000,
+        unit_x(),
+    )
+    .await;
+    insert(
+        &store,
+        &shard,
+        "mem_old",
+        "same content",
+        TAG,
+        1000,
+        unit_x(),
+    )
+    .await;
+    assert_eq!(vector_count(&store, &shard).await.vector_count, 2);
+
+    let dedup = ShardDedupStore::new(store.manager.clone());
+    dedup
+        .delete(
+            &DedupShard {
+                shard_id: shard.id,
+                db_path: shard.db_path.clone(),
+            },
+            "mem_old",
+        )
+        .await
+        .expect("the dedup delete");
+
+    assert_eq!(row_ids(&store, &shard).await, vec!["mem_keep".to_string()]);
+    assert_eq!(
+        vector_count(&store, &shard).await.vector_count,
+        1,
+        "the registry adopted the absolute count"
+    );
+    let db = store
+        .manager
+        .open_shard(&shard.db_path)
+        .await
+        .expect("the shard opens");
+    assert_eq!(
+        mem_store::shard_facts::read_stored_count(db.as_ref())
+            .await
+            .expect("shard_stats count"),
+        1,
+        "the shard's own count is the authority"
+    );
 }

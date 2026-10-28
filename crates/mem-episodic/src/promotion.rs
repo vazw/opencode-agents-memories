@@ -230,33 +230,46 @@ pub trait PermanentMemorySink: Send + Sync {
     ) -> mem_embed::embedder::BoxFuture<'a, Result<PromoteOutcome, EpisodicError>>;
 }
 
-/// The seam that makes the shard `vector_count` increment testable.
-pub trait VectorCountBump: Send + Sync {
-    /// Increments the shard's vector count by one.
-    fn bump<'a>(
+/// The seam that makes the shard's ABSOLUTE count resync testable (W3).
+pub trait VectorCountSync: Send + Sync {
+    /// Re-measures the shard's rows and writes the absolute count into both
+    /// authorities.
+    fn resync<'a>(
         &'a self,
         shard_id: i64,
     ) -> mem_embed::embedder::BoxFuture<'a, Result<(), StoreError>>;
 }
 
-/// The production bump: the shard manager's own increment.
-pub struct ShardVectorCountBump {
+/// The production resync: `shard_stats` measured by `COUNT(*)`, then the
+/// registry cache adopted from the shard's own value.
+pub struct ShardVectorCountSync {
     shards: Arc<ShardManager>,
 }
 
-impl ShardVectorCountBump {
-    /// The bump over `shards`.
+impl ShardVectorCountSync {
+    /// The resync over `shards`.
     pub fn new(shards: Arc<ShardManager>) -> Self {
         Self { shards }
     }
 }
 
-impl VectorCountBump for ShardVectorCountBump {
-    fn bump<'a>(
+impl VectorCountSync for ShardVectorCountSync {
+    fn resync<'a>(
         &'a self,
         shard_id: i64,
     ) -> mem_embed::embedder::BoxFuture<'a, Result<(), StoreError>> {
-        Box::pin(async move { self.shards.increment_vector_count(shard_id).await })
+        Box::pin(async move {
+            let shard = self
+                .shards
+                .get_shard_by_id(shard_id)
+                .await?
+                .ok_or_else(|| {
+                    StoreError::internal(format!("Shard {shard_id} no longer exists"))
+                })?;
+            let db = self.shards.open_shard(&shard.db_path).await?;
+            let count = mem_store::shard_facts::sync_count(db.as_ref()).await?;
+            self.shards.set_vector_count(shard_id, count).await
+        })
     }
 }
 
@@ -264,29 +277,29 @@ impl VectorCountBump for ShardVectorCountBump {
 pub struct ShardPermanentMemorySink {
     shards: Arc<ShardManager>,
     dimensions: u32,
-    bump: Arc<dyn VectorCountBump>,
+    counts: Arc<dyn VectorCountSync>,
 }
 
 impl ShardPermanentMemorySink {
-    /// The sink over `shards`, bumping through the shard manager.
+    /// The sink over `shards`, resyncing through the shard manager.
     pub fn new(shards: Arc<ShardManager>, dimensions: u32) -> Self {
-        Self::with_vector_bump(
+        Self::with_vector_sync(
             shards.clone(),
             dimensions,
-            Arc::new(ShardVectorCountBump::new(shards)),
+            Arc::new(ShardVectorCountSync::new(shards)),
         )
     }
 
-    /// The sink over `shards` with an injected bump (the test seam).
-    pub fn with_vector_bump(
+    /// The sink over `shards` with an injected resync (the test seam).
+    pub fn with_vector_sync(
         shards: Arc<ShardManager>,
         dimensions: u32,
-        bump: Arc<dyn VectorCountBump>,
+        counts: Arc<dyn VectorCountSync>,
     ) -> Self {
         Self {
             shards,
             dimensions,
-            bump,
+            counts,
         }
     }
 }
@@ -418,8 +431,10 @@ impl PermanentMemorySink for ShardPermanentMemorySink {
                                 Err(error) => return Err(EpisodicError::Store(error)),
                             }
 
-                            // (6) The count bump — exactly once, on the insert path only.
-                            self.bump.bump(info.id).await?;
+                            // (6) The absolute count resync — exactly once, on the
+                            // insert path only. The insert above stays a single
+                            // `execute` (the W0 classifier depends on it).
+                            self.counts.resync(info.id).await?;
 
                             // (7) Inserted.
                             Ok::<PromoteOutcome, EpisodicError>(PromoteOutcome::Inserted)

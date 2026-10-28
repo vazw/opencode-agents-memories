@@ -459,6 +459,12 @@ impl MemoryPort for FakeBackend {
             .collect())
     }
 
+    /// The fake has no stored facts to judge; the authority is exercised over
+    /// the production adapter in `shard_model_authority.rs`.
+    async fn verify_shards(&self, _shards: &[ShardRef]) -> Result<(), PortError> {
+        Ok(())
+    }
+
     async fn all_memories(&self, shard: &ShardRef) -> Result<Vec<MemoryRow>, PortError> {
         self.record(format!("all_memories:{}", shard.scope_hash));
         let state = self

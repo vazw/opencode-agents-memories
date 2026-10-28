@@ -8,7 +8,7 @@ mod common;
 
 use std::sync::Arc;
 
-use common::{FakeVectorCountBump, TestDir, session_row, shard_manager};
+use common::{FakeVectorCountSync, TestDir, session_row, shard_manager};
 use mem_episodic::promotion::{
     PermanentMemorySink, PromoteOutcome, PromotionRecord, ShardPermanentMemorySink,
     select_promotable_facts,
@@ -378,11 +378,11 @@ async fn test_promotion_is_idempotent_on_rerun() {
 }
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
-async fn test_promotion_does_not_increment_vector_count_when_already_present() {
-    let dir = TestDir::new("promotion-no-double-bump");
+async fn test_promotion_does_not_resync_the_shard_count_when_already_present() {
+    let dir = TestDir::new("promotion-no-double-resync");
     let shards = shard_manager(dir.store_config());
-    let bump = Arc::new(FakeVectorCountBump::new());
-    let sink = ShardPermanentMemorySink::with_vector_bump(shards.clone(), 8, bump.clone());
+    let sync = Arc::new(FakeVectorCountSync::new());
+    let sink = ShardPermanentMemorySink::with_vector_sync(shards.clone(), 8, sync.clone());
     let record = record("fact-1", "use redis", 8);
 
     assert_eq!(
@@ -391,7 +391,11 @@ async fn test_promotion_does_not_increment_vector_count_when_already_present() {
             .expect("first promote"),
         PromoteOutcome::Inserted
     );
-    assert_eq!(bump.bumped().len(), 1, "the insert path bumps exactly once");
+    assert_eq!(
+        sync.resynced().len(),
+        1,
+        "the insert path resyncs exactly once"
+    );
 
     assert_eq!(
         sink.promote(SCOPE_HASH, &record)
@@ -400,9 +404,9 @@ async fn test_promotion_does_not_increment_vector_count_when_already_present() {
         PromoteOutcome::AlreadyPresent
     );
     assert_eq!(
-        bump.bumped().len(),
+        sync.resynced().len(),
         1,
-        "the AlreadyPresent path never bumps (no double count)"
+        "the AlreadyPresent path never resyncs (no second count)"
     );
     assert_eq!(
         memory_rows(&shards, SCOPE_HASH, CONTAINER_TAG).await.len(),
@@ -411,16 +415,16 @@ async fn test_promotion_does_not_increment_vector_count_when_already_present() {
 }
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
-async fn test_promotion_reports_error_when_vector_count_increment_fails() {
-    let dir = TestDir::new("promotion-bump-failure");
+async fn test_promotion_reports_error_when_the_count_resync_fails() {
+    let dir = TestDir::new("promotion-resync-failure");
     let shards = shard_manager(dir.store_config());
-    let bump = Arc::new(FakeVectorCountBump::failing());
-    let sink = ShardPermanentMemorySink::with_vector_bump(shards.clone(), 8, bump.clone());
+    let sync = Arc::new(FakeVectorCountSync::failing());
+    let sink = ShardPermanentMemorySink::with_vector_sync(shards.clone(), 8, sync.clone());
 
     let error = sink
         .promote(SCOPE_HASH, &record("fact-1", "use redis", 8))
         .await
-        .expect_err("the failed bump is reported");
+        .expect_err("the failed resync is reported");
     assert!(
         matches!(error, mem_episodic::EpisodicError::Store(_)),
         "{error}"
@@ -428,26 +432,30 @@ async fn test_promotion_reports_error_when_vector_count_increment_fails() {
 
     // The memory row IS written ...
     let rows = memory_rows(&shards, SCOPE_HASH, CONTAINER_TAG).await;
-    assert_eq!(rows.len(), 1, "the row was written before the failed bump");
+    assert_eq!(
+        rows.len(),
+        1,
+        "the row was written before the failed resync"
+    );
     // ... but the shard's vector count was NOT incremented (drift of one).
     let registry = registry_rows(&shards, SCOPE_HASH).await;
     let count = registry
         .first()
         .map(|info| info.vector_count)
         .expect("a shard registry row");
-    assert_eq!(count, 0, "the failed bump left the count untouched");
+    assert_eq!(count, 0, "the failed resync left the count untouched");
 }
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_shard_vector_count_drift_is_reconciled_on_next_write() {
     let dir = TestDir::new("promotion-reconcile");
     let shards = shard_manager(dir.store_config());
-    let bump = Arc::new(FakeVectorCountBump::failing());
-    let sink = ShardPermanentMemorySink::with_vector_bump(shards.clone(), 8, bump.clone());
+    let sync = Arc::new(FakeVectorCountSync::failing());
+    let sink = ShardPermanentMemorySink::with_vector_sync(shards.clone(), 8, sync.clone());
 
     sink.promote(SCOPE_HASH, &record("fact-1", "use redis", 8))
         .await
-        .expect_err("the failed bump is reported");
+        .expect_err("the failed resync is reported");
 
     // The next write-shard resolution re-syncs the count from the shard's
     // `memories` table, so the drift is corrected to the true row count.
@@ -633,5 +641,84 @@ async fn test_promotion_fails_the_run_and_writes_nothing_when_a_registered_shard
         count_rows_across_shards(&fresh, SCOPE_HASH, &fact_c.id).await,
         0,
         "no row with C's id in the two surviving shards"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// W3 — the absolute count authority on the promotion path
+// ---------------------------------------------------------------------------
+
+/// AC17 — promote twice: both count authorities stay exact at 1 and the
+/// `AlreadyPresent` path never resyncs.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_promotion_keeps_both_count_authorities_exact() {
+    let dir = TestDir::new("promotion-count-authority");
+    let shards = shard_manager(dir.store_config());
+    let sink = ShardPermanentMemorySink::new(shards.clone(), 8);
+    let record = record("fact-1", "use redis", 8);
+
+    assert_eq!(
+        sink.promote(SCOPE_HASH, &record)
+            .await
+            .expect("first promote"),
+        PromoteOutcome::Inserted
+    );
+    let info = registry_rows(&shards, SCOPE_HASH)
+        .await
+        .into_iter()
+        .next()
+        .expect("a shard registry row");
+    let db = shards.open_shard(&info.db_path).await.expect("open shard");
+    assert_eq!(
+        mem_store::shard_facts::read_stored_count(db.as_ref())
+            .await
+            .expect("shard_stats count"),
+        1,
+        "the insert path writes the absolute count"
+    );
+    assert_eq!(
+        shards
+            .get_shard_by_id(info.id)
+            .await
+            .expect("registry read")
+            .expect("registry row")
+            .vector_count,
+        1,
+        "the registry adopted the same value"
+    );
+    drop(db);
+
+    assert_eq!(
+        sink.promote(SCOPE_HASH, &record)
+            .await
+            .expect("second promote"),
+        PromoteOutcome::AlreadyPresent
+    );
+    let info = registry_rows(&shards, SCOPE_HASH)
+        .await
+        .into_iter()
+        .next()
+        .expect("a shard registry row");
+    let db = shards.open_shard(&info.db_path).await.expect("open shard");
+    assert_eq!(
+        mem_store::shard_facts::read_stored_count(db.as_ref())
+            .await
+            .expect("shard_stats count"),
+        1,
+        "the AlreadyPresent path leaves the count alone"
+    );
+    assert_eq!(
+        shards
+            .get_shard_by_id(info.id)
+            .await
+            .expect("registry read")
+            .expect("registry row")
+            .vector_count,
+        1
+    );
+    drop(db);
+    assert_eq!(
+        memory_rows(&shards, SCOPE_HASH, CONTAINER_TAG).await.len(),
+        1
     );
 }

@@ -58,7 +58,8 @@ use mem_skills::schema::{
     Skill as MemSkill, SkillInput as MemSkillInput, SkillPatch as MemSkillPatch,
 };
 use mem_store::db::{BatchMode, DbHandle, Row, Statement, Value, query_one};
-use mem_store::error::StoreError;
+use mem_store::error::{ShardModelMismatchEntry, StoreError};
+use mem_store::shard_facts::{self, ModelAuthority};
 use mem_store::shard_manager::ShardManager;
 use mem_store::vector::{self, MemoryInsert, SearchResult};
 use serde_json::{Value as JsonValue, json};
@@ -89,8 +90,15 @@ pub struct ProductionDeps {
 // ---------------------------------------------------------------------------
 
 /// A store fault: the detail is logged by the handler, never echoed (D-9).
+///
+/// The model-authority refusal is TYPED, not stringly: it survives as
+/// `PortError::ModelMismatch` so the HTTP layer can answer 409 with the
+/// operator command (W3).
 fn store_failure(error: StoreError) -> PortError {
-    PortError::Store(error.message())
+    match error {
+        StoreError::ShardModelMismatch(report) => PortError::ModelMismatch(report),
+        other => PortError::Store(other.message()),
+    }
 }
 
 /// A profile-store fault. An analysis failure keeps its provider message
@@ -255,6 +263,63 @@ impl ProductionMemory {
             .await
             .map_err(store_failure)
     }
+
+    /// The typed refusal for one shard of `shard`'s scope.
+    fn refusal(&self, shard: &ShardRef, shard_id: i64, stored_model: Option<String>) -> PortError {
+        let config = self.manager.config();
+        PortError::ModelMismatch(Box::new(shard_facts::model_mismatch(
+            vec![ShardModelMismatchEntry {
+                id: shard_id,
+                stored_model,
+                expected: config.embedding_model.clone(),
+            }],
+            &config.container_tag_prefix,
+            shard.scope,
+            &shard.scope_hash,
+        )))
+    }
+
+    /// Verifies one `ShardRef` before `update_memory`'s batch and returns the
+    /// registry id the adopt step needs.
+    ///
+    /// TOTAL and fail-closed: an unnameable shard (`shard_id: None`) or a
+    /// facts read failure refuses with the SAME typed error — never a silent
+    /// write. Production `find_memory` always yields `Some`, so the synthetic
+    /// id 0 is unreachable through the HTTP surface.
+    async fn verify_write_shard(&self, shard: &ShardRef) -> Result<i64, PortError> {
+        let Some(shard_id) = shard.shard_id else {
+            tracing::warn!(
+                scope_hash = %shard.scope_hash,
+                "update_memory: shard carries no registry id; refusing"
+            );
+            return Err(self.refusal(shard, 0, None));
+        };
+        let db = match self.open(shard).await {
+            Ok(db) => db,
+            Err(error) => {
+                tracing::warn!(error = %error, "update_memory: shard unavailable; refusing");
+                return Err(self.refusal(shard, shard_id, None));
+            }
+        };
+        let facts = match shard_facts::read_model_facts(db.as_ref()).await {
+            Ok(facts) => facts,
+            Err(error) => {
+                tracing::warn!(error = %error, "update_memory: shard facts unreadable; refusing");
+                return Err(self.refusal(shard, shard_id, None));
+            }
+        };
+        let config = self.manager.config();
+        match shard_facts::judge_model_facts(
+            &facts,
+            self.manager.embedding_identity(),
+            &config.embedding_model,
+        ) {
+            ModelAuthority::Mismatch { stored_model } => {
+                Err(self.refusal(shard, shard_id, stored_model))
+            }
+            _ => Ok(shard_id),
+        }
+    }
 }
 
 #[async_trait]
@@ -289,6 +354,70 @@ impl MemoryPort for ProductionMemory {
             }));
         }
         Ok(refs)
+    }
+
+    async fn verify_shards(&self, shards: &[ShardRef]) -> Result<(), PortError> {
+        let mut entries = Vec::new();
+        for shard in shards {
+            let Some(shard_id) = shard.shard_id else {
+                tracing::warn!(
+                    scope_hash = %shard.scope_hash,
+                    "verify_shards: shard carries no registry id; skipping"
+                );
+                continue;
+            };
+            // Read-only: never `ensure_v3`/`init_shard_db`. A shard whose
+            // facts cannot be read keeps today's per-shard tolerance — it is
+            // not a model mismatch.
+            let db = match self.manager.open_shard(&shard.db_path).await {
+                Ok(db) => db,
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        shard_id,
+                        "verify_shards: shard could not be opened; skipping"
+                    );
+                    continue;
+                }
+            };
+            let facts = match shard_facts::read_model_facts(db.as_ref()).await {
+                Ok(facts) => facts,
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        shard_id,
+                        "verify_shards: shard facts could not be read; skipping"
+                    );
+                    continue;
+                }
+            };
+            let config = self.manager.config();
+            if let ModelAuthority::Mismatch { stored_model } = shard_facts::judge_model_facts(
+                &facts,
+                self.manager.embedding_identity(),
+                &config.embedding_model,
+            ) {
+                entries.push(ShardModelMismatchEntry {
+                    id: shard_id,
+                    stored_model,
+                    expected: config.embedding_model.clone(),
+                });
+            }
+        }
+        if entries.is_empty() {
+            return Ok(());
+        }
+        // Every shard of one call shares `(scope, scope_hash)` by
+        // construction (the handler lists per scope); the first shard supplies
+        // the remedy tag.
+        let (scope, scope_hash) = shards
+            .first()
+            .map(|shard| (shard.scope, shard.scope_hash.clone()))
+            .unwrap_or((mem_core::scope::Scope::User, String::new()));
+        let config = self.manager.config();
+        Err(PortError::ModelMismatch(Box::new(
+            shard_facts::model_mismatch(entries, &config.container_tag_prefix, scope, &scope_hash),
+        )))
     }
 
     async fn all_memories(&self, shard: &ShardRef) -> Result<Vec<MemoryRow>, PortError> {
@@ -348,11 +477,18 @@ impl MemoryPort for ProductionMemory {
                 let manager = lock_manager;
                 Box::pin(async move {
                     // The write runs under the per-scope lock, resolves the
-                    // active (or rotated) shard and bumps the registry count.
+                    // active (or rotated) shard, and writes the row plus the
+                    // statement-measured absolute count in ONE transaction.
                     let shard = manager.get_write_shard(scope, scope_hash).await?;
                     let db = manager.open_shard(&shard.db_path).await?;
-                    vector::insert_vector(db.as_ref(), &insert).await?;
-                    manager.increment_vector_count(shard.id).await
+                    let statement = vector::insert_vector_statement(&insert)?;
+                    db.batch(
+                        vec![statement, shard_facts::sync_count_statement()],
+                        BatchMode::Write,
+                    )
+                    .await?;
+                    manager.adopt_stored_count(db.as_ref(), shard.id).await?;
+                    Ok(())
                 })
             })
             .await;
@@ -360,9 +496,15 @@ impl MemoryPort for ProductionMemory {
     }
 
     async fn update_memory(&self, shard: &ShardRef, update: MemoryUpdate) -> Result<(), PortError> {
+        // W3: the PUT hole is closed AT THE PORT, before the batch. The
+        // handler embeds first (one wasted embedding call on a refused write);
+        // the check cannot move there without leaving a second caller
+        // unguarded.
+        let shard_id = self.verify_write_shard(shard).await?;
         let insert = memory_insert(update.into());
         let db = self.open(shard).await?;
-        // Upstream's `db.transaction("write")`: delete + insert atomically.
+        // Upstream's `db.transaction("write")`: delete + insert atomically,
+        // plus the absolute count in the same transaction.
         // `BatchMode::Write` is the transactional batch (IMMEDIATE).
         let statement = vector::insert_vector_statement(&insert).map_err(store_failure)?;
         let statements = vec![
@@ -371,20 +513,27 @@ impl MemoryPort for ProductionMemory {
                 vec![Value::Text(insert.id.clone())],
             ),
             statement,
+            shard_facts::sync_count_statement(),
         ];
         db.batch(statements, BatchMode::Write)
+            .await
+            .map_err(store_failure)?;
+        self.manager
+            .adopt_stored_count(db.as_ref(), shard_id)
             .await
             .map_err(store_failure)?;
         Ok(())
     }
 
     async fn delete_memory(&self, shard: &ShardRef, id: &str) -> Result<(), PortError> {
+        // Deletes are never model-refused: erasure must not depend on a
+        // re-embed (D-W3-3). The count is still absolute.
         let db = self.open(shard).await?;
-        vector::delete_memory_by_id(db.as_ref(), id)
+        let count = vector::delete_memories(db.as_ref(), &[id.to_string()])
             .await
             .map_err(store_failure)?;
-        // Upstream `decrementVectorCount` — the registry row is located by the
-        // shard path (the port's `ShardRef` carries no registry id).
+        // The registry row is located by the shard path (the port's
+        // `ShardRef` may carry no registry id).
         if let Some(info) = self
             .manager
             .get_shard_by_path(&shard.db_path)
@@ -392,7 +541,7 @@ impl MemoryPort for ProductionMemory {
             .map_err(store_failure)?
         {
             self.manager
-                .decrement_vector_count(info.id)
+                .set_vector_count(info.id, count)
                 .await
                 .map_err(store_failure)?;
         }
@@ -1133,7 +1282,12 @@ impl FactStore for ProductionFacts {
                 Box::pin(async move {
                     let shard = manager.get_write_shard(scope, hash.as_str()).await?;
                     let db = manager.open_shard(&shard.db_path).await?;
-                    vector::insert_vector(db.as_ref(), &insert).await?;
+                    let statement = vector::insert_vector_statement(&insert)?;
+                    db.batch(
+                        vec![statement, shard_facts::sync_count_statement()],
+                        BatchMode::Write,
+                    )
+                    .await?;
                     // The pin flag is NOT part of the INSERT (the frozen
                     // statement has no such column): upstream sets it with a
                     // follow-up UPDATE, and the port does the same through
@@ -1141,7 +1295,8 @@ impl FactStore for ProductionFacts {
                     if pinned {
                         vector::pin_memory(db.as_ref(), &memory_id).await?;
                     }
-                    manager.increment_vector_count(shard.id).await
+                    manager.adopt_stored_count(db.as_ref(), shard.id).await?;
+                    Ok(())
                 })
             })
             .await;
@@ -1157,7 +1312,7 @@ impl FactStore for ProductionFacts {
             if let Some(row) = row
                 && row.text("container_tag").as_deref() == Some(container_tag)
             {
-                vector::delete_memory_by_id(db.as_ref(), id)
+                let count = vector::delete_memories(db.as_ref(), &[id.to_string()])
                     .await
                     .map_err(portability_store_failure)?;
                 if let Some(info) = self
@@ -1167,7 +1322,7 @@ impl FactStore for ProductionFacts {
                     .map_err(portability_store_failure)?
                 {
                     self.manager
-                        .decrement_vector_count(info.id)
+                        .set_vector_count(info.id, count)
                         .await
                         .map_err(portability_store_failure)?;
                 }

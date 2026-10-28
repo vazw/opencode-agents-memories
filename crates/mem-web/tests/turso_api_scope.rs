@@ -159,10 +159,13 @@ async fn insert(
     )
     .await
     .expect("insert the seed row");
-    manager
-        .increment_vector_count(shard.id)
+    let count = mem_store::shard_facts::sync_count(db.as_ref())
         .await
-        .expect("bump the vector count");
+        .expect("sync the shard count");
+    manager
+        .set_vector_count(shard.id, count)
+        .await
+        .expect("adopt the registry count");
 }
 
 /// Builds the real store: a 768-dim temp store with a project shard holding

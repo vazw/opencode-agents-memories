@@ -49,7 +49,7 @@ pub use milestone::{
 pub use payload::SessionMetadata;
 pub use promotion::{
     PermanentMemorySink, PromotableFact, PromoteOutcome, PromotionRecord, ShardPermanentMemorySink,
-    VectorCountBump, select_promotable_facts,
+    VectorCountSync, select_promotable_facts,
 };
 pub use purge::{EpisodicPurgeReport, SessionScope};
 pub use raw_context::{MAX_RAW_CONTEXT_BYTES, RawContext, RawContextWrite, validate_raw_context};
