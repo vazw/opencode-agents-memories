@@ -48,6 +48,9 @@ const REQUEST_TIMEOUT_MS = 15000;
 // Compaction is on the host's critical path: a wedged engine must not stall it
 // for the 15 s default. Both compaction calls pass this explicitly.
 const COMPACTION_REQUEST_TIMEOUT_MS = 2000;
+// Issue 69: the catalogue read is on the host's awaited `setup` path. With the
+// 5 s hello bound, a wedged engine can delay `setup` by up to ~8 s.
+const SKILLS_REQUEST_TIMEOUT_MS = 3000;
 // Issue 50 (D-26-11): the authored-text cap, in CODE POINTS — the same unit the
 // engine's `chars().take(2000)` cap counts (never UTF-16 units or bytes).
 const MAX_QUERY_CHARS = 2000;
@@ -192,7 +195,7 @@ function writeStructured(level, event, fields) {
   }
 }
 
-function logWarn(event, fields = {}) {
+export function logWarn(event, fields = {}) {
   writeStructured("warn", event, fields);
 }
 
@@ -200,7 +203,7 @@ function logInfo(event, fields = {}) {
   writeStructured("info", event, fields);
 }
 
-function shortError(err) {
+export function shortError(err) {
   const text = err && typeof err.message === "string" ? err.message : String(err);
   return text.slice(0, 120);
 }
@@ -490,6 +493,31 @@ async function sendRequest(method, params, timeoutMs = REQUEST_TIMEOUT_MS) {
   const started = await ensureStarted();
   if (!started) throw new Error("memory degraded (fail-open): no compatible engine");
   return callChild(method, params, method + "-" + requestCounter++, timeoutMs);
+}
+
+// Issue 69: the engine owns the skill catalogue. A pre-69 engine omits the
+// capability, so it is NEVER asked — an absent flag means "no registration",
+// not "send it and inspect the answer". The two bounds are the host's awaited
+// `setup` worst case: 5 s hello + 3 s catalogue.
+export async function readSkillCatalogue(projectId) {
+  if (typeof projectId !== "string" || projectId.trim().length === 0) return null;
+  if (!(await ensureStarted())) return null; // hello bound: 5000 ms
+  if (!engineCapability("skills")) return null;
+  try {
+    const result = await sendRequest(
+      "skills",
+      { project_id: projectId },
+      SKILLS_REQUEST_TIMEOUT_MS
+    );
+    if (result === null || typeof result !== "object" || !Array.isArray(result.skills)) {
+      logWarn("skills.malformed_response", {});
+      return null;
+    }
+    return result.skills;
+  } catch (err) {
+    logWarn("skills.read_failed", { message: shortError(err) });
+    return null;
+  }
 }
 
 // Fire-and-forget capture (§3): the ack carries no durability guarantee in

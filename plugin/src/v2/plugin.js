@@ -9,14 +9,15 @@
 // narrow legacy client from the V2 context, run the very same V1 `server()`
 // against it, and let the adapter translate V2 session hooks and events onto
 // the resulting hooks. The engine surface therefore cannot fork — one child,
-// one hello, the same five methods.
+// one hello, the same six methods.
 //
 // Provider connectivity is deliberately absent (D7): it is unported and owned
 // by issue 62, and the legacy client exposes no `provider` surface at all.
 //
 // Upstream reference: example/opencode-mem/src/v2/plugin.ts.
 
-import { server } from "../plugin.js";
+import { readSkillCatalogue, server } from "../plugin.js";
+import { registerSkills } from "../skills.js";
 import { registerV2Adapter } from "./adapter.js";
 import { createLegacyClient } from "./legacy-client.js";
 import { MemToast } from "./toast-rpc.js";
@@ -45,7 +46,16 @@ export async function setup(ctx) {
     worktree: ctx?.location?.project?.directory ?? null,
     $: null,
   });
-  return registerV2Adapter(ctx, v1.hooks);
+  const adapterCleanup = await registerV2Adapter(ctx, v1.hooks);
+  // Issue 69: the catalogue is the engine's; the host's skill domain is where it
+  // becomes visible. Fail-open: no engine, no capability, no transform → no-op.
+  const skills = await registerSkills(ctx, {
+    readCatalogue: () => readSkillCatalogue(ctx?.location?.directory ?? null),
+  });
+  return async () => {
+    await skills.cleanup();
+    await adapterCleanup();
+  };
 }
 
 export default { id, setup };

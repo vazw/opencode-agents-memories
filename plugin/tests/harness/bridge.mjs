@@ -1,11 +1,11 @@
 // W5.2 shared test harness for the staged-package cases. NOT a test file:
 // `node --test` only matches `*.test.mjs`, so this module has no cases of its
-// own — its correctness is proved by its six users: `v2-plugin-adapter.test.mjs`
+// own — its correctness is proved by its seven users: `v2-plugin-adapter.test.mjs`
 // and `compaction-v2-inheritance.test.mjs` (`mode: "v2"`),
 // `wrapper-toast.test.mjs` (`mode: "v1"`), `compaction-hook.test.mjs`
 // (`mode: "v1-compaction"`), `compaction-capability.test.mjs`
-// (`mode: "v1-compaction"`, the capability gate) and `memory-tools.test.mjs`
-// (`mode: "v2-tool"`).
+// (`mode: "v1-compaction"`, the capability gate), `memory-tools.test.mjs`
+// (`mode: "v2-tool"`) and `skills-bridge.test.mjs` (`mode: "v2-skills"`).
 //
 // Why a subprocess and not an import: `plugin/src/plugin.js` spawns the engine
 // with piped stdio and no `detached`/`unref` (`:365-368`), and the stub exits
@@ -60,6 +60,7 @@ export function stagePackageTree(tmpRoot) {
 export const DEFAULT_STUB_CAPABILITIES = {
   compaction: true,
   fire_and_forget_capture: true,
+  skills: true,
   standalone: true,
   web: true,
 };
@@ -69,11 +70,13 @@ export function stageStubEngine(pkgDir, {
   manifestPath,
   injectMode = "error",
   capabilities = DEFAULT_STUB_CAPABILITIES,
+  skills = [],
+  skillsPath = null, // when set, re-read per `skills` request (the re-register case)
 }) {
   const dir = path.join(pkgDir, "engine", `${process.platform}-${process.arch}`);
   fs.mkdirSync(dir, { recursive: true });
   const binPath = path.join(dir, "opencode-agents-memory");
-  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities }), {
+  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath }), {
     mode: 0o755,
   });
   fs.chmodSync(binPath, 0o755);
@@ -83,8 +86,8 @@ export function stageStubEngine(pkgDir, {
 // Static body (no template interpolation inside the script beyond CONFIG):
 // answers the canned protocol-1.0.0 results, records its own pid, exits on
 // SIGTERM or stdin EOF.
-function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities }) {
-  const config = JSON.stringify({ injectMode, requestLogPath, manifestPath, capabilities });
+function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath }) {
+  const config = JSON.stringify({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath });
   const blocks = JSON.stringify({
     restore:
       "## Restored Session Memory\n\n### Memory 1\nRetries are capped at three\n\nTags: project, opencode-mem\n\n### Memory 2\nDeploys go through the staging gate first\n\nTags: project, opencode-mem\n\n",
@@ -97,7 +100,7 @@ function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabiliti
 const CONFIG = ${config};
 const BLOCKS = ${blocks};
 import fs from "node:fs";
-const { injectMode, requestLogPath, manifestPath, capabilities } = CONFIG;
+const { injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath } = CONFIG;
 function logLine(object) {
   try { fs.appendFileSync(requestLogPath, JSON.stringify(object) + "\\n"); } catch {}
 }
@@ -139,9 +142,18 @@ function respond(parsed) {
       // undefined key is dropped by JSON.stringify — the pre-D-43 shape.
       capabilities: capabilities === null ? undefined : capabilities,
       engine_version: "0.1.0",
-      methods: ["capture", "inject", "recall", "health", "shutdown"],
+      // The advertised set moves with the capability: a pre-69 stub shows five.
+      methods: capabilities?.skills === true
+        ? ["capture", "inject", "recall", "skills", "health", "shutdown"]
+        : ["capture", "inject", "recall", "health", "shutdown"],
       protocol: "1.0.0",
     };
+  } else if (method === "skills") {
+    let answer = skills;
+    if (skillsPath) {
+      try { answer = JSON.parse(fs.readFileSync(skillsPath, "utf8")); } catch { /* keep the startup copy */ }
+    }
+    result = { skills: answer };
   } else if (method === "capture") {
     result = { accepted: true };
   } else if (method === "recall") {
@@ -190,7 +202,7 @@ function respond(parsed) {
 
 /**
  * The driver script, written into the case's temp dir by its consumer. One
- * source, four modes (`DRIVER_MODE`), each reading its fixture from the JSON
+ * source, five modes (`DRIVER_MODE`), each reading its fixture from the JSON
  * file whose path the parent passes as argv[3]:
  *
  *   "v1" — imports the staged `dist/plugin.js`, builds `server()` from the
@@ -210,6 +222,14 @@ function respond(parsed) {
  *          an async fake tool surface, invokes the registered
  *          `recall_project_sessions` tool and writes
  *          `{ names, payloadText, wire }`.
+ *   "v2-skills" — imports the staged `dist/v2/plugin.js`, calls `setup(ctx)`
+ *          against an incremental fake `skill.transform` (the callback runs at
+ *          registration), releases the recorded event stream afterwards (both
+ *          the adapter watcher's and the skills subscription's generators
+ *          receive the fixture events), polls the wire for the re-register
+ *          `skills` request and writes
+ *          `{ adds, updates, removes, disposed, catalogueRequests, helloCount,
+ *          consoleErrors, elapsedMs }`.
  */
 export const DRIVER_SOURCE = `import fs from "node:fs";
 import path from "node:path";
@@ -490,6 +510,108 @@ if (mode === "v2-tool") {
   const wire = readWire();
   await cleanup();
   writeRecord({ names: added.map((entry) => entry.name), payloadText: result.content, wire });
+  process.exit(0);
+}
+
+if (mode === "v2-skills") {
+  const mod = await import(pathToFileURL(path.join(pkgDir, "dist", "v2", "plugin.js")));
+  const consoleErrors = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => {
+    consoleErrors.push(args.map((arg) => String(arg)).join(" "));
+  };
+
+  const storedSkills = new Map();
+  const adds = [];
+  const updates = [];
+  const removes = [];
+  let stored = null;
+  let disposed = false;
+  let releaseEvents = null;
+  const eventsReleased = new Promise((resolve) => {
+    releaseEvents = resolve;
+  });
+  const editor = {
+    list: () => [...storedSkills.values()],
+    get: (id) => storedSkills.get(id),
+    add: (skill) => {
+      adds.push(skill);
+      storedSkills.set(skill.id, { ...skill });
+    },
+    update: (id, mutate) => {
+      updates.push(id);
+      const current = { ...storedSkills.get(id) };
+      mutate(current);
+      storedSkills.set(id, current);
+    },
+    remove: (id) => {
+      removes.push(id);
+      storedSkills.delete(id);
+    },
+  };
+  const ctx = {
+    location: fixture.location,
+    session: { hook: async () => {} },
+    tool: {
+      // The tool surface is not this case's subject; a no-op keeps console
+      // clean and mirrors the live host's shape.
+      transform: async () => ({ dispose: async () => {} }),
+    },
+    skill: {
+      transform: async (callback) => {
+        stored = callback;
+        callback(editor); // the host runs the callback at registration
+        return {
+          dispose: async () => {
+            disposed = true;
+          },
+        };
+      },
+      reload: async () => stored(editor), // the second call the AC pins
+    },
+    event: {
+      // Two subscribers (the adapter watcher and the skills subscription) each
+      // get their own generator; both receive the same released events.
+      async *subscribe({ signal }) {
+        await eventsReleased;
+        for (const event of fixture.events ?? []) {
+          yield event;
+        }
+        if (signal.aborted) return;
+        await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+      },
+    },
+  };
+
+  const startedAt = Date.now();
+  const cleanup = await mod.setup(ctx);
+  const elapsedMs = Date.now() - startedAt;
+
+  // The re-register case: rewrite the staged catalogue file, release the event
+  // stream (the registration's own event predates the subscription) and wait
+  // for the second "skills" request.
+  if (fixture.skillsAfterPath && Array.isArray(fixture.skillsAfter)) {
+    fs.writeFileSync(fixture.skillsAfterPath, JSON.stringify(fixture.skillsAfter));
+    releaseEvents();
+    const deadline = Date.now() + 3000;
+    for (;;) {
+      const requests = readWire().filter((message) => message && message.method === "skills");
+      if (requests.length >= 2) break;
+      if (Date.now() > deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  } else {
+    releaseEvents();
+  }
+
+  await cleanup();
+  console.error = originalConsoleError;
+  const wire = readWire();
+  const catalogueRequests = wire
+    .filter((message) => message && message.method === "skills")
+    .map((message) => message.params);
+  const helloCount = wire.filter((message) => message && message.method === "hello").length;
+  writeRecord({ adds, updates, removes, disposed, catalogueRequests, helloCount, consoleErrors, elapsedMs });
   process.exit(0);
 }
 
