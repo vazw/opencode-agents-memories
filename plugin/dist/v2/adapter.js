@@ -1,7 +1,7 @@
 // V2→V1 adapter (W5.2, blueprint D2) — translates V2 session hooks and the
 // event stream onto the hooks map `server()` returns, so the engine surface
 // cannot fork: under V2 the very same V1 closure mints the capture id, spawns
-// the one child and speaks the same five methods.
+// one child, one hello, the same six runtime methods.
 //
 // Crossing INTO V1: the prompt text and its injected parts, event envelopes,
 // the session id, the project directory. Crossing OUT: the injected text block.
