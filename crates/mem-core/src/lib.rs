@@ -6,6 +6,7 @@ pub const CRATE_NAME: &str = "mem-core";
 pub mod agent;
 pub mod config;
 pub mod dedup;
+pub mod embedding;
 pub mod env;
 pub mod error;
 pub mod logging;

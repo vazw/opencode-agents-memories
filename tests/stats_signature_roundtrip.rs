@@ -304,6 +304,7 @@ fn test_capture_round_trip_moves_todays_stats_counters() {
             config.clone(),
             connections,
             Arc::new(SystemProcessProbe),
+            None,
         );
         let api = mem_web::api::ports::ApiServices::unavailable().with_memory(Arc::new(
             mem_web::api::store_adapter::ProductionMemory::new(shards),

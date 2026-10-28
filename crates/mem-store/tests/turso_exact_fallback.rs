@@ -22,6 +22,7 @@ async fn test_finds_memories_via_exact_cosine_scan_without_vector_indexes() {
         &mem_store::schema_migrations::MigrationOptions {
             db_path: None,
             label: "exact-fallback",
+            max_known: mem_store::schema_migrations::MEMORY_SHARD_MAX_KNOWN,
         },
         None,
     )

@@ -21,7 +21,7 @@ use mem_store::db::{
 };
 use mem_store::error::StoreError;
 use mem_store::platform::Platform;
-use mem_store::schema_migrations::{MigrationOptions, apply_episodic_schema};
+use mem_store::schema_migrations::{EPISODIC_MAX_KNOWN, MigrationOptions, apply_episodic_schema};
 use mem_store::tokio::sync::OnceCell;
 use mem_store::tracing::warn;
 use mem_store::vector::vector_to_text;
@@ -200,6 +200,7 @@ impl EpisodicStore {
         let options = MigrationOptions {
             db_path: Some(self.db_path.clone()),
             label: EPISODIC_MIGRATION_LABEL,
+            max_known: EPISODIC_MAX_KNOWN,
         };
         // The exclusivity proof lives across the apply call; the settle below
         // is the only restore path (the runner never unlinks a file it has

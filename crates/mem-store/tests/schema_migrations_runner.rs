@@ -99,6 +99,7 @@ fn options_for(config: &StoreConfig, file: &str) -> MigrationOptions {
     MigrationOptions {
         db_path: Some(config.storage_path.join(file)),
         label: "test",
+        max_known: mem_store::schema_migrations::MEMORY_SHARD_MAX_KNOWN,
     }
 }
 
@@ -134,6 +135,7 @@ async fn test_applies_pending_migrations_in_ascending_version_order_and_records_
         &MigrationOptions {
             db_path: None,
             label: "test",
+            max_known: 2,
         },
         None,
     )
@@ -170,20 +172,23 @@ async fn test_applies_pending_migrations_in_ascending_version_order_and_records_
 async fn test_returns_current_version_when_nothing_is_pending() {
     let _config = common::store_config("mig-noop");
     let db = VersionedDb::new();
-    db.core.version.store(7, Ordering::SeqCst);
-    let migrations = vec![migration(5, "CREATE TABLE never (id INTEGER)")];
+    db.core.version.store(2, Ordering::SeqCst);
+    let migrations = vec![migration(2, "CREATE TABLE never (id INTEGER)")];
     let version = apply_schema_migrations(
         &db,
         &migrations,
         &MigrationOptions {
             db_path: None,
             label: "test",
+            // The file is already at the set's highest version: a build that
+            // knows v2 accepts it, and nothing is pending.
+            max_known: 2,
         },
         None,
     )
     .await
     .expect("noop");
-    assert_eq!(version, 7, "current version wins when nothing pending");
+    assert_eq!(version, 2, "current version wins when nothing pending");
     let sqls = db.core.sqls.lock().unwrap().clone();
     assert!(
         sqls.iter()
@@ -263,7 +268,10 @@ async fn test_creates_backup_before_destructive_upgrade_when_version_positive() 
     )
     .await
     .expect("applies v2");
-    assert_eq!(version, 2);
+    assert_eq!(
+        version, 3,
+        "the backup test's subject is the backup; v3 moves the stamp"
+    );
 
     let backups: Vec<PathBuf> = std::fs::read_dir(&config.storage_path)
         .expect("storage dir")
@@ -390,7 +398,7 @@ async fn test_failure_at_version_zero_leaves_original_untouched_and_reraises() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_memory_shard_migrations_apply_v1_and_v2() {
+async fn test_memory_shard_migrations_apply_v1_through_v3() {
     let config = common::store_config("mig-mem");
     let db = common::open_real_db(&config, "shard.db")
         .await
@@ -404,7 +412,15 @@ async fn test_memory_shard_migrations_apply_v1_and_v2() {
     )
     .await
     .expect("applies");
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
+    let stats = db
+        .query(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='shard_stats'",
+            Vec::new(),
+        )
+        .await
+        .expect("stats table probe");
+    assert_eq!(stats.len(), 1, "v3 creates shard_stats");
 
     let columns = db
         .query("PRAGMA table_info(memories)", Vec::new())
@@ -439,4 +455,60 @@ async fn test_memory_shard_migrations_apply_v1_and_v2() {
             "index {expected} present"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// 7/7 max_known refusal (ADR-0021)
+// ---------------------------------------------------------------------------
+
+/// AC2: a build that knows only v2 refuses a v3 file, even with nothing
+/// pending.
+///
+/// The RED arm is the SAME FILE AFTER the first apply (`current = 3`), not a
+/// fresh database: a fresh file has `current = 0`, so a `max_known: 2` build
+/// applies v1..v3 and returns `Ok(3)`. The check is `current > max_known`,
+/// never `target > max_known`.
+#[tokio::test]
+async fn test_a_build_that_knows_only_v2_refuses_a_v3_file() {
+    let config = common::store_config("mig-newer-than-build");
+    let file = "test.db";
+    let migrations = vec![
+        migration(1, "CREATE TABLE v_one (id INTEGER)"),
+        migration(2, "ALTER TABLE v_one ADD COLUMN two INTEGER"),
+        migration(3, "ALTER TABLE v_one ADD COLUMN three INTEGER"),
+    ];
+    let db = common::open_real_db(&config, file).await.expect("open");
+    let current_build = MigrationOptions {
+        db_path: Some(config.storage_path.join(file)),
+        label: "test",
+        max_known: 3,
+    };
+    let applied = apply_schema_migrations(db.as_ref(), &migrations, &current_build, None)
+        .await
+        .expect("this build applies its own set");
+    assert_eq!(applied, 3, "the v3 build stamps the file at 3");
+    drop(db);
+
+    let db = common::open_real_db(&config, file).await.expect("reopen");
+    let older_build = MigrationOptions {
+        db_path: Some(config.storage_path.join(file)),
+        label: "test",
+        max_known: 2,
+    };
+    let error = apply_schema_migrations(db.as_ref(), &migrations, &older_build, None)
+        .await
+        .expect_err("a v3 file must be refused by a build that knows only v2");
+    assert!(
+        matches!(
+            error,
+            StoreError::SchemaNewerThanBuild {
+                label: "test",
+                found: 3,
+                supported: 2,
+            }
+        ),
+        "the refusal must name the found and supported versions, got {error:?}"
+    );
+    drop(db);
+    common::cleanup_temp_dir(&config.storage_path).expect("cleanup temp dir");
 }

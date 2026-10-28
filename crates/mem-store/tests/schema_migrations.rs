@@ -39,6 +39,7 @@ async fn test_applies_user_version_migrations_idempotently() {
     let options = MigrationOptions {
         db_path: Some(db_path.clone()),
         label: "user-prompts",
+        max_known: mem_store::schema_migrations::USER_PROMPTS_MAX_KNOWN,
     };
     let migrations = user_prompts_migrations();
     let proof = common::exclusive_root(&config.storage_path);
@@ -87,6 +88,7 @@ async fn test_migrates_memory_shards_to_session_id_index_v2() {
     let options = MigrationOptions {
         db_path: Some(db_path.clone()),
         label: "shard",
+        max_known: mem_store::schema_migrations::MEMORY_SHARD_MAX_KNOWN,
     };
 
     let all = mem_store::schema_migrations::memory_shard_migrations(2);
@@ -94,6 +96,12 @@ async fn test_migrates_memory_shards_to_session_id_index_v2() {
     let v1: Vec<_> = all
         .iter()
         .filter(|migration| migration.version == 1)
+        .cloned()
+        .collect();
+    // This battery's subject is the v2 session-id index; v3 is out of scope.
+    let through_v2: Vec<_> = all
+        .iter()
+        .filter(|migration| migration.version <= 2)
         .cloned()
         .collect();
     let applied_v1 = apply_schema_migrations(&*db, &v1, &options, Some(&proof))
@@ -113,7 +121,7 @@ async fn test_migrates_memory_shards_to_session_id_index_v2() {
     .await
     .expect("insert v1 row");
 
-    let applied_v2 = apply_schema_migrations(&*db, &all, &options, Some(&proof))
+    let applied_v2 = apply_schema_migrations(&*db, &through_v2, &options, Some(&proof))
         .await
         .expect("apply v1+v2");
     assert_eq!(applied_v2, 2);

@@ -1,8 +1,12 @@
 # 43 — W9.0 · Database base hardening (review findings)
 
 Status: ready-for-human — 2026-10-27 (umbrella, not a single wave: **W0** `af01156`, **W1 write side**
-`3d5e940` and the **liveness blocker** `aa0dcc4` are landed; W2, W3, W4, W5, W7 and W8 are absent from the
-tree, and **ADRs 0017–0024 are all unwritten**. The audit that gates ADR-0019 and ADR-0025 is now preserved
+`3d5e940` and the **liveness blocker** `aa0dcc4` are landed; **W2 is landed on `main` at `e0bbd37`**
+(merge of `12feaa2` over `c558e52`, base `dc5bcad`; shard v3 + `shard_stats` + embedding fingerprint;
+review approved after one rework) — W3, W4, W5, W7
+and W8 are absent from the tree, and the ADR set is partial: **0017 (`0017-compaction-hook.md`) and 0026
+(`0026-context-assembly.md`) exist and 0018 (`0018-shard-facts-source-of-truth.md`) + 0021
+(`0021-schema-version-discipline.md`) landed with W2**. The audit that gates ADR-0019 and ADR-0025 is now preserved
 in-repo at `docs/evidence/opsec-w6-design-2026-10-25/` — §9 lists twelve blockers, 1 closed, 2–12 open.
 Next moves are the owner's: pick the next wave, rule the ADR-0019 promise, write ADR items 4–12. **Blocks
 issue 39 (retention cleanup) and issue 41 (scheduler).**
@@ -576,8 +580,9 @@ already landed, so the line now names them instead of inviting a re-triage.
 
 **Absent from the tree** — W2 (`shard_stats`, embedding fingerprint), W3 (`embedding_model` is still unread
 outside `sql.rs`), W4 (no `WHERE is_active = 1` unique index), W5 (no prompts `user_version = 2`), W7 (no
-reaping code), W8 (no `benches/` target anywhere in the workspace). **ADRs 0017–0024: none exist**;
-`docs/adr/` stops at 0016.
+reaping code), W8 (no `benches/` target anywhere in the workspace). **The ADR set is partial**:
+`0017-compaction-hook.md` and `0026-context-assembly.md` exist; `0018-shard-facts-source-of-truth.md` and
+`0021-schema-version-discipline.md` land with W2.
 
 **Why this is not `ready-for-agent`.** It is a program, not a task: five code waves, eight ADRs, and the
 owner decisions that bound them. The next binding moves are rulings a wave cannot make — which wave next,
@@ -601,3 +606,51 @@ the status line plus the preserved audit.
   **W2 → W3** (schema then authority), because W3 is what retention consumes. The scope-wide delete-by-id
   residual (W1b's note) is split out as **issue 72** — it is small, self-contained, and blocks 39's delete
   path more directly than the remaining waves.
+
+---
+
+## W2 — shard v3 landed (2026-10-28, base `dc5bcad`)
+
+**Wave ledger.** Branch `issue-43/w2-shard-v3`, base `dc5bcad`. Ten steps, all gates closed; evidence in
+`.tmp/progress/bp-20261027-2353-issue43-w2-shard-v3-r4.ledger.md` (the blueprint's provenance line says
+`39d0ee4`, which is where the r1 derivation was taken; the Plan Gate ruled the label stale and every
+number valid — **0 files changed under the measured crates between `39d0ee4` and `dc5bcad`**).
+
+| step | gate | measured |
+|---|---|---|
+| 1 | `turso_capabilities` (the conditional claim engine fact) | 41 → **42 passed, 1 ignored** |
+| 2 | `schema_migrations_runner` (max_known refusal) | 6 → **7 passed**; 24 literals in 18 files swept |
+| 3 | `shard_v3_migration` (schema/convergence/refusal/AC17) | **5 passed**; guards 7 + 2 |
+| 4 | `shard_v3_migration` (lazy upgrade + one `COUNT(*)`); `mem-store` | **7 passed**; **312 passed, 11 ignored** |
+| 5 | `mem-core --test embedding_identity`; `mem-store` | **3 passed**; 312 unchanged |
+| 6 | `shard_v3_migration` (claim precedence); `mem-bridge --test composition_identity` | **11 passed**; **1 passed** |
+| 7 | `turso_reembed_migration`; `golden_sql` | 4 → **10 passed**; **16 passed** |
+| 8 | docs | `TDD-EXEMPT: documentation` |
+| 9 | workspace gates | `mem-store` **322 passed, 11 ignored**; fmt + both clippy gates clean; no `mem-store → mem-embed` edge |
+
+**What W2 records, and what it refuses to claim (R-12, the narrowing).** Every written shard gets a
+correct `shard_stats` row. The fingerprint is claimed **only where it is provable** — an empty shard whose
+vectors, vacuously, were produced by the configured identity. A populated pre-W2 shard is
+`WithheldNonEmpty { rows }`: any value written there would assert provenance the build cannot support.
+`reembed_scope` rewrites such a scope and stamps the fingerprint + count inside the vector write batch, so
+a crash can never leave new vectors under an old identity. W2 records; **W3 verifies** — `is_shard_valid`,
+search, `store_adapter` and the rotation input are byte-identical, and no read path learns about
+fingerprints.
+
+**D-16 / R-2 — the lost-registry overwrite is closed.** `init_shard_db` now writes
+`embedding_dimensions` / `embedding_model` with `INSERT OR IGNORE` (a deliberate divergence from upstream's
+`INSERT OR REPLACE`; the live constants and the two frozen copies in `golden_sql.rs` moved together). A
+populated shard file whose registry row was lost keeps its own model when `create_shard` re-registers it,
+and `detect_embedding_mismatch` sees the foreign model instead of a rewritten match. Residual: a same-name
+model/endpoint swap is still not caught — **model equality is not proof** (R-3).
+
+**R-10 — ADR-0017's number is taken.** `docs/adr/0017-compaction-hook.md` exists, so the design's planned
+"ADR-0017 scope-wide id resolution" needs a new number when W1's ADR is written. ADR-0018 and ADR-0021 were
+free and W2 uses them.
+
+**ADRs written:** `docs/adr/0018-shard-facts-source-of-truth.md` (the shard owns its count and identity;
+the claim rule; D-16; the narrowing; the hot-cold rider; the W3 hand-off) and
+`docs/adr/0021-schema-version-discipline.md` (one runner, mandatory `max_known`, refuse-before-pending on
+`current`, no error-message matching; W2 ships the mechanism, W5 ships prompts v2).
+
+**Both false ADR statements are corrected**: 0017 and 0026 exist; 0018 and 0021 land with W2 (this edit).

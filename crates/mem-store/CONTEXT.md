@@ -5,6 +5,11 @@
 **Ubiquitous language:**
 
 - **Shard** — one SQLite db per (scope, hash, index) at `{storage}/{scope}s/{scope}_{hash}_shard_{n}.db`; registry (`metadata.db`) authoritative for index/activity; rotation at `max_vectors_per_shard`; incompatible shards raise `ShardIncompatible` ("left untouched"), never quarantined.
+- **Shard facts** — the shard owns its absolute vector count (`shard_stats`, one row `id = 1`, written only from `COUNT(*)`, never a placeholder or a delta) and its embedding identity (`shard_metadata.embedding_fingerprint`). `metadata.db` is a **cache** of the count (ADR-0018). `withheld non-empty` means a populated un-fingerprinted shard: W2 records a count and no fingerprint; `reembed_scope` is the supported way out.
+- **Embedding fingerprint** — canonical JSON `{"v":1,…}` from `mem_core::embedding::EmbeddingIdentity::fingerprint()` (fallible: an encoding error writes nothing, `WithheldEncoding`). No credential, no API URL, no NUL bytes; field order is declaration order. Claimed only when the shard is empty and the key is absent; a present key is never overwritten.
+- **Write-once identity keys** — `embedding_dimensions`/`embedding_model` are `INSERT OR IGNORE` in `init_shard_db` (D-16, a deliberate divergence from upstream's `INSERT OR REPLACE`): a populated file whose registry row was lost keeps its own identity, so the model detector cannot be blinded by `create_shard`.
+- **Version discipline** — every `apply_schema_migrations` call passes a per-set `max_known`; a file whose `user_version` is higher raises `SchemaNewerThanBuild` before the pending check (`current`, never `target`). W2 raises only the shard set (`MEMORY_SHARD_MAX_KNOWN = 3`); prompts v2 is W5's half (ADR-0021).
+
 - **Golden SQL** — upstream statements byte-for-byte in `src/sql.rs`, pinned by `tests/golden_sql.rs` (D2 blocking rule); `is_read_query` is the batch read/write classifier.
 - **Ready gate** — injected legacy/encryption steps + swap recovery + shard warmup; deduped, failed runs re-run all steps, `reset()` re-arms.
 - **Operation lock** — `.turso-operation.lock`/`.turso-migrate.lock`; live PID blocks writes (`writes are temporarily blocked`); corrupt/dead = stale; release PID-guarded.

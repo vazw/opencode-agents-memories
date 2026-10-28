@@ -418,15 +418,19 @@ pub const REGISTER_EXISTING_SHARD: &str = r#"
 pub const FIND_SHARD_BY_KEY: &str =
     r#"SELECT * FROM shards WHERE scope = ? AND scope_hash = ? AND shard_index = ?"#;
 
-// shard-manager.ts L266-271 (initShardDb dims `INSERT OR REPLACE`).
+// shard-manager.ts L266-271 (initShardDb dims). DELIBERATE DIVERGENCE from
+// upstream's `INSERT OR REPLACE` (ADR-0018 D-16): the identity keys are
+// write-once, so a populated file whose registry row was lost keeps its own
+// model/dims when `create_shard` re-opens it. The staged rebuild runs on a
+// fresh file, so it still stamps the target identity.
 pub const SHARD_METADATA_INSERT_DIMENSIONS: &str = r#"
-          INSERT OR REPLACE INTO shard_metadata (key, value)
+          INSERT OR IGNORE INTO shard_metadata (key, value)
           VALUES ('embedding_dimensions', ?)
         "#;
 
-// shard-manager.ts L273-279 (initShardDb model).
+// shard-manager.ts L273-279 (initShardDb model; write-once, see above).
 pub const SHARD_METADATA_INSERT_MODEL: &str = r#"
-          INSERT OR REPLACE INTO shard_metadata (key, value)
+          INSERT OR IGNORE INTO shard_metadata (key, value)
           VALUES ('embedding_model', ?)
         "#;
 

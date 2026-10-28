@@ -78,6 +78,7 @@ async fn test_preserves_legacy_prompts_while_adding_newer_columns() {
         &MigrationOptions {
             db_path: Some(config.storage_path.join("user-prompts.db")),
             label: "test",
+            max_known: mem_store::schema_migrations::USER_PROMPTS_MAX_KNOWN,
         },
         Some(common::exclusive_root(&config.storage_path).as_ref()),
     )

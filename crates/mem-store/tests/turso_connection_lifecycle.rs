@@ -73,6 +73,7 @@ async fn test_reopens_databases_after_close_turso_and_invalidate_caches() {
         config.clone(),
         connections.clone(),
         Arc::new(SystemProcessProbe),
+        None,
     );
     let shard = shards
         .get_write_shard(Scope::Project, "a1b2c3d4e5f60001")
@@ -124,6 +125,7 @@ async fn test_does_not_leak_in_flight_open_across_close_all() {
         config.clone(),
         connections.clone(),
         Arc::new(SystemProcessProbe),
+        None,
     );
 
     // Arm one gated open on the metadata db.
@@ -190,6 +192,7 @@ async fn test_close_invalidates_ready_gate_and_shard_manager() {
         config.clone(),
         connections.clone(),
         Arc::new(SystemProcessProbe),
+        None,
     ));
 
     let (counter, step) = ready_step_counter();

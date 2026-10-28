@@ -132,6 +132,7 @@ async fn test_self_holder_restore_is_pending_and_the_runner_does_not_unlink() {
     let options = MigrationOptions {
         db_path: Some(db_path.clone()),
         label: "test",
+        max_known: 2,
     };
     let proof = common::exclusive_root(&config.storage_path);
 
@@ -223,6 +224,7 @@ async fn test_destructive_migration_without_root_proof_refuses_before_the_copy()
     let options = MigrationOptions {
         db_path: Some(db_path.clone()),
         label: "test",
+        max_known: mem_store::schema_migrations::MEMORY_SHARD_MAX_KNOWN,
     };
 
     let error = apply_schema_migrations(db.as_ref(), &memory_shard_migrations(2), &options, None)
@@ -275,6 +277,7 @@ async fn test_v6_backup_without_root_proof_refuses_before_its_copy() {
     let options = MigrationOptions {
         db_path: Some(db_path.clone()),
         label: "episodic",
+        max_known: mem_store::schema_migrations::EPISODIC_MAX_KNOWN,
     };
     // A genuine v5 database: a version-0 apply takes no backup, so no proof.
     let version = apply_schema_migrations(
@@ -332,6 +335,7 @@ async fn test_restore_without_an_engine_lock_refuses_and_keeps_the_backup() {
     let options = MigrationOptions {
         db_path: Some(db_path.clone()),
         label: "test",
+        max_known: 2,
     };
 
     let lock = match mem_store::engine_lock::acquire_engine_lock(

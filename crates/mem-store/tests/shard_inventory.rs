@@ -495,6 +495,7 @@ async fn test_inventory_discovers_disk_only_shard_files() {
         &mem_store::schema_migrations::MigrationOptions {
             db_path: None,
             label: "disk-only",
+            max_known: mem_store::schema_migrations::MEMORY_SHARD_MAX_KNOWN,
         },
         None,
     )

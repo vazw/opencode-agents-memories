@@ -46,11 +46,31 @@ pub struct SchemaMigration {
 
 /// Apply-time options (`options?.dbPath` / `options?.label` upstream; the
 /// label is for tracing only).
-#[derive(Debug, Clone, Default)]
+///
+/// `max_known` is the highest schema version this build knows for the
+/// migration set being applied (ADR-0021). There is deliberately no
+/// `Default`: a permissive default would fail open on a newer file, so every
+/// call site names its set's maximum.
+#[derive(Debug, Clone)]
 pub struct MigrationOptions {
     pub db_path: Option<PathBuf>,
     pub label: &'static str,
+    pub max_known: i64,
 }
+
+/// Highest `metadata.db` schema version this build knows.
+pub const METADATA_MAX_KNOWN: i64 = 1;
+/// Highest `user_prompts` schema version this build knows (prompts v2 is
+/// W5's half of ADR-0021).
+pub const USER_PROMPTS_MAX_KNOWN: i64 = 1;
+/// Highest `user_profiles` schema version this build knows.
+pub const USER_PROFILES_MAX_KNOWN: i64 = 1;
+/// Highest memory-shard schema version this build knows.
+pub const MEMORY_SHARD_MAX_KNOWN: i64 = 3;
+/// Highest episodic schema version this build knows: `apply_episodic_schema`
+/// applies v6 itself while `episodic_migrations()` returns v1..v5, so
+/// deriving this from the slice would refuse every v6 database.
+pub const EPISODIC_MAX_KNOWN: i64 = 6;
 
 /// Upstream `getUserVersion`.
 async fn get_user_version(db: &dyn Db) -> Result<i64, StoreError> {
@@ -157,6 +177,17 @@ pub async fn apply_schema_migrations(
     let mut sorted = migrations.to_vec();
     sorted.sort_by_key(|migration| migration.version);
     let current = get_user_version(db).await?;
+    // Refuse a file stamped by a newer build BEFORE the pending check (ADR-0021):
+    // a newer file has no pending migrations, so an in-loop check never runs.
+    // The comparison is on `current`, never on `target` — a fresh database must
+    // still apply v1..vN under a build that knows N.
+    if current > options.max_known {
+        return Err(StoreError::SchemaNewerThanBuild {
+            label: options.label,
+            found: current,
+            supported: options.max_known,
+        });
+    }
     let pending: Vec<i64> = sorted
         .iter()
         .filter(|migration| migration.version > current)
@@ -273,6 +304,16 @@ pub fn memory_shard_migrations(dimensions: u32) -> Vec<SchemaMigration> {
             version: 2,
             description: "Indexed session_id for session lookup (FTS5 unavailable on @tursodatabase/database)",
             statements: v2,
+        },
+        SchemaMigration {
+            version: 3,
+            description: "shard_stats: the shard's own absolute vector count (W2)",
+            // The DDL alone: no count row is written by the migration — a
+            // placeholder 0 is a W7 reaping trigger (ADR-0018).
+            statements: vec![Statement::new(
+                crate::shard_facts::SHARD_STATS_DDL,
+                Vec::new(),
+            )],
         },
     ]
 }

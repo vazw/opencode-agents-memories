@@ -13,7 +13,8 @@ use mem_episodic::store::{EPISODIC_DB_NAME, EPISODIC_MIGRATION_LABEL, EpisodicSt
 use mem_store::db::{Db, Value, query_one};
 use mem_store::episodic_sql::{EPISODIC_INDEXES, EPISODIC_V2_INDEXES};
 use mem_store::schema_migrations::{
-    MigrationOptions, SchemaMigration, apply_schema_migrations, episodic_migrations,
+    EPISODIC_MAX_KNOWN, MigrationOptions, SchemaMigration, apply_schema_migrations,
+    episodic_migrations,
 };
 use mem_store::vector::vector_to_text;
 use mem_store::vector_utils::parse_extracted_vector;
@@ -43,6 +44,7 @@ fn migration_options(store: &EpisodicStore) -> MigrationOptions {
     MigrationOptions {
         db_path: Some(store.db_path().to_path_buf()),
         label: EPISODIC_MIGRATION_LABEL,
+        max_known: EPISODIC_MAX_KNOWN,
     }
 }
 
@@ -68,6 +70,7 @@ async fn apply_v1_only(db: &dyn Db, db_path: &std::path::Path) {
         &MigrationOptions {
             db_path: Some(db_path.to_path_buf()),
             label: EPISODIC_MIGRATION_LABEL,
+            max_known: EPISODIC_MAX_KNOWN,
         },
         // v1 over a version-0 file takes no backup; no proof is needed.
         None,

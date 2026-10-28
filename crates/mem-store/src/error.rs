@@ -139,6 +139,18 @@ pub enum StoreError {
         /// The operation that found the lock poisoned.
         operation: &'static str,
     },
+    /// A database stamped by a newer build than this one knows how to read
+    /// (ADR-0021). Checked against the file's current `user_version` before
+    /// anything is applied; a newer file has no pending migrations, so a
+    /// check inside the apply loop would never run.
+    #[error(
+        "Database {label} is at schema version {found}, but this build supports at most {supported}"
+    )]
+    SchemaNewerThanBuild {
+        label: &'static str,
+        found: i64,
+        supported: i64,
+    },
     /// A shard of the scope could not be read during a scope-wide memory-id
     /// lookup, so the deterministic write was deferred rather than risk a
     /// duplicate. Never a "not found".

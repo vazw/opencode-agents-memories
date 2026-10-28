@@ -94,6 +94,9 @@ pub struct ShardManager {
     config: StoreConfig,
     connections: Arc<ConnectionManager>,
     probe: Arc<dyn ProcessProbe>,
+    /// The build's configured embedding identity (`None` = no identity: no
+    /// fingerprint is ever claimed — today's legacy behaviour).
+    embedding_identity: Option<mem_core::embedding::EmbeddingIdentity>,
     metadata: Arc<Mutex<Option<DbHandle>>>,
     init: Arc<Mutex<Option<Arc<InitCell>>>>,
     scope_write_locks: Arc<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>>,
@@ -106,6 +109,7 @@ impl Clone for ShardManager {
             config: self.config.clone(),
             connections: self.connections.clone(),
             probe: self.probe.clone(),
+            embedding_identity: self.embedding_identity.clone(),
             // Clone::clone may not fail: metadata and init are Arc-shared, so a clone shares
             // the one authoritative cache and the one init slot instead of snapshotting them (ADR-0013 D-3 / F10)
             metadata: self.metadata.clone(),
@@ -160,12 +164,14 @@ impl ShardManager {
         config: StoreConfig,
         connections: Arc<ConnectionManager>,
         probe: Arc<dyn ProcessProbe>,
+        embedding_identity: Option<mem_core::embedding::EmbeddingIdentity>,
     ) -> Self {
         Self {
             storage_path: storage_path.canonicalize().unwrap_or(storage_path),
             config,
             connections,
             probe,
+            embedding_identity,
             metadata: Arc::new(Mutex::new(None)),
             init: Arc::new(Mutex::new(None)),
             scope_write_locks: Arc::new(Mutex::new(HashMap::new())),
@@ -176,6 +182,11 @@ impl ShardManager {
     /// dims/model without reaching into `Arc<ShardManager>` privates).
     pub fn config(&self) -> &StoreConfig {
         &self.config
+    }
+
+    /// The configured embedding identity, when this build has one.
+    pub fn embedding_identity(&self) -> Option<&mem_core::embedding::EmbeddingIdentity> {
+        self.embedding_identity.as_ref()
     }
 
     /// The process probe (live-lock checks in the migration paths).
@@ -419,6 +430,7 @@ impl ShardManager {
                         .join(crate::operation_lock::METADATA_DB_NAME),
                 ),
                 label: "metadata.db",
+                max_known: crate::schema_migrations::METADATA_MAX_KNOWN,
             },
             root.as_ref(),
         )
@@ -591,16 +603,30 @@ impl ShardManager {
             )
             .await;
         match insert {
-            Ok(result) => Ok(ShardInfo {
-                id: result.last_insert_rowid,
-                scope,
-                scope_hash: scope_hash.to_string(),
-                shard_index,
-                db_path: full_path,
-                vector_count: 0,
-                is_active: true,
-                created_at: now,
-            }),
+            Ok(result) => {
+                let shard = ShardInfo {
+                    id: result.last_insert_rowid,
+                    scope,
+                    scope_hash: scope_hash.to_string(),
+                    shard_index,
+                    db_path: full_path,
+                    vector_count: 0,
+                    is_active: true,
+                    created_at: now,
+                };
+                // A populated file whose registry row was lost reaches this
+                // path: the observed count (not a false 0) becomes the row's
+                // value, and the write-once identity keys survive (D-16).
+                let outcome = crate::shard_facts::prepare_active_shard(
+                    shard_db.as_ref(),
+                    self.config.embedding_dimensions,
+                    self.embedding_identity.as_ref(),
+                    &self.config.embedding_model,
+                )
+                .await?;
+                self.sync_shard_vector_count(shard, outcome.vector_count)
+                    .await
+            }
             Err(error) => {
                 let unique = error.message().contains("UNIQUE constraint failed")
                     || error.message().contains("SQLITE_CONSTRAINT");
@@ -688,8 +714,14 @@ impl ShardManager {
             })
     }
 
-    /// Upstream `initShardDb` — validated dims, ensure_shard_schema, then
-    /// `INSERT OR REPLACE` dims/model metadata.
+    /// Upstream `initShardDb` — validated dims, ensure_shard_schema, then the
+    /// dims/model metadata batch.
+    ///
+    /// The two identity keys are **write-once** (`INSERT OR IGNORE`, ADR-0018
+    /// D-16): a populated file whose registry row was lost is re-opened by
+    /// `create_shard`, and the old `INSERT OR REPLACE` would overwrite its
+    /// stored model with the configured one — blinding the very detector W2
+    /// ships. A fresh file (including the staged rebuild) still gets both.
     pub async fn init_shard_db(
         &self,
         db: &dyn Db,
@@ -727,6 +759,7 @@ impl ShardManager {
             &crate::schema_migrations::MigrationOptions {
                 db_path: None,
                 label: "memory-shard",
+                max_known: crate::schema_migrations::MEMORY_SHARD_MAX_KNOWN,
             },
             // No backup is taken without a `db_path`, so no proof is needed.
             None,
@@ -787,11 +820,14 @@ impl ShardManager {
         true
     }
 
-    /// Upstream `syncShardVectorCount`.
-    async fn sync_shard_vector_count(&self, shard: ShardInfo) -> Result<ShardInfo, StoreError> {
-        let db = self.connections.get_connection(&shard.db_path).await?;
-        let row = query_one(&*db, crate::sql::COUNT_ALL_VECTORS, Vec::new()).await?;
-        let count = row.and_then(|row| row.i64("count")).unwrap_or(0).max(0) as u64;
+    /// Upstream `syncShardVectorCount`, fed the count the caller already
+    /// measured (`prepare_active_shard`): the hot path pays no second
+    /// `COUNT(*)` (D-7).
+    async fn sync_shard_vector_count(
+        &self,
+        shard: ShardInfo,
+        count: u64,
+    ) -> Result<ShardInfo, StoreError> {
         if count == shard.vector_count {
             return Ok(shard);
         }
@@ -915,7 +951,17 @@ impl ShardManager {
                             db_path: shard.db_path.clone(),
                         });
                     }
-                    let shard = self.sync_shard_vector_count(shard).await?;
+                    let shard_db = self.open_shard(&shard.db_path).await?;
+                    let outcome = crate::shard_facts::prepare_active_shard(
+                        shard_db.as_ref(),
+                        self.config.embedding_dimensions,
+                        self.embedding_identity.as_ref(),
+                        &self.config.embedding_model,
+                    )
+                    .await?;
+                    let shard = self
+                        .sync_shard_vector_count(shard, outcome.vector_count)
+                        .await?;
                     if shard.vector_count >= u64::from(self.config.max_vectors_per_shard) {
                         self.mark_shard_read_only_off(shard.id).await?;
                         return self
@@ -1320,6 +1366,7 @@ mod tests {
                 Arc::new(crate::db::TursoConnectFactory),
             )),
             Arc::new(crate::platform::SystemProcessProbe),
+            None,
         )
     }
 

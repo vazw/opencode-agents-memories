@@ -1009,6 +1009,107 @@ async fn test_check_violation_inside_a_write_batch_is_an_error_and_rolls_back() 
     common::cleanup_temp_dir(&config.storage_path).expect("cleanup temp dir");
 }
 
+/// AC1 (W2 step 1): the conditional claim inserts exactly once, only on an
+/// empty shard, and never overwrites a present value.
+///
+/// Rejection mechanism: arm (c) deletes the claimed row first (so the key
+/// guard cannot be the cause) and seeds one `memories` row; the only clause
+/// then able to withhold the insert is `NOT EXISTS (SELECT 1 FROM memories)`.
+/// A bare `INSERT OR IGNORE … VALUES` writes there and fails arm (c) — the
+/// non-vacuity control for the composition.
+#[tokio::test]
+async fn test_conditional_claim_inserts_once_and_only_on_an_empty_shard() {
+    let config = production_config("cap-claim-identity");
+    let db = open_production(&config, "probe.db").await;
+
+    db.execute(
+        "CREATE TABLE shard_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        vec![],
+    )
+    .await
+    .expect("create shard_metadata");
+    db.execute("CREATE TABLE memories (id TEXT PRIMARY KEY)", vec![])
+        .await
+        .expect("create memories");
+
+    async fn read_fingerprint(db: &dyn Db) -> Option<String> {
+        let rows = db
+            .query(
+                "SELECT value FROM shard_metadata WHERE key = 'embedding_fingerprint'",
+                vec![],
+            )
+            .await
+            .expect("read fingerprint");
+        rows.into_iter().next().and_then(|row| row.text("value"))
+    }
+
+    // (a) Empty shard: one row changed, the bound value present.
+    let first = db
+        .execute(
+            mem_store::shard_facts::CLAIM_IDENTITY_SQL,
+            vec![Value::Text("fp-first".to_string())],
+        )
+        .await
+        .expect("claim on an empty shard must succeed");
+    assert_eq!(
+        first.changes, 1,
+        "the empty-shard claim must insert one row"
+    );
+    assert_eq!(
+        read_fingerprint(db.as_ref()).await.as_deref(),
+        Some("fp-first"),
+        "the claim must write the bound value"
+    );
+
+    // (b) Repeat with a different value: a no-op, the first value survives.
+    let second = db
+        .execute(
+            mem_store::shard_facts::CLAIM_IDENTITY_SQL,
+            vec![Value::Text("fp-second".to_string())],
+        )
+        .await
+        .expect("a repeated claim must not fail");
+    assert_eq!(
+        second.changes, 0,
+        "a present fingerprint is immutable: the repeat must change nothing"
+    );
+    assert_eq!(
+        read_fingerprint(db.as_ref()).await.as_deref(),
+        Some("fp-first"),
+        "the repeat must not overwrite the claimed value"
+    );
+
+    // (c) Key absent again, but the shard is non-empty: withheld.
+    db.execute(
+        "DELETE FROM shard_metadata WHERE key = 'embedding_fingerprint'",
+        vec![],
+    )
+    .await
+    .expect("clear the claimed row");
+    db.execute("INSERT INTO memories (id) VALUES ('m1')", vec![])
+        .await
+        .expect("seed one memory row");
+    let third = db
+        .execute(
+            mem_store::shard_facts::CLAIM_IDENTITY_SQL,
+            vec![Value::Text("fp-third".to_string())],
+        )
+        .await
+        .expect("a withheld claim is not an error");
+    assert_eq!(
+        third.changes, 0,
+        "a non-empty shard must not be claimed (a bare INSERT OR IGNORE would write here)"
+    );
+    assert_eq!(
+        read_fingerprint(db.as_ref()).await,
+        None,
+        "no fingerprint row may exist on a non-empty, unclaimed shard"
+    );
+
+    drop(db);
+    common::cleanup_temp_dir(&config.storage_path).expect("cleanup temp dir");
+}
+
 // ===========================================================================
 // Step 3 — P2 + P3 (AC9–AC10)
 // ===========================================================================
