@@ -337,9 +337,14 @@ operation; the engine's own self-check uses the reserved value `"__engine__"`.
 |---|---|---|---|
 | `capture` | no (fire-and-forget ack) | `session_id` (req), `capture_id` (req), `project_id?`, `agent_id?`, `agent_name?`, `parent_session_id?`, `transcript?`, `summary?`, `metadata?` | `{"accepted":true}` |
 | `inject` | **yes** | `session_id` (req), `project_id?`, `agent_id?`, `token_budget?`, `include?` | `{"block":string\|null,"memory_count":int,"tokens":int,"truncated":bool,"handling_ms":int}` |
-| `recall` | no | `session_id` (req), `query` (req), `limit?`, `scope?`, `tags?` | `{"items":[…],"count":int}` |
+| `recall` | no | `session_id` (req); **canonical** when `projectId` is present (camelCase, no unknown keys): `projectId` (req), `mode?` (`"chronological"\|"semantic"\|"filtered"`), `query?` (semantic only), `since?`, `until?`, `lastNSessions?`, `touchedFiles?`, `agentId?`, `sessionId?` (filter key), `includeFullSessions?`; **legacy** otherwise: `query` (req, string), `limit?`, `scope?`, `tags?` (these keys only) | `{"items":[…],"count":int}` |
 | `health` | no | `session_id` (req) | `{"ok":bool,"mode":"full"\|"degraded","degraded_reason":string\|null,"protocol":semver,"engine_version":semver,"db":{"path":string,"ready":bool},"uptime_ms":int,"sessions":int}` |
 | `shutdown` | teardown only | `session_id` (req) | `{"ok":true}` |
+
+**Amendment (issue 73, 2026-10-28).** D-46's `recall` row is amended to the dual shape: the
+canonical W4.2 argument set, discriminated by a present `projectId`, and the frozen legacy
+subset. `docs/bridge-schema.md` §3 carries the same row; the canonical shape has been served
+since issue 22 (`e58e703`), and the legacy shape remains a logged empty page.
 
 `capture_id` is a client-minted idempotency key (≤ 64 chars). The `capture` ack is returned **before** the
 summarisation and **before** the DB write, so the ack carries no `duplicate` flag: the idempotency check (D-36)
