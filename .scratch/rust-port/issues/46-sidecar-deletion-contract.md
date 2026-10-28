@@ -1,6 +1,6 @@
 # 46 — Storage · The sidecar-deletion contract: exclusivity is asserted, refused, or the file is not unlinked
 
-Status: done — 2026-10-28 — wave r5 landed on `issue-46/sidecar-deletion-contract` (commits `42d2bfd` … `a713678`, rework included); G1/G2 and R1 measured under `## Wave r5 measurements`.
+Status: done — 2026-10-28 — wave r5 **landed on `main` at `e102b19`** (merge `d78ffda` of `058750d`, which carries issue 43's W2; wave commits `42d2bfd` … `a713678`, rework `955f4cd`/`a713678`, and the merge-only `e102b19` test serialization); G1/G2 and R1 measured under `## Wave r5 measurements`.
 
 ## PREMISE — `needs_validation` (read before implementing)
 
