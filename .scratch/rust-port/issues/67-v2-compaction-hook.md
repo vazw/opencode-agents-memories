@@ -1,6 +1,8 @@
 # 67 — V2 first-class compaction hook (pre-compaction ingest)
 
-Status: ready-for-agent — 2026-10-27 (re-verified at `f41b9ef`: the V2 adapter registers only `prompt`/`context`;
+Status: done — 2026-10-29 — landed at `6f76295` (the V2 adapter registers `prompt`, `context` and `compaction`; the pre-compaction ingest is wired through the V1 hook; restore stays summary-only with one typed line per forwarded event).
+
+_Original triage:_ ready-for-agent — 2026-10-27 (re-verified at `f41b9ef`: the V2 adapter registers only `prompt`/`context`;
 the host's own plugins register the compaction hook in four places, and the compaction service describes
 consuming its edits. The exact invocation site is the wave's first measurement. Brief under `## Agent Brief`.)
 
