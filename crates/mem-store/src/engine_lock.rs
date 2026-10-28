@@ -166,16 +166,48 @@ fn deregister(lock: &EngineLock) {
     registry.retain(|entry| entry.strong_count() > 0 && entry.as_ptr() != identity);
 }
 
+// Test-only interleaving seam (issue 46 defect 1): called immediately after
+// each successful registry upgrade. The deadlock regression uses it to release
+// the last *external* strong reference of a non-matching lock, so the upgraded
+// handle is the final one when the non-match is rejected.
+#[cfg(all(test, target_os = "linux"))]
+type RegistryUpgradeHook = Box<dyn FnOnce(&Arc<EngineLock>)>;
+
+#[cfg(all(test, target_os = "linux"))]
+thread_local! {
+    static REGISTRY_UPGRADE_HOOK: std::cell::RefCell<Option<RegistryUpgradeHook>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(all(test, target_os = "linux"))]
+fn run_registry_upgrade_hook(lock: &Arc<EngineLock>) {
+    if let Some(hook) = REGISTRY_UPGRADE_HOOK.with(|cell| cell.borrow_mut().take()) {
+        hook(lock);
+    }
+}
+
 /// The live lock registered for `root`, matched **exactly** (`/root/u` must
 /// never satisfy `/root/users`). Poison recovered, never `unwrap`ed.
+///
+/// Upgrades are collected **under** the guard and selected **after** it drops:
+/// a non-matching upgraded `Arc` may be the last strong reference, and its
+/// `Drop` → `deregister` re-locks this same non-reentrant mutex. Dropping it
+/// inside the guard is the issue-46 defect-1 same-thread deadlock.
 pub(crate) fn registered_lock(root: &Path) -> Option<Arc<EngineLock>> {
-    let registry = LOCK_REGISTRY
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    registry
-        .iter()
-        .filter_map(Weak::upgrade)
-        .find(|lock| lock.storage_root() == root)
+    let locks: Vec<Arc<EngineLock>> = {
+        let registry = LOCK_REGISTRY
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut locks = Vec::with_capacity(registry.len());
+        for weak in registry.iter() {
+            let Some(lock) = weak.upgrade() else { continue };
+            #[cfg(all(test, target_os = "linux"))]
+            run_registry_upgrade_hook(&lock);
+            locks.push(lock);
+        }
+        locks
+    };
+    locks.into_iter().find(|lock| lock.storage_root() == root)
 }
 
 /// Creates the lock file exclusively and writes the `LockRecord` body.
@@ -475,6 +507,75 @@ mod tests {
         );
         assert!(!engine_lock_path(&root).exists());
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The deterministic RED child (issue 46 defect 1).
+    ///
+    /// Registers A then B. The hook drops A's only external `Arc` while
+    /// `registered_lock` holds the registry mutex and has just upgraded A. On
+    /// the pre-fix body that upgraded `Arc` becomes the last strong reference,
+    /// so its `Drop` runs `deregister` under the same mutex — a same-thread
+    /// deadlock. The parent kills the child after its deadline, which is why
+    /// this must run in a separate process: a stuck thread cannot be unwound
+    /// and would poison every later registry test.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_registry_upgrade_drop_child() {
+        if std::env::var_os("MEM_STORE_REGISTRY_DROP_CHILD").is_none() {
+            return;
+        }
+        let a_root = temp_dir("registry-drop-a");
+        let b_root = temp_dir("registry-drop-b");
+        let a = acquire(&a_root);
+        let b = acquire(&b_root);
+        REGISTRY_UPGRADE_HOOK.with(|cell| {
+            *cell.borrow_mut() = Some(Box::new(move |upgraded: &Arc<EngineLock>| {
+                assert!(
+                    Arc::ptr_eq(upgraded, &a),
+                    "the hook fires on A's upgrade (registry order A, B)"
+                );
+                drop(a);
+            }));
+        });
+        let found = registered_lock(&b_root).expect("B is registered");
+        assert!(Arc::ptr_eq(&found, &b));
+        drop(found);
+        drop(b);
+        let _ = fs::remove_dir_all(&a_root);
+        let _ = fs::remove_dir_all(&b_root);
+    }
+
+    /// The deadlock regression: the registry lookup must not drop a non-matching
+    /// upgraded lock under its own non-reentrant guard.
+    ///
+    /// Inverted world: re-introduce the `filter_map(upgrade).find(..)` body (the
+    /// upgraded non-match drops inside the guard) → the child's `Drop` re-locks
+    /// `LOCK_REGISTRY` on the same thread and this parent fails after 10 s.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_registry_upgrade_drop_does_not_deadlock_under_the_guard() {
+        let mut child = std::process::Command::new(std::env::current_exe().expect("current_exe"))
+            .arg("--exact")
+            .arg("engine_lock::tests::test_registry_upgrade_drop_child")
+            .arg("--test-threads=1")
+            .env("MEM_STORE_REGISTRY_DROP_CHILD", "1")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn the registry child");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            if let Some(status) = child.try_wait().expect("try_wait") {
+                assert!(status.success(), "the child exited {status}");
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("deadlock: the child did not finish within 10 s");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
     }
 
     /// Sanity: the operation-lock constant is not the engine lock's file, so a
