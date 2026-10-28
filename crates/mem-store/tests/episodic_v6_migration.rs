@@ -27,6 +27,7 @@ fn options(config: &mem_store::config::StoreConfig) -> MigrationOptions {
     MigrationOptions {
         db_path: Some(config.storage_path.join("episodic.db")),
         label: "episodic-v6",
+        max_known: mem_store::schema_migrations::EPISODIC_MAX_KNOWN,
     }
 }
 

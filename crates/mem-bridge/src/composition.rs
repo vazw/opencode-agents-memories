@@ -151,6 +151,9 @@ pub async fn build_composed_runtime(
         store_config,
         connections,
         probe.clone(),
+        // The ONE production wiring (AC9): the identity is derived from the
+        // resolved config, the same authority the store config came from.
+        Some(mem_core::embedding::EmbeddingIdentity::from_config(config)),
     ));
 
     // The capture summarizer: provider-backed when a provider reaches the

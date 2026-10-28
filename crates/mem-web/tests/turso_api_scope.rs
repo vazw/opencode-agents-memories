@@ -192,6 +192,7 @@ async fn real_store() -> RealStore {
         config.clone(),
         connections,
         Arc::new(SystemProcessProbe),
+        None,
     );
     let project_shard = manager
         .create_shard(Scope::Project, PROJECT_HASH, 0)

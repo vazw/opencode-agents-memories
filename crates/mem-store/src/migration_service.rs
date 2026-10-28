@@ -64,6 +64,18 @@ pub struct ShardMismatch {
     pub vector_count: u64,
 }
 
+/// A shard whose stored embedding identity does not match the configured one
+/// (W2: model-only changes with equal dimensions are detectable).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShardEmbeddingMismatch {
+    pub shard_id: i64,
+    pub db_path: PathBuf,
+    pub scope: Scope,
+    pub scope_hash: String,
+    pub stored_fingerprint: Option<String>,
+    pub stored_model: Option<String>,
+}
+
 /// Upstream `"fresh-start" | "re-embed"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MigrationStrategy {
@@ -220,6 +232,235 @@ impl MigrationService {
         }))
     }
 
+    /// Detection of a **model-only** change (equal dimensions): the three-case
+    /// rule of ADR-0018.
+    ///
+    /// - a present fingerprint mismatches iff it differs from the configured
+    ///   one;
+    /// - an absent fingerprint with a different stored `embedding_model` is a
+    ///   mismatch (a pre-W2 shard that named another model);
+    /// - an absent fingerprint with an absent or equal model is **not** a
+    ///   mismatch (legacy, assumed matching; model equality is not proof —
+    ///   residual R-3).
+    pub async fn detect_embedding_mismatch(
+        &self,
+    ) -> Result<Vec<ShardEmbeddingMismatch>, StoreError> {
+        self.ready.ensure_ready().await?;
+        let identity = self.shards.embedding_identity().ok_or_else(|| {
+            internal("Embedding identity is not configured; cannot detect a model change")
+        })?;
+        let configured = identity.fingerprint().map_err(|error| StoreError::Json {
+            message: error.to_string(),
+        })?;
+        let configured_model = identity.model.as_str();
+
+        let mut shards = self.shards.get_all_shards(Scope::User, None).await?;
+        shards.extend(self.shards.get_all_shards(Scope::Project, None).await?);
+
+        let mut mismatches = Vec::new();
+        for shard in &shards {
+            match self
+                .shard_embedding_mismatch(shard, &configured, configured_model)
+                .await
+            {
+                Ok(Some(mismatch)) => mismatches.push(mismatch),
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        shard_id = shard.id,
+                        error = %error.message(),
+                        "Migration: error checking shard embedding identity"
+                    );
+                }
+            }
+        }
+        Ok(mismatches)
+    }
+
+    /// One shard's identity probe (a per-shard failure is the caller's to
+    /// swallow, like `detect_dimension_mismatch`).
+    async fn shard_embedding_mismatch(
+        &self,
+        shard: &crate::shard_manager::ShardInfo,
+        configured_fingerprint: &str,
+        configured_model: &str,
+    ) -> Result<Option<ShardEmbeddingMismatch>, StoreError> {
+        let db = self.connections.get_connection(&shard.db_path).await?;
+        let stored_fingerprint = self.metadata_value(&db, "embedding_fingerprint").await?;
+        let stored_model = self.metadata_value(&db, "embedding_model").await?;
+        let mismatch = match &stored_fingerprint {
+            Some(fingerprint) => fingerprint != configured_fingerprint,
+            None => stored_model
+                .as_deref()
+                .is_some_and(|model| model != configured_model),
+        };
+        if !mismatch {
+            return Ok(None);
+        }
+        Ok(Some(ShardEmbeddingMismatch {
+            shard_id: shard.id,
+            db_path: shard.db_path.clone(),
+            scope: shard.scope,
+            scope_hash: shard.scope_hash.clone(),
+            stored_fingerprint,
+            stored_model,
+        }))
+    }
+
+    /// One scope's supported way out of a model change (ADR-0018 R-12).
+    ///
+    /// Reuses the guard chain of `migrate_to_new_model` — `is_running` swap,
+    /// the operation lock, the per-shard write lock, the staged rebuild /
+    /// verify / swap — and returns the same typed-outcome channel: a refusal
+    /// is `success: false` + `error`.
+    ///
+    /// A scope whose shards ALL carry the configured fingerprint short-circuits
+    /// **before** staging: `success: true`, zero re-embedded memories, no
+    /// embed call, no `.reembed-*.tmp`. The predicate is "fingerprint present
+    /// and equal", never `detect_embedding_mismatch().is_empty()` — a
+    /// populated pre-W2 shard has no fingerprint and an equal model, so
+    /// identity detection selects nothing, and it must still be rewritten.
+    pub async fn reembed_scope(
+        &self,
+        scope: Scope,
+        scope_hash: &str,
+    ) -> Result<MigrationResult, StoreError> {
+        let started = Instant::now();
+        if self.is_running.swap(true, Ordering::SeqCst) {
+            return Ok(MigrationResult {
+                success: false,
+                strategy: "re-embed".to_string(),
+                deleted_shards: 0,
+                re_embedded_memories: 0,
+                duration_ms: 0,
+                error: Some("Migration already running".to_string()),
+            });
+        }
+        let outcome = self
+            .reembed_scope_with_lock(scope, scope_hash, started)
+            .await;
+        self.is_running.store(false, Ordering::SeqCst);
+        Ok(match outcome {
+            Ok(result) => result,
+            Err(error) => {
+                tracing::warn!(error = %error.message(), "Migration: scope re-embed failed");
+                MigrationResult {
+                    success: false,
+                    strategy: "re-embed".to_string(),
+                    deleted_shards: 0,
+                    re_embedded_memories: 0,
+                    duration_ms: elapsed_ms(started),
+                    error: Some(error.message()),
+                }
+            }
+        })
+    }
+
+    /// The lock guard of [`reembed_scope`] (released whether the body throws
+    /// or not, like `migrate_with_lock`).
+    async fn reembed_scope_with_lock(
+        &self,
+        scope: Scope,
+        scope_hash: &str,
+        started: Instant,
+    ) -> Result<MigrationResult, StoreError> {
+        let identity = self
+            .shards
+            .embedding_identity()
+            .ok_or_else(|| internal("Re-embed requires a configured embedding identity"))?;
+        let configured = identity.fingerprint().map_err(|error| StoreError::Json {
+            message: error.to_string(),
+        })?;
+        let operation = format!("re-embed-{}-{scope_hash}", scope.as_str());
+        let operation_lock = acquire_turso_operation_lock(
+            &self.config.storage_path,
+            self.shards.process_probe(),
+            &operation,
+        )?;
+        let outcome = self
+            .reembed_scope_body(scope, scope_hash, &configured, started)
+            .await;
+        operation_lock.release();
+        outcome
+    }
+
+    async fn reembed_scope_body(
+        &self,
+        scope: Scope,
+        scope_hash: &str,
+        configured_fingerprint: &str,
+        started: Instant,
+    ) -> Result<MigrationResult, StoreError> {
+        self.ready.ensure_ready().await?;
+        let shards = self.shards.get_all_shards(scope, Some(scope_hash)).await?;
+        let mut work = Vec::new();
+        for shard in &shards {
+            let db = self.connections.get_connection(&shard.db_path).await?;
+            let fingerprint = self.metadata_value(&db, "embedding_fingerprint").await?;
+            if fingerprint.as_deref() != Some(configured_fingerprint) {
+                work.push(shard.id);
+            }
+        }
+        let re_embedded_memories = if work.is_empty() {
+            0
+        } else {
+            self.reembed_shards(&work).await?
+        };
+        Ok(MigrationResult {
+            success: true,
+            strategy: "re-embed".to_string(),
+            deleted_shards: 0,
+            re_embedded_memories,
+            duration_ms: elapsed_ms(started),
+            error: None,
+        })
+    }
+
+    /// The per-shard rebuild loop shared by `migrate_to_new_model` and
+    /// `reembed_scope`: warm up once, then stage/verify/swap each shard under
+    /// its scope write lock.
+    async fn reembed_shards(&self, shard_ids: &[i64]) -> Result<u64, StoreError> {
+        self.re_embedder.warmup().await?;
+        self.re_embedder.clear_cache();
+
+        let mut re_embedded_memories = 0u64;
+        for shard_id in shard_ids {
+            let shard = self
+                .shards
+                .get_shard_by_id(*shard_id)
+                .await?
+                .ok_or_else(|| {
+                    internal(format!(
+                        "Migration source shard {shard_id} no longer exists"
+                    ))
+                })?;
+            let id = *shard_id;
+            let migrated = {
+                let config = self.config.clone();
+                let ready = Arc::clone(&self.ready);
+                let shards = Arc::clone(&self.shards);
+                let connections = Arc::clone(&self.connections);
+                let re_embedder = Arc::clone(&self.re_embedder);
+                let scope = shard.scope;
+                let scope_hash = shard.scope_hash.clone();
+                self.shards
+                    .with_scope_write_lock(scope, &scope_hash, move || {
+                        Box::pin(Self::rebuild_shard_safely(
+                            config,
+                            ready,
+                            shards,
+                            connections,
+                            re_embedder,
+                            id,
+                        ))
+                    })
+                    .await?
+            };
+            re_embedded_memories += migrated;
+        }
+        Ok(re_embedded_memories)
+    }
+
     /// Upstream `migrateToNewModel`: the `isRunning` re-entrancy guard
     /// throws; every error inside the try becomes a `success: false`
     /// result; the operation lock and flag always release.
@@ -280,7 +521,14 @@ impl MigrationService {
         started: Instant,
     ) -> Result<MigrationResult, StoreError> {
         let mismatch = self.detect_dimension_mismatch().await?;
-        if !mismatch.needs_migration {
+        // `ReEmbed` unions identity mismatches (a model change with equal
+        // dimensions); `FreshStart` stays dimension-only, so a model rename
+        // can never silently archive a scope (ADR-0018 D-11).
+        let identity_mismatches = match strategy {
+            MigrationStrategy::ReEmbed => self.detect_embedding_mismatch().await?,
+            MigrationStrategy::FreshStart => Vec::new(),
+        };
+        if !mismatch.needs_migration && identity_mismatches.is_empty() {
             return Ok(MigrationResult {
                 success: true,
                 strategy: strategy.as_str().to_string(),
@@ -292,7 +540,19 @@ impl MigrationService {
         }
         match strategy {
             MigrationStrategy::FreshStart => self.fresh_start_migration(&mismatch, started).await,
-            MigrationStrategy::ReEmbed => self.re_embed_migration(&mismatch, started).await,
+            MigrationStrategy::ReEmbed => {
+                let mut ids: Vec<i64> = mismatch
+                    .shard_mismatches
+                    .iter()
+                    .map(|mismatch| mismatch.shard_id)
+                    .collect();
+                for identity_mismatch in &identity_mismatches {
+                    if !ids.contains(&identity_mismatch.shard_id) {
+                        ids.push(identity_mismatch.shard_id);
+                    }
+                }
+                self.re_embed_migration(&ids, started).await
+            }
         }
     }
 
@@ -331,52 +591,14 @@ impl MigrationService {
         })
     }
 
-    /// Upstream `reEmbedMigration`: warm up, then rebuild every mismatched
-    /// shard under its scope write lock.
+    /// Upstream `reEmbedMigration`: rebuild every selected shard under its
+    /// scope write lock (the loop itself lives in `reembed_shards`).
     async fn re_embed_migration(
         &self,
-        mismatch: &DimensionMismatch,
+        shard_ids: &[i64],
         started: Instant,
     ) -> Result<MigrationResult, StoreError> {
-        self.re_embedder.warmup().await?;
-        self.re_embedder.clear_cache();
-
-        let mut re_embedded_memories = 0u64;
-        for shard_info in &mismatch.shard_mismatches {
-            let shard = self
-                .shards
-                .get_shard_by_id(shard_info.shard_id)
-                .await?
-                .ok_or_else(|| {
-                    internal(format!(
-                        "Migration source shard {} no longer exists",
-                        shard_info.shard_id
-                    ))
-                })?;
-            let migrated = {
-                let config = self.config.clone();
-                let ready = Arc::clone(&self.ready);
-                let shards = Arc::clone(&self.shards);
-                let connections = Arc::clone(&self.connections);
-                let re_embedder = Arc::clone(&self.re_embedder);
-                let scope = shard.scope;
-                let scope_hash = shard.scope_hash.clone();
-                self.shards
-                    .with_scope_write_lock(scope, &scope_hash, move || {
-                        Box::pin(Self::rebuild_shard_safely(
-                            config,
-                            ready,
-                            shards,
-                            connections,
-                            re_embedder,
-                            shard_info.shard_id,
-                        ))
-                    })
-                    .await?
-            };
-            re_embedded_memories += migrated;
-        }
-
+        let re_embedded_memories = self.reembed_shards(shard_ids).await?;
         Ok(MigrationResult {
             success: true,
             strategy: "re-embed".to_string(),
@@ -480,7 +702,23 @@ impl MigrationService {
         // Upstream batches of 50: statement-list grouping only — the port
         // commits one transactional batch (recorded divergence, same as the
         // legacy migrator).
-        let mut statements = Vec::with_capacity(memories.len() * 2);
+        //
+        // The vector batch carries the shard facts (ADR-0018 D-4): the claim
+        // is FIRST (the emptiness clause must still see an empty `memories`
+        // table inside the transaction) and the absolute count is LAST, so a
+        // crash can never leave new vectors under an old identity or a count
+        // that disagrees with them.
+        let mut statements = Vec::with_capacity(memories.len() * 2 + 2);
+        if let Some(identity) = shards.embedding_identity() {
+            match identity.fingerprint() {
+                Ok(fingerprint) => {
+                    statements.push(crate::shard_facts::claim_statement(&fingerprint));
+                }
+                Err(error) => {
+                    tracing::error!(error = %error, "embedding fingerprint encoding failed");
+                }
+            }
+        }
         for memory in memories {
             let id = memory.text("id").unwrap_or_default();
             let content = memory.text("content").unwrap_or_default();
@@ -529,6 +767,12 @@ impl MigrationService {
                 statements.push(Statement::new(sql::PIN_MEMORY, vec![Value::Text(id)]));
             }
         }
+        // The batch inserts exactly `expected` rows; the count is the truth by
+        // construction, and the post-batch verification proves it.
+        statements.push(Statement::new(
+            crate::shard_facts::SYNC_COUNT_SQL,
+            vec![Value::Integer(i64::try_from(expected).unwrap_or(i64::MAX))],
+        ));
         staged.batch(statements, BatchMode::Write).await?;
 
         let staged_count = count_all_vectors(&*staged).await;

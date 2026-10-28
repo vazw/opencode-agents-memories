@@ -26,7 +26,7 @@ use mem_store::connection::ConnectionManager;
 use mem_store::db::{ConnectFactory, DbHandle, Value, query_one, turso_connect_factory};
 use mem_store::platform::Platform;
 use mem_store::schema_migrations::{
-    MigrationOptions, apply_schema_migrations, user_profiles_migrations,
+    MigrationOptions, USER_PROFILES_MAX_KNOWN, apply_schema_migrations, user_profiles_migrations,
 };
 use serde::{Deserialize, Serialize};
 
@@ -655,6 +655,7 @@ impl ProfileStore {
         let options = MigrationOptions {
             db_path: Some(self.db_path.clone()),
             label: USER_PROFILES_DB_NAME,
+            max_known: USER_PROFILES_MAX_KNOWN,
         };
         apply_schema_migrations(db.as_ref(), &user_profiles_migrations(), &options).await?;
         Ok(db)

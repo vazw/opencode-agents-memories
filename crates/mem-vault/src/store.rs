@@ -30,6 +30,9 @@ use crate::key;
 /// The migration label (tracing only).
 pub(crate) const VAULT_MIGRATION_LABEL: &str = "vault";
 
+/// Highest `vault.db` schema version this build knows (ADR-0021).
+pub(crate) const VAULT_MAX_KNOWN: i64 = 1;
+
 /// One scope's lazy state: one manager (hence one key) and one open handle.
 ///
 /// The manager is created **inside** its cell, so the key is minted exactly
@@ -157,6 +160,7 @@ impl VaultStore {
                 let options = MigrationOptions {
                     db_path: Some(db_path.clone()),
                     label: VAULT_MIGRATION_LABEL,
+                    max_known: VAULT_MAX_KNOWN,
                 };
                 apply_schema_migrations(db.as_ref(), &crate::schema::vault_migrations(), &options)
                     .await?;

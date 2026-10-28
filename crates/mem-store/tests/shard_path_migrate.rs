@@ -644,6 +644,7 @@ async fn test_migrates_valid_disk_only_shard_discovered_after_startup() {
         &mem_store::schema_migrations::MigrationOptions {
             db_path: None,
             label: "disk-only",
+            max_known: mem_store::schema_migrations::MEMORY_SHARD_MAX_KNOWN,
         },
     )
     .await
@@ -703,6 +704,7 @@ async fn test_recovers_interrupted_swap_during_storage_ready_gate() {
         &mem_store::schema_migrations::MigrationOptions {
             db_path: None,
             label: "recover-fixture",
+            max_known: mem_store::schema_migrations::MEMORY_SHARD_MAX_KNOWN,
         },
     )
     .await

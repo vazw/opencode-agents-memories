@@ -308,6 +308,36 @@ pub async fn real_components_with_probe(
     std::sync::Arc<mem_store::connection::ConnectionManager>,
     mem_store::shard_manager::ShardManager,
 ) {
+    components(config, probe, None).await
+}
+
+/// Wired real components carrying an explicit embedding identity (W2's
+/// fingerprint tests need a manager that can claim).
+pub async fn real_components_with_identity(
+    config: StoreConfig,
+    identity: Option<mem_core::embedding::EmbeddingIdentity>,
+) -> (
+    StoreConfig,
+    std::sync::Arc<mem_store::connection::ConnectionManager>,
+    mem_store::shard_manager::ShardManager,
+) {
+    components(
+        config,
+        std::sync::Arc::new(mem_store::platform::SystemProcessProbe),
+        identity,
+    )
+    .await
+}
+
+async fn components(
+    config: StoreConfig,
+    probe: std::sync::Arc<dyn mem_store::platform::ProcessProbe>,
+    identity: Option<mem_core::embedding::EmbeddingIdentity>,
+) -> (
+    StoreConfig,
+    std::sync::Arc<mem_store::connection::ConnectionManager>,
+    mem_store::shard_manager::ShardManager,
+) {
     use mem_store::connection::ConnectionManager;
     use mem_store::db::TursoConnectFactory;
     use mem_store::platform::Platform;
@@ -324,6 +354,7 @@ pub async fn real_components_with_probe(
         config.clone(),
         connections.clone(),
         probe,
+        identity,
     );
     (config, connections, manager)
 }
@@ -681,6 +712,128 @@ pub fn copy_diskann_fixture(dir: &Path, name: &str) -> PathBuf {
         }
     }
     target
+}
+
+// ---------------------------------------------------------------------------
+// W2 recording connection factory (AC13/AC15)
+// ---------------------------------------------------------------------------
+
+/// One recorded `BatchMode::Write` batch: the opened path and its statements.
+#[derive(Clone)]
+pub struct RecordedBatch {
+    pub path: std::path::PathBuf,
+    pub statements: Vec<Statement>,
+}
+
+#[derive(Default)]
+struct RecordingState {
+    opens: std::sync::Mutex<Vec<std::path::PathBuf>>,
+    batches: std::sync::Mutex<Vec<RecordedBatch>>,
+}
+
+/// A `ConnectFactory` that wraps the real one and records every open path and
+/// every write batch. AC13 uses it to prove no `.reembed-*.tmp` was opened or
+/// written; AC15 uses it to identify the staged vector batch by content.
+#[derive(Clone, Default)]
+pub struct RecordingConnectFactory {
+    state: Arc<RecordingState>,
+}
+
+impl RecordingConnectFactory {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Every path handed to `connect`, in order.
+    pub fn opens(&self) -> Vec<std::path::PathBuf> {
+        self.state.opens.lock().unwrap().clone()
+    }
+
+    /// Every write batch, in order.
+    pub fn write_batches(&self) -> Vec<RecordedBatch> {
+        self.state.batches.lock().unwrap().clone()
+    }
+}
+
+impl ConnectFactory for RecordingConnectFactory {
+    fn connect(
+        &self,
+        path: std::path::PathBuf,
+        opts: ConnectOptions,
+    ) -> BoxFuture<'static, Result<DbHandle, StoreError>> {
+        let state = Arc::clone(&self.state);
+        Box::pin(async move {
+            state.opens.lock().unwrap().push(path.clone());
+            let inner = mem_store::db::turso_connect_factory()
+                .connect(path.clone(), opts)
+                .await?;
+            Ok(Arc::new(RecordingDb { inner, path, state }) as DbHandle)
+        })
+    }
+}
+
+struct RecordingDb {
+    inner: DbHandle,
+    path: std::path::PathBuf,
+    state: Arc<RecordingState>,
+}
+
+impl Db for RecordingDb {
+    fn execute(
+        &self,
+        sql: &str,
+        params: Vec<Value>,
+    ) -> BoxFuture<'_, Result<ExecResult, StoreError>> {
+        self.inner.execute(sql, params)
+    }
+
+    fn query(&self, sql: &str, params: Vec<Value>) -> BoxFuture<'_, Result<Vec<Row>, StoreError>> {
+        self.inner.query(sql, params)
+    }
+
+    fn batch(
+        &self,
+        statements: Vec<Statement>,
+        mode: BatchMode,
+    ) -> BoxFuture<'_, Result<Vec<ExecResult>, StoreError>> {
+        if mode == BatchMode::Write {
+            self.state.batches.lock().unwrap().push(RecordedBatch {
+                path: self.path.clone(),
+                statements: statements.clone(),
+            });
+        }
+        self.inner.batch(statements, mode)
+    }
+}
+
+/// Wired real components with an explicit identity and connection factory.
+pub async fn real_components_with_factory(
+    config: StoreConfig,
+    identity: Option<mem_core::embedding::EmbeddingIdentity>,
+    factory: std::sync::Arc<dyn ConnectFactory>,
+) -> (
+    StoreConfig,
+    std::sync::Arc<mem_store::connection::ConnectionManager>,
+    mem_store::shard_manager::ShardManager,
+) {
+    use mem_store::connection::ConnectionManager;
+    use mem_store::platform::Platform;
+    use mem_store::shard_manager::ShardManager;
+
+    let connections = std::sync::Arc::new(ConnectionManager::new(
+        config.storage_path.clone(),
+        config.clone(),
+        Platform::current(),
+        factory,
+    ));
+    let manager = ShardManager::new(
+        config.storage_path.clone(),
+        config.clone(),
+        connections.clone(),
+        std::sync::Arc::new(mem_store::platform::SystemProcessProbe),
+        identity,
+    );
+    (config, connections, manager)
 }
 
 // ---------------------------------------------------------------------------

@@ -26,6 +26,7 @@ async fn prepared_db(config: &StoreConfig, file: &str, dims: u32) -> mem_store::
         &MigrationOptions {
             db_path: None,
             label: "vector-battery",
+            max_known: mem_store::schema_migrations::MEMORY_SHARD_MAX_KNOWN,
         },
     )
     .await

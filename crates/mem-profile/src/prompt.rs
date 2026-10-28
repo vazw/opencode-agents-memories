@@ -20,7 +20,8 @@ use mem_store::connection::ConnectionManager;
 use mem_store::db::{ConnectFactory, DbHandle, Value, query_one, turso_connect_factory};
 use mem_store::platform::Platform;
 use mem_store::schema_migrations::{
-    MigrationOptions, apply_schema_migrations, ensure_user_prompt_columns, user_prompts_migrations,
+    MigrationOptions, USER_PROMPTS_MAX_KNOWN, apply_schema_migrations, ensure_user_prompt_columns,
+    user_prompts_migrations,
 };
 
 use crate::erasure::{ProfileEraser, PromptDeletion};
@@ -167,6 +168,7 @@ impl UserPromptManager {
         let options = MigrationOptions {
             db_path: Some(self.db_path.clone()),
             label: USER_PROMPTS_DB_NAME,
+            max_known: USER_PROMPTS_MAX_KNOWN,
         };
         apply_schema_migrations(db.as_ref(), &user_prompts_migrations(), &options).await?;
         ensure_user_prompt_columns(db.as_ref()).await?;

@@ -29,6 +29,9 @@ use crate::schema as sql;
 /// The migration label (tracing only).
 pub const FACTS_MIGRATION_LABEL: &str = "facts";
 
+/// Highest `facts.db` schema version this build knows (ADR-0021).
+pub const FACTS_MAX_KNOWN: i64 = 1;
+
 /// One contributing session behind a fact.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FactSource {
@@ -177,6 +180,7 @@ impl FactsStore {
         let options = MigrationOptions {
             db_path: Some(self.db_path.clone()),
             label: FACTS_MIGRATION_LABEL,
+            max_known: FACTS_MAX_KNOWN,
         };
         apply_schema_migrations(
             db.as_ref(),

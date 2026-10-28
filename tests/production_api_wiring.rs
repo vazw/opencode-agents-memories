@@ -299,6 +299,7 @@ fn seed_rows(storage: &Path, store_config: &StoreConfig, rows: &[SeedRow]) {
             store_config.clone(),
             connections,
             Arc::new(SystemProcessProbe),
+            None,
         );
         let shard = manager
             .create_shard(Scope::Project, PROJECT_HASH, 0)

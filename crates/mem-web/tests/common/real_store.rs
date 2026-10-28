@@ -57,6 +57,7 @@ pub fn new_store(label: &str) -> RealStore {
         config.clone(),
         connections,
         Arc::new(SystemProcessProbe),
+        None,
     );
     RealStore { config, manager }
 }

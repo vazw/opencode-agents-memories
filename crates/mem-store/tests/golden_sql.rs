@@ -295,15 +295,16 @@ mod frozen {
     pub const FROZEN_FIND_SHARD_BY_KEY: &str =
         r#"SELECT * FROM shards WHERE scope = ? AND scope_hash = ? AND shard_index = ?"#;
 
-    /// shard-manager.ts L267-271
+    /// shard-manager.ts L267-271 — frozen with W2's D-16 divergence
+    /// (`INSERT OR IGNORE`: the identity keys are write-once; ADR-0018).
     pub const FROZEN_SHARD_METADATA_INSERT_DIMENSIONS: &str = r#"
-          INSERT OR REPLACE INTO shard_metadata (key, value)
+          INSERT OR IGNORE INTO shard_metadata (key, value)
           VALUES ('embedding_dimensions', ?)
         "#;
 
     /// shard-manager.ts L274-278
     pub const FROZEN_SHARD_METADATA_INSERT_MODEL: &str = r#"
-          INSERT OR REPLACE INTO shard_metadata (key, value)
+          INSERT OR IGNORE INTO shard_metadata (key, value)
           VALUES ('embedding_model', ?)
         "#;
 

@@ -30,6 +30,7 @@ async fn prepared_db(
         &MigrationOptions {
             db_path: None,
             label: "search-battery",
+            max_known: mem_store::schema_migrations::MEMORY_SHARD_MAX_KNOWN,
         },
     )
     .await

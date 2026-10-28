@@ -27,6 +27,7 @@ pub mod project_tags;
 pub mod prompts;
 pub mod ready;
 pub mod schema_migrations;
+pub mod shard_facts;
 pub mod shard_inventory;
 pub mod shard_manager;
 pub mod shard_path_migration;

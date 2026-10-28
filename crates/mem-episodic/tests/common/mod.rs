@@ -136,6 +136,7 @@ pub fn shard_manager_with_probe(
         config,
         connections,
         probe,
+        None,
     ))
 }
 
