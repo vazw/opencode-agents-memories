@@ -60,9 +60,9 @@ export async function registerSkills(ctx, { readCatalogue } = {}) {
   let pending = false; // an event arrived while a refresh was in flight
 
   function apply(editor) {
-    // The installed 2.2.0 host passes a SkillEditor with all five methods. Any
-    // other shape (an older host's draft object) is left untouched rather than
-    // throwing inside it.
+    // The installed 2.2.0 host passes the full SkillEditor (get/add/update/
+    // remove). Any other shape (an older host's draft object) is left untouched
+    // rather than throwing inside it.
     if (typeof editor?.get !== "function" || typeof editor?.add !== "function") return;
     if (typeof editor.remove !== "function" || typeof editor.update !== "function") return;
     const nextIds = new Set(entries.map((entry) => entry.id));

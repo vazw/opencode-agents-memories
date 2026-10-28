@@ -5,7 +5,7 @@
 **Ubiquitous language (W5.1, ADR-0007):**
 
 - **engine** — the single Rust process that owns the storage root's databases. It
-  serves the five-method JSON-RPC surface over stdio (as the wrapper's child) and,
+  serves the six-method JSON-RPC surface over stdio (as the wrapper's child) and,
   in this same process, the axum web server (`WebLauncher` seam, D-32). Lives in
   `engine.rs`; the root composition is a sync arg-parser around it (M1).
 - **launcher mode / launch mode** — `stdio` (per-request JSON-RPC over stdin/stdout,
@@ -17,8 +17,10 @@
 - **hello handshake** — the wrapper's first request; the wrapper applies the
   major-equal + floor compat rule on the reply. `hello` is not a runtime method.
   The reply's additive `capabilities` object is how the wrapper learns which
-  behaviours this build serves — e.g. `compaction` (issue 68).
+  behaviours this build serves — e.g. `compaction` (issue 68) and `skills`
+  (issue 69: this build's dispatch answers the `skills` method).
 - **session_id** — the required top-level parameter of every runtime method
+  except `skills`, which takes `project_id` instead and carries no session id
   (1..=128 chars); DATA, never authority.
 - **capture_id** — the client-minted UUIDv7-shaped, ≤64-char identifier added to
   `agent_sessions` by the v4 additive migration (recall: W5.1 has no write path
