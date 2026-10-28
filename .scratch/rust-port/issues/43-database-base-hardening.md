@@ -8,8 +8,10 @@ and W8 are absent from the tree, and the ADR set is partial: **0017 (`0017-compa
 (`0026-context-assembly.md`) exist and 0018 (`0018-shard-facts-source-of-truth.md`) + 0021
 (`0021-schema-version-discipline.md`) landed with W2**. The audit that gates ADR-0019 and ADR-0025 is now preserved
 in-repo at `docs/evidence/opsec-w6-design-2026-10-25/` — §9 lists twelve blockers, 1 closed, 2–12 open.
-Next moves are the owner's: pick the next wave, rule the ADR-0019 promise, write ADR items 4–12. **Blocks
-issue 39 (retention cleanup) and issue 41 (scheduler).**
+Next: **W3 is chosen** (owner decisions 2026-10-28/29 below — scope, mismatch policy, absent-fingerprint
+fallback, count-at-commit, CLI, typed HTTP, 72-after-W3, ADR-0018 amendment, strict boundary, one measurement);
+the **ADR-0019 text follows W3** with blockers 6–11 closed by those rulings (blocker 12 moves to ADR-0025).
+**Blocks issue 39 (retention cleanup) and issue 41 (scheduler).**
 
 ## RE-VERIFICATION 2026-10-25 (architecture pass) — read this before the items below
 
@@ -124,6 +126,73 @@ wish.
   token, and test both directions per platform — **before ADR-0025**, per `opsec`
   (`w6/liveness/platform-probe-fails-open`, high). No `--force-take-lock`: a flag that forces a lock is a
   footgun for a bug with a real fix.
+
+### Owner decisions 2026-10-28/29 — grilling session (W3, the ADR-0019 text, issue 28)
+
+**Order: W3 first**, then the ADR-0019 text, then issue 28 (last by construction — blocked by 01–27 and
+manual). Every ruling below is the owner's, taken one question at a time; the rejected alternative is named so
+the record shows what was weighed.
+
+**W3 — the next wave (ten rulings):**
+
+1. **Scope = full count/model authority:** read authority **and** write authority **and** count authority.
+   *Rejected:* read-only (leaves writes deepening the mismatch) and read+write without count (leaves
+   `shard_stats` driftable, and issue 72 would be written against the `decrement` W3 removes).
+2. **Read mismatch ⇒ typed hard failure.** `ShardModelMismatch { shards: [{id, stored_model, expected}],
+   remedy: "re-embed the scope" }`. *Rejected:* silent skip (the silent-wrong-answer class) and partial results
+   plus a marker (repeats `w6/erase/disclosure-unreachable` unless the UI renders it).
+3. **Absent fingerprint ⇒ model-equality fallback.** Absent + `embedding_model` equal ⇒ valid with a structured
+   warn; absent + different ⇒ mismatch; the fingerprint wins when present. *Rejected:* absent ⇒ mismatch (bricks
+   every populated pre-v3 shard — all existing data) and absent ⇒ always valid. Carries the residual **model
+   equality is not proof** (a pre-D-16 overwritten row still passes). Dimensions remain a **distinct** reason
+   (`ShardIncompatible`), because the remedy differs.
+4. **Count sync per transaction.** Every write transaction ends with one `COUNT(*)` statement; a group delete is
+   **one** batch (all deletes + one sync); a single delete is a batch of one. Needs a `delete_memories(ids)`
+   primitive in `mem-store`. *Rejected:* per-mutation recount (≈353 µs per 10 k-row `COUNT(*)`, so ≈350 ms for a
+   1 000-row dedup pass) and hybrid/running-delta (a delta is what W3 removes).
+5. **Re-embed surface = CLI** (`--mode=reembed-scope --scope <scope>`, the `purge-session` precedent). *Rejected:*
+   an HTTP endpoint (needs a job model: progress, cancellation, concurrent-write rule) and both. Residual: the
+   remedy is reachable to the operator, not from the UI; the mismatch error prints the exact command.
+6. **Web mapping = typed.** 409 Conflict plus a body naming the mismatched shards and the CLI command; the
+   existing error envelope renders it. *Rejected:* today's generic 500 (`envelope.rs:127`), which kills the
+   remedy one layer above the store; and a UI banner (UI work in a store wave).
+7. **Issue 72 lands after W3** and consumes the new primitive. *Rejected:* 72 first (drafts the call W3 deletes)
+   and folding 72 into W3 (blast radius).
+8. **ADR = amend ADR-0018**: replace `## W3 hand-off` with D-18-7…D-18-10 (read refusal, write refusal, absent
+   fallback, count-at-commit) and update R-3/R-5/R-6/R-12 rather than leaving them stale. *Rejected:* a new
+   ADR-0027 (splits one subject; 0019–0025 are spoken for).
+9. **Strict boundary.** Out: W4, W5, W6, W7, W8, decision 4's `max_vectors_per_shard` value, issue 72,
+   ADR-0019. In: the count fed to rotation must be the committed `COUNT(*)`, never a delta.
+10. **Performance = one measurement, no gate** (µs per shard per query, before/after); W8 owns the budget.
+    *Inverted world:* if the delta were >5 % of a recall, the fingerprint read must move to the shard-open path,
+    cached per connection — a design change in W3, not W8's.
+
+**ADR-0019 text — five rulings (write it after W3):**
+
+- **Delete surface = additive field.** `erasure: EraseState` on both delete DTOs, always present
+  (`Erased | PendingErase { residual, surviving_derived }`); the status endpoint stays for state that outlives
+  the call. **This reverses the routed "separate status endpoint" default above**, because the common outcome of
+  a delete is `PendingErase` (sweeps are opportunistic), so a default answer of `deleted: true` is wrong for the
+  majority case. Residual fields are **labels, never paths**: `tier`, `sweep_state`, `surviving_derived_count`.
+- **No queue; a manual lever.** `PendingErase` may persist indefinitely; the operator forces a sweep with
+  `--mode=sweep` (a W6 deliverable the ADR names as planned). *Rejected:* a durable bounded queue (stores prompt
+  ids — itself an erasure artifact — and invites the forbidden start-up drain).
+- **Milestone arithmetic is historical.** Rewriting a contributor out does not change `source_count` or
+  `window_start/end`; the report counts `milestones_rewritten` separately from erased rows. *Rejected:*
+  recomputation (no source-id list exists — `milestone.rs:55–83`) and decrement (the delta arithmetic W3 deletes).
+- **Vault tier = per-request tri-state** (`Yes | No | Unknown`) in `NOT_ERASED`, `Unknown` on any failed open
+  (never `No`); tied to ADR-0012 D-14, changing at W8c. `NOT_ERASED` grows to two tiers (`memories-shard`,
+  `vault`), per the audit's literal remediation.
+- **The three-clause promise adopted**, with **two** `surviving_derived` counters (memories, rewritten
+  milestones): (1) what leaves — `user_prompts.content` at the next successful sweep, `PendingErase` until then;
+  (2) what is retained — memories, the host transcript, milestones as historical, the vault named, and profile
+  rows/changelogs erased by the watermark rule (issue 48); (3) what the sweep covers — `user_prompts`, the
+  milestone contributor rewrite, `.bak` reaping under the exclusive root only; **not** the vault, transcript,
+  logs/exports/media, or memories.
+
+**Blocker status after these rulings:** 6, 7, 8, 9, 10 and 11 are closed by the rulings above. **Blocker 12
+(the retirement sentence) belongs to ADR-0025, not ADR-0019** — it is about the guard's permanence against
+pre-guard binaries, so it moves with ADR-0025's blockers 1–5.
 
 ### SECURITY GATE 2026-10-25 — `opsec` audit: **REJECTED** (10 confirmed, 2 high)
 
