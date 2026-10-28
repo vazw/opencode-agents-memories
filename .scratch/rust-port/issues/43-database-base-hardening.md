@@ -1,10 +1,12 @@
 # 43 — W9.0 · Database base hardening (review findings)
 
 Status: ready-for-human — 2026-10-27 (umbrella, not a single wave: **W0** `af01156`, **W1 write side**
-`3d5e940` and the **liveness blocker** `aa0dcc4` are landed; **W2 is landed** on branch
-`issue-43/w2-shard-v3` (base `dc5bcad`, shard v3 + `shard_stats` + embedding fingerprint); W3, W4, W5, W7
+`3d5e940` and the **liveness blocker** `aa0dcc4` are landed; **W2 is landed on `main` at `e0bbd37`**
+(merge of `12feaa2` over `c558e52`, base `dc5bcad`; shard v3 + `shard_stats` + embedding fingerprint;
+review approved after one rework) — W3, W4, W5, W7
 and W8 are absent from the tree, and the ADR set is partial: **0017 (`0017-compaction-hook.md`) and 0026
-(`0026-context-assembly.md`) exist; 0018 and 0021 land with W2**. The audit that gates ADR-0019 and ADR-0025 is now preserved
+(`0026-context-assembly.md`) exist and 0018 (`0018-shard-facts-source-of-truth.md`) + 0021
+(`0021-schema-version-discipline.md`) landed with W2**. The audit that gates ADR-0019 and ADR-0025 is now preserved
 in-repo at `docs/evidence/opsec-w6-design-2026-10-25/` — §9 lists twelve blockers, 1 closed, 2–12 open.
 Next moves are the owner's: pick the next wave, rule the ADR-0019 promise, write ADR items 4–12. **Blocks
 issue 39 (retention cleanup) and issue 41 (scheduler).**
