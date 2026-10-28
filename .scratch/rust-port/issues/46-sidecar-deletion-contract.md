@@ -1,6 +1,6 @@
 # 46 — Storage · The sidecar-deletion contract: exclusivity is asserted, refused, or the file is not unlinked
 
-Status: done — 2026-10-28 — wave r5 landed on `issue-46/sidecar-deletion-contract` (commits `42d2bfd` … `10a5dd9`); G1/G2 and R1 measured under `## Wave r5 measurements`.
+Status: done — 2026-10-28 — wave r5 landed on `issue-46/sidecar-deletion-contract` (commits `42d2bfd` … `a713678`, rework included); G1/G2 and R1 measured under `## Wave r5 measurements`.
 
 ## PREMISE — `needs_validation` (read before implementing)
 
@@ -292,8 +292,8 @@ re-executed) holds a multiprocess handle; the parent raw-unlinks the database an
 child writes again, the next opener creates a new `-tshm`. Literal observation:
 
 ```text
-[G2] probe under a live multiprocess child = Free
-[G2] TSHM_INO before=34:2085028 (len 86016) AFTER=ok TSHM_INO after=34:2085032 (len 86016)
+[G2 OBSERVED] probe under a live multiprocess child = Free
+[G2 OBSERVED] TSHM_INO before=34:2085028 (len 86016) AFTER=ok TSHM_INO after=34:2085032 (len 86016)
 ```
 
 **R1 resolved:** the probe cannot see a foreign multiprocess holder (`Free`), so exclusivity is the engine
