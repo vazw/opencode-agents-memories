@@ -448,14 +448,6 @@ pub const SQLITE_MASTER_MEMORIES_TABLE: &str =
 // shard-manager.ts L406 (markShardReadOnly).
 pub const MARK_SHARD_INACTIVE: &str = r#"UPDATE shards SET is_active = 0 WHERE id = ?"#;
 
-// shard-manager.ts L411 (incrementVectorCount).
-pub const INCREMENT_VECTOR_COUNT: &str =
-    r#"UPDATE shards SET vector_count = vector_count + 1 WHERE id = ?"#;
-
-// shard-manager.ts L418-421 (decrementVectorCount, `AND vector_count > 0`).
-pub const DECREMENT_VECTOR_COUNT: &str =
-    r#"UPDATE shards SET vector_count = vector_count - 1 WHERE id = ? AND vector_count > 0"#;
-
 // shard-manager.ts L434 (getShardById; deletes/archive use the same statement inline).
 pub const GET_SHARD_BY_ID: &str = r#"SELECT * FROM shards WHERE id = ?"#;
 

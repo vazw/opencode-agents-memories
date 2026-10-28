@@ -1001,28 +1001,6 @@ impl ShardManager {
         self.mark_shard_read_only_off(shard_id).await
     }
 
-    /// Upstream `incrementVectorCount`.
-    pub async fn increment_vector_count(&self, shard_id: i64) -> Result<(), StoreError> {
-        let db = self.ensure_initialized().await?;
-        db.execute(
-            crate::sql::INCREMENT_VECTOR_COUNT,
-            vec![Value::Integer(shard_id)],
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// Upstream `decrementVectorCount` (`AND vector_count > 0` in the SQL).
-    pub async fn decrement_vector_count(&self, shard_id: i64) -> Result<(), StoreError> {
-        let db = self.ensure_initialized().await?;
-        db.execute(
-            crate::sql::DECREMENT_VECTOR_COUNT,
-            vec![Value::Integer(shard_id)],
-        )
-        .await?;
-        Ok(())
-    }
-
     /// Upstream `setVectorCount` (invalid counts type-enforced as `u64`;
     /// registry note).
     pub async fn set_vector_count(&self, shard_id: i64, count: u64) -> Result<(), StoreError> {

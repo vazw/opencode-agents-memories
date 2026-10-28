@@ -318,14 +318,6 @@ mod frozen {
     /// shard-manager.ts L429 (also L338 sync)
     pub const FROZEN_SET_VECTOR_COUNT: &str = r#"UPDATE shards SET vector_count = ? WHERE id = ?"#;
 
-    /// shard-manager.ts L411
-    pub const FROZEN_INCREMENT_VECTOR_COUNT: &str =
-        r#"UPDATE shards SET vector_count = vector_count + 1 WHERE id = ?"#;
-
-    /// shard-manager.ts L418-421 (`AND vector_count > 0`)
-    pub const FROZEN_DECREMENT_VECTOR_COUNT: &str =
-        r#"UPDATE shards SET vector_count = vector_count - 1 WHERE id = ? AND vector_count > 0"#;
-
     /// shard-manager.ts L434
     pub const FROZEN_GET_SHARD_BY_ID: &str = r#"SELECT * FROM shards WHERE id = ?"#;
 
@@ -1253,14 +1245,6 @@ async fn test_frozen_shard_registry_crud_executes() {
     );
     assert_eq!(sql::MARK_SHARD_INACTIVE, frozen::FROZEN_MARK_SHARD_INACTIVE);
     assert_eq!(sql::SET_VECTOR_COUNT, frozen::FROZEN_SET_VECTOR_COUNT);
-    assert_eq!(
-        sql::INCREMENT_VECTOR_COUNT,
-        frozen::FROZEN_INCREMENT_VECTOR_COUNT
-    );
-    assert_eq!(
-        sql::DECREMENT_VECTOR_COUNT,
-        frozen::FROZEN_DECREMENT_VECTOR_COUNT
-    );
     assert_eq!(sql::DELETE_SHARD_ROW, frozen::FROZEN_DELETE_SHARD_ROW);
     assert_eq!(
         sql::SHARD_METADATA_INSERT_DIMENSIONS,
@@ -1365,12 +1349,6 @@ async fn test_frozen_shard_registry_crud_executes() {
     )
     .await
     .unwrap();
-    db.execute(sql::INCREMENT_VECTOR_COUNT, vec![Value::Integer(shard_id)])
-        .await
-        .unwrap();
-    db.execute(sql::DECREMENT_VECTOR_COUNT, vec![Value::Integer(shard_id)])
-        .await
-        .unwrap();
     let row = db
         .query(sql::GET_SHARD_BY_ID, vec![Value::Integer(shard_id)])
         .await
@@ -1378,7 +1356,7 @@ async fn test_frozen_shard_registry_crud_executes() {
     assert_eq!(
         row[0].i64("vector_count"),
         Some(11),
-        "increment lands 12, decrement returns 11"
+        "SET_VECTOR_COUNT keeps its pin (W3 deleted the delta statements)"
     );
     assert_eq!(row[0].i64("is_active"), Some(0));
 

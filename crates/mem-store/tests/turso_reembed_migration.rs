@@ -108,10 +108,13 @@ async fn fixture(prefix: &str) -> (Fixture, ShardInfo) {
         db.execute(&statement.sql, statement.params)
             .await
             .expect("insert memory");
-        shards
-            .increment_vector_count(shard.id)
+        let count = shard_facts::sync_count(db.as_ref())
             .await
-            .expect("vector count");
+            .expect("sync the shard count");
+        shards
+            .set_vector_count(shard.id, count)
+            .await
+            .expect("adopt the vector count");
     }
     db.execute(sql::PIN_MEMORY, vec![Value::Text("mem_one".to_string())])
         .await
@@ -481,10 +484,13 @@ async fn identity_rig(
         db.execute(&statement.sql, statement.params)
             .await
             .expect("insert memory");
-        unwired
-            .increment_vector_count(shard.id)
+        let count = shard_facts::sync_count(db.as_ref())
             .await
-            .expect("vector count");
+            .expect("sync the shard count");
+        unwired
+            .set_vector_count(shard.id, count)
+            .await
+            .expect("adopt the vector count");
         db.execute(
             "INSERT OR REPLACE INTO shard_metadata (key, value) VALUES ('embedding_model', ?1)",
             vec![Value::Text(stored_model.to_string())],
