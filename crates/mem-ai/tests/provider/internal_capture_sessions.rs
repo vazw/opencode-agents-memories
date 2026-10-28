@@ -44,6 +44,7 @@ fn test_internal_capture_session_not_recaptured() {
 
 #[test]
 fn test_internal_session_set_global() {
+    let _gate = crate::lock_global_capture();
     let first = InternalCaptureSessions::global();
     let second = InternalCaptureSessions::global();
 
