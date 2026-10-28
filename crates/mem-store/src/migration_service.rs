@@ -242,6 +242,11 @@ impl MigrationService {
     /// - an absent fingerprint with an absent or equal model is **not** a
     ///   mismatch (legacy, assumed matching; model equality is not proof —
     ///   residual R-3).
+    ///
+    /// Callers must not invoke this on a manager without an embedding
+    /// identity: it returns an error by design. `migrate_dispatch` unions it
+    /// only when `ShardManager::embedding_identity()` is `Some`; the explicit
+    /// refusal (AC14) belongs to `reembed_scope`.
     pub async fn detect_embedding_mismatch(
         &self,
     ) -> Result<Vec<ShardEmbeddingMismatch>, StoreError> {
@@ -523,10 +528,15 @@ impl MigrationService {
         let mismatch = self.detect_dimension_mismatch().await?;
         // `ReEmbed` unions identity mismatches (a model change with equal
         // dimensions); `FreshStart` stays dimension-only, so a model rename
-        // can never silently archive a scope (ADR-0018 D-11).
+        // can never silently archive a scope (ADR-0018 D-11). The union is
+        // gated on a configured identity: a manager without one keeps the
+        // legal pre-W2 path (re-embed a dimension mismatch), and
+        // `detect_embedding_mismatch` is never invoked on it.
         let identity_mismatches = match strategy {
-            MigrationStrategy::ReEmbed => self.detect_embedding_mismatch().await?,
-            MigrationStrategy::FreshStart => Vec::new(),
+            MigrationStrategy::ReEmbed if self.shards.embedding_identity().is_some() => {
+                self.detect_embedding_mismatch().await?
+            }
+            _ => Vec::new(),
         };
         if !mismatch.needs_migration && identity_mismatches.is_empty() {
             return Ok(MigrationResult {
@@ -767,11 +777,12 @@ impl MigrationService {
                 statements.push(Statement::new(sql::PIN_MEMORY, vec![Value::Text(id)]));
             }
         }
-        // The batch inserts exactly `expected` rows; the count is the truth by
-        // construction, and the post-batch verification proves it.
+        // The sync statement measures `COUNT(*)` inside the same transaction,
+        // so it sees exactly the rows this batch inserted; the post-batch
+        // verification independently proves the selection/insertion contract.
         statements.push(Statement::new(
             crate::shard_facts::SYNC_COUNT_SQL,
-            vec![Value::Integer(i64::try_from(expected).unwrap_or(i64::MAX))],
+            Vec::new(),
         ));
         staged.batch(statements, BatchMode::Write).await?;
 

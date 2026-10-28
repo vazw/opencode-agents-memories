@@ -13,8 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use common::{
-    FakeReEmbedder, RecordingConnectFactory, cleanup_temp_dir, real_components_with_identity,
-    store_config,
+    FakeReEmbedder, RecordingConnectFactory, cleanup_temp_dir, real_components, store_config,
 };
 use mem_core::embedding::EmbeddingIdentity;
 use mem_store::connection::ConnectionManager;
@@ -58,16 +57,13 @@ struct Fixture {
 /// Upstream `createSourceShard`: a dims-2 project shard with `mem_one`
 /// (pinned) + `mem_two`, then a `MigrationService` whose config demands
 /// dims 4 (the mismatch the migration must resolve).
+///
+/// The manager carries **no embedding identity**: this fixture pins the legal
+/// pre-W2 re-embed path — a dimension mismatch with no identity configured
+/// (the W2 identity tests build their own rigs with `Some`).
 async fn fixture(prefix: &str) -> (Fixture, ShardInfo) {
     let base = store_config(prefix); // dims = 2, model "test-model"
-    // Upstream flips CONFIG.embeddingDimensions = 4 before migrating. The
-    // manager carries that same target identity (W2): the StoreConfig keeps
-    // the base dims so the source shard stays valid until the swap.
-    let mut service_config = base.clone();
-    service_config.embedding_dimensions = 4;
-    service_config.embedding_model = "text-embedding-mock".to_string();
-    let identity = identity_for_store(&service_config);
-    let (config, connections, manager) = real_components_with_identity(base, Some(identity)).await;
+    let (config, connections, manager) = real_components(base).await;
     let shards = Arc::new(manager);
     let registry: Arc<dyn ShardRegistry> = shards.clone();
     let ready = Arc::new(build_ready_gate(
@@ -124,6 +120,10 @@ async fn fixture(prefix: &str) -> (Fixture, ShardInfo) {
         .await
         .expect("connection closes");
 
+    // Upstream flips CONFIG.embeddingDimensions = 4 before migrating.
+    let mut service_config = config.clone();
+    service_config.embedding_dimensions = 4;
+    service_config.embedding_model = "text-embedding-mock".to_string();
     let reembedder = Arc::new(FakeReEmbedder::new()); // deterministic [1,0,0,0]
     let service = MigrationService::new(
         service_config,
@@ -161,6 +161,10 @@ fn list_names(dir: &Path) -> Vec<String> {
 #[tokio::test]
 async fn test_stages_a_complete_replacement_and_preserves_metadata_tags_and_pins() {
     let (fixture, shard) = fixture("reembed-swap").await;
+    assert!(
+        fixture.shards.embedding_identity().is_none(),
+        "this test pins the legacy no-identity path"
+    );
 
     let result = fixture
         .service
@@ -896,10 +900,16 @@ async fn test_the_staged_rebuild_writes_the_fingerprint_in_the_vector_batch() {
         2,
         "the batch carries exactly the N vector inserts"
     );
+    let last = batch.statements.last().expect("non-empty batch");
     assert_eq!(
-        batch.statements.last().expect("non-empty batch").sql,
+        last.sql,
         shard_facts::SYNC_COUNT_SQL,
         "the sync count must be the LAST statement"
+    );
+    assert!(
+        last.sql.contains("COUNT(*)"),
+        "the sync statement must measure COUNT(*): {}",
+        last.sql
     );
     assert_eq!(
         recording

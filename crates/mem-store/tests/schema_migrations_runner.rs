@@ -166,21 +166,22 @@ async fn test_applies_pending_migrations_in_ascending_version_order_and_records_
 async fn test_returns_current_version_when_nothing_is_pending() {
     let _config = common::store_config("mig-noop");
     let db = VersionedDb::new();
-    db.core.version.store(7, Ordering::SeqCst);
-    let migrations = vec![migration(5, "CREATE TABLE never (id INTEGER)")];
+    db.core.version.store(2, Ordering::SeqCst);
+    let migrations = vec![migration(2, "CREATE TABLE never (id INTEGER)")];
     let version = apply_schema_migrations(
         &db,
         &migrations,
         &MigrationOptions {
             db_path: None,
             label: "test",
-            // The file is already at 7; the noop arm must be allowed to see it.
-            max_known: 7,
+            // The file is already at the set's highest version: a build that
+            // knows v2 accepts it, and nothing is pending.
+            max_known: 2,
         },
     )
     .await
     .expect("noop");
-    assert_eq!(version, 7, "current version wins when nothing pending");
+    assert_eq!(version, 2, "current version wins when nothing pending");
     let sqls = db.core.sqls.lock().unwrap().clone();
     assert!(
         sqls.iter()

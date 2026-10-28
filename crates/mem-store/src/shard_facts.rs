@@ -32,8 +32,14 @@ pub const CLAIM_IDENTITY_SQL: &str = "INSERT OR IGNORE INTO shard_metadata (key,
 pub const SHARD_STATS_DDL: &str = "CREATE TABLE IF NOT EXISTS shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))";
 
 /// Absolute upsert (the shape of `REGISTER_EXISTING_SHARD`). Every writer
-/// writes `COUNT(*)`, so a lost or skipped write is repaired by the next one.
-pub const SYNC_COUNT_SQL: &str = "INSERT INTO shard_stats (id, vector_count) VALUES (1, ?1) ON CONFLICT(id) DO UPDATE SET vector_count = excluded.vector_count";
+/// writes `COUNT(*)` **measured by the statement itself**, so a lost or
+/// skipped write is repaired by the next one and no caller can pass a count
+/// the table contradicts (the re-embed batch includes this statement after
+/// its inserts).
+pub const SYNC_COUNT_SQL: &str = "INSERT INTO shard_stats (id, vector_count) SELECT 1, COUNT(*) FROM memories ON CONFLICT(id) DO UPDATE SET vector_count = excluded.vector_count";
+
+/// The count read-back (after [`SYNC_COUNT_SQL`]).
+pub const SELECT_VECTOR_COUNT: &str = "SELECT vector_count FROM shard_stats WHERE id = 1";
 
 /// The fingerprint read (before any claim attempt).
 pub const SELECT_FINGERPRINT: &str =
@@ -87,15 +93,16 @@ pub async fn read_count(db: &dyn Db) -> Result<u64, StoreError> {
     Ok(u64::try_from(count).unwrap_or(u64::MAX))
 }
 
-/// Measures `COUNT(*)` and writes it into `shard_stats`, returning the value.
+/// Writes the statement-measured `COUNT(*)` into `shard_stats` and returns
+/// the value read back from the table (never a caller-supplied number).
 pub async fn sync_count(db: &dyn Db) -> Result<u64, StoreError> {
-    let count = read_count(db).await?;
-    db.execute(
-        SYNC_COUNT_SQL,
-        vec![Value::Integer(i64::try_from(count).unwrap_or(i64::MAX))],
-    )
-    .await?;
-    Ok(count)
+    db.execute(SYNC_COUNT_SQL, Vec::new()).await?;
+    let row = query_one(db, SELECT_VECTOR_COUNT, Vec::new()).await?;
+    let count = row
+        .and_then(|row| row.i64("vector_count"))
+        .unwrap_or(0)
+        .max(0);
+    Ok(u64::try_from(count).unwrap_or(u64::MAX))
 }
 
 /// Reads the stored fingerprint (`None` when the key is absent).
