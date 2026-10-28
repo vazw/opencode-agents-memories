@@ -12,8 +12,6 @@
 //! N-A in Rust: handles release deterministically on `Drop`. The
 //! observation point survives as [`RetryContext::on_retry`].
 
-#![allow(dead_code)]
-
 use std::path::Path;
 use std::sync::Arc;
 
