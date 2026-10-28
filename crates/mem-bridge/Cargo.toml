@@ -12,6 +12,7 @@ mem-profile = { workspace = true }
 mem-episodic = { workspace = true }
 mem-facts = { workspace = true }
 mem-vault = { workspace = true }
+mem-skills = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }

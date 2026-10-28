@@ -1952,6 +1952,7 @@ dependencies = [
  "mem-episodic",
  "mem-facts",
  "mem-profile",
+ "mem-skills",
  "mem-store",
  "mem-vault",
  "serde",
