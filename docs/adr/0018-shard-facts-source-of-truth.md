@@ -135,25 +135,53 @@ re-syncs `shard_stats` from `COUNT(*)` and, if it moves vectors across identitie
 fingerprint it did not prove — the destination starts unclaimed unless the mover rewrites the vectors under
 the configured identity.
 
-## W3 hand-off
+**D-18-9 — Model authority on reads: selection-time, typed, no partials.**
+`MemoryPort::verify_shards(&[ShardRef])` is REQUIRED (no default). `memories::search` calls it once per
+shard list, in both branches, immediately after `shards(…)` and before any `search_in_shard` or prompt
+query. `ProductionMemory::verify_shards` reads each shard's `shard_metadata` facts, judges them, collects
+**every** mismatched shard of the list, and refuses with one `PortError::ModelMismatch`, answered **409**
+with the typed Display (ids, model names, the command). A shard whose facts cannot be read is logged and
+skipped — today's per-shard tolerance, not a mismatch. No partial answer is ever returned.
+**Numbering note:** the ruling's "D-18-7…D-18-10" was written before W2 landed and is superseded by the
+recorded D-18-7/D-18-8; W3's decisions are D-18-9…D-18-12.
 
-W3 inherits a truthful detector and **no policy**. It owns:
+**D-18-10 — Model authority on writes: every vector producer, at the write seam; deletes stay open.**
+`shard_facts::prepare_write_shard` reads the facts once, judges, and on a positive mismatch returns
+`StoreError::ShardModelMismatch` **before** W2's claim/count body runs (a refused write mutates nothing).
+`resolve_write_shard` uses it, so capture, import, API insert and episodic promotion inherit the refusal.
+`ProductionMemory::update_memory` (the `PUT /api/memories/{id}` hole) verifies at the port before its
+delete+insert batch; it is total and fail-closed (no registry id or an unreadable shard → the same typed
+refusal, never a silent write). `delete_memory`/`pin`/`unpin` are **not** refused: erasure must not depend
+on a re-embed. The handler embeds before calling the port, so a refused PUT spends one embedding call —
+recorded, accepted.
 
-- `ShardModelMismatch` and the decision on a mismatch (search skipping, write refusal);
-- `is_shard_valid`'s model comparison (W2 leaves it dimensions-only, byte-identical);
-- `sync_count` on the delete paths (`mem-web::store_adapter`, dedup, portability), so `shard_stats` cannot
-  stay above truth (R-5);
-- not reading "model equal" as provenance (R-3).
+**D-18-11 — An absent fingerprint falls back to model equality, and equality is not proof.**
+`judge_model_facts` is pure and total: a present fingerprint wins over the model; with no configured
+identity the model is still compared (a build without a fingerprint check is not blind to a named foreign
+model); an absent fingerprint with an absent or equal model is `ModelEquality` — allowed, warned, never
+called provenance. `legacy-unknown` is a named foreign model, not an absent one, so an upgraded install is
+refused until re-embedded.
+
+**D-18-12 — The count is measured at commit; the registry adopts it; the deltas are gone.**
+Every row-count-changing `BatchMode::Write` batch ends with `SYNC_COUNT_SQL` (no binds — the statement
+measures `COUNT(*)` itself), and the caller adopts the committed value into the registry cache
+(`ShardManager::adopt_stored_count`). `delete_memories(ids)` is one transaction of N deletes plus the sync
+and returns the read-back; an empty list is a read-only no-op. `increment_vector_count` /
+`decrement_vector_count` and their SQL constants are deleted; promotion's insert stays a single `execute`
+and resyncs with the next statement (R-4).
 
 ## Residuals
 
-- **R-3** — a same-name remote endpoint or ONNX-file swap is not caught; model equality is a negative
-  signal only.
-- **R-5** — `shard_stats` lags in both directions: the write-path sync runs before the row being written
-  is inserted, and delete paths do not sync. The error is bounded by "since the last write", never
-  cumulative.
-- **R-6** — retired shards never get a `shard_stats` row until opened through the write path, so W3's
-  `COUNT(*)` fallback is permanent.
+- **R-3** — a same-name remote endpoint or ONNX-file swap is not caught: the authority refuses only on
+  positive evidence of a difference (a differing fingerprint, or a differing model name). An equal model
+  name is not proof. A build without an identity compares the model and warns.
+- **R-5** — the only remaining gap is promotion's single-execute insert: its resync is the next statement,
+  outside that execute's window (R-4); every delete path writes the absolute count in its own batch.
+- **R-6** — unchanged: retired shards may carry no `shard_stats` row until opened; the model authority
+  reads `shard_metadata`, never `shard_stats`, so search is unaffected. `delete_memories` is unbounded and
+  issue 72 must chunk.
 - **R-7** — no `.bak` for shard migrations; v3 is additive and convergent, and a v2 binary ignores the
   extra table.
-- **R-12** — the narrowing above.
+- **R-12** — an upgraded install (`legacy-unknown`, or any foreign model) is refused, by design; the way
+  out is the operator command the error names: `opencode-agents-memory --mode=reembed-scope --scope
+  <container tag>`.
