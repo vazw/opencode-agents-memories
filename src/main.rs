@@ -246,6 +246,7 @@ struct ParsedArgs {
     session: Option<String>,
     agent: Option<String>,
     confirm: Option<String>,
+    scope: Option<String>,
 }
 
 /// The sync arg-parse (M1): mode, storage root, web host/port overrides, the
@@ -270,6 +271,7 @@ fn parse_args<I: Iterator<Item = (String, Option<String>)>>(args: I) -> ParsedAr
             "--session" | "session" => parsed.session = inline,
             "--agent" | "agent" => parsed.agent = inline,
             "--confirm" | "confirm" => parsed.confirm = inline,
+            "--scope" | "scope" => parsed.scope = inline,
             other => eprintln!("ignoring argument {other:?}"),
         }
     }
@@ -295,7 +297,8 @@ fn main() {
                 || arg == "--project"
                 || arg == "--session"
                 || arg == "--agent"
-                || arg == "--confirm")
+                || arg == "--confirm"
+                || arg == "--scope")
         {
             let value = raw.get(index + 1).cloned();
             let has_value = value.is_some();
@@ -339,6 +342,10 @@ fn main() {
     // The purge request, built and confirmed at parse time. `None` for every
     // other mode.
     let mut purge_request: Option<mem_bridge::purge::PurgeRequest> = None;
+    // The reembed-scope tag: validated by the CLI runner AFTER the config
+    // load (it needs no config to reject a bad tag, but does need it to
+    // compose the embedder).
+    let mut reembed_tag: Option<String> = None;
     if let Some(mode) = args.mode.clone() {
         let mode = mode.trim().to_owned();
         if mode == "print-crates" {
@@ -366,6 +373,10 @@ fn main() {
                 Some(_) => {}
             }
             purge_request = Some(request);
+        } else if mode == "reembed-scope" {
+            // W3: the scope tag travels as-is; an absent flag is the empty
+            // tag, which the runner rejects with 64 (invalid scope).
+            reembed_tag = Some(args.scope.clone().unwrap_or_default());
         } else {
             match LaunchMode::parse(&mode) {
                 Ok(parsed) => {
@@ -421,6 +432,16 @@ fn main() {
             &core_config,
             &config.storage_root,
             &request,
+        ));
+    }
+
+    // W3 — the re-embed dispatch also sits BEFORE the engine runtime: never
+    // start the stdio loop, the web server or the engine lock in this mode.
+    if let Some(container_tag) = reembed_tag {
+        std::process::exit(mem_bridge::reembed::run(
+            &core_config,
+            &config.storage_root,
+            &mem_bridge::reembed::ReembedRequest { container_tag },
         ));
     }
 
