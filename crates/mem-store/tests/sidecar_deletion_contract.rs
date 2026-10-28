@@ -1097,3 +1097,65 @@ async fn test_legacy_reembed_recovery_releases_the_operation_lock() {
     );
     let _ = common::cleanup_temp_dir(&storage);
 }
+
+/// G2's inversion arm — a live **cross-process legacy** holder refuses the
+/// unlink, and nothing on disk changes.
+///
+/// The legacy child opens through the documented override
+/// (`OPENCODE_MEM_ALLOW_UNGUARDED_OPEN=1`, no multiprocess WAL), so the probe
+/// can see it (`Held`). The refusal must precede the first unlink: the main
+/// file and all three sidecars stay byte-identical and the child's next write
+/// still succeeds.
+///
+/// Inverted world: delete the probe from `remove_sqlite_database` → the parent
+/// unlinks and the "still present" / snapshot assertions fail.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_g2_refusal_with_a_live_legacy_holder_child() {
+    let config = common::store_config("g2-legacy-refusal");
+    let db_path = config.storage_path.join("g2.db");
+    // The child's legacy open never creates `-tshm`; seed it so the refusal's
+    // "all three sidecars survive" arm covers the turso-owned file too.
+    std::fs::write(sidecar(&db_path, "-tshm"), b"tshm-sentinel").expect("seed -tshm");
+
+    let mut holder = TshmHolder::spawn(&db_path, true);
+    let proof = common::exclusive_root(&config.storage_path);
+    let baseline = file_snapshot(&db_path);
+    assert_eq!(
+        baseline
+            .iter()
+            .find(|(suffix, _)| *suffix == "-tshm")
+            .and_then(|(_, bytes)| bytes.clone()),
+        Some(b"tshm-sentinel".to_vec()),
+        "the seeded -tshm is present before the refusal"
+    );
+    assert!(
+        baseline
+            .iter()
+            .any(|(suffix, bytes)| suffix.is_empty() && bytes.is_some()),
+        "the child's database exists before the refusal"
+    );
+
+    let claim = proof
+        .claim(&db_path)
+        .expect("the database is inside the root");
+    let error = mem_store::sqlite_files::remove_sqlite_database(claim)
+        .expect_err("a live legacy holder must refuse the unlink");
+    assert!(
+        matches!(error, StoreError::ExclusivityRefused { .. }),
+        "the refusal must be the typed exclusivity error, got {error:?}"
+    );
+    assert_eq!(
+        file_snapshot(&db_path),
+        baseline,
+        "the refusal precedes the first unlink: db, -wal, -shm and -tshm are unchanged"
+    );
+
+    let after = holder.write_more();
+    assert_eq!(
+        after, "ok",
+        "the child's write after the refused unlink still succeeds"
+    );
+    holder.exit();
+    let _ = common::cleanup_temp_dir(&config.storage_path);
+}
