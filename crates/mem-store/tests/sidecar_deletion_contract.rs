@@ -14,6 +14,7 @@ mod common;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
 use mem_store::config::StoreConfig;
@@ -22,10 +23,12 @@ use mem_store::db::{
     turso_connect_factory,
 };
 use mem_store::error::StoreError;
+use mem_store::operation_lock::OPERATION_LOCK_FILE;
 use mem_store::platform::Platform;
 use mem_store::schema_migrations::{
     MigrationOptions, SchemaMigration, apply_schema_migrations, memory_shard_migrations,
 };
+use mem_store::shard_path_migration::{PathMigrateSwapState, ShardMove};
 use mem_store::sql;
 
 /// The v1-era insert shape (the 16 pre-v2 columns), matching
@@ -925,4 +928,172 @@ async fn test_g2_positive_control_tshm_split_is_silent() {
     drop(reopened);
     holder.exit();
     let _ = common::cleanup_temp_dir(&config.storage_path);
+}
+
+// ---------------------------------------------------------------------------
+// 46.5 — the two recovery locks
+// ---------------------------------------------------------------------------
+
+/// The recovery consults the operation lock **before its first unlink**.
+///
+/// The seeded holder's name (`"test-holder"`) is what the refusal must report:
+/// per M27 the field comes from the holder's record, so asserting our own
+/// operation name would be circular. The literal `"path-migrate-recovery"` is
+/// pinned by the rg gate, not by this test.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_path_migrate_recovery_refuses_while_the_operation_lock_is_held() {
+    let config = common::store_config("recovery-lock");
+    let (config, connections, shards) = common::real_components(config).await;
+    let storage = config.storage_path.clone();
+    let registry: Arc<dyn mem_store::shard_manager::ShardRegistry> = Arc::new(shards);
+    std::fs::create_dir_all(storage.join("projects")).expect("projects dir");
+
+    let old_path = storage.join("projects/old.db");
+    let new_path = storage.join("projects/new.db");
+    let staged = storage.join("projects/staged.tmp");
+    let backup = storage.join("projects/backup.bak");
+    std::fs::write(&old_path, b"old").expect("seed old");
+    std::fs::write(&new_path, b"new").expect("seed new");
+    let journal = common::write_swap_fixture(
+        &storage,
+        &PathMigrateSwapState {
+            operation: "path-migrate".to_string(),
+            old_hash: "a1b2c3d4e5f60001".to_string(),
+            new_hash: "ffffffffffffffff".to_string(),
+            moves: vec![ShardMove {
+                shard_id: 1,
+                shard_index: 0,
+                old_path: old_path.clone(),
+                new_path: new_path.clone(),
+                staged_path: staged.clone(),
+                backup_path: backup.clone(),
+                is_active: true,
+                vector_count: 1,
+                old_container_tag: "opencode_project_a1b2c3d4e5f60001".to_string(),
+            }],
+            archived_targets: Vec::new(),
+        },
+    );
+    let bytes_before = [
+        std::fs::read(&old_path).expect("old bytes"),
+        std::fs::read(&new_path).expect("new bytes"),
+        std::fs::read(&journal).expect("journal bytes"),
+    ];
+    common::write_lock_state(
+        &storage,
+        OPERATION_LOCK_FILE,
+        std::process::id(),
+        Some("test-holder"),
+    );
+
+    let error = mem_store::shard_path_migration::recover_interrupted_swap(
+        &storage,
+        &connections,
+        registry.as_ref(),
+        Arc::new(mem_store::platform::SystemProcessProbe),
+    )
+    .await
+    .expect_err("a live operation lock must refuse the recovery");
+    match error {
+        StoreError::MigrationLocked { operation, .. } => assert_eq!(
+            operation.as_deref(),
+            Some("test-holder"),
+            "the refusal reports the HOLDER's operation name"
+        ),
+        other => panic!("expected MigrationLocked, got {other:?}"),
+    }
+
+    assert_eq!(
+        bytes_before,
+        [
+            std::fs::read(&old_path).expect("old bytes"),
+            std::fs::read(&new_path).expect("new bytes"),
+            std::fs::read(&journal).expect("journal bytes"),
+        ],
+        "the refusal precedes the first unlink: every file is byte-identical"
+    );
+    assert!(!staged.exists(), "no staged file was created");
+    assert!(!backup.exists(), "no backup was moved");
+    let _ = common::cleanup_temp_dir(&storage);
+}
+
+/// The legacy re-embed recovery consults the operation lock before its first
+/// unlink. The seeded holder is the realistic conflicting `"path-migrate"`.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_legacy_reembed_recovery_refuses_while_the_operation_lock_is_held() {
+    let config = common::store_config("legacy-recovery-lock");
+    let (config, connections, shards) = common::real_components(config).await;
+    let storage = config.storage_path.clone();
+    let shards = Arc::new(shards);
+    std::fs::create_dir_all(storage.join("projects")).expect("projects dir");
+
+    let db_path = storage.join("projects/project_a1b2c3d4e5f60001_shard_0.db");
+    let staged = PathBuf::from(format!("{}.reembed-fixture.tmp", db_path.display()));
+    let backup = PathBuf::from(format!("{}.pre-reembed-fixture.bak", db_path.display()));
+    std::fs::write(&db_path, b"active").expect("seed active");
+    let state_path = common::write_reembed_swap_state(&db_path, &staged, &backup);
+    let bytes_before = [
+        std::fs::read(&db_path).expect("active bytes"),
+        std::fs::read(&state_path).expect("journal bytes"),
+    ];
+    common::write_lock_state(
+        &storage,
+        OPERATION_LOCK_FILE,
+        std::process::id(),
+        Some("path-migrate"),
+    );
+
+    let sleeper = common::RecordingSleeper::new();
+    let sleep = sleeper.as_sleep_fn();
+    let error = mem_store::legacy_migrator::run_legacy_turso_migration(
+        &storage,
+        &shards,
+        &connections,
+        &sleep,
+    )
+    .await
+    .expect_err("a live operation lock must refuse the re-embed recovery");
+    match error {
+        StoreError::MigrationLocked { operation, .. } => assert_eq!(
+            operation.as_deref(),
+            Some("path-migrate"),
+            "the refusal reports the HOLDER's operation name"
+        ),
+        other => panic!("expected MigrationLocked, got {other:?}"),
+    }
+    assert_eq!(
+        bytes_before,
+        [
+            std::fs::read(&db_path).expect("active bytes"),
+            std::fs::read(&state_path).expect("journal bytes"),
+        ],
+        "the refusal precedes the first unlink: every file is byte-identical"
+    );
+    assert!(!staged.exists(), "no staged replacement was created");
+    assert!(!backup.exists(), "no backup was moved");
+    let _ = common::cleanup_temp_dir(&storage);
+}
+
+/// The recovery lock is released before `run_legacy_turso_migration` returns:
+/// a clean run leaves no `.turso-operation.lock` behind.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_legacy_reembed_recovery_releases_the_operation_lock() {
+    let config = common::store_config("legacy-recovery-release");
+    let (config, connections, shards) = common::real_components(config).await;
+    let storage = config.storage_path.clone();
+    let shards = Arc::new(shards);
+    let sleeper = common::RecordingSleeper::new();
+    let sleep = sleeper.as_sleep_fn();
+
+    mem_store::legacy_migrator::run_legacy_turso_migration(&storage, &shards, &connections, &sleep)
+        .await
+        .expect("a clean run succeeds");
+    assert!(
+        !storage.join(OPERATION_LOCK_FILE).exists(),
+        "the recovery lock is released before the run returns"
+    );
+    let _ = common::cleanup_temp_dir(&storage);
 }

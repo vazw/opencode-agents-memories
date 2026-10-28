@@ -883,7 +883,20 @@ pub async fn run_legacy_turso_migration(
         std::fs::create_dir_all(storage_path)?;
     }
 
-    recover_interrupted_reembed_swaps(storage_path, connections).await?;
+    // 46.5: the recovery mutates shard files, so it runs under the
+    // legacy-reembed-recover operation lock — acquired immediately before
+    // the recovery and released immediately after, before the engine
+    // conversion and long before the legacy lock. One lock file is shared by
+    // every operation name; a live holder (any name) refuses the recovery
+    // before its first unlink.
+    let recovery_lock = crate::operation_lock::acquire_turso_operation_lock(
+        storage_path,
+        shards.process_probe(),
+        "legacy-reembed-recover",
+    )?;
+    let recovery = recover_interrupted_reembed_swaps(storage_path, connections).await;
+    recovery_lock.release();
+    recovery?;
 
     // Recovery may put a libSQL shard back at its active path. Convert DiskANN
     // indexes before any legacy verification opens it with the Turso engine,

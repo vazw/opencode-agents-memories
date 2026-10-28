@@ -592,14 +592,41 @@ async fn test_migration_lock_retries_three_attempts_then_errors_locked_by_anothe
     // this process: the lock must NEVER be stolen, only retried, then fail.
     common::write_lock_state(&rig.storage, ".turso-migrate.lock", 1, None);
 
+    // 46.5: the recovery's operation-lock acquire asserts BOTH lock files, so a
+    // live legacy lock now refuses the run up front — naming the holder's own
+    // record (whose `operation` is None) — instead of reaching the retry loop.
     let error = rig.run().await.expect_err("live foreign lock blocks");
     assert!(
-        error.message().contains("locked by another process"),
+        matches!(
+            error,
+            StoreError::MigrationLocked {
+                operation: None,
+                ..
+            }
+        ),
+        "the recovery refuses on the legacy holder's record, got {error:?}"
+    );
+
+    // The retry policy itself is still pinned through the helper — the only
+    // path a live legacy lock leaves reachable.
+    let sleeper = common::RecordingSleeper::new();
+    let sleep = sleeper.as_sleep_fn();
+    let retry_error = match mem_store::operation_lock::acquire_legacy_migration_lock_with_retry(
+        &rig.storage,
+        rig.shards.process_probe(),
+        &sleep,
+        3,
+    ) {
+        Ok(_) => panic!("a live foreign lock must block every attempt"),
+        Err(error) => error,
+    };
+    assert!(
+        retry_error.message().contains("locked by another process"),
         "final error names the lock, got {}",
-        error.message()
+        retry_error.message()
     );
     assert_eq!(
-        rig.sleeper.recorded(),
+        sleeper.recorded(),
         vec![
             std::time::Duration::from_millis(200),
             std::time::Duration::from_millis(350),

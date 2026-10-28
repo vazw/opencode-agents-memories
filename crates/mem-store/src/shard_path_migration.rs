@@ -289,17 +289,31 @@ async fn rollback_swap(
 /// Upstream `recoverInterruptedSwap`: journal missing -> Ok; parse +
 /// validate + guard EVERY path BEFORE any mutation; rollback; journal
 /// still present -> `Internal` (upstream error text pinned).
+///
+/// 46.5: the recovery acquires the path-migrate-recovery operation lock **before**
+/// `rollback_from_journal` and releases it immediately after, so a live
+/// operation lock (one file shared by every operation name) refuses the
+/// recovery before its first unlink and leaves the journal and every shard
+/// file byte-identical. The operation *name* records who holds the lock; a
+/// refusal reports the **holder's** name, never ours.
 pub async fn recover_interrupted_swap(
     storage_path: &Path,
     connections: &ConnectionManager,
     registry: &dyn ShardRegistry,
+    process_probe: Arc<dyn crate::platform::ProcessProbe>,
 ) -> Result<(), StoreError> {
     let state_path = swap_state_path(storage_path);
     if !state_path.exists() {
         return Ok(());
     }
 
+    let recovery_lock = crate::operation_lock::acquire_turso_operation_lock(
+        storage_path,
+        process_probe,
+        "path-migrate-recovery",
+    )?;
     let outcome = rollback_from_journal(storage_path, connections, registry, &state_path).await;
+    recovery_lock.release();
     match outcome {
         Ok(()) => {
             if state_path.exists() {

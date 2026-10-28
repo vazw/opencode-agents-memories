@@ -167,10 +167,14 @@ pub fn legacy_migration_step(
 }
 
 /// Upstream `shardPathMigrationService.recoverInterruptedSwap()` step.
+///
+/// `process_probe` is the liveness oracle for the path-migrate-recovery
+/// operation lock the recovery acquires before its first unlink (issue 46.5).
 pub fn path_migrate_recovery_step(
     storage_path: &Path,
     connections: Arc<ConnectionManager>,
     registry: Arc<dyn ShardRegistry>,
+    process_probe: Arc<dyn crate::platform::ProcessProbe>,
 ) -> ReadyStep {
     let storage: PathBuf = storage_path.to_path_buf();
     ReadyStep {
@@ -178,11 +182,13 @@ pub fn path_migrate_recovery_step(
         run: Arc::new(move || {
             let (storage, connections, registry) =
                 (storage.clone(), connections.clone(), registry.clone());
+            let process_probe = process_probe.clone();
             Box::pin(async move {
                 crate::shard_path_migration::recover_interrupted_swap(
                     &storage,
                     &connections,
                     registry.as_ref(),
+                    process_probe,
                 )
                 .await
             })
@@ -244,6 +250,7 @@ pub fn build_ready_gate_with(
         storage_path,
         connections,
         registry,
+        shards.process_probe(),
     ));
     steps.push(shard_warmup_step(shards));
     ReadyGate::new(steps)
@@ -285,6 +292,7 @@ pub fn build_ready_gate_with_encryption(
         storage_path,
         connections,
         registry,
+        shards.process_probe(),
     ));
     steps.push(shard_warmup_step(shards));
     ReadyGate::new(steps)

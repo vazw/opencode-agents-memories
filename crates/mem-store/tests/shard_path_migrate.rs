@@ -916,6 +916,7 @@ async fn test_recovery_rejects_journal_paths_outside_storage() {
         &storage,
         &connections,
         registry.as_ref(),
+        Arc::new(mem_store::platform::SystemProcessProbe),
     )
     .await
     .expect_err("outside storage rejected");
@@ -1292,6 +1293,7 @@ async fn test_recovery_rejects_deep_traversal_journal_paths() {
         &storage,
         &connections,
         registry.as_ref(),
+        Arc::new(mem_store::platform::SystemProcessProbe),
     )
     .await
     .expect_err("deep traversal must be rejected before any mutation");

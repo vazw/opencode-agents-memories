@@ -320,7 +320,12 @@ async fn test_recovery_step_restores_interrupted_swap_before_warmup() {
         )
     };
     let gate = Arc::new(ReadyGate::new(vec![
-        path_migrate_recovery_step(&storage, connections.clone(), registry.clone()),
+        path_migrate_recovery_step(
+            &storage,
+            connections.clone(),
+            registry.clone(),
+            std::sync::Arc::new(mem_store::platform::SystemProcessProbe),
+        ),
         ReadyStep {
             name: "warmup-probe",
             run: watcher,
