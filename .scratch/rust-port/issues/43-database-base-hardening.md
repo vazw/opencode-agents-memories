@@ -3,14 +3,14 @@
 Status: ready-for-human — 2026-10-27 (umbrella, not a single wave: **W0** `af01156`, **W1 write side**
 `3d5e940` and the **liveness blocker** `aa0dcc4` are landed; **W2 is landed on `main` at `e0bbd37`**
 (merge of `12feaa2` over `c558e52`, base `dc5bcad`; shard v3 + `shard_stats` + embedding fingerprint;
-review approved after one rework) — W3, W4, W5, W7
+review approved after one rework); **W3 is landed on `main` at `a4df6e7`** (count/model authority: typed read+write refusals incl. `update_memory`, count-at-commit, the re-embed CLI, ADR-0018 D-18-13; review approved after **two** reworks) — W4, W5, W7
 and W8 are absent from the tree, and the ADR set is partial: **0017 (`0017-compaction-hook.md`) and 0026
 (`0026-context-assembly.md`) exist and 0018 (`0018-shard-facts-source-of-truth.md`) + 0021
 (`0021-schema-version-discipline.md`) landed with W2**. The audit that gates ADR-0019 and ADR-0025 is now preserved
 in-repo at `docs/evidence/opsec-w6-design-2026-10-25/` — §9 lists twelve blockers, 1 closed, 2–12 open.
-Next: **W3 is chosen** (owner decisions 2026-10-28/29 below — scope, mismatch policy, absent-fingerprint
-fallback, count-at-commit, CLI, typed HTTP, 72-after-W3, ADR-0018 amendment, strict boundary, one measurement);
-the **ADR-0019 text follows W3** with blockers 6–11 closed by those rulings (blocker 12 moves to ADR-0025).
+Next: **W3 is landed**; the owner picks W4 (one-active index), W5 (prompts v2) or W7 (reaping) next. The
+**ADR-0019 text** is unblocked (blockers 6–11 closed by the 2026-10-28/29 rulings; blocker 12 moves to
+ADR-0025), and **issue 72** may now consume `delete_memories`.
 **Blocks issue 39 (retention cleanup) and issue 41 (scheduler).**
 
 ## RE-VERIFICATION 2026-10-25 (architecture pass) — read this before the items below
