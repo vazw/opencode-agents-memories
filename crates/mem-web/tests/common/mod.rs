@@ -17,6 +17,7 @@
 //!   `tokio::task::spawn_blocking` (a blocking read on the runtime thread
 //!   would starve the spawned server task).
 
+pub mod capture;
 pub mod fakes;
 pub mod real_store;
 

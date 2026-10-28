@@ -393,6 +393,9 @@ async fn migrate_memory_shard(
         shards
             .init_shard_db(&*db, config.embedding_dimensions, &config.embedding_model)
             .await?;
+        // `init_shard_db` wrote the identity keys: any cached facts for this
+        // path are stale (R-13's writer rule; no close happens on this branch).
+        connections.model_facts_cache().invalidate(db_path)?;
         let sidecar = zero_sidecar();
         write_sidecar(db_path, &sidecar)?;
         return Ok(Some(sidecar));
@@ -529,6 +532,9 @@ async fn migrate_memory_shard(
             source_model,
         )
         .await?;
+    // Belt-and-braces: the close above already invalidated this path, but a
+    // future caller that reorders the close must not serve stale facts.
+    connections.model_facts_cache().invalidate(db_path)?;
 
     // Divergence (recorded): ONE transactional batch (inserts in
     // BATCH_SIZE groups, pins last) instead of upstream's chunked

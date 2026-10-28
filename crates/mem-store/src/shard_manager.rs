@@ -235,6 +235,27 @@ impl ShardManager {
         self.connections.get_connection(full_path).await
     }
 
+    /// The per-open-connection identity-facts cache (R-13).
+    pub fn model_facts_cache(&self) -> &crate::shard_facts::ModelFactsCache {
+        self.connections.model_facts_cache()
+    }
+
+    /// Invalidates a shard's cached identity facts. REQUIRED after every
+    /// in-process write to `shard_metadata` (ADR-0018 D-18-13).
+    pub fn invalidate_model_facts(&self, db_path: &Path) -> Result<(), StoreError> {
+        self.connections.model_facts_cache().invalidate(db_path)
+    }
+
+    /// The authority's cached read through the open shard handle.
+    pub async fn model_facts(
+        &self,
+        db_path: &Path,
+    ) -> Result<crate::shard_facts::ModelFacts, StoreError> {
+        let db = self.connections.get_connection(db_path).await?;
+        crate::shard_facts::model_facts_cached(&db, self.connections.model_facts_cache(), db_path)
+            .await
+    }
+
     /// Upstream `reset()` (sync; consumed by the lifecycle step).
     pub fn reset(&self) -> Result<(), StoreError> {
         // metadata cache: reset must invalidate, or the next call reuses a stale handle (ADR-0013 D-2 D2-c)
@@ -247,6 +268,9 @@ impl ShardManager {
             lock: "init",
             operation: "reset",
         })? = None;
+        // the identity-facts cache: reset must not serve facts from a closed
+        // handle's file (the open/close hooks are the primary guard)
+        self.connections.model_facts_cache().clear()?;
         Ok(())
     }
 
@@ -589,6 +613,11 @@ impl ShardManager {
             &self.config.embedding_model,
         )
         .await?;
+        // `init_shard_db` writes the identity keys; a registered file can
+        // already have a cache entry (the lost-registry-row branch).
+        self.connections
+            .model_facts_cache()
+            .invalidate(&full_path)?;
 
         let insert = db
             .execute(
@@ -624,6 +653,13 @@ impl ShardManager {
                     &self.config.embedding_model,
                 )
                 .await?;
+                if matches!(outcome.step, crate::shard_facts::FingerprintStep::Claimed) {
+                    // The claim wrote `shard_metadata`; the cached pre-claim
+                    // facts (if any) are stale.
+                    self.connections
+                        .model_facts_cache()
+                        .invalidate(&shard.db_path)?;
+                }
                 self.sync_shard_vector_count(shard, outcome.vector_count)
                     .await
             }
@@ -716,6 +752,10 @@ impl ShardManager {
 
     /// Upstream `initShardDb` — validated dims, ensure_shard_schema, then the
     /// dims/model metadata batch.
+    ///
+    /// **Writer rule (R-13):** this writes `shard_metadata`, so every caller
+    /// MUST invalidate the path in its `ModelFactsCache` after commit (the
+    /// connection open/close hooks are the second line of defence).
     ///
     /// The two identity keys are **write-once** (`INSERT OR IGNORE`, ADR-0018
     /// D-16): a populated file whose registry row was lost is re-opened by
@@ -953,7 +993,7 @@ impl ShardManager {
                     }
                     let shard_db = self.open_shard(&shard.db_path).await?;
                     let outcome = crate::shard_facts::prepare_write_shard(
-                        shard_db.as_ref(),
+                        &shard_db,
                         self.config.embedding_dimensions,
                         self.embedding_identity.as_ref(),
                         &self.config.embedding_model,
@@ -963,6 +1003,8 @@ impl ShardManager {
                             scope: shard.scope,
                             scope_hash: &shard.scope_hash,
                         },
+                        self.connections.model_facts_cache(),
+                        &shard.db_path,
                     )
                     .await?;
                     let shard = self

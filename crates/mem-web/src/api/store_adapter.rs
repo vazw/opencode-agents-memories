@@ -301,7 +301,13 @@ impl ProductionMemory {
                 return Err(self.refusal(shard, shard_id, None));
             }
         };
-        let facts = match shard_facts::read_model_facts(db.as_ref()).await {
+        let facts = match shard_facts::model_facts_cached(
+            &db,
+            self.manager.model_facts_cache(),
+            &shard.db_path,
+        )
+        .await
+        {
             Ok(facts) => facts,
             Err(error) => {
                 tracing::warn!(error = %error, "update_memory: shard facts unreadable; refusing");
@@ -309,11 +315,13 @@ impl ProductionMemory {
             }
         };
         let config = self.manager.config();
-        match shard_facts::judge_model_facts(
+        let authority = shard_facts::judge_model_facts(
             &facts,
             self.manager.embedding_identity(),
             &config.embedding_model,
-        ) {
+        );
+        shard_facts::warn_model_equality(&authority, Some(shard_id), &config.embedding_model);
+        match authority {
             ModelAuthority::Mismatch { stored_model } => {
                 Err(self.refusal(shard, shard_id, stored_model))
             }
@@ -380,7 +388,13 @@ impl MemoryPort for ProductionMemory {
                     continue;
                 }
             };
-            let facts = match shard_facts::read_model_facts(db.as_ref()).await {
+            let facts = match shard_facts::model_facts_cached(
+                &db,
+                self.manager.model_facts_cache(),
+                &shard.db_path,
+            )
+            .await
+            {
                 Ok(facts) => facts,
                 Err(error) => {
                     tracing::warn!(
@@ -392,11 +406,13 @@ impl MemoryPort for ProductionMemory {
                 }
             };
             let config = self.manager.config();
-            if let ModelAuthority::Mismatch { stored_model } = shard_facts::judge_model_facts(
+            let authority = shard_facts::judge_model_facts(
                 &facts,
                 self.manager.embedding_identity(),
                 &config.embedding_model,
-            ) {
+            );
+            shard_facts::warn_model_equality(&authority, Some(shard_id), &config.embedding_model);
+            if let ModelAuthority::Mismatch { stored_model } = authority {
                 entries.push(ShardModelMismatchEntry {
                     id: shard_id,
                     stored_model,

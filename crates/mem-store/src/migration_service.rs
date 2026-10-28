@@ -809,6 +809,8 @@ impl MigrationService {
             message: error.to_string(),
         })?;
         std::fs::write(swap_state_path, body)?;
+        // The close invalidates the identity-facts cache (R-13), so the next
+        // read through a fresh handle sees the swapped file.
         connections.close_connection(db_path).await?;
 
         let ctx = RetryContext::system();

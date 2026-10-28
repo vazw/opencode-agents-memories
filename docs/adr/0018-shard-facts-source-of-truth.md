@@ -160,7 +160,9 @@ recorded, accepted.
 identity the model is still compared (a build without a fingerprint check is not blind to a named foreign
 model); an absent fingerprint with an absent or equal model is `ModelEquality` — allowed, warned, never
 called provenance. `legacy-unknown` is a named foreign model, not an absent one, so an upgraded install is
-refused until re-embedded.
+refused until re-embedded. The warning is observable without a dev-dependency
+(`tracing::subscriber::set_default`) and is pinned by the capture tests in both crates, so AC6b's
+`testable: no` is withdrawn.
 
 **D-18-12 — The count is measured at commit; the registry adopts it; the deltas are gone.**
 Every row-count-changing `BatchMode::Write` batch ends with `SYNC_COUNT_SQL` (no binds — the statement
@@ -169,6 +171,22 @@ measures `COUNT(*)` itself), and the caller adopts the committed value into the 
 and returns the read-back; an empty list is a read-only no-op. `increment_vector_count` /
 `decrement_vector_count` and their SQL constants are deleted; promotion's insert stays a single `execute`
 and resyncs with the next statement (R-4).
+
+**D-18-13 — The identity-facts read is cached per open connection.**
+The authority used to issue one `SELECT key, value FROM shard_metadata …` per shard per
+`GET /api/search`; measured at 105–142 µs that was 9–12 % of a recall, over R-13's pre-registered 5 %.
+`ModelFactsCache` serves a hit only to the EXACT handle it was read through (`Weak<dyn Db>` +
+`Arc::ptr_eq`), so a close+reopen of the same path can never serve the previous file's facts — even if a
+slow reader re-caches after the close, its entry carries the old handle. The five invalidation points:
+(1) a successful open and (2) a close (`ConnectionManager::open_database`/`close_one`); (3)
+`close_all`/`ShardManager::reset` clear the map; (4) the explicit writers of `shard_metadata` invalidate
+after commit — `create_shard` after `init_shard_db` and again after a `Claimed`, the write seam's claim in
+`prepare_write_shard`, and the two `legacy_migrator` writes (the re-embed swap is covered by its closes);
+(5) the writer rule is documented on `init_shard_db` and `claim_identity`: **any writer of
+`shard_metadata` invalidates the path.** Verified by three tests (serve-until-invalidated, claim
+invalidation, reopened connection) with their named mutations, each RED. Measured (release, 500 rows,
+768 dims): cached `0.07 µs`/shard vs uncached `104.66 µs`; `delta_pct = 0.01 %` (gate < 5 %),
+`uncached_delta_pct = 11.08 %` (the control still measures the same quantity).
 
 ## Residuals
 
@@ -185,3 +203,7 @@ and resyncs with the next statement (R-4).
 - **R-12** — an upgraded install (`legacy-unknown`, or any foreign model) is refused, by design; the way
   out is the operator command the error names: `opencode-agents-memory --mode=reembed-scope --scope
   <container tag>`.
+- **R-13 — resolved by D-18-13.** Six pre-fix runs landed at 9.14–11.51 %; the per-connection cache
+  measures `delta_pct` 0.01 % with the uncached control at 11.08 % (release, 500 rows, 768 dims). The
+  pre-registered "move the read to the shard-open path" was realised as the per-connection cache at the
+  same read seam, so no signature outside `prepare_write_shard` changed.

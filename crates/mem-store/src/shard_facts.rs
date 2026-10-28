@@ -3,7 +3,11 @@
 //!
 //! W2 **records**; W3 verifies. Nothing here is consulted by a read path.
 
-use crate::db::{Db, Statement, Value, query_one};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, Weak};
+
+use crate::db::{Db, DbHandle, Statement, Value, query_one};
 use crate::error::{ShardModelMismatch, ShardModelMismatchEntry, StoreError};
 use crate::schema_migrations::{MEMORY_SHARD_MAX_KNOWN, MigrationOptions, apply_schema_migrations};
 use crate::sql;
@@ -139,6 +143,11 @@ pub fn claim_statement(fingerprint: &str) -> Statement {
 
 /// Executes the claim and reports what the statement did.
 ///
+/// **Writer rule (R-13):** a claim writes `shard_metadata`, so the caller
+/// MUST invalidate the path in its [`ModelFactsCache`] after commit. The
+/// production caller does this in [`prepare_write_shard`] only when the step
+/// is [`FingerprintStep::Claimed`].
+///
 /// `changes = 0` after a clean read is only a lost race: another writer
 /// claimed between the read and the insert.
 pub async fn claim_identity(db: &dyn Db, fingerprint: &str) -> Result<FingerprintStep, StoreError> {
@@ -209,26 +218,56 @@ pub struct ShardWriteFacts {
 /// The composed write-path shard-facts seam.
 ///
 /// Order is load-bearing: the idempotent v1..v3 migration first (`ensure_v3`),
-/// then ONE identity-facts read, then the judgement — a positive mismatch
-/// refuses **before** the count body runs, so the shard is never mutated by a
-/// refused write. W2's claim/count body then runs with the facts already read
-/// (no second identity statement).
+/// then ONE identity-facts read (through the per-connection cache, R-13), then
+/// the judgement — a positive mismatch refuses **before** the count body runs,
+/// so the shard is never mutated by a refused write. W2's claim/count body
+/// then runs with the facts already read (no second identity statement).
 ///
 /// Concurrent writers cannot straddle the pair: the read is one statement and
 /// the claim is conditional (`INSERT OR IGNORE`), so a present key always
-/// wins.
+/// wins. A claim is the only in-call writer of `shard_metadata`, so it
+/// invalidates the cached path after commit.
 pub async fn prepare_write_shard(
-    db: &dyn Db,
+    db: &DbHandle,
     dimensions: u32,
     identity: Option<&EmbeddingIdentity>,
     model: &str,
     mismatch: ShardMismatchContext<'_>,
+    cache: &ModelFactsCache,
+    db_path: &Path,
 ) -> Result<ShardWriteFacts, StoreError> {
-    prepare_shard_facts(db, dimensions, identity, model, Some(mismatch)).await
+    ensure_v3(db.as_ref(), dimensions).await?;
+    let facts = model_facts_cached(db, cache, db_path).await?;
+    let authority = judge_model_facts(&facts, identity, model);
+    warn_model_equality(&authority, Some(mismatch.shard_id), model);
+    if let ModelAuthority::Mismatch { stored_model } = &authority {
+        return Err(model_mismatch_error(
+            vec![ShardModelMismatchEntry {
+                id: mismatch.shard_id,
+                stored_model: stored_model.clone(),
+                expected: model.to_string(),
+            }],
+            mismatch.container_tag_prefix,
+            mismatch.scope,
+            mismatch.scope_hash,
+        ));
+    }
+    let outcome =
+        finish_shard_facts(db.as_ref(), dimensions, identity, model, facts, authority).await?;
+    // The claim is the only in-call writer; a claimed fingerprint changes the
+    // stored facts. `AlreadyPresent`/`Withheld*` changed nothing.
+    if matches!(outcome.facts.step, FingerprintStep::Claimed) {
+        cache.invalidate(db_path)?;
+    }
+    Ok(outcome)
 }
 
-/// The single inner body shared by [`prepare_active_shard`] and
-/// [`prepare_write_shard`].
+/// The W2 low-level seam's inner body: reads the facts UNCACHED and judges.
+///
+/// It keeps the `&dyn Db` signature (W2's AC10 family and its four callers),
+/// so it cannot use the per-connection cache. Unlike
+/// [`prepare_write_shard`] it never refuses (it has no registry id to name);
+/// the write refusal lives there.
 async fn prepare_shard_facts(
     db: &dyn Db,
     dimensions: u32,
@@ -239,6 +278,7 @@ async fn prepare_shard_facts(
     ensure_v3(db, dimensions).await?;
     let facts = read_model_facts(db).await?;
     let authority = judge_model_facts(&facts, identity, model);
+    warn_model_equality(&authority, mismatch.map(|context| context.shard_id), model);
     if let (ModelAuthority::Mismatch { stored_model }, Some(context)) = (&authority, mismatch) {
         return Err(model_mismatch_error(
             vec![ShardModelMismatchEntry {
@@ -251,6 +291,19 @@ async fn prepare_shard_facts(
             context.scope_hash,
         ));
     }
+    finish_shard_facts(db, dimensions, identity, model, facts, authority).await
+}
+
+/// The W2 claim/count body, run with the facts already read (no second
+/// identity statement).
+async fn finish_shard_facts(
+    db: &dyn Db,
+    dimensions: u32,
+    identity: Option<&EmbeddingIdentity>,
+    model: &str,
+    facts: ModelFacts,
+    authority: ModelAuthority,
+) -> Result<ShardWriteFacts, StoreError> {
     let vector_count = sync_count(db).await?;
     let step = if facts.fingerprint.is_some() {
         FingerprintStep::AlreadyPresent
@@ -344,6 +397,104 @@ pub async fn read_model_facts(db: &dyn Db) -> Result<ModelFacts, StoreError> {
     Ok(facts)
 }
 
+/// Per-open-connection cache of a shard's identity facts (R-13).
+///
+/// The authority reads `shard_metadata` once per shard per `GET /api/search`;
+/// at ~100-140 µs per turso query that was 9-12 % of a recall. This cache
+/// moves the steady-state read to a mutex lookup plus an `Arc` clone.
+///
+/// An entry is valid only while the EXACT connection it was read through
+/// asks: a hit requires `Arc::ptr_eq` against the asking handle. A
+/// close+reopen of the same path can therefore never serve the previous
+/// file's facts, even if a slow reader re-caches after the close (its entry
+/// carries the old handle and misses on the new one).
+///
+/// **Writer rule:** any in-process writer of `shard_metadata` MUST call
+/// [`ModelFactsCache::invalidate`] for its path after commit. The cache is
+/// per open connection and cannot observe a write made through another
+/// handle. The full writer set is audited in ADR-0018 D-18-13.
+#[derive(Default)]
+pub struct ModelFactsCache {
+    entries: Mutex<HashMap<PathBuf, CachedModelFacts>>,
+}
+
+struct CachedModelFacts {
+    handle: Weak<dyn Db>,
+    facts: ModelFacts,
+}
+
+fn cache_lock_poisoned(operation: &'static str) -> StoreError {
+    StoreError::LockPoisoned {
+        lock: "model_facts",
+        operation,
+    }
+}
+
+impl ModelFactsCache {
+    fn lookup(&self, db_path: &Path, db: &DbHandle) -> Result<Option<ModelFacts>, StoreError> {
+        let entries = self
+            .entries
+            .lock()
+            .map_err(|_| cache_lock_poisoned("lookup"))?;
+        Ok(entries.get(db_path).and_then(|entry| {
+            entry
+                .handle
+                .upgrade()
+                .filter(|handle| Arc::ptr_eq(handle, db))
+                .map(|_| entry.facts.clone())
+        }))
+    }
+
+    fn store(&self, db_path: &Path, db: &DbHandle, facts: ModelFacts) -> Result<(), StoreError> {
+        self.entries
+            .lock()
+            .map_err(|_| cache_lock_poisoned("store"))?
+            .insert(
+                db_path.to_path_buf(),
+                CachedModelFacts {
+                    handle: Arc::downgrade(db),
+                    facts,
+                },
+            );
+        Ok(())
+    }
+
+    /// Every in-process writer of `shard_metadata` MUST call this after
+    /// commit (see the type's writer rule).
+    pub fn invalidate(&self, db_path: &Path) -> Result<(), StoreError> {
+        self.entries
+            .lock()
+            .map_err(|_| cache_lock_poisoned("invalidate"))?
+            .remove(db_path);
+        Ok(())
+    }
+
+    /// `close_all` / `ShardManager::reset`.
+    pub fn clear(&self) -> Result<(), StoreError> {
+        self.entries
+            .lock()
+            .map_err(|_| cache_lock_poisoned("clear"))?
+            .clear();
+        Ok(())
+    }
+}
+
+/// The read the authority uses: a hit for the same live connection, else ONE
+/// `SELECT_MODEL_FACTS` that is then cached. Never holds the cache lock across
+/// the await (the miss drops the guard first).
+pub async fn model_facts_cached(
+    db: &DbHandle,
+    cache: &ModelFactsCache,
+    db_path: &Path,
+) -> Result<ModelFacts, StoreError> {
+    if let Some(facts) = cache.lookup(db_path, db)? {
+        return Ok(facts);
+    }
+    let facts = read_model_facts(db.as_ref()).await?;
+    cache.store(db_path, db, facts.clone())?;
+    Ok(facts)
+}
+
 /// The pure, total judgement of a shard's stored identity.
 ///
 /// The fingerprint wins when one is present and the build carries an
@@ -384,6 +535,37 @@ pub fn judge_model_facts(
         stored => ModelAuthority::ModelEquality {
             stored_model: stored.map(str::to_string),
         },
+    }
+}
+
+/// The D-W3-1 / D-18-11 warn. The parameter list is the privacy boundary:
+/// the helper cannot see a path, content or a session id.
+pub fn warn_model_equality(
+    authority: &ModelAuthority,
+    shard_id: Option<i64>,
+    configured_model: &str,
+) {
+    let (stored_model, kind) = match authority {
+        ModelAuthority::ModelEquality { stored_model } => (stored_model, "model-equality"),
+        ModelAuthority::ModelEqualityNoIdentity { stored_model } => {
+            (stored_model, "model-equality-no-identity")
+        }
+        ModelAuthority::Fingerprint | ModelAuthority::Mismatch { .. } => return,
+    };
+    match shard_id {
+        Some(id) => tracing::warn!(
+            shard_id = id,
+            stored_model = stored_model.as_deref().unwrap_or("none"),
+            configured_model = configured_model,
+            authority = kind,
+            "shard identity: no fingerprint; accepting on model equality (not proof)"
+        ),
+        None => tracing::warn!(
+            stored_model = stored_model.as_deref().unwrap_or("none"),
+            configured_model = configured_model,
+            authority = kind,
+            "shard identity: no fingerprint; accepting on model equality (not proof)"
+        ),
     }
 }
 

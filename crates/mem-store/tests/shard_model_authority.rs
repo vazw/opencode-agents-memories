@@ -298,6 +298,9 @@ async fn set_metadata(manager: &ShardManager, shard: &ShardInfo, key: &str, valu
     )
     .await
     .expect("write the identity fact");
+    manager
+        .invalidate_model_facts(&shard.db_path)
+        .expect("invalidate the facts after a raw write");
 }
 
 /// Removes the fingerprint `create_shard` claims on an empty shard, leaving a
@@ -313,6 +316,9 @@ async fn clear_fingerprint(manager: &ShardManager, shard: &ShardInfo) {
     )
     .await
     .expect("clear the fingerprint");
+    manager
+        .invalidate_model_facts(&shard.db_path)
+        .expect("invalidate the facts after a raw write");
 }
 
 /// Inserts one 2-dimension row and syncs the shard's absolute count.
@@ -443,7 +449,24 @@ async fn test_a_model_named_shard_without_a_fingerprint_refuses_the_next_write()
 /// `legacy-unknown` shard is refused (never softened to "absent").
 #[tokio::test]
 async fn test_a_legacy_shard_with_equal_model_still_writes() {
-    let (config, _connections, manager, _shard) = write_fixture("model-legacy-equal", true).await;
+    let (config, _connections, manager, shard) = write_fixture("model-legacy-equal", true).await;
+    // The fixture the test names: absent fingerprint, equal model.
+    // `create_shard` claims the configured fingerprint on an empty shard, so
+    // it must be removed — otherwise the seam takes `Fingerprint` and the
+    // `ModelEquality` arm is never constructed (the mutant survives).
+    clear_fingerprint(&manager, &shard).await;
+    let db = manager
+        .open_shard(&shard.db_path)
+        .await
+        .expect("open the shard");
+    assert_eq!(
+        shard_facts::read_fingerprint(db.as_ref())
+            .await
+            .expect("fingerprint read"),
+        None,
+        "AC6a's first arm must exercise ModelEquality, not Fingerprint"
+    );
+    drop(db);
     let written = manager
         .get_write_shard(Scope::Project, HASH)
         .await
@@ -496,6 +519,203 @@ async fn test_a_dimension_and_a_model_refusal_stay_distinct() {
     common::cleanup_temp_dir(&config.storage_path).expect("cleanup");
 }
 
+// ---------------------------------------------------------------------------
+// R-13 — the per-connection ModelFacts cache
+// ---------------------------------------------------------------------------
+
+/// The cache serves the facts of the LIVE connection until invalidated; a
+/// non-caching reader would return the changed model immediately.
+#[tokio::test]
+async fn test_the_model_facts_cache_serves_until_it_is_invalidated() {
+    let (config, _connections, manager, shard) =
+        write_fixture("model-cache-invalidate", true).await;
+    assert_eq!(
+        manager
+            .model_facts(&shard.db_path)
+            .await
+            .expect("warm the cache")
+            .stored_model
+            .as_deref(),
+        Some("test-model")
+    );
+
+    // A raw write through the SAME open handle, deliberately NOT invalidated:
+    // the cache must still serve the old facts.
+    let db = manager
+        .open_shard(&shard.db_path)
+        .await
+        .expect("open the shard");
+    db.execute(
+        "INSERT OR REPLACE INTO shard_metadata (key, value) VALUES ('embedding_model', 'changed-model')",
+        Vec::new(),
+    )
+    .await
+    .expect("change the stored model");
+    assert_eq!(
+        manager
+            .model_facts(&shard.db_path)
+            .await
+            .expect("cached read")
+            .stored_model
+            .as_deref(),
+        Some("test-model"),
+        "the cache serves the connection's read until invalidated"
+    );
+
+    manager
+        .invalidate_model_facts(&shard.db_path)
+        .expect("invalidate");
+    assert_eq!(
+        manager
+            .model_facts(&shard.db_path)
+            .await
+            .expect("post-invalidate read")
+            .stored_model
+            .as_deref(),
+        Some("changed-model"),
+        "invalidation makes the next read observe the write"
+    );
+
+    drop(db);
+    common::cleanup_temp_dir(&config.storage_path).expect("cleanup");
+}
+
+/// A claim (the `prepare_write_shard` path) writes the fingerprint; the cache
+/// the call warmed before claiming must not survive it.
+#[tokio::test]
+async fn test_a_claim_invalidates_the_cached_model_facts() {
+    let config = common::store_config("model-cache-claim");
+    let (_config, connections, manager) = common::real_components(config.clone()).await;
+    let shard = manager
+        .create_shard(Scope::Project, HASH, 0)
+        .await
+        .expect("create the project shard");
+    assert_eq!(
+        manager
+            .model_facts(&shard.db_path)
+            .await
+            .expect("warm the pre-claim facts")
+            .fingerprint,
+        None,
+        "the identity-less manager writes the model only"
+    );
+
+    let configured = identity(&config.embedding_model, config.embedding_dimensions);
+    let expected = configured.fingerprint().expect("identity serializes");
+    let manager_with_id = ShardManager::new(
+        config.storage_path.clone(),
+        config.clone(),
+        connections.clone(),
+        Arc::new(mem_store::platform::SystemProcessProbe),
+        Some(configured),
+    );
+    manager_with_id
+        .get_write_shard(Scope::Project, HASH)
+        .await
+        .expect("the empty shard is claimed");
+    assert_eq!(
+        manager_with_id
+            .model_facts(&shard.db_path)
+            .await
+            .expect("post-claim read")
+            .fingerprint
+            .as_deref(),
+        Some(expected.as_str()),
+        "the claim invalidated the cached pre-claim facts"
+    );
+
+    common::cleanup_temp_dir(&config.storage_path).expect("cleanup");
+}
+
+/// A reopened connection never serves the previous file's facts.
+///
+/// `Arc::ptr_eq` is the CORRECTNESS mechanism (a re-cached entry carrying the
+/// old handle misses on the new one); the close invalidation is resource
+/// hygiene. Do not "simplify" either into a path-only cache.
+#[tokio::test]
+async fn test_a_reopened_connection_never_serves_the_previous_files_facts() {
+    let (config, connections, manager, shard) = write_fixture("model-cache-reopen", true).await;
+    assert!(
+        manager
+            .model_facts(&shard.db_path)
+            .await
+            .expect("warm the cache")
+            .fingerprint
+            .is_some()
+    );
+
+    connections
+        .close_connection(&shard.db_path)
+        .await
+        .expect("close the shard");
+    let db = manager
+        .open_shard(&shard.db_path)
+        .await
+        .expect("reopen the shard");
+    db.execute(
+        "INSERT OR REPLACE INTO shard_metadata (key, value) VALUES ('embedding_fingerprint', 'reopened-fingerprint')",
+        Vec::new(),
+    )
+    .await
+    .expect("change the fingerprint through a fresh handle");
+    assert_eq!(
+        manager
+            .model_facts(&shard.db_path)
+            .await
+            .expect("post-reopen read")
+            .fingerprint
+            .as_deref(),
+        Some("reopened-fingerprint"),
+        "the fresh handle must not be served the previous file's entry"
+    );
+
+    drop(db);
+    common::cleanup_temp_dir(&config.storage_path).expect("cleanup");
+}
+
+/// AC6b (withdrawn `testable:no`) — the ModelEquality fallback emits exactly
+/// one structured warn, with fields only (no path, content or session id).
+#[tokio::test]
+async fn test_the_equal_model_fallback_emits_a_structured_warn() {
+    use common::capture::WarnCapture;
+
+    let (config, _connections, manager, shard) = write_fixture("warn-model-equality", true).await;
+    clear_fingerprint(&manager, &shard).await;
+    let capture = WarnCapture::default();
+    let guard = tracing::subscriber::set_default(capture.clone());
+    let written = manager
+        .get_write_shard(Scope::Project, HASH)
+        .await
+        .expect("an equal model still writes");
+    drop(guard);
+    assert_eq!(written.vector_count, 0);
+
+    let events = capture.events();
+    assert_eq!(
+        events.len(),
+        1,
+        "exactly one ModelEquality warn: {events:?}"
+    );
+    let event = &events[0];
+    assert_eq!(event.shard_id, Some(shard.id));
+    assert_eq!(event.stored_model.as_deref(), Some("test-model"));
+    assert_eq!(event.configured_model.as_deref(), Some("test-model"));
+    assert_eq!(event.authority.as_deref(), Some("model-equality"));
+    assert!(
+        event.message.contains("model equality"),
+        "{}",
+        event.message
+    );
+    // The privacy boundary: the helper cannot see these, and the rendered
+    // fields must not contain them.
+    let storage = config.storage_path.display().to_string();
+    assert!(!event.rendered.contains(&storage), "{}", event.rendered);
+    assert!(!event.rendered.contains("seeded content"));
+    assert!(!event.rendered.contains("sess-"));
+
+    common::cleanup_temp_dir(&config.storage_path).expect("cleanup");
+}
+
 /// The W3 measurement harness (created now, run only in the measurement step
 /// with `--release --ignored --nocapture`).
 #[ignore = "measurement: run with --release --ignored --nocapture in the measurement step"]
@@ -536,14 +756,32 @@ async fn test_measure_shard_model_read_cost() {
         .await
         .expect("seed 500 rows");
 
+    let cache = shard_facts::ModelFactsCache::default();
+    let db_path = std::path::Path::new("shard.db");
+    // Warm once so the timed loop measures the steady-state hit.
+    let _ = shard_facts::model_facts_cached(&db, &cache, db_path)
+        .await
+        .expect("warm the facts cache");
+
     const MODEL_READS: u32 = 1_000;
+    let started = Instant::now();
+    for _ in 0..MODEL_READS {
+        let _ = shard_facts::model_facts_cached(&db, &cache, db_path)
+            .await
+            .expect("cached model facts");
+    }
+    let model_read_us_per_shard =
+        started.elapsed().as_secs_f64() * 1_000_000.0 / f64::from(MODEL_READS);
+
+    // The control: the same read WITHOUT the cache. It must stay at the
+    // pre-cache cost so the harness still measures the same quantity.
     let started = Instant::now();
     for _ in 0..MODEL_READS {
         let _ = shard_facts::read_model_facts(db.as_ref())
             .await
-            .expect("model facts");
+            .expect("uncached model facts");
     }
-    let model_read_us_per_shard =
+    let uncached_model_read_us_per_shard =
         started.elapsed().as_secs_f64() * 1_000_000.0 / f64::from(MODEL_READS);
 
     const SEARCHES: u32 = 20;
@@ -564,8 +802,9 @@ async fn test_measure_shard_model_read_cost() {
     let search_us_per_query = started.elapsed().as_secs_f64() * 1_000_000.0 / f64::from(SEARCHES);
 
     let delta_pct = model_read_us_per_shard / search_us_per_query * 100.0;
+    let uncached_delta_pct = uncached_model_read_us_per_shard / search_us_per_query * 100.0;
     println!(
-        "MEASURE profile=release rows=500 dims=768 model_read_us_per_shard={model_read_us_per_shard:.2} search_us_per_query={search_us_per_query:.2} delta_pct={delta_pct:.2}"
+        "MEASURE profile=release rows=500 dims=768 model_read_us_per_shard={model_read_us_per_shard:.2} search_us_per_query={search_us_per_query:.2} delta_pct={delta_pct:.2} uncached_model_read_us_per_shard={uncached_model_read_us_per_shard:.2} uncached_delta_pct={uncached_delta_pct:.2}"
     );
 
     drop(db);

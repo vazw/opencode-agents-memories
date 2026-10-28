@@ -191,6 +191,27 @@ async fn make_foreign(manager: &ShardManager, shard: &ShardInfo) {
     )
     .await
     .expect("seed the foreign fingerprint");
+    manager
+        .invalidate_model_facts(&shard.db_path)
+        .expect("invalidate the facts after a raw write");
+}
+
+/// Removes the shard's fingerprint (the legacy identity) and invalidates the
+/// cached facts.
+async fn clear_fingerprint(manager: &ShardManager, shard: &ShardInfo) {
+    let db = manager
+        .open_shard(&shard.db_path)
+        .await
+        .expect("open the shard");
+    db.execute(
+        "DELETE FROM shard_metadata WHERE key = 'embedding_fingerprint'",
+        Vec::new(),
+    )
+    .await
+    .expect("clear the fingerprint");
+    manager
+        .invalidate_model_facts(&shard.db_path)
+        .expect("invalidate the facts after a raw write");
 }
 
 /// Builds the fixture. `foreign` seeds the two project shards with a foreign
@@ -464,5 +485,49 @@ async fn test_a_delete_keeps_both_count_authorities_exact() {
     assert_eq!(store.row_count(&store.project_shards[1]).await, 0);
     assert_eq!(store.stats_count(&store.project_shards[1]).await, 0);
     assert_eq!(store.registry_count(&store.project_shards[1]).await, 0);
+    cleanup(&store);
+}
+
+/// AC6b — the legacy fallback warns on the READ seam too: one warn for the
+/// unfingerprinted user shard, none for the fingerprinted project shards.
+#[tokio::test]
+async fn test_the_legacy_fallback_warns_on_the_search_path() {
+    use common::capture::WarnCapture;
+
+    let store = real_store("warn-model-search", false).await;
+    insert_row(
+        &store.manager,
+        &store.user_shard,
+        "mem_warn_hit",
+        "legacy hit",
+        USER_TAG,
+    )
+    .await;
+    clear_fingerprint(&store.manager, &store.user_shard).await;
+    let router = store.router();
+
+    let capture = WarnCapture::default();
+    let guard = tracing::subscriber::set_default(capture.clone());
+    let response = api_request(
+        router.clone(),
+        "GET",
+        "/api/search?q=probe",
+        Some(API_TOKEN),
+        None,
+    )
+    .await;
+    drop(guard);
+    assert_eq!(response.status, 200, "{}", response.body_string());
+
+    let events = capture.events();
+    assert_eq!(events.len(), 1, "one warn for the legacy shard: {events:?}");
+    let event = &events[0];
+    assert_eq!(event.shard_id, Some(store.user_shard.id));
+    assert_eq!(event.authority.as_deref(), Some("model-equality"));
+    assert_eq!(event.stored_model.as_deref(), Some("test-model"));
+    let storage = store.config.storage_path.display().to_string();
+    assert!(!event.rendered.contains(&storage), "{}", event.rendered);
+    assert!(!event.rendered.contains("legacy hit"));
+
     cleanup(&store);
 }

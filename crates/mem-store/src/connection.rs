@@ -84,6 +84,10 @@ pub struct ConnectionManager {
     platform: Platform,
     factory: Arc<dyn ConnectFactory>,
     connections: Arc<Mutex<HashMap<PathBuf, DbHandle>>>,
+    /// Per-open-connection identity-facts cache (R-13). Invalidated on open,
+    /// close and clear; the handle guard makes a stale entry unservable even
+    /// if a hook is missed.
+    model_facts: Arc<crate::shard_facts::ModelFactsCache>,
     pending: Arc<Mutex<HashMap<PathBuf, Arc<PendingOpen>>>>,
     closing_connections: Arc<Mutex<HashMap<PathBuf, Arc<Signal>>>>,
     closing_all: Arc<Mutex<Option<Arc<Signal>>>>,
@@ -102,10 +106,16 @@ impl ConnectionManager {
             platform,
             factory,
             connections: Arc::default(),
+            model_facts: Arc::default(),
             pending: Arc::default(),
             closing_connections: Arc::default(),
             closing_all: Arc::default(),
         }
+    }
+
+    /// The identity-facts cache shared with the shard manager and the port.
+    pub fn model_facts_cache(&self) -> &crate::shard_facts::ModelFactsCache {
+        &self.model_facts
     }
 
     fn global_close_signal(&self) -> Result<Option<Arc<Signal>>, StoreError> {
@@ -234,6 +244,8 @@ impl ConnectionManager {
                 operation: "open_database",
             })?
             .insert(db_path.to_path_buf(), handle.clone());
+        // A fresh handle must never start with a previous file's facts.
+        self.model_facts.invalidate(db_path)?;
         Ok(handle)
     }
 
@@ -329,6 +341,7 @@ impl ConnectionManager {
             })?
             .remove(db_path);
         drop(released);
+        self.model_facts.invalidate(db_path)?;
         Ok(())
     }
 
@@ -427,6 +440,7 @@ impl ConnectionManager {
             connections.drain().map(|(_, handle)| handle).collect()
         };
         drop(drained);
+        self.model_facts.clear()?;
         // pending: clear only after every waiter was signalled (ADR-0013 D-2 D2-a)
         self.pending
             .lock()
