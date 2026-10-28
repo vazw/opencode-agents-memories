@@ -1,8 +1,6 @@
 # 46 — Storage · The sidecar-deletion contract: exclusivity is asserted, refused, or the file is not unlinked
 
-Status: ready-for-agent — 2026-10-28 (owner ruled **option 1**: require `EngineLock` + `ProbeOutcome::Free`
-before any unlink, accepting a foreign multiprocess holder as a stated residual; the engine lock must be
-hoisted above the recovery paths. G1 runs first in the wave. See `## Agent Brief` and the ruling comment.)
+Status: done — 2026-10-28 — wave r5 landed on `issue-46/sidecar-deletion-contract` (commits `42d2bfd` … `10a5dd9`); G1/G2 and R1 measured under `## Wave r5 measurements`.
 
 ## PREMISE — `needs_validation` (read before implementing)
 
