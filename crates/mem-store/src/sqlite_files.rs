@@ -1,12 +1,27 @@
 //! SQLite/Turso database file sidecar operations + Windows file-lock retry
 //! (port of upstream `src/services/turso/sqlite-handle-release.ts`).
 //!
-//! Upstream rules kept byte-for-byte in behavior:
-//! - renaming only the main file would leave a stale `-wal` behind and drop
-//!   commits -> main + `-wal`/`-shm`/`-tshm` move/copy/clear together;
-//! - `-tshm` is Turso multiprocess-WAL shared memory;
+//! **Upstream behaviour is a reference here, not a safety claim (issue 46).**
+//! This module's public mutations carry a contract upstream never wrote:
+//!
+//! - a rename/copy moves or copies the main file and its `-wal`/`-shm`/`-tshm`
+//!   sidecars together, so committed frames are never orphaned;
+//! - `-tshm` is Turso's multiprocess-WAL shared memory — turso-owned,
+//!   format-versioned and resized at runtime. It is **never a liveness signal**:
+//!   the engine never unlinks it as one, and 45.A5's mode marker therefore lives
+//!   in `.wal-mode`, never here;
+//! - every sidecar is a **cached mapping** of its main file with **no identity
+//!   re-check** between the probe and the unlink: turso will not notice a
+//!   missing or unlinked sidecar, so no caller may assume the engine repairs
+//!   or even reports it;
+//! - a read-only open cannot prove writability, so the contract's probe refuses
+//!   there rather than degrading to a silent unlink;
 //! - the retry actively waits at most `maxRetries` tries with the upstream
 //!   delay table; non-lock errors and non-Windows platforms fail immediately.
+//!
+//! The contract itself — what a caller must hold and what a refusal leaves
+//! behind — is written at [`remove_sqlite_database`], [`rename_sqlite_database`]
+//! and [`copy_sqlite_database`].
 //!
 //! `collectReleasedSqliteHandles` (libsql 0.5.x GC pass, win32-only) is
 //! N-A in Rust: handles release deterministically on `Drop`. The

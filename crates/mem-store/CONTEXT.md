@@ -21,7 +21,9 @@
 - **Re-embed swap** — `.reembed-{pid}-{millis}.tmp`, `.pre-reembed-{nonce}.bak`, `.reembed-swap.json`, recovery before engine conversion.
 - **ReEmbedder seam** — mem-store never depends on mem-embed.
 - **MigrationService** — dims preflight + fresh-start/re-embed strategies, scope write lock.
-- **Sidecars** — `-wal`/`-shm`/`-tshm` companions move with their db; Windows lock retries use the upstream delay table.
+- **Sidecars** — `-wal`/`-shm`/`-tshm` companions move with their db; Windows lock retries use the upstream delay table. Any deletion needs the exclusive root plus a `Free`/`Missing` probe before the first unlink; a foreign multiprocess holder is the documented residual (issue 46).
+- **Exclusive root** — `delete_guard::ExclusiveRoot`: a live proof that this process holds the storage root's `EngineLock`; published by the lock's process registry, matched by the **exact** root path (never a prefix), and withdrawn by the last lock drop. `ConnectionManager::exclusive_root` is the lookup.
+- **Delete claim** — `delete_guard::FileClaim`, minted only by `ExclusiveRoot::claim`; a remove/rename needs one per end, a copy only for its destination (the source is a documented snapshot). The probe runs **inside** the mutating function before its first unlink; `Held`/`Unknown` refuse with `ExclusivityRefused`, and a needed-but-absent proof refuses with `NoExclusiveRoot`.
 - **Drop-based release** — `TursoDb` owns `Database` + `Connection`; no close API — last handle drop releases; manager close = remove + drop.
 - **Db seam** — boxed-future `Db` (`execute`/`query`/`batch`); `BatchMode::Write` = transactional `Immediate`; vector ops are free fns over `&dyn Db`.
 
