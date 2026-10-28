@@ -183,10 +183,33 @@ slow reader re-caches after the close, its entry carries the old handle. The fiv
 after commit — `create_shard` after `init_shard_db` and again after a `Claimed`, the write seam's claim in
 `prepare_write_shard`, and the two `legacy_migrator` writes (the re-embed swap is covered by its closes);
 (5) the writer rule is documented on `init_shard_db` and `claim_identity`: **any writer of
-`shard_metadata` invalidates the path.** Verified by three tests (serve-until-invalidated, claim
-invalidation, reopened connection) with their named mutations, each RED. Measured (release, 500 rows,
-768 dims): cached `0.07 µs`/shard vs uncached `104.66 µs`; `delta_pct = 0.01 %` (gate < 5 %),
-`uncached_delta_pct = 11.08 %` (the control still measures the same quantity).
+`shard_metadata` invalidates the path.**
+
+The epoch closes the second half of the same race: `model_facts_cached` captures the epoch before its
+`SELECT`, and `store_if_unchanged` checks and inserts in ONE critical section, so a reader that began
+before a writer cannot repopulate the cache with the pre-write facts after the writer's invalidation.
+`invalidate`/`clear` bump the epoch in the same critical section as the removal/clear (a separate atomic
+would re-open the window).
+
+**The complete writer audit** (every in-process `shard_metadata` writer and its invalidation point):
+
+| # | writer | path to the write | invalidation |
+|---|---|---|---|
+| 1 | claim (`claim_identity`/`claim_statement`) | `prepare_shard_facts` from the write seam; the staged re-embed batch | `prepare_write_shard` invalidates on `Claimed`; the staged path is closed before the swap |
+| 2 | re-embed swap | staged `init_shard_db`, close/rename | `close_connection(staged)` + `close_connection(live)` invalidate; the next open is a miss |
+| 3 | legacy migrator model write | `legacy_migrator.rs` via `init_shard_db` (both sites) | explicit invalidate at both; the rebuild branch's close is the belt |
+| 4 | `create_shard` | `init_shard_db` + the claim | invalidate after `init_shard_db` and again after `Claimed` |
+| 5 | close / reset | `close_connection`/`close_all`/`ShardManager::reset` | `close_one` invalidates, `close_everything` clears, `reset` clears |
+| 6 | delete / archive / path-migration / encryption / engine migrators | all close the database first | covered by `close_connection` |
+| 7 | test fixtures writing metadata through `manager.open_shard` | the `shard_model_authority.rs` fixtures (both crates) | `invalidate_model_facts` after each raw write |
+
+The tests pin the three mechanisms separately: serve-until-invalidated and claim-invalidation are each RED
+under their named mutations; the reopen test is RED only when the hooks AND the guard are removed together
+(the hooks mask the guard); the guard is pinned by the old-handle test, whose path-only mutant is RED with
+the hooks intact; the epoch is pinned by the straddling-read test, whose gate-removed and bump-removed
+mutations are each RED (and the path-only mutant leaves it GREEN — the mechanisms are distinct). Measured
+(release, 500 rows, 768 dims): cached `0.07 µs`/shard vs uncached `104.66 µs`; `delta_pct = 0.01 %`
+(gate < 5 %), `uncached_delta_pct = 11.08 %` (the control still measures the same quantity).
 
 ## Residuals
 

@@ -1,11 +1,28 @@
-//! A thread-local WARN capture for the AC6b fallback-warning test.
+//! A process-wide WARN capture for the AC6b fallback-warning tests.
 //!
-//! No dev-dependency: `tracing::subscriber::set_default` ships with the
-//! `tracing` dependency both crates already have. The capture records every
-//! field into `rendered` so the privacy assertion can prove a path, a session
-//! id or content never rides on the warning.
+//! # Why not `set_default`
+//!
+//! A thread-local subscriber install can leave an already-registered callsite
+//! uninterested: the callsite's first registration computes its interest from
+//! the dispatchers at that moment and stores it (`DefaultCallsite::register`),
+//! while a subscriber install rebuilds the same atomic from another caller
+//! (`rebuild_interest_cache`); the two writes are unsynchronised. A callsite
+//! another test registered as `never` before the capture exists can therefore
+//! stay `never` for the rest of the process — the parallel workspace schedule
+//! reproduces it as zero events.
+//!
+//! The capture is therefore installed ONCE per test binary as the process-wide
+//! subscriber (`OnceLock` + `set_global_default`), the interest cache is
+//! rebuilt after the install (and once more immediately before each window,
+//! covering an in-flight first registration), the subscriber answers
+//! `Interest::always()` for WARN from `register_callsite` itself, and `events()`
+//! filters by the emitting thread so tests sharing the binary cannot see each
+//! other's warns. The tests stay on the current-thread runtime and must not
+//! `tokio::spawn` the seam (the thread filter would drop the event).
+//!
+//! No dev-dependency: `tracing` is a normal dependency of both crates.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// The message `shard_facts::warn_model_equality` emits (pinned here for the
 /// subscriber's filter; a drift breaks the test loudly).
@@ -27,21 +44,57 @@ pub struct WarnEvent {
     pub authority: Option<String>,
     /// Every field as `name=value;` — the privacy assertion reads this.
     pub rendered: String,
+    /// The emitting thread; `events()` shows only the caller's thread.
+    pub thread: std::thread::ThreadId,
 }
 
-/// The capture subscriber. The event store is an `Arc`, so a clone handed to
-/// `set_default` shares the same events with the test's handle (the trait's
-/// REQUIRED impl cannot be written for `Arc<WarnCapture>`: both the trait and
-/// `Arc` are foreign, so the impl lives on the local type).
+static INSTALLED: OnceLock<WarnCapture> = OnceLock::new();
+
+/// Installs the capture as the process-wide subscriber (once per test binary)
+/// and returns a handle. `rebuild_interest_cache` re-registers every callsite
+/// that another test may have registered as `never` before this call.
+pub fn install() -> WarnCapture {
+    INSTALLED
+        .get_or_init(|| {
+            let capture = WarnCapture::default();
+            tracing::subscriber::set_global_default(capture.clone())
+                .expect("the capture is the only global tracing subscriber in this binary");
+            tracing::callsite::rebuild_interest_cache();
+            capture
+        })
+        .clone()
+}
+
+/// The capture subscriber. The event store is an `Arc`, so the clone handed to
+/// `set_global_default` shares the same events with every test's handle (the
+/// trait's required impl cannot be written for `Arc<WarnCapture>`: both the
+/// trait and `Arc` are foreign, so the impl lives on the local type).
 #[derive(Default, Clone)]
 pub struct WarnCapture {
     events: Arc<Mutex<Vec<WarnEvent>>>,
 }
 
 impl WarnCapture {
-    /// Every captured event, in order.
+    /// The captured events emitted by the calling thread, in order.
     pub fn events(&self) -> Vec<WarnEvent> {
-        self.events.lock().expect("warn capture lock").clone()
+        let me = std::thread::current().id();
+        self.events
+            .lock()
+            .expect("warn capture lock")
+            .iter()
+            .filter(|event| event.thread == me)
+            .cloned()
+            .collect()
+    }
+
+    /// Drops the calling thread's events (the fixture's own warns precede the
+    /// window under assertion).
+    pub fn clear_current_thread(&self) {
+        let me = std::thread::current().id();
+        self.events
+            .lock()
+            .expect("warn capture lock")
+            .retain(|event| event.thread != me);
     }
 }
 
@@ -86,6 +139,17 @@ impl tracing::Subscriber for WarnCapture {
         *metadata.level() == tracing::Level::WARN
     }
 
+    fn register_callsite(
+        &self,
+        metadata: &'static tracing::Metadata<'static>,
+    ) -> tracing::subscriber::Interest {
+        if *metadata.level() == tracing::Level::WARN {
+            tracing::subscriber::Interest::always()
+        } else {
+            tracing::subscriber::Interest::never()
+        }
+    }
+
     fn new_span(&self, _attributes: &tracing::span::Attributes<'_>) -> tracing::span::Id {
         tracing::span::Id::from_u64(1)
     }
@@ -110,6 +174,7 @@ impl tracing::Subscriber for WarnCapture {
                 configured_model: fields.configured_model,
                 authority: fields.authority,
                 rendered: fields.rendered,
+                thread: std::thread::current().id(),
             });
     }
 

@@ -490,10 +490,17 @@ async fn test_a_delete_keeps_both_count_authorities_exact() {
 
 /// AC6b — the legacy fallback warns on the READ seam too: one warn for the
 /// unfingerprinted user shard, none for the fingerprinted project shards.
+///
+/// The capture is process-wide: installed once per test binary, the interest
+/// cache rebuilt after the install (and once more immediately before the
+/// request), and events filtered by the emitting thread. A thread-local
+/// `set_default` would race the callsite's first registration in the parallel
+/// workspace schedule and can leave the callsite `Interest::never` (zero
+/// events); see `tests/common/capture.rs`. `api_request` polls the router on
+/// this thread, so the filter is valid.
 #[tokio::test]
 async fn test_the_legacy_fallback_warns_on_the_search_path() {
-    use common::capture::WarnCapture;
-
+    let capture = common::capture::install();
     let store = real_store("warn-model-search", false).await;
     insert_row(
         &store.manager,
@@ -506,8 +513,8 @@ async fn test_the_legacy_fallback_warns_on_the_search_path() {
     clear_fingerprint(&store.manager, &store.user_shard).await;
     let router = store.router();
 
-    let capture = WarnCapture::default();
-    let guard = tracing::subscriber::set_default(capture.clone());
+    capture.clear_current_thread();
+    tracing::callsite::rebuild_interest_cache();
     let response = api_request(
         router.clone(),
         "GET",
@@ -516,7 +523,6 @@ async fn test_the_legacy_fallback_warns_on_the_search_path() {
         None,
     )
     .await;
-    drop(guard);
     assert_eq!(response.status, 200, "{}", response.body_string());
 
     let events = capture.events();

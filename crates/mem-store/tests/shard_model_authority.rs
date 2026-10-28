@@ -4,9 +4,12 @@
 
 mod common;
 
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use mem_core::config::EmbeddingPooling;
 use mem_core::embedding::EmbeddingIdentity;
-use mem_store::db::Value;
+use mem_store::db::{BatchMode, BoxFuture, Db, DbHandle, ExecResult, Row, Statement, Value};
 use mem_store::error::{ShardModelMismatch, ShardModelMismatchEntry, StoreError};
 use mem_store::shard_facts::{self, ModelAuthority, ModelFacts};
 
@@ -627,11 +630,14 @@ async fn test_a_claim_invalidates_the_cached_model_facts() {
     common::cleanup_temp_dir(&config.storage_path).expect("cleanup");
 }
 
-/// A reopened connection never serves the previous file's facts.
+/// The open/close hooks: a reopened connection never serves the previous
+/// file's facts.
 ///
-/// `Arc::ptr_eq` is the CORRECTNESS mechanism (a re-cached entry carrying the
-/// old handle misses on the new one); the close invalidation is resource
-/// hygiene. Do not "simplify" either into a path-only cache.
+/// This test pins the HOOKS — a path-only lookup with both hooks intact
+/// passes it. The `Arc::ptr_eq` guard is pinned by
+/// `test_an_old_handle_cannot_recache_after_the_new_handle_opened`; the epoch
+/// by `test_a_read_straddling_an_invalidate_is_never_cached`. Do not
+/// "simplify" any of the three mechanisms.
 #[tokio::test]
 async fn test_a_reopened_connection_never_serves_the_previous_files_facts() {
     let (config, connections, manager, shard) = write_fixture("model-cache-reopen", true).await;
@@ -673,21 +679,211 @@ async fn test_a_reopened_connection_never_serves_the_previous_files_facts() {
     common::cleanup_temp_dir(&config.storage_path).expect("cleanup");
 }
 
+// ---------------------------------------------------------------------------
+// F2/F3 — storing across an invalidation, and the handle guard
+// ---------------------------------------------------------------------------
+
+/// A scripted `Db` for the model-facts cache: `query` pops the next canned
+/// `SELECT_MODEL_FACTS` answer, and the first query can be gated between the
+/// read and the caller's store.
+struct ScriptedFactsDb {
+    answers: std::sync::Mutex<VecDeque<Vec<Row>>>,
+    queries: AtomicUsize,
+    gate_first_query: bool,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl ScriptedFactsDb {
+    fn new(answers: Vec<Vec<Row>>, gate_first_query: bool) -> Self {
+        Self {
+            answers: std::sync::Mutex::new(answers.into()),
+            queries: AtomicUsize::new(0),
+            gate_first_query,
+            entered: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        }
+    }
+}
+
+impl Db for ScriptedFactsDb {
+    fn execute(
+        &self,
+        _sql: &str,
+        _params: Vec<Value>,
+    ) -> BoxFuture<'_, Result<ExecResult, StoreError>> {
+        Box::pin(async move {
+            Ok(ExecResult {
+                changes: 0,
+                last_insert_rowid: 0,
+            })
+        })
+    }
+
+    fn query(
+        &self,
+        _sql: &str,
+        _params: Vec<Value>,
+    ) -> BoxFuture<'_, Result<Vec<Row>, StoreError>> {
+        Box::pin(async move {
+            let first = self.queries.fetch_add(1, Ordering::SeqCst) == 0;
+            if first && self.gate_first_query {
+                self.entered.notify_one();
+                self.release.notified().await;
+            }
+            Ok(self
+                .answers
+                .lock()
+                .expect("answers")
+                .pop_front()
+                .unwrap_or_default())
+        })
+    }
+
+    fn batch(
+        &self,
+        _statements: Vec<Statement>,
+        _mode: BatchMode,
+    ) -> BoxFuture<'_, Result<Vec<ExecResult>, StoreError>> {
+        Box::pin(async move { Ok(Vec::new()) })
+    }
+}
+
+fn facts_rows(fingerprint: &str, model: &str) -> Vec<Row> {
+    let columns = Arc::new(vec!["key".to_string(), "value".to_string()]);
+    vec![
+        Row::new(
+            columns.clone(),
+            vec![
+                Value::Text("embedding_fingerprint".to_string()),
+                Value::Text(fingerprint.to_string()),
+            ],
+        ),
+        Row::new(
+            columns,
+            vec![
+                Value::Text("embedding_model".to_string()),
+                Value::Text(model.to_string()),
+            ],
+        ),
+    ]
+}
+
+/// F2 — a reader that began BEFORE an invalidate must not repopulate the
+/// cache AFTER it: the miss captures the epoch before its `SELECT` and stores
+/// only if no invalidate/clear intervened.
+#[tokio::test]
+async fn test_a_read_straddling_an_invalidate_is_never_cached() {
+    let path = std::path::Path::new("epoch/shard.db");
+    let fake = Arc::new(ScriptedFactsDb::new(
+        vec![
+            facts_rows("old-fingerprint", "test-model"),
+            facts_rows("new-fingerprint", "test-model"),
+        ],
+        true,
+    ));
+    let db: DbHandle = fake.clone();
+    let cache = Arc::new(shard_facts::ModelFactsCache::default());
+
+    let reader = tokio::spawn({
+        let db = Arc::clone(&db);
+        let cache = Arc::clone(&cache);
+        let path = path.to_path_buf();
+        async move { shard_facts::model_facts_cached(&db, &cache, &path).await }
+    });
+    fake.entered.notified().await;
+    cache
+        .invalidate(path)
+        .expect("invalidate while the read is in flight");
+    fake.release.notify_one();
+    let stale = reader.await.expect("reader task").expect("stale read");
+    assert_eq!(stale.fingerprint.as_deref(), Some("old-fingerprint"));
+
+    let next = shard_facts::model_facts_cached(&db, &cache, path)
+        .await
+        .expect("post-invalidate read");
+    assert_eq!(
+        next.fingerprint.as_deref(),
+        Some("new-fingerprint"),
+        "the pre-invalidate store must not land"
+    );
+    assert_eq!(
+        fake.queries.load(Ordering::SeqCst),
+        2,
+        "the post-invalidate read must query the shard again"
+    );
+}
+
+/// F3 — the old handle re-caches AFTER the new handle opened and warmed; no
+/// invalidate sits between its read and store, so only the handle guard can
+/// keep the new handle from being served the old entry.
+#[tokio::test]
+async fn test_an_old_handle_cannot_recache_after_the_new_handle_opened() {
+    let path = std::path::Path::new("reopened/shard.db");
+    let cache = shard_facts::ModelFactsCache::default();
+    let reopened_fake = Arc::new(ScriptedFactsDb::new(
+        vec![
+            facts_rows("new-fingerprint", "test-model"),
+            facts_rows("new-fingerprint", "test-model"),
+        ],
+        false,
+    ));
+    let reopened: DbHandle = reopened_fake.clone();
+    assert_eq!(
+        shard_facts::model_facts_cached(&reopened, &cache, path)
+            .await
+            .expect("warm")
+            .fingerprint
+            .as_deref(),
+        Some("new-fingerprint")
+    );
+
+    let old_fake = Arc::new(ScriptedFactsDb::new(
+        vec![facts_rows("old-fingerprint", "test-model")],
+        false,
+    ));
+    let old: DbHandle = old_fake.clone();
+    assert_eq!(
+        shard_facts::model_facts_cached(&old, &cache, path)
+            .await
+            .expect("old read")
+            .fingerprint
+            .as_deref(),
+        Some("old-fingerprint")
+    );
+
+    assert_eq!(
+        shard_facts::model_facts_cached(&reopened, &cache, path)
+            .await
+            .expect("reopened read")
+            .fingerprint
+            .as_deref(),
+        Some("new-fingerprint"),
+        "a path-keyed cache serves the old handle's entry"
+    );
+    assert_eq!(reopened_fake.queries.load(Ordering::SeqCst), 2);
+}
+
 /// AC6b (withdrawn `testable:no`) — the ModelEquality fallback emits exactly
 /// one structured warn, with fields only (no path, content or session id).
+///
+/// The capture is process-wide: installed once per test binary, the interest
+/// cache rebuilt after the install (and once more immediately before the
+/// seam), and events filtered by the emitting thread. A thread-local
+/// `set_default` would race the callsite's first registration in the parallel
+/// workspace schedule and can leave the callsite `Interest::never` (zero
+/// events); see `tests/common/capture.rs`.
 #[tokio::test]
 async fn test_the_equal_model_fallback_emits_a_structured_warn() {
-    use common::capture::WarnCapture;
-
+    let capture = common::capture::install();
     let (config, _connections, manager, shard) = write_fixture("warn-model-equality", true).await;
     clear_fingerprint(&manager, &shard).await;
-    let capture = WarnCapture::default();
-    let guard = tracing::subscriber::set_default(capture.clone());
+    capture.clear_current_thread();
+    tracing::callsite::rebuild_interest_cache();
     let written = manager
         .get_write_shard(Scope::Project, HASH)
         .await
         .expect("an equal model still writes");
-    drop(guard);
     assert_eq!(written.vector_count, 0);
 
     let events = capture.events();

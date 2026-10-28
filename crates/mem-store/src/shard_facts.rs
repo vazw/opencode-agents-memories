@@ -1,7 +1,9 @@
 //! Shard facts (W2): the per-shard `shard_stats` row and the embedding
 //! identity fingerprint stored in `shard_metadata`.
 //!
-//! W2 **records**; W3 verifies. Nothing here is consulted by a read path.
+//! W2 **records**; W3 verifies: `prepare_write_shard` refuses the write and
+//! `ProductionMemory::verify_shards` refuses the read, both through
+//! [`model_facts_cached`].
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -409,13 +411,30 @@ pub async fn read_model_facts(db: &dyn Db) -> Result<ModelFacts, StoreError> {
 /// file's facts, even if a slow reader re-caches after the close (its entry
 /// carries the old handle and misses on the new one).
 ///
+/// The epoch closes the second half of the same race: a miss captures the
+/// epoch before its `SELECT` and stores only if no invalidate/clear
+/// intervened, so a reader that began before a writer cannot repopulate the
+/// cache with the pre-write facts after the writer's invalidation.
+///
 /// **Writer rule:** any in-process writer of `shard_metadata` MUST call
 /// [`ModelFactsCache::invalidate`] for its path after commit. The cache is
 /// per open connection and cannot observe a write made through another
 /// handle. The full writer set is audited in ADR-0018 D-18-13.
 #[derive(Default)]
 pub struct ModelFactsCache {
-    entries: Mutex<HashMap<PathBuf, CachedModelFacts>>,
+    state: Mutex<CacheState>,
+}
+
+#[derive(Default)]
+struct CacheState {
+    /// Bumped by every `invalidate`/`clear`. A miss captures it before its
+    /// `SELECT` and stores only if it is unchanged, so a reader that straddles
+    /// a writer's invalidation cannot re-add the pre-write facts. Process-wide
+    /// (not per path), deliberately: the per-path condition is implied, and a
+    /// per-path counter keyed like `entries` would reset on removal and re-open
+    /// the window.
+    epoch: u64,
+    entries: HashMap<PathBuf, CachedModelFacts>,
 }
 
 struct CachedModelFacts {
@@ -431,67 +450,93 @@ fn cache_lock_poisoned(operation: &'static str) -> StoreError {
 }
 
 impl ModelFactsCache {
-    fn lookup(&self, db_path: &Path, db: &DbHandle) -> Result<Option<ModelFacts>, StoreError> {
-        let entries = self
-            .entries
+    fn lookup(
+        &self,
+        db_path: &Path,
+        db: &DbHandle,
+    ) -> Result<(u64, Option<ModelFacts>), StoreError> {
+        let state = self
+            .state
             .lock()
             .map_err(|_| cache_lock_poisoned("lookup"))?;
-        Ok(entries.get(db_path).and_then(|entry| {
+        let hit = state.entries.get(db_path).and_then(|entry| {
             entry
                 .handle
                 .upgrade()
                 .filter(|handle| Arc::ptr_eq(handle, db))
                 .map(|_| entry.facts.clone())
-        }))
+        });
+        Ok((state.epoch, hit))
     }
 
-    fn store(&self, db_path: &Path, db: &DbHandle, facts: ModelFacts) -> Result<(), StoreError> {
-        self.entries
+    /// Inserts only if no invalidate/clear intervened since `epoch` was
+    /// captured; the check and the insert share the lock (no TOCTOU).
+    fn store_if_unchanged(
+        &self,
+        db_path: &Path,
+        db: &DbHandle,
+        facts: ModelFacts,
+        epoch: u64,
+    ) -> Result<(), StoreError> {
+        let mut state = self
+            .state
             .lock()
-            .map_err(|_| cache_lock_poisoned("store"))?
-            .insert(
-                db_path.to_path_buf(),
-                CachedModelFacts {
-                    handle: Arc::downgrade(db),
-                    facts,
-                },
-            );
+            .map_err(|_| cache_lock_poisoned("store"))?;
+        if state.epoch != epoch {
+            return Ok(());
+        }
+        state.entries.insert(
+            db_path.to_path_buf(),
+            CachedModelFacts {
+                handle: Arc::downgrade(db),
+                facts,
+            },
+        );
         Ok(())
     }
 
     /// Every in-process writer of `shard_metadata` MUST call this after
-    /// commit (see the type's writer rule).
+    /// commit (see the type's writer rule). The epoch bump is in the same
+    /// critical section as the removal.
     pub fn invalidate(&self, db_path: &Path) -> Result<(), StoreError> {
-        self.entries
+        let mut state = self
+            .state
             .lock()
-            .map_err(|_| cache_lock_poisoned("invalidate"))?
-            .remove(db_path);
+            .map_err(|_| cache_lock_poisoned("invalidate"))?;
+        state.epoch = state.epoch.wrapping_add(1);
+        state.entries.remove(db_path);
         Ok(())
     }
 
-    /// `close_all` / `ShardManager::reset`.
+    /// `close_all` / `ShardManager::reset`. The epoch bump is in the same
+    /// critical section as the clear.
     pub fn clear(&self) -> Result<(), StoreError> {
-        self.entries
+        let mut state = self
+            .state
             .lock()
-            .map_err(|_| cache_lock_poisoned("clear"))?
-            .clear();
+            .map_err(|_| cache_lock_poisoned("clear"))?;
+        state.epoch = state.epoch.wrapping_add(1);
+        state.entries.clear();
         Ok(())
     }
 }
 
 /// The read the authority uses: a hit for the same live connection, else ONE
-/// `SELECT_MODEL_FACTS` that is then cached. Never holds the cache lock across
-/// the await (the miss drops the guard first).
+/// `SELECT_MODEL_FACTS` that is cached only if no invalidate/clear intervened.
+/// Never holds the cache lock across the await (the miss drops the guard
+/// first). A skipped store is a perf-only outcome: returning the snapshot the
+/// `SELECT` produced is always correct.
 pub async fn model_facts_cached(
     db: &DbHandle,
     cache: &ModelFactsCache,
     db_path: &Path,
 ) -> Result<ModelFacts, StoreError> {
-    if let Some(facts) = cache.lookup(db_path, db)? {
+    let (epoch, hit) = cache.lookup(db_path, db)?;
+    if let Some(facts) = hit {
         return Ok(facts);
     }
     let facts = read_model_facts(db.as_ref()).await?;
-    cache.store(db_path, db, facts.clone())?;
+    cache.store_if_unchanged(db_path, db, facts.clone(), epoch)?;
     Ok(facts)
 }
 
