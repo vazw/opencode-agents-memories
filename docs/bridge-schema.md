@@ -51,7 +51,7 @@ The wrapper's **first** message after spawn is `hello`. No runtime method may pr
 ```
 
 ```json
-{"id":"hello-1","jsonrpc":"2.0","result":{"capabilities":{"fire_and_forget_capture":true,"standalone":true,"web":true},"engine_version":"0.1.0","methods":["capture","inject","recall","health","shutdown"],"protocol":"1.0.0"}}
+{"id":"hello-1","jsonrpc":"2.0","result":{"capabilities":{"compaction":true,"fire_and_forget_capture":true,"standalone":true,"web":true},"engine_version":"0.1.0","methods":["capture","inject","recall","health","shutdown"],"protocol":"1.0.0"}}
 ```
 
 Protocol version is one semver line owned by ADR-0007; its current value is `1.0.0`.
@@ -63,6 +63,12 @@ The engine is **compatible** iff
 A different major, or a version below the floor, is incompatible: the wrapper MUST NOT call
 any runtime method and degrades per D-38 (warning on stderr + status file; memory disabled,
 plugin still loads). A newer minor is compatible.
+
+The `capabilities` object is additive: each key is `true` exactly when this engine serves that
+behaviour, and a wrapper reads only the keys it knows, ignoring unknown ones. `compaction`
+means the engine's `inject` honours `include.compaction`; an engine that omits the key answers
+the compaction request with the ordinary project chat block, so the wrapper MUST no-op both
+compaction hooks.
 
 `hello` is **not** a runtime method (D-40): it takes no `session_id` and is not counted in
 the five.

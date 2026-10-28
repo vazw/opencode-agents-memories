@@ -137,6 +137,11 @@ impl Default for EngineConfig {
 fn handshake_result(config: &EngineConfig) -> serde_json::Value {
     serde_json::json!({
         "capabilities": {
+            // Issue 68 (D-43): this build's `inject` honours `include.compaction`
+            // (inject.rs:341-347 and :589-591 — the leg renders the session tier
+            // or returns an empty block, never the chat block). A build predating
+            // issue 33 omitted the key; the wrapper then no-ops both hooks.
+            "compaction": true,
             "fire_and_forget_capture": true,
             "standalone": true,
             "web": true,

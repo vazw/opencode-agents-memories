@@ -286,6 +286,8 @@ The protocol version is a single semver line owned by this ADR; its initial valu
 compatible — the engine may add capabilities but MUST NOT remove or change an existing method, parameter or
 error code within a major line.
 
+The example above lists the capabilities of the initial build and is not exhaustive: the object is additive, and issue 68 added `compaction`.
+
 Grounds: the handshake is what turns a version mismatch into a D-38 degradation instead of a stream of
 `-32601`/`-32602` errors from an engine that cannot serve the wrapper; the major-equal + floor rule is the
 smallest rule that admits additive engine upgrades while refusing a breaking one.
