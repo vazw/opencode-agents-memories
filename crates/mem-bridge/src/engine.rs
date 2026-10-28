@@ -166,11 +166,11 @@ pub struct Engine {
     /// Number of internal lifecycle tasks spawned through [`Engine::spawn_tracked`]
     /// and not yet finished (step 10's no-live-tasks oracle reads it).
     live_tasks: Arc<AtomicUsize>,
-    /// The W5.3 runtime services plus the W5.4 one-tool read service. `None`
-    /// is the FIXTURE-only engine (`Engine::new`): `capture`/`inject`/`recall`
-    /// degrade (-32001) and never touch storage; `hello`/`health`/`shutdown`
-    /// are unchanged. The legacy `recall` shape needs no runtime (it reads
-    /// nothing).
+    /// The W5.3 runtime services plus the W5.4 one-tool read service and the
+    /// issue-69 skills service. `None` is the FIXTURE-only engine
+    /// (`Engine::new`): `capture`/`inject`/`recall`/`skills` degrade (-32001)
+    /// and never touch storage; `hello`/`health`/`shutdown` are unchanged. The
+    /// legacy `recall` shape needs no runtime (it reads nothing).
     runtime: Option<Arc<EngineRuntime>>,
 }
 
@@ -271,8 +271,9 @@ impl Engine {
         Response::result(request.id.clone(), handshake_result(&self.config))
     }
 
-    /// The `session_id` data gate shared by every runtime method; returns
-    /// `Some(response)` when the request is rejected (`-32602`).
+    /// The `session_id` data gate shared by every runtime method except
+    /// `skills` (session-free, issue 69); returns `Some(response)` when the
+    /// request is rejected (`-32602`).
     fn check_session_id(&self, request: &Request) -> Option<Response> {
         let value = match request.param("session_id") {
             None | Some(serde_json::Value::Null) => {
