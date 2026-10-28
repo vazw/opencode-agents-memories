@@ -587,10 +587,18 @@ async fn test_an_existing_fingerprint_is_never_overwritten() {
         .expect("seed a foreign fingerprint");
     }
 
-    manager
+    // W3: the write path REFUSES this shard — the seeded fingerprint is
+    // foreign to the configured identity. The test's subject (claim
+    // precedence) is asserted through the W2 primitive below, which keeps its
+    // behaviour; `get_write_shard` now answers the typed refusal.
+    let error = manager
         .get_write_shard(Scope::Project, HASH)
         .await
-        .expect("write shard");
+        .expect_err("a foreign fingerprint refuses the write path");
+    assert!(
+        matches!(error, StoreError::ShardModelMismatch(_)),
+        "got {error:?}"
+    );
     let db = manager.open_shard(&path).await.expect("open the shard");
     let outcome =
         shard_facts::prepare_active_shard(db.as_ref(), DIMS, Some(&identity), "test-model")

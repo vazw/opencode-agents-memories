@@ -952,15 +952,21 @@ impl ShardManager {
                         });
                     }
                     let shard_db = self.open_shard(&shard.db_path).await?;
-                    let outcome = crate::shard_facts::prepare_active_shard(
+                    let outcome = crate::shard_facts::prepare_write_shard(
                         shard_db.as_ref(),
                         self.config.embedding_dimensions,
                         self.embedding_identity.as_ref(),
                         &self.config.embedding_model,
+                        crate::shard_facts::ShardMismatchContext {
+                            shard_id: shard.id,
+                            container_tag_prefix: &self.config.container_tag_prefix,
+                            scope: shard.scope,
+                            scope_hash: &shard.scope_hash,
+                        },
                     )
                     .await?;
                     let shard = self
-                        .sync_shard_vector_count(shard, outcome.vector_count)
+                        .sync_shard_vector_count(shard, outcome.facts.vector_count)
                         .await?;
                     if shard.vector_count >= u64::from(self.config.max_vectors_per_shard) {
                         self.mark_shard_read_only_off(shard.id).await?;
@@ -1030,6 +1036,17 @@ impl ShardManager {
         )
         .await?;
         Ok(())
+    }
+
+    /// W3: the shard's committed `shard_stats` count is the authority; this
+    /// writes it into the registry CACHE.
+    ///
+    /// Reads the value the caller's batch already measured (`SYNC_COUNT_SQL`)
+    /// — it never measures again and never accepts a caller-supplied number.
+    pub async fn adopt_stored_count(&self, db: &dyn Db, shard_id: i64) -> Result<u64, StoreError> {
+        let count = crate::shard_facts::read_stored_count(db).await?;
+        self.set_vector_count(shard_id, count).await?;
+        Ok(count)
     }
 
     /// Upstream `getShardById`.

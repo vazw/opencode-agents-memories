@@ -16,7 +16,7 @@
 
 #![allow(dead_code)]
 
-use crate::db::{Db, DbHandle, Row, Statement, Value};
+use crate::db::{BatchMode, Db, DbHandle, Row, Statement, Value};
 use crate::error::StoreError;
 use crate::vector_utils::{
     distance_to_similarity, escape_like_pattern, parse_session_id_from_metadata,
@@ -675,6 +675,30 @@ pub async fn delete_memory_by_id(db: &dyn Db, memory_id: &str) -> Result<(), Sto
     )
     .await?;
     Ok(())
+}
+
+/// The absolute group delete (W3): N deletes and ONE statement-measured
+/// `COUNT(*)` in the SAME `BatchMode::Write` transaction, returning the value
+/// read back from `shard_stats`.
+///
+/// `ids` empty is a read-only no-op: it returns the stored count (0 when no
+/// `shard_stats` row exists) and changes nothing.
+///
+/// Unbounded in batch size by contract; issue 72 must chunk large id sets.
+pub async fn delete_memories(db: &dyn Db, ids: &[String]) -> Result<u64, StoreError> {
+    if ids.is_empty() {
+        return crate::shard_facts::read_stored_count(db).await;
+    }
+    let mut statements = Vec::with_capacity(ids.len() + 1);
+    for id in ids {
+        statements.push(Statement::new(
+            crate::sql::DELETE_MEMORY_BY_ID,
+            vec![Value::Text(id.clone())],
+        ));
+    }
+    statements.push(crate::shard_facts::sync_count_statement());
+    db.batch(statements, BatchMode::Write).await?;
+    crate::shard_facts::read_stored_count(db).await
 }
 
 /// Upstream `listMemories` (L359–381): an empty tag selects every row, a

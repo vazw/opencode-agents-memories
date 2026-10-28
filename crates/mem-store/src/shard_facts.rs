@@ -4,9 +4,11 @@
 //! W2 **records**; W3 verifies. Nothing here is consulted by a read path.
 
 use crate::db::{Db, Statement, Value, query_one};
-use crate::error::StoreError;
+use crate::error::{ShardModelMismatch, ShardModelMismatchEntry, StoreError};
 use crate::schema_migrations::{MEMORY_SHARD_MAX_KNOWN, MigrationOptions, apply_schema_migrations};
 use crate::sql;
+use mem_core::embedding::EmbeddingIdentity;
+use mem_core::scope::Scope;
 
 /// The one conditional claim statement (AC1).
 ///
@@ -40,6 +42,25 @@ pub const SYNC_COUNT_SQL: &str = "INSERT INTO shard_stats (id, vector_count) SEL
 
 /// The count read-back (after [`SYNC_COUNT_SQL`]).
 pub const SELECT_VECTOR_COUNT: &str = "SELECT vector_count FROM shard_stats WHERE id = 1";
+
+/// The absolute count as a batch statement (no binds — the statement measures
+/// `COUNT(*)` itself, so no caller can pass a count the table contradicts).
+pub fn sync_count_statement() -> Statement {
+    Statement::new(SYNC_COUNT_SQL, Vec::new())
+}
+
+/// Reads the committed `shard_stats` value (`0` when the row is absent).
+///
+/// A read-back only, never a fallback authority: the caller has already
+/// measured `COUNT(*)` in the statement that wrote the row.
+pub async fn read_stored_count(db: &dyn Db) -> Result<u64, StoreError> {
+    let row = query_one(db, SELECT_VECTOR_COUNT, Vec::new()).await?;
+    let count = row
+        .and_then(|row| row.i64("vector_count"))
+        .unwrap_or(0)
+        .max(0);
+    Ok(u64::try_from(count).unwrap_or(u64::MAX))
+}
 
 /// The fingerprint read (before any claim attempt).
 pub const SELECT_FINGERPRINT: &str =
@@ -99,12 +120,7 @@ pub async fn read_count(db: &dyn Db) -> Result<u64, StoreError> {
 /// the value read back from the table (never a caller-supplied number).
 pub async fn sync_count(db: &dyn Db) -> Result<u64, StoreError> {
     db.execute(SYNC_COUNT_SQL, Vec::new()).await?;
-    let row = query_one(db, SELECT_VECTOR_COUNT, Vec::new()).await?;
-    let count = row
-        .and_then(|row| row.i64("vector_count"))
-        .unwrap_or(0)
-        .max(0);
-    Ok(u64::try_from(count).unwrap_or(u64::MAX))
+    read_stored_count(db).await
 }
 
 /// Reads the stored fingerprint (`None` when the key is absent).
@@ -167,31 +183,76 @@ pub fn claimable_fingerprint(
     }
 }
 
+/// The registry context a write refusal names. The facts live in the shard
+/// DB; the registry id and the remedy's scope triple do not.
+#[derive(Debug, Clone, Copy)]
+pub struct ShardMismatchContext<'a> {
+    /// The registry row id of the shard being written.
+    pub shard_id: i64,
+    /// The configured container-tag prefix (`config.container_tag_prefix`).
+    pub container_tag_prefix: &'a str,
+    /// The scope the shard belongs to.
+    pub scope: Scope,
+    /// The scope hash the shard belongs to.
+    pub scope_hash: &'a str,
+}
+
+/// The outcome of the write-path seam: the judgement plus W2's facts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShardWriteFacts {
+    /// What the stored identity proved (or failed to prove).
+    pub authority: ModelAuthority,
+    /// The W2 fingerprint/count outcome.
+    pub facts: ShardFactsOutcome,
+}
+
 /// The composed write-path shard-facts seam.
 ///
 /// Order is load-bearing: the idempotent v1..v3 migration first (`ensure_v3`),
-/// then the fingerprint READ (before any claim attempt, so a present key on a
-/// non-empty shard is `AlreadyPresent`, not `WithheldNonEmpty`), then the
-/// measured count, then the precedence:
+/// then ONE identity-facts read, then the judgement — a positive mismatch
+/// refuses **before** the count body runs, so the shard is never mutated by a
+/// refused write. W2's claim/count body then runs with the facts already read
+/// (no second identity statement).
 ///
-/// 1. key present -> `AlreadyPresent`, even on a non-empty shard;
-/// 2. key absent + rows > 0 -> `WithheldNonEmpty { rows }` (provenance is
-///    unprovable; a value written here would be a lie);
-/// 3. key absent + rows = 0 -> claim; the claim's `changes = 0` is only a lost
-///    race and is reported as `AlreadyPresent`.
-///
-/// The measured count is always returned, whatever the fingerprint decision
-/// was.
-pub async fn prepare_active_shard(
+/// Concurrent writers cannot straddle the pair: the read is one statement and
+/// the claim is conditional (`INSERT OR IGNORE`), so a present key always
+/// wins.
+pub async fn prepare_write_shard(
     db: &dyn Db,
     dimensions: u32,
-    identity: Option<&mem_core::embedding::EmbeddingIdentity>,
+    identity: Option<&EmbeddingIdentity>,
     model: &str,
-) -> Result<ShardFactsOutcome, StoreError> {
+    mismatch: ShardMismatchContext<'_>,
+) -> Result<ShardWriteFacts, StoreError> {
+    prepare_shard_facts(db, dimensions, identity, model, Some(mismatch)).await
+}
+
+/// The single inner body shared by [`prepare_active_shard`] and
+/// [`prepare_write_shard`].
+async fn prepare_shard_facts(
+    db: &dyn Db,
+    dimensions: u32,
+    identity: Option<&EmbeddingIdentity>,
+    model: &str,
+    mismatch: Option<ShardMismatchContext<'_>>,
+) -> Result<ShardWriteFacts, StoreError> {
     ensure_v3(db, dimensions).await?;
-    let existing = read_fingerprint(db).await?;
+    let facts = read_model_facts(db).await?;
+    let authority = judge_model_facts(&facts, identity, model);
+    if let (ModelAuthority::Mismatch { stored_model }, Some(context)) = (&authority, mismatch) {
+        return Err(model_mismatch_error(
+            vec![ShardModelMismatchEntry {
+                id: context.shard_id,
+                stored_model: stored_model.clone(),
+                expected: model.to_string(),
+            }],
+            context.container_tag_prefix,
+            context.scope,
+            context.scope_hash,
+        ));
+    }
     let vector_count = sync_count(db).await?;
-    let step = if existing.is_some() {
+    let step = if facts.fingerprint.is_some() {
         FingerprintStep::AlreadyPresent
     } else if vector_count > 0 {
         tracing::info!(
@@ -206,5 +267,158 @@ pub async fn prepare_active_shard(
             Err(step) => step,
         }
     };
-    Ok(ShardFactsOutcome { step, vector_count })
+    Ok(ShardWriteFacts {
+        authority,
+        facts: ShardFactsOutcome { step, vector_count },
+    })
+}
+
+/// The W2 low-level seam: judges the facts but never refuses (it has no
+/// registry id to name), so the claim/count behaviour W2 pinned is unchanged.
+///
+/// The write refusal lives in [`prepare_write_shard`].
+pub async fn prepare_active_shard(
+    db: &dyn Db,
+    dimensions: u32,
+    identity: Option<&EmbeddingIdentity>,
+    model: &str,
+) -> Result<ShardFactsOutcome, StoreError> {
+    prepare_shard_facts(db, dimensions, identity, model, None)
+        .await
+        .map(|write| write.facts)
+}
+
+// ---------------------------------------------------------------------------
+// W3 — the model authority
+// ---------------------------------------------------------------------------
+
+/// The one identity-facts read (W3): both stored identity keys in a single
+/// statement, so a concurrent writer cannot straddle the pair.
+pub const SELECT_MODEL_FACTS: &str = "SELECT key, value FROM shard_metadata WHERE key IN ('embedding_fingerprint','embedding_model')";
+
+/// The operator command that re-embeds one scope. The single source of the
+/// remedy: the store error, the HTTP body and the operator log all read it.
+pub const REEMBED_SCOPE_COMMAND: &str = "opencode-agents-memory --mode=reembed-scope --scope";
+
+/// The two stored identity facts, read together.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ModelFacts {
+    /// The stored `embedding_fingerprint`, when the shard proves its identity.
+    pub fingerprint: Option<String>,
+    /// The stored `embedding_model`, when the shard names one.
+    pub stored_model: Option<String>,
+}
+
+/// The pure judgement over [`ModelFacts`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelAuthority {
+    /// The stored fingerprint equals the configured identity's fingerprint:
+    /// the strongest proof a shard can carry.
+    Fingerprint,
+    /// No fingerprint, no configured identity, and the stored model is absent
+    /// or equal to the configured one — a warning, not proof (R-1).
+    ModelEqualityNoIdentity { stored_model: Option<String> },
+    /// No fingerprint, and the stored model is absent or equal to the
+    /// configured one — legacy, warned about, allowed (R-1).
+    ModelEquality { stored_model: Option<String> },
+    /// Positive evidence that the shard belongs to another model.
+    Mismatch { stored_model: Option<String> },
+}
+
+/// Reads both identity facts in ONE statement (never two round trips: the pair
+/// could straddle a concurrent write).
+pub async fn read_model_facts(db: &dyn Db) -> Result<ModelFacts, StoreError> {
+    let rows = db.query(SELECT_MODEL_FACTS, Vec::new()).await?;
+    let mut facts = ModelFacts::default();
+    for row in rows {
+        let Some(key) = row.text("key") else {
+            continue;
+        };
+        let value = row.text("value");
+        match key.as_str() {
+            "embedding_fingerprint" => facts.fingerprint = value,
+            "embedding_model" => facts.stored_model = value,
+            _ => {}
+        }
+    }
+    Ok(facts)
+}
+
+/// The pure, total judgement of a shard's stored identity.
+///
+/// The fingerprint wins when one is present and the build carries an
+/// identity; a build without one still compares the MODEL (it cannot check a
+/// fingerprint, but it is not blind to a named foreign model). An absent
+/// fingerprint falls back to model equality — a warning, never proof (R-1).
+pub fn judge_model_facts(
+    facts: &ModelFacts,
+    identity: Option<&EmbeddingIdentity>,
+    configured_model: &str,
+) -> ModelAuthority {
+    if let Some(stored_fingerprint) = facts.fingerprint.as_deref() {
+        if let Some(identity) = identity {
+            let matches = identity
+                .fingerprint()
+                .is_ok_and(|configured| configured == stored_fingerprint);
+            return if matches {
+                ModelAuthority::Fingerprint
+            } else {
+                ModelAuthority::Mismatch {
+                    stored_model: facts.stored_model.clone(),
+                }
+            };
+        }
+        return match facts.stored_model.as_deref() {
+            Some(stored) if stored != configured_model => ModelAuthority::Mismatch {
+                stored_model: facts.stored_model.clone(),
+            },
+            _ => ModelAuthority::ModelEqualityNoIdentity {
+                stored_model: facts.stored_model.clone(),
+            },
+        };
+    }
+    match facts.stored_model.as_deref() {
+        Some(stored) if stored != configured_model => ModelAuthority::Mismatch {
+            stored_model: facts.stored_model.clone(),
+        },
+        stored => ModelAuthority::ModelEquality {
+            stored_model: stored.map(str::to_string),
+        },
+    }
+}
+
+/// The operator remedy for one scope: the exact command that re-embeds it.
+pub fn reembed_remedy(container_tag_prefix: &str, scope: Scope, scope_hash: &str) -> String {
+    format!(
+        "{REEMBED_SCOPE_COMMAND} {container_tag_prefix}_{}_{scope_hash}",
+        scope.as_str()
+    )
+}
+
+/// The refusal payload naming every mismatched shard of one scope.
+pub fn model_mismatch(
+    entries: Vec<ShardModelMismatchEntry>,
+    container_tag_prefix: &str,
+    scope: Scope,
+    scope_hash: &str,
+) -> ShardModelMismatch {
+    ShardModelMismatch {
+        shards: entries,
+        remedy: reembed_remedy(container_tag_prefix, scope, scope_hash),
+    }
+}
+
+/// The store-layer refusal for the write path.
+pub fn model_mismatch_error(
+    entries: Vec<ShardModelMismatchEntry>,
+    container_tag_prefix: &str,
+    scope: Scope,
+    scope_hash: &str,
+) -> StoreError {
+    StoreError::ShardModelMismatch(Box::new(model_mismatch(
+        entries,
+        container_tag_prefix,
+        scope,
+        scope_hash,
+    )))
 }

@@ -13,6 +13,60 @@
 
 use std::path::{Path, PathBuf};
 
+/// One shard whose stored embedding identity disagrees with the configured
+/// one (W3's model authority).
+///
+/// Carries ids, model names and the expected model only: never content and
+/// never a path (the refusal is answered on the HTTP surface).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShardModelMismatchEntry {
+    /// The registry row id of the mismatched shard.
+    pub id: i64,
+    /// The shard's stored `embedding_model`, when it has one.
+    pub stored_model: Option<String>,
+    /// The configured model the shard had to prove.
+    pub expected: String,
+}
+
+/// The model-authority refusal: every mismatched shard of one scope, plus the
+/// one operator remedy that re-embeds it.
+///
+/// `remedy` is built from [`crate::shard_facts::REEMBED_SCOPE_COMMAND`] by
+/// [`crate::shard_facts::model_mismatch`], so the store error, the HTTP body
+/// and the operator log cannot diverge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShardModelMismatch {
+    /// Every mismatched shard of the request's scope, collected before the
+    /// refusal is raised.
+    pub shards: Vec<ShardModelMismatchEntry>,
+    /// The exact command an operator runs to re-embed the scope.
+    pub remedy: String,
+}
+
+impl std::fmt::Display for ShardModelMismatch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("embedding model mismatch: ")?;
+        for (index, shard) in self.shards.iter().enumerate() {
+            if index > 0 {
+                formatter.write_str("; ")?;
+            }
+            match shard.stored_model.as_deref() {
+                Some(model) => write!(
+                    formatter,
+                    "shard {} (stored model '{model}', expected '{}')",
+                    shard.id, shard.expected
+                )?,
+                None => write!(
+                    formatter,
+                    "shard {} (stored model none, expected '{}')",
+                    shard.id, shard.expected
+                )?,
+            }
+        }
+        write!(formatter, "; re-embed the scope: {}", self.remedy)
+    }
+}
+
 /// The mem-store operation error surface.
 #[derive(Debug, Clone, thiserror::Error)]
 #[non_exhaustive]
@@ -203,6 +257,15 @@ pub enum StoreError {
         db_path: PathBuf,
         mode: &'static str,
     },
+    /// A shard's stored embedding identity disagrees with the configured one
+    /// (W3): every vector-producing write is refused before it reaches the
+    /// shard, never appended into a foreign latent space.
+    ///
+    /// Appended last and boxed: the mismatch list is unbounded and
+    /// `StoreError`'s 112-byte high-water mark is a budget tripwire, not the
+    /// enforcement.
+    #[error("{0}")]
+    ShardModelMismatch(Box<ShardModelMismatch>),
 }
 
 /// The value a failing schema migration hands its caller: the runner never
