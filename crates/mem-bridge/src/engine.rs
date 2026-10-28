@@ -1131,10 +1131,14 @@ pub async fn run_in_runtime(
 fn acquire_outcome(
     storage_root: &std::path::Path,
     probe: Arc<dyn mem_store::platform::ProcessProbe>,
-) -> Option<Arc<mem_store::engine_lock::EngineLock>> {
+) -> Arc<mem_store::delete_guard::ExclusiveRoot> {
     use mem_store::engine_lock as el;
     match el::acquire_engine_lock(storage_root, probe) {
-        Ok(el::EngineLockOutcome::Acquired(lock)) => Some(lock),
+        // The proof (not the raw lock) is what the process carries: every
+        // store derives its `Option<&ExclusiveRoot>` from this registration.
+        Ok(el::EngineLockOutcome::Acquired(lock)) => {
+            Arc::new(mem_store::delete_guard::ExclusiveRoot::new(lock))
+        }
         Ok(el::EngineLockOutcome::Lost { holder_pid }) => {
             structured_stderr(
                 "lock_lost",

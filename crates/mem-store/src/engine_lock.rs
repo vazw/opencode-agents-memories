@@ -391,6 +391,92 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// Acquires over a free root (test helper; panics on `Lost`).
+    #[cfg(target_os = "linux")]
+    fn acquire(root: &Path) -> Arc<EngineLock> {
+        match acquire_engine_lock(root, Arc::new(crate::platform::SystemProcessProbe))
+            .expect("acquire over a free root")
+        {
+            EngineLockOutcome::Acquired(lock) => lock,
+            EngineLockOutcome::Lost { holder_pid } => {
+                panic!("a free temp root must be acquired, holder pid {holder_pid}")
+            }
+        }
+    }
+
+    /// 46.2: the registry publishes the root proof while the lock lives and
+    /// withdraws it on the last drop; a different root is never matched.
+    ///
+    /// Inverted world: skip `register` → the first `current` is `None`; match
+    /// roots by prefix → the `other` assertion fails.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_engine_lock_publishes_and_withdraws_the_root_proof() {
+        let root = temp_dir("registry-publish");
+        let other = temp_dir("registry-publish-other");
+        let lock = acquire(&root);
+
+        assert!(
+            crate::delete_guard::ExclusiveRoot::current(&root).is_some(),
+            "a live lock must be published"
+        );
+        assert!(
+            crate::delete_guard::ExclusiveRoot::current(&other).is_none(),
+            "the lookup matches the root exactly"
+        );
+
+        drop(lock);
+        assert!(
+            crate::delete_guard::ExclusiveRoot::current(&root).is_none(),
+            "the last drop withdraws the proof"
+        );
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&other);
+    }
+
+    /// 46.2: a drop after a manual release must not remove a **newer**
+    /// registration for the same root.
+    ///
+    /// A releases (idempotent flag), B acquires and registers, A drops: the
+    /// proof for B stays visible and B's lock file survives. A path-keyed
+    /// deregistration would erase B; a non-idempotent `release` would unlink
+    /// B's file.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_engine_lock_drop_does_not_remove_a_newer_registration() {
+        let root = temp_dir("registry-newer");
+        let a = acquire(&root);
+        a.release();
+        assert!(
+            !engine_lock_path(&root).exists(),
+            "A's public early release removes its own file"
+        );
+
+        let b = acquire(&root);
+        assert!(
+            engine_lock_path(&root).exists(),
+            "B now owns the root's lock file"
+        );
+
+        drop(a);
+        assert!(
+            crate::delete_guard::ExclusiveRoot::current(&root).is_some(),
+            "A's drop must not deregister B's live entry"
+        );
+        assert!(
+            engine_lock_path(&root).exists(),
+            "A's drop must not unlink B's lock file"
+        );
+
+        drop(b);
+        assert!(
+            crate::delete_guard::ExclusiveRoot::current(&root).is_none(),
+            "B's drop withdraws the proof"
+        );
+        assert!(!engine_lock_path(&root).exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
     /// Sanity: the operation-lock constant is not the engine lock's file, so a
     /// reclaimed engine lock never touches another session's operation lock.
     ///
