@@ -11,7 +11,7 @@ The final gate: a coverage matrix for **all 110 upstream `*.test.ts` files** wit
 
 ## Acceptance criteria
 
-- [ ] Parity matrix document — **moved to issue 71** (23 missing rows; 87/110 today).
+- [ ] Parity matrix document — **moved to issue 71** (matrix completed by issue 71: 110/110; 15 rows were still missing at r1).
 - [ ] Drop-in rehearsal transcript: same project dir, TS removed, Rust installed → memories intact, UI functional, capture/injection working.
 - [ ] §0b D3 hatch closed or expressly reconfirmed as deferred.
 
