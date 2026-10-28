@@ -273,3 +273,30 @@ option 2 is ruled; issue 43 decisions 1–9.
   recovery paths (`migration_service.rs` currently takes only the operation lock). G1 (the self-holder write
   loss) runs first in the wave; G2 and its inversion arm follow. The `.tshm` probe stays unimplemented; issue
   45's O3 is not re-opened.
+
+## Wave r5 measurements (2026-10-28)
+
+**G1 — self-holder write loss (pre-fix, MEASURED).** A real v1 shard kept open through `DbHandle`; a
+failing v2 migration with `db_path: Some(..)`; then a write through the old handle; reopen. Literal
+observation (`cargo test -p mem-store --test sidecar_deletion_contract -- --exact
+test_g1_self_holder_write_loss_is_silent --nocapture`):
+
+```text
+[G1 OBSERVED] write_error=none user_version_after_reopen=1 row_ids_after_reopen=["row1"] restored_inode=2082964
+```
+
+The write is acknowledged and silently lost; the path is the backup's inode. The premise holds. After the
+fix the replacement test reports the inversion: `[G1-INVERSION] row_ids_after_reopen=["row1", "row2"]
+inode_unchanged=true`.
+
+**G2 — `.tshm` split under a live multiprocess holder (MEASURED).** Child process (this test binary
+re-executed) holds a multiprocess handle; the parent raw-unlinks the database and all three sidecars, the
+child writes again, the next opener creates a new `-tshm`. Literal observation:
+
+```text
+[G2] probe under a live multiprocess child = Free
+[G2] TSHM_INO before=34:2085028 (len 86016) AFTER=ok TSHM_INO after=34:2085032 (len 86016)
+```
+
+**R1 resolved:** the probe cannot see a foreign multiprocess holder (`Free`), so exclusivity is the engine
+lock plus the absence of a legacy holder — the residual stands as written.

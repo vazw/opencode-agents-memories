@@ -79,6 +79,7 @@ async fn test_preserves_legacy_prompts_while_adding_newer_columns() {
             db_path: Some(config.storage_path.join("user-prompts.db")),
             label: "test",
         },
+        Some(common::exclusive_root(&config.storage_path).as_ref()),
     )
     .await
     .expect("baseline applies");

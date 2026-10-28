@@ -66,14 +66,8 @@ fn pre_v2_row(id: &str, content: &str) -> Vec<Value> {
     ]
 }
 
-/// Seeds a real v1 shard through an open handle and returns that handle plus
-/// the database path. The handle stays open on purpose: it is the pre-fix
-/// self-holder.
-async fn seed_open_v1(
-    config: &mem_store::config::StoreConfig,
-    file: &str,
-) -> (mem_store::db::DbHandle, PathBuf) {
-    let db = common::open_real_db(config, file).await.expect("open");
+/// Seeds the v1 schema + one row through an already-open handle.
+async fn seed_v1(db: &dyn mem_store::db::Db) {
     let v1 = &memory_shard_migrations(2)[0];
     db.batch(v1.statements.clone(), BatchMode::Write)
         .await
@@ -84,7 +78,6 @@ async fn seed_open_v1(
     db.execute(PRE_V2_INSERT, pre_v2_row("row1", "keep"))
         .await
         .expect("seed row");
-    (db, config.storage_path.join(file))
 }
 
 fn inode(path: &Path) -> u64 {
@@ -92,100 +85,295 @@ fn inode(path: &Path) -> u64 {
     std::fs::metadata(path).expect("stat").ino()
 }
 
-/// G1 — the pre-fix self-holder write loss is silent.
+/// The four files a refusal must leave byte-identical (`None` = absent).
+fn file_snapshot(db_path: &Path) -> Vec<(&'static str, Option<Vec<u8>>)> {
+    ["", "-wal", "-shm", "-tshm"]
+        .into_iter()
+        .map(|suffix| (suffix, std::fs::read(sidecar(db_path, suffix)).ok()))
+        .collect()
+}
+
+async fn user_version(db: &dyn mem_store::db::Db) -> i64 {
+    mem_store::db::query_one(db, sql::PRAGMA_USER_VERSION, Vec::new())
+        .await
+        .expect("version probe")
+        .and_then(|row| row.i64("user_version"))
+        .unwrap_or(-1)
+}
+
+/// 46.4 — the runner returns the pending; it does not unlink the file it holds.
 ///
-/// Sequence: a real v1 shard is open through `db`; `apply_schema_migrations`
-/// takes a backup, fails v2, then unlinks the live database and renames the
-/// backup over its path. A write through the still-open `db` afterwards is
-/// acknowledged but lands in the unlinked inode; the reopened path is the
-/// backup's, so the write is invisible.
+/// This test **replaces** the Step-1 measurement
+/// `test_g1_self_holder_write_loss_is_silent`, whose pre-fix observation was:
 ///
-/// **Stop-and-branch measurement:** if the write is visible on reopen, the
-/// premise is refuted and Steps 3–9 must not run.
+/// ```text
+/// [G1 OBSERVED] write_error=none user_version_after_reopen=1 row_ids_after_reopen=["row1"] restored_inode=2082964
+/// ```
+///
+/// After the fix the pending is returned instead: the main `db_path` keeps its
+/// inode (nothing was unlinked; deliberately **no** probe-detection claim, R2),
+/// and a write through the still-open handle is visible on reopen — the exact
+/// inversion of the lost write above.
 #[cfg(unix)]
 #[tokio::test]
-async fn test_g1_self_holder_write_loss_is_silent() {
-    let config = common::store_config("g1-self-holder");
-    let (db, db_path) = seed_open_v1(&config, "shard.db").await;
-    let original_inode = inode(&db_path);
+async fn test_self_holder_restore_is_pending_and_the_runner_does_not_unlink() {
+    let config = common::store_config("self-holder-pending");
+    let (_config, connections, _shards) = common::real_components(config.clone()).await;
+    let db_path = config.storage_path.join("shard.db");
+    let db = connections
+        .get_connection(&db_path)
+        .await
+        .expect("open through the manager");
+    seed_v1(db.as_ref()).await;
+    let inode_before = inode(&db_path);
     let options = MigrationOptions {
         db_path: Some(db_path.clone()),
         label: "test",
     };
+    let proof = common::exclusive_root(&config.storage_path);
 
     let error = apply_schema_migrations(
         db.as_ref(),
         &[migration(2, "SELECTX certainly not sql")],
         &options,
+        Some(&proof),
     )
     .await
-    .expect_err("the failing v2 migration must re-raise");
-    assert!(
-        !error.to_string().is_empty(),
-        "the original failure is surfaced: {error}"
-    );
-
-    // The restore unlinked the live file and renamed the backup over its path,
-    // consuming the `.bak`: the path now names a different inode — the backup.
-    let restored_inode = inode(&db_path);
-    let leftovers: Vec<PathBuf> = std::fs::read_dir(&config.storage_path)
-        .expect("storage dir")
-        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| path.to_string_lossy().ends_with(".bak"))
-        .collect();
-    assert!(
-        leftovers.is_empty(),
-        "the restore consumes the backup it renames into place: {leftovers:?}"
-    );
-    assert_ne!(
-        original_inode, restored_inode,
-        "the database path must name the backup's inode after the restore"
-    );
-
-    // The write through the old handle: acknowledged (or an error we record),
-    // never reaching the restored file.
-    let write = db
-        .execute(PRE_V2_INSERT, pre_v2_row("row2", "lost-write"))
-        .await;
-    let write_error = match &write {
-        Ok(_) => "none".to_string(),
-        Err(error) => error.to_string(),
+    .expect_err("the failing v2 migration must return the pending");
+    let pending = match error {
+        StoreError::MigrationRestorePending(pending) => pending,
+        other => panic!("expected MigrationRestorePending, got {other:?}"),
     };
+    assert!(
+        pending.backup_path().exists(),
+        "the backup must be kept until the caller settles"
+    );
+    assert_eq!(
+        inode(&db_path),
+        inode_before,
+        "the runner must not unlink or replace the file it holds open"
+    );
 
+    // The G1 inversion: the write through the still-open handle survives.
+    db.execute(PRE_V2_INSERT, pre_v2_row("row2", "kept-write"))
+        .await
+        .expect("write through the still-open handle");
     drop(db);
     let reopened = common::open_real_db(&config, "shard.db")
         .await
         .expect("reopen");
-    let version = reopened
-        .query(sql::PRAGMA_USER_VERSION, Vec::new())
+    let ids: Vec<String> = reopened
+        .query("SELECT id FROM memories", Vec::new())
         .await
-        .expect("version probe")[0]
-        .i64("user_version")
-        .unwrap_or(-1);
-    let rows = reopened
+        .expect("rows probe")
+        .iter()
+        .filter_map(|row| row.text("id"))
+        .collect();
+    println!(
+        "[G1-INVERSION] row_ids_after_reopen={ids:?} inode_unchanged={}",
+        inode(&db_path) == inode_before
+    );
+    assert!(
+        ids.iter().any(|id| id == "row2"),
+        "the write through the still-open handle must now be visible; ids: {ids:?}"
+    );
+    drop(reopened);
+    let _ = common::cleanup_temp_dir(&config.storage_path);
+}
+
+/// 46.4 — `db_path: Some` + `root: None` refuses **before the checkpoint and
+/// the copy**.
+///
+/// Fixture order (the Plan Gate's N2): checkpoint once, then a final write that
+/// leaves a non-empty `-wal`, then the baseline. Moving the refusal after the
+/// checkpoint changes the `-wal` bytes, so the mutation cannot pass silently.
+/// The oracle is byte-for-byte file equality — strictly stronger than the
+/// blueprint's SHA-256, and this workspace has no hash dependency to add.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_destructive_migration_without_root_proof_refuses_before_the_copy() {
+    let config = common::store_config("no-root-refusal");
+    let (_config, connections, _shards) = common::real_components(config.clone()).await;
+    let db_path = config.storage_path.join("shard.db");
+    let db = connections
+        .get_connection(&db_path)
+        .await
+        .expect("open through the manager");
+    seed_v1(db.as_ref()).await;
+    // Quiesce once...
+    db.query("PRAGMA wal_checkpoint(TRUNCATE)", Vec::new())
+        .await
+        .expect("quiescing checkpoint");
+    // ...then a final write leaves coordination bytes behind...
+    db.execute(PRE_V2_INSERT, pre_v2_row("row2", "wal-payload"))
+        .await
+        .expect("final write");
+    let wal_len = std::fs::metadata(sidecar(&db_path, "-wal"))
+        .expect("the final write leaves a -wal")
+        .len();
+    assert!(
+        wal_len > 0,
+        "the fixture must leave a non-empty -wal, or the checkpoint mutation proves nothing"
+    );
+    // ...and only then the baseline.
+    let baseline = file_snapshot(&db_path);
+    let options = MigrationOptions {
+        db_path: Some(db_path.clone()),
+        label: "test",
+    };
+
+    let error = apply_schema_migrations(db.as_ref(), &memory_shard_migrations(2), &options, None)
+        .await
+        .expect_err("a destructive upgrade needs the root proof");
+    assert!(
+        matches!(error, StoreError::NoExclusiveRoot { .. }),
+        "the refusal must be the typed no-root error, got {error:?}"
+    );
+
+    let backups: Vec<PathBuf> = std::fs::read_dir(&config.storage_path)
+        .expect("storage dir")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.to_string_lossy().ends_with(".bak"))
+        .collect();
+    assert!(backups.is_empty(), "no backup may be created: {backups:?}");
+    assert_eq!(
+        file_snapshot(&db_path),
+        baseline,
+        "db, -wal, -shm and -tshm must be byte-identical: the refusal precedes its own checkpoint"
+    );
+    assert_eq!(user_version(db.as_ref()).await, 1, "user_version unchanged");
+    let rows = db
         .query("SELECT id FROM memories", Vec::new())
         .await
         .expect("rows probe");
-    let ids: Vec<String> = rows.iter().filter_map(|row| row.text("id")).collect();
-
-    println!(
-        "[G1 OBSERVED] write_error={write_error} user_version_after_reopen={version} \
-         row_ids_after_reopen={ids:?} restored_inode={restored_inode}"
-    );
-
-    assert!(
-        !ids.iter().any(|id| id == "row2"),
-        "the write through the still-open handle must NOT survive the reopen; if it does, the \
-         premise is refuted and this wave must stop (step 1 stop-and-branch). ids: {ids:?}"
-    );
     assert_eq!(
-        ids,
-        vec!["row1".to_string()],
-        "the reopened database is the backup, carrying exactly the seeded v1 row"
+        rows.len(),
+        2,
+        "row count unchanged (row1 + the final write)"
     );
-    assert_eq!(version, 1, "the reopened database is the v1 backup");
 
-    drop(reopened);
+    drop(db);
+    let _ = common::cleanup_temp_dir(&config.storage_path);
+}
+
+/// 46.4 — the v6 backup site is reachable on a v5 database and refuses with no
+/// proof, before its copy.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_v6_backup_without_root_proof_refuses_before_its_copy() {
+    const DIMS: u32 = 2;
+    let config = common::store_config("v6-no-root");
+    let (_config, connections, _shards) = common::real_components(config.clone()).await;
+    let db_path = config.storage_path.join("episodic.db");
+    let db = connections
+        .get_connection(&db_path)
+        .await
+        .expect("open through the manager");
+    let options = MigrationOptions {
+        db_path: Some(db_path.clone()),
+        label: "episodic",
+    };
+    // A genuine v5 database: a version-0 apply takes no backup, so no proof.
+    let version = apply_schema_migrations(
+        db.as_ref(),
+        &mem_store::schema_migrations::episodic_migrations(DIMS),
+        &options,
+        None,
+    )
+    .await
+    .expect("apply v1..v5");
+    assert_eq!(version, 5);
+    let baseline = file_snapshot(&db_path);
+
+    let error =
+        mem_store::schema_migrations::apply_episodic_schema(db.as_ref(), DIMS, &options, None)
+            .await
+            .expect_err("the v6 backup needs a proof");
+    assert!(
+        matches!(error, StoreError::NoExclusiveRoot { .. }),
+        "the refusal must be the typed no-root error, got {error:?}"
+    );
+    let backups: Vec<PathBuf> = std::fs::read_dir(&config.storage_path)
+        .expect("storage dir")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.to_string_lossy().ends_with(".bak"))
+        .collect();
+    assert!(backups.is_empty(), "the v6 copy must not run: {backups:?}");
+    assert_eq!(
+        file_snapshot(&db_path),
+        baseline,
+        "the v6 refusal must leave every file byte-identical"
+    );
+    assert_eq!(user_version(db.as_ref()).await, 5, "still at v5");
+
+    drop(db);
+    let _ = common::cleanup_temp_dir(&config.storage_path);
+}
+
+/// 46.4 — a restore with no live engine lock refuses and keeps the backup.
+///
+/// The memoising `common::exclusive_root` keeps its lock alive and can never
+/// observe `None`, so this test acquires a manual `Arc<EngineLock>` + proof,
+/// takes the pending with it, then drops both before `restore`.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_restore_without_an_engine_lock_refuses_and_keeps_the_backup() {
+    let config = common::store_config("restore-no-lock");
+    let (_config, connections, _shards) = common::real_components(config.clone()).await;
+    let db_path = config.storage_path.join("shard.db");
+    let db = connections
+        .get_connection(&db_path)
+        .await
+        .expect("open through the manager");
+    seed_v1(db.as_ref()).await;
+    let options = MigrationOptions {
+        db_path: Some(db_path.clone()),
+        label: "test",
+    };
+
+    let lock = match mem_store::engine_lock::acquire_engine_lock(
+        &config.storage_path,
+        std::sync::Arc::new(mem_store::platform::SystemProcessProbe),
+    )
+    .expect("acquire over a free root")
+    {
+        mem_store::engine_lock::EngineLockOutcome::Acquired(lock) => lock,
+        mem_store::engine_lock::EngineLockOutcome::Lost { holder_pid } => {
+            panic!("a fresh temp root must be free, holder pid {holder_pid}")
+        }
+    };
+    let proof = mem_store::delete_guard::ExclusiveRoot::new(lock);
+    let error = apply_schema_migrations(
+        db.as_ref(),
+        &[migration(2, "SELECTX certainly not sql")],
+        &options,
+        Some(&proof),
+    )
+    .await
+    .expect_err("the failing v2 migration must return the pending");
+    let pending = match error {
+        StoreError::MigrationRestorePending(pending) => pending,
+        other => panic!("expected MigrationRestorePending, got {other:?}"),
+    };
+    let backup = pending.backup_path().to_path_buf();
+    assert!(backup.exists(), "the pending names a live backup");
+    drop(proof);
+    let inode_before = inode(&db_path);
+
+    let restore_error = pending
+        .restore(&connections, db)
+        .await
+        .expect_err("no live proof must refuse the restore");
+    assert!(
+        matches!(restore_error, StoreError::NoExclusiveRoot { .. }),
+        "the refusal must be the typed no-root error, got {restore_error:?}"
+    );
+    assert!(backup.exists(), "the refusal keeps the backup it names");
+    assert_eq!(
+        inode(&db_path),
+        inode_before,
+        "the refusal must precede the first unlink"
+    );
     let _ = common::cleanup_temp_dir(&config.storage_path);
 }
 

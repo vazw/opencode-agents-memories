@@ -110,14 +110,7 @@ pub fn copy_sqlite_database(from: &Path, to: FileClaim<'_>) -> Result<(), StoreE
     copy_sqlite_files(from, to.path())
 }
 
-// shortcut: no exclusivity proof; the schema runner's backup destination is minted in
-// backup_before_destructive and cannot obtain a root until Step 5. Deleted in Step 5.
-// Re-decision: Step 5 of this wave.
-pub(crate) fn copy_sqlite_database_without_proof(from: &Path, to: &Path) -> Result<(), StoreError> {
-    copy_sqlite_files(from, to)
-}
-
-/// The copy body shared by the claimed function and the counted Step-4 shim.
+/// The copy body behind the claimed function.
 fn copy_sqlite_files(from: &Path, to: &Path) -> Result<(), StoreError> {
     std::fs::copy(from, to)?;
     for sidecar in sidecar_paths(from, to) {
@@ -205,15 +198,8 @@ pub fn remove_sqlite_database(claim: FileClaim<'_>) -> Result<(), StoreError> {
     unlink_sqlite_files(claim.path())
 }
 
-// shortcut: no exclusivity proof; only schema_migrations' failure path (which cannot yet obtain
-// one) may call this. Deleted in Step 5 when the restore becomes a MigrationRestorePending the
-// caller settles. Re-decision: Step 5 of this wave.
-pub(crate) fn remove_sqlite_database_without_proof(db_path: &Path) -> Result<(), StoreError> {
-    unlink_sqlite_files(db_path)
-}
-
-/// The unlink body shared by the claimed function and the counted Step-3 shim:
-/// database plus the three sidecars, `NotFound` tolerated either way.
+/// The unlink body behind the claimed function: database plus the three
+/// sidecars, `NotFound` tolerated either way.
 fn unlink_sqlite_files(db_path: &Path) -> Result<(), StoreError> {
     let mut targets = vec![db_path.to_path_buf()];
     for suffix in SIDECAR_SUFFIXES {

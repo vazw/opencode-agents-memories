@@ -18,6 +18,7 @@ use std::sync::Arc;
 use mem_store::config::StoreConfig;
 use mem_store::connection::ConnectionManager;
 use mem_store::db::{ConnectFactory, DbHandle, Value, query_one, turso_connect_factory};
+use mem_store::error::StoreError;
 use mem_store::platform::Platform;
 use mem_store::schema_migrations::{
     MigrationOptions, apply_schema_migrations, ensure_user_prompt_columns, user_prompts_migrations,
@@ -168,7 +169,27 @@ impl UserPromptManager {
             db_path: Some(self.db_path.clone()),
             label: USER_PROMPTS_DB_NAME,
         };
-        apply_schema_migrations(db.as_ref(), &user_prompts_migrations(), &options).await?;
+        // The set is v1-only today (no backup); the proof and settle keep the
+        // site honest for a future v2 (issue 46.4).
+        let root = self.connections.exclusive_root();
+        match apply_schema_migrations(
+            db.as_ref(),
+            &user_prompts_migrations(),
+            &options,
+            root.as_ref(),
+        )
+        .await
+        {
+            Ok(_) => {}
+            Err(StoreError::MigrationRestorePending(pending)) => {
+                let original = pending.original().clone();
+                return match pending.restore(&self.connections, db).await {
+                    Ok(()) => Err(original.into()),
+                    Err(restore_error) => Err(restore_error.into()),
+                };
+            }
+            Err(error) => return Err(error.into()),
+        }
         ensure_user_prompt_columns(db.as_ref()).await?;
         db.execute(
             "UPDATE user_prompts SET captured = 0 WHERE captured = 2",

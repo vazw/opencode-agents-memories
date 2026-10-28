@@ -19,6 +19,7 @@ use mem_store::db::{
     BatchMode, ConnectFactory, Db, DbHandle, ExecResult, Row, Statement, Value, query_one,
     turso_connect_factory,
 };
+use mem_store::error::StoreError;
 use mem_store::platform::Platform;
 use mem_store::schema_migrations::{MigrationOptions, apply_episodic_schema};
 use mem_store::tokio::sync::OnceCell;
@@ -200,11 +201,25 @@ impl EpisodicStore {
             db_path: Some(self.db_path.clone()),
             label: EPISODIC_MIGRATION_LABEL,
         };
+        // The exclusivity proof lives across the apply call; the settle below
+        // is the only restore path (the runner never unlinks a file it has
+        // open, issue 46.4).
+        let root = self.connections.exclusive_root();
         // W7.1: v1..v5 through the shared runner, then the convergent v6
         // retention schema. `episodic_migrations()` deliberately stays
         // v1..v5; v6 is applied ONLY here.
-        apply_episodic_schema(db.as_ref(), self.dimensions, &options).await?;
-        Ok(db)
+        match apply_episodic_schema(db.as_ref(), self.dimensions, &options, root.as_ref()).await {
+            Ok(_) => Ok(db),
+            Err(StoreError::MigrationRestorePending(pending)) => {
+                // Upstream catch: a restore failure replaces the original.
+                let original = pending.original().clone();
+                match pending.restore(&self.connections, db).await {
+                    Ok(()) => Err(original.into()),
+                    Err(restore_error) => Err(restore_error.into()),
+                }
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     /// Row count, optionally scoped to one project (`None` is diagnostics/

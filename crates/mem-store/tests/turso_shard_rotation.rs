@@ -431,6 +431,8 @@ async fn test_delete_shard_closes_connection_removes_row_and_file() {
 async fn test_archive_shard_renames_file_and_rejects_escape_overrides() {
     let config = common::test_store_config("rot-archive", 2, 100);
     let (config, _connections, manager) = real_components(config).await;
+    // archive_shard renames under the root's proof.
+    let _proof = common::exclusive_root(&config.storage_path);
     let hash = scope_hash(12);
     let shard = manager
         .get_write_shard(Scope::Project, &hash)

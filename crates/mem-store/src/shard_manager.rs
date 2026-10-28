@@ -323,7 +323,20 @@ impl ShardManager {
                         operation: "ensure_initialized",
                     })?
                     .replace(current.clone());
-                self.init_metadata_db(&current).await?;
+                if let Err(error) = self.init_metadata_db(&current).await {
+                    // A failed adopt must not leave a half-trusted cell: clear
+                    // BOTH before propagating, so the next call retries.
+                    // (Ruling 2a: metadata never settles a restore.)
+                    *self.init.lock().map_err(|_| StoreError::LockPoisoned {
+                        lock: "init",
+                        operation: "ensure_initialized",
+                    })? = None;
+                    *self.metadata.lock().map_err(|_| StoreError::LockPoisoned {
+                        lock: "metadata",
+                        operation: "ensure_initialized",
+                    })? = None;
+                    return Err(error);
+                }
             }
             return Ok(cached);
         }
@@ -390,6 +403,13 @@ impl ShardManager {
     }
 
     async fn init_metadata_db(&self, db: &DbHandle) -> Result<(), StoreError> {
+        // Metadata is a no-settle site (Ruling 2a): it has exactly one v1
+        // migration, `backup_before_destructive` returns `None` at
+        // `from_version <= 0`, and a v1 database returns early on empty
+        // pending — so `MigrationRestorePending` cannot arise here. The proof
+        // is still passed (and alive across the await) so a future v2 can
+        // refuse before a backup.
+        let root = self.connections.exclusive_root();
         crate::schema_migrations::apply_schema_migrations(
             db.as_ref(),
             &crate::schema_migrations::metadata_db_migrations(),
@@ -400,6 +420,7 @@ impl ShardManager {
                 ),
                 label: "metadata.db",
             },
+            root.as_ref(),
         )
         .await
         .map(|_| ())
@@ -707,6 +728,8 @@ impl ShardManager {
                 db_path: None,
                 label: "memory-shard",
             },
+            // No backup is taken without a `db_path`, so no proof is needed.
+            None,
         )
         .await
     }

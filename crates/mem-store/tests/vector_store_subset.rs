@@ -27,6 +27,7 @@ async fn prepared_db(config: &StoreConfig, file: &str, dims: u32) -> mem_store::
             db_path: None,
             label: "vector-battery",
         },
+        None,
     )
     .await
     .expect("shard schema");

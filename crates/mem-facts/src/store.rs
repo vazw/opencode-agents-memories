@@ -18,6 +18,7 @@ use mem_store::connection::ConnectionManager;
 use mem_store::db::{
     BatchMode, ConnectFactory, DbHandle, Row, Statement, Value, query_one, turso_connect_factory,
 };
+use mem_store::error::StoreError;
 use mem_store::platform::Platform;
 use mem_store::schema_migrations::{MigrationOptions, apply_schema_migrations};
 use mem_store::tokio::sync::OnceCell;
@@ -178,13 +179,27 @@ impl FactsStore {
             db_path: Some(self.db_path.clone()),
             label: FACTS_MIGRATION_LABEL,
         };
-        apply_schema_migrations(
+        // The set is v1-only today (no backup); the proof and settle keep the
+        // site honest for a future v2 (issue 46.4).
+        let root = self.connections.exclusive_root();
+        match apply_schema_migrations(
             db.as_ref(),
             &sql::facts_migrations(self.dimensions),
             &options,
+            root.as_ref(),
         )
-        .await?;
-        Ok(db)
+        .await
+        {
+            Ok(_) => Ok(db),
+            Err(StoreError::MigrationRestorePending(pending)) => {
+                let original = pending.original().clone();
+                match pending.restore(&self.connections, db).await {
+                    Ok(()) => Err(original.into()),
+                    Err(restore_error) => Err(restore_error.into()),
+                }
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     /// The applied `facts.db` schema version (1 for this wave).

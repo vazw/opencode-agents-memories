@@ -23,6 +23,13 @@ use mem_store::schema_migrations::{
 
 const DIMS: u32 = 2;
 
+/// The memoised root proof (a destructive upgrade needs one).
+fn root_proof(
+    config: &mem_store::config::StoreConfig,
+) -> std::sync::Arc<mem_store::delete_guard::ExclusiveRoot> {
+    common::exclusive_root(&config.storage_path)
+}
+
 fn options(config: &mem_store::config::StoreConfig) -> MigrationOptions {
     MigrationOptions {
         db_path: Some(config.storage_path.join("episodic.db")),
@@ -51,9 +58,14 @@ async fn table_columns(db: &dyn Db, table: &str) -> Vec<String> {
 /// Builds a genuine v5 database (the migration set direct callers see).
 async fn v5_database(config: &mem_store::config::StoreConfig) -> DbHandle {
     let db = open_real_db(config, "episodic.db").await.expect("open");
-    let version = apply_schema_migrations(&*db, &episodic_migrations(DIMS), &options(config))
-        .await
-        .expect("apply v1..v5");
+    let version = apply_schema_migrations(
+        &*db,
+        &episodic_migrations(DIMS),
+        &options(config),
+        Some(root_proof(config).as_ref()),
+    )
+    .await
+    .expect("apply v1..v5");
     assert_eq!(version, 5, "the direct set stays at v5");
     db
 }
@@ -76,9 +88,14 @@ async fn test_v6_upgrade_preserves_existing_rows_and_defaults() {
     let db = v5_database(&config).await;
     insert_v5_row(&*db, "row-v5").await;
 
-    let outcome = apply_episodic_schema(&*db, DIMS, &options(&config))
-        .await
-        .expect("v6 apply");
+    let outcome = apply_episodic_schema(
+        &*db,
+        DIMS,
+        &options(&config),
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect("v6 apply");
     assert_eq!(outcome.version, 6);
     assert_eq!(user_version(&*db).await, 6);
 
@@ -131,9 +148,14 @@ async fn test_v6_upgrade_preserves_existing_rows_and_defaults() {
 async fn test_v6_creates_the_retention_tables_and_index() {
     let config = store_config("v6-tables");
     let db = v5_database(&config).await;
-    apply_episodic_schema(&*db, DIMS, &options(&config))
-        .await
-        .expect("v6 apply");
+    apply_episodic_schema(
+        &*db,
+        DIMS,
+        &options(&config),
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect("v6 apply");
 
     let raw_columns = table_columns(&*db, "episodic_raw_context").await;
     assert_eq!(
@@ -205,13 +227,23 @@ async fn test_v6_creates_the_retention_tables_and_index() {
 async fn test_v6_is_idempotent_on_reopen() {
     let config = store_config("v6-idempotent");
     let db = v5_database(&config).await;
-    let first = apply_episodic_schema(&*db, DIMS, &options(&config))
-        .await
-        .expect("first apply");
+    let first = apply_episodic_schema(
+        &*db,
+        DIMS,
+        &options(&config),
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect("first apply");
     assert_eq!(first.version, 6);
-    let second = apply_episodic_schema(&*db, DIMS, &options(&config))
-        .await
-        .expect("second apply");
+    let second = apply_episodic_schema(
+        &*db,
+        DIMS,
+        &options(&config),
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect("second apply");
     assert_eq!(second.version, 6);
     assert_eq!(second.pragma, PragmaOutcome::NotAttempted);
     assert_eq!(user_version(&*db).await, 6);
@@ -230,15 +262,25 @@ async fn test_v6_is_idempotent_on_reopen() {
 async fn test_v6_database_opens_with_a_v5_only_migration_set() {
     let config = store_config("v6-v5-only");
     let db = v5_database(&config).await;
-    apply_episodic_schema(&*db, DIMS, &options(&config))
-        .await
-        .expect("v6 apply");
+    apply_episodic_schema(
+        &*db,
+        DIMS,
+        &options(&config),
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect("v6 apply");
 
     // A v5-only binary (the rollback path) sees zero pending migrations and
     // returns the CURRENT version, 6.
-    let version = apply_schema_migrations(&*db, &episodic_migrations(DIMS), &options(&config))
-        .await
-        .expect("v5-only set over a v6 database");
+    let version = apply_schema_migrations(
+        &*db,
+        &episodic_migrations(DIMS),
+        &options(&config),
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect("v5-only set over a v6 database");
     assert_eq!(version, 6, "the runner returns the current version");
 }
 
@@ -246,9 +288,14 @@ async fn test_v6_database_opens_with_a_v5_only_migration_set() {
 async fn test_fresh_root_reaches_v6_in_one_open() {
     let config = store_config("v6-fresh");
     let db = open_real_db(&config, "episodic.db").await.expect("open");
-    let outcome = apply_episodic_schema(&*db, DIMS, &options(&config))
-        .await
-        .expect("fresh apply");
+    let outcome = apply_episodic_schema(
+        &*db,
+        DIMS,
+        &options(&config),
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect("fresh apply");
     assert_eq!(outcome.version, 6);
     assert_eq!(user_version(&*db).await, 6);
 

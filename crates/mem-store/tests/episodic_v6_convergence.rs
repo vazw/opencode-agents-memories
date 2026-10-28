@@ -59,11 +59,23 @@ async fn table_columns(db: &dyn Db, table: &str) -> Vec<String> {
         .collect()
 }
 
+/// The memoised root proof (a destructive upgrade needs one).
+fn root_proof(
+    config: &mem_store::config::StoreConfig,
+) -> std::sync::Arc<mem_store::delete_guard::ExclusiveRoot> {
+    common::exclusive_root(&config.storage_path)
+}
+
 async fn v5_database(config: &mem_store::config::StoreConfig) -> DbHandle {
     let db = open_real_db(config, "episodic.db").await.expect("open");
-    let version = apply_schema_migrations(&*db, &episodic_migrations(DIMS), &options(config))
-        .await
-        .expect("apply v1..v5");
+    let version = apply_schema_migrations(
+        &*db,
+        &episodic_migrations(DIMS),
+        &options(config),
+        Some(root_proof(config).as_ref()),
+    )
+    .await
+    .expect("apply v1..v5");
     assert_eq!(version, 5);
     db
 }
@@ -118,9 +130,14 @@ async fn test_v6_rerun_after_a_partial_application_converges() {
     half_applied_v6(&*db, true, true).await;
 
     // Already at v5 + the v6 objects: this is the state a retry meets.
-    let outcome = apply_episodic_schema(&*db, DIMS, &options(&config))
-        .await
-        .expect("the retry converges instead of a duplicate-column error");
+    let outcome = apply_episodic_schema(
+        &*db,
+        DIMS,
+        &options(&config),
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect("the retry converges instead of a duplicate-column error");
     assert_eq!(outcome.version, 6);
     assert_eq!(user_version(&*db).await, 6);
 
@@ -159,9 +176,14 @@ async fn test_v6_partial_application_with_a_missing_table_converges() {
     // not.
     half_applied_v6(&*db, true, false).await;
 
-    let outcome = apply_episodic_schema(&*db, DIMS, &options(&config))
-        .await
-        .expect("the retry converges and creates the missing table");
+    let outcome = apply_episodic_schema(
+        &*db,
+        DIMS,
+        &options(&config),
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect("the retry converges and creates the missing table");
     assert_eq!(outcome.version, 6);
     assert_eq!(user_version(&*db).await, 6);
     assert_eq!(
@@ -193,9 +215,14 @@ async fn test_v6_partial_application_with_a_missing_table_converges() {
 async fn test_v6_pragma_path_is_the_measured_constant() {
     let config = store_config("v6-pragma-measured");
     let db = v5_database(&config).await;
-    let outcome: EpisodicSchemaOutcome = apply_episodic_schema(&*db, DIMS, &options(&config))
-        .await
-        .expect("first apply");
+    let outcome: EpisodicSchemaOutcome = apply_episodic_schema(
+        &*db,
+        DIMS,
+        &options(&config),
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect("first apply");
     assert_eq!(outcome.version, 6);
     assert_eq!(
         outcome.pragma, V6_PRAGMA_PATH_MEASURED,
@@ -262,9 +289,14 @@ async fn test_v6_pragma_refusal_falls_back_and_converges() {
     let inner = v5_database(&config).await;
     let db = Arc::new(PragmaRefusingDb::new(inner.clone()));
 
-    let outcome = apply_episodic_schema(db.as_ref(), DIMS, &options(&config))
-        .await
-        .expect("the fallback path converges");
+    let outcome = apply_episodic_schema(
+        db.as_ref(),
+        DIMS,
+        &options(&config),
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect("the fallback path converges");
     assert_eq!(outcome.pragma, PragmaOutcome::Fallback);
     assert_eq!(outcome.version, 6);
     assert_eq!(user_version(db.as_ref()).await, 6);
@@ -290,14 +322,24 @@ async fn test_v6_pragma_refusal_falls_back_and_converges() {
 async fn test_v6_reopen_reports_not_attempted() {
     let config = store_config("v6-reopen");
     let db = v5_database(&config).await;
-    let first = apply_episodic_schema(&*db, DIMS, &options(&config))
-        .await
-        .expect("first apply");
+    let first = apply_episodic_schema(
+        &*db,
+        DIMS,
+        &options(&config),
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect("first apply");
     assert_eq!(first.version, 6);
 
-    let reopened = apply_episodic_schema(&*db, DIMS, &options(&config))
-        .await
-        .expect("reopen");
+    let reopened = apply_episodic_schema(
+        &*db,
+        DIMS,
+        &options(&config),
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect("reopen");
     assert_eq!(
         reopened,
         EpisodicSchemaOutcome {
@@ -312,9 +354,14 @@ async fn test_v6_reopen_reports_not_attempted() {
 async fn test_v6_apply_takes_one_backup_of_an_existing_database() {
     let config = store_config("v6-backup");
     let db = v5_database(&config).await;
-    apply_episodic_schema(&*db, DIMS, &options(&config))
-        .await
-        .expect("apply");
+    apply_episodic_schema(
+        &*db,
+        DIMS,
+        &options(&config),
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect("apply");
 
     let backups: Vec<String> = std::fs::read_dir(&config.storage_path)
         .expect("read root")
@@ -327,9 +374,14 @@ async fn test_v6_apply_takes_one_backup_of_an_existing_database() {
     // A fresh root takes none.
     let fresh = store_config("v6-backup-fresh");
     let fresh_db = open_real_db(&fresh, "episodic.db").await.expect("open");
-    apply_episodic_schema(&*fresh_db, DIMS, &options(&fresh))
-        .await
-        .expect("fresh apply");
+    apply_episodic_schema(
+        &*fresh_db,
+        DIMS,
+        &options(&fresh),
+        Some(root_proof(&fresh).as_ref()),
+    )
+    .await
+    .expect("fresh apply");
     let fresh_backups: Vec<String> = std::fs::read_dir(&fresh.storage_path)
         .expect("read root")
         .filter_map(|entry| entry.ok())

@@ -33,6 +33,8 @@ struct Fixture {
     #[allow(dead_code)]
     reembedder: Arc<FakeReEmbedder>,
     storage: PathBuf,
+    /// The live exclusivity proof the swap mutations need (issue 46).
+    _proof: Arc<mem_store::delete_guard::ExclusiveRoot>,
 }
 
 /// Upstream `createSourceShard`: a dims-2 project shard with `mem_one`
@@ -117,6 +119,7 @@ async fn fixture(prefix: &str) -> (Fixture, ShardInfo) {
             service,
             reembedder,
             storage,
+            _proof: common::exclusive_root(&config.storage_path),
         },
         shard,
     )

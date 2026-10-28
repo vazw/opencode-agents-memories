@@ -58,6 +58,8 @@ async fn test_verify_failure_restores_the_plaintext_backup() {
     let key_hex = common::hex_key_64();
     let config = common::encrypted_store_config("enc-restore", &key_hex);
     let (config, connections, _shards) = common::real_components(config).await;
+    // The verify-failure restore renames under the root's proof.
+    let _proof = common::exclusive_root(&config.storage_path);
     let storage = config.storage_path.clone();
 
     let db_path = storage.join("data.db");

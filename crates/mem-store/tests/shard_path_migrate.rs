@@ -35,6 +35,8 @@ struct Rig {
     service: PathMigrationService,
     prompts: Arc<RecordingPromptUpdater>,
     current_dir: PathBuf,
+    /// The live exclusivity proof the claimed mutations need (issue 46).
+    _proof: Arc<mem_store::delete_guard::ExclusiveRoot>,
 }
 
 async fn rig(prefix: &str) -> Rig {
@@ -71,6 +73,9 @@ async fn rig_with_tags(
 ) -> Rig {
     let config = common::test_store_config(prefix, 2, 100);
     let (config, connections, shards) = common::real_components(config).await;
+    // Every forward migration stages, copies and renames: it runs under the
+    // root's proof (issue 46).
+    let proof = common::exclusive_root(&config.storage_path);
     let registry: Arc<dyn ShardRegistry> = Arc::new(shards.clone());
     let inventory = Arc::new(ShardInventory::new(
         config.storage_path.clone(),
@@ -97,6 +102,7 @@ async fn rig_with_tags(
         service,
         prompts,
         current_dir,
+        _proof: proof,
     }
 }
 
@@ -645,6 +651,7 @@ async fn test_migrates_valid_disk_only_shard_discovered_after_startup() {
             db_path: None,
             label: "disk-only",
         },
+        None,
     )
     .await
     .expect("schema");
@@ -704,6 +711,7 @@ async fn test_recovers_interrupted_swap_during_storage_ready_gate() {
             db_path: None,
             label: "recover-fixture",
         },
+        None,
     )
     .await
     .expect("schema");
@@ -961,6 +969,8 @@ async fn test_prompt_update_failure_does_not_rollback_completed_migration() {
         })
     };
     let (config, connections, shards) = common::real_components(config).await;
+    // The forward swap stages, copies and renames: it needs the root's proof.
+    let _proof = common::exclusive_root(&config.storage_path);
     let registry: Arc<dyn ShardRegistry> = Arc::new(shards.clone());
     let inventory = Arc::new(ShardInventory::new(
         config.storage_path.clone(),

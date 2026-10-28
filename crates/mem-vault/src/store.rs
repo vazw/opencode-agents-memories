@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use mem_store::config::StoreConfig;
 use mem_store::connection::ConnectionManager;
 use mem_store::db::{ConnectFactory, DbHandle, query_one, turso_connect_factory};
+use mem_store::error::StoreError;
 use mem_store::platform::Platform;
 use mem_store::schema_migrations::{MigrationOptions, apply_schema_migrations};
 use mem_store::tokio::sync::OnceCell;
@@ -158,9 +159,27 @@ impl VaultStore {
                     db_path: Some(db_path.clone()),
                     label: VAULT_MIGRATION_LABEL,
                 };
-                apply_schema_migrations(db.as_ref(), &crate::schema::vault_migrations(), &options)
-                    .await?;
-                Ok::<DbHandle, VaultError>(db)
+                // Vault's set is v1-only today, so no backup arises; the proof
+                // and settle keep the site honest for a future v2 (issue 46.4).
+                let root = manager.exclusive_root();
+                match apply_schema_migrations(
+                    db.as_ref(),
+                    &crate::schema::vault_migrations(),
+                    &options,
+                    root.as_ref(),
+                )
+                .await
+                {
+                    Ok(_) => Ok::<DbHandle, VaultError>(db),
+                    Err(StoreError::MigrationRestorePending(pending)) => {
+                        let original = pending.original().clone();
+                        match pending.restore(manager, db).await {
+                            Ok(()) => Err(original.into()),
+                            Err(restore_error) => Err(restore_error.into()),
+                        }
+                    }
+                    Err(error) => Err(error.into()),
+                }
             })
             .await?;
         Ok(handle.clone())

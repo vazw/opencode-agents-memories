@@ -1,28 +1,40 @@
 //! Schema-migration runner — port of upstream
-//! `src/services/turso/schema-migrations.ts` apply/backup/restore semantics
+//! `src/services/turso/schema-migrations.ts` apply/backup semantics
 //! (blueprint W1.2 step 6).
 //!
 //! Upstream apply order, verbatim: sort by version, read `PRAGMA
 //! user_version`, filter pending, backup before destructive (existing file,
 //! current > 0); per pending migration write-batch statements then
-//! `PRAGMA user_version = <v>`. On failure the close is handled by the
-//! caller (DIVERGENCE, see below): delete originals, rename the backup
-//! back under the file-lock retry, and re-raise the ORIGINAL error (a
-//! restore failure replaces it, exactly like the upstream catch block).
+//! `PRAGMA user_version = <v>`.
 //!
-//! DIVERGENCE (reviewer note): upstream closes its own `TursoDb` handle
-//! before restoring; this runner borrows the db (`&dyn Db`) and cannot
-//! close it — the caller drops/reopens (wired in W1.5). On POSIX a rename
-//! over an open file stays valid, so the restore path is behaviorally
-//! equivalent on the test platform.
+//! **Issue 46.4 — the restore is the caller's step.** Upstream closes its own
+//! `TursoDb` handle before restoring; this runner borrows the db (`&dyn Db`) and
+//! must not unlink a file it has open. On failure with a backup it therefore
+//! returns `StoreError::MigrationRestorePending`, and the caller (which owns the
+//! handle) closes it and calls `MigrationRestorePending::restore`. That restore
+//! moves the backup **and its sidecars** back with `rename_sqlite_database`
+//! (the old bare `std::fs::rename` stranded `.bak-wal`/`-shm`/`-tshm` debris),
+//! inside the same `with_sqlite_file_lock_retry` window the old call sites had.
+//!
+//! **Issue 46 — the proof.** A backup that is taken must be restorable, and only
+//! a process that can prove root exclusivity may restore. So a destructive
+//! upgrade with `db_path: Some(..)` requires the caller's
+//! `Option<&ExclusiveRoot>`: with no proof the runner returns
+//! `StoreError::NoExclusiveRoot` **before** its checkpoint and before the copy,
+//! leaving the database byte-identical and creating no `.bak`.
 
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 
-use crate::db::{BatchMode, Db, Statement, query_one};
-use crate::error::StoreError;
-use crate::sqlite_files::{FILE_LOCK_RETRY_DELAYS_MS, RetryContext, with_sqlite_file_lock_retry};
+use crate::connection::ConnectionManager;
+use crate::db::{BatchMode, Db, DbHandle, Statement, query_one};
+use crate::delete_guard::ExclusiveRoot;
+use crate::error::{MigrationRestorePending, StoreError};
+use crate::sqlite_files::{
+    FILE_LOCK_RETRY_DELAYS_MS, RetryContext, copy_sqlite_database, remove_sqlite_database,
+    rename_sqlite_database, with_sqlite_file_lock_retry,
+};
 
 /// A single versioned schema step; statements run as ONE write batch.
 #[derive(Debug, Clone)]
@@ -51,17 +63,29 @@ fn set_user_version_statement(version: i64) -> Statement {
     Statement::new(crate::sql::set_user_version_sql(version), Vec::new())
 }
 
+/// The backup-needed rule: an existing database at a positive version.
+fn requires_backup(db_path: Option<&Path>, from_version: i64) -> Option<&Path> {
+    db_path.filter(|path| path.exists() && from_version > 0)
+}
+
 /// Upstream `backupBeforeDestructive`.
+///
+/// The destination is claimed from the caller's proof. With no proof and a
+/// backup needed this refuses **before creating anything**
+/// ([`StoreError::NoExclusiveRoot`]).
 fn backup_before_destructive(
     db_path: Option<&Path>,
     from_version: i64,
+    root: Option<&ExclusiveRoot>,
 ) -> Result<Option<PathBuf>, StoreError> {
-    let Some(db_path) = db_path else {
+    let Some(db_path) = requires_backup(db_path, from_version) else {
         return Ok(None);
     };
-    if !db_path.exists() || from_version <= 0 {
-        return Ok(None);
-    }
+    let Some(root) = root else {
+        return Err(StoreError::NoExclusiveRoot {
+            db_path: db_path.to_path_buf(),
+        });
+    };
     let now_millis = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_millis() as i64)
@@ -75,33 +99,60 @@ fn backup_before_destructive(
     if let Some(parent) = backup_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    // Step-4 treatment: the destination is minted here and the root only
-    // arrives with Step 5's fourth argument, so the copy goes through the
-    // counted shim (deleted in Step 5).
-    crate::sqlite_files::copy_sqlite_database_without_proof(db_path, &backup_path)?;
+    let to_claim = root.claim(&backup_path)?;
+    copy_sqlite_database(db_path, to_claim)?;
     Ok(Some(backup_path))
 }
 
-/// Upstream restore body inside `withSqliteFileLockRetry`: unlink originals
-/// (main + sidecars) then rename the backup back.
-///
-/// Step-3 treatment: the runner has no root of its own yet (it receives two
-/// paths, and `db_path.parent()` is not the storage root for every producer —
-/// the vault is `{root}/vault/{scope}/vault.db`), so the unlink goes through
-/// the counted Step-3 shim. Step 5 replaces this function with
-/// `MigrationRestorePending::restore`, which holds the caller's passed proof.
-fn restore_from_backup(db_path: &Path, backup_path: &Path) -> Result<(), StoreError> {
-    crate::sqlite_files::remove_sqlite_database_without_proof(db_path)?;
-    std::fs::rename(backup_path, db_path)?;
-    Ok(())
+impl MigrationRestorePending {
+    /// Settles the pending restore: **drop the caller's handle first**, close the
+    /// manager's cached clone, resolve the proof, then unlink the failed file and
+    /// rename the backup (main + sidecars) back — one retry window, like the old
+    /// failure branches.
+    ///
+    /// The by-value handle is not a close by itself (`Arc<dyn Db>`): the literal
+    /// `drop` is the first statement, and the manager's clone is dropped by
+    /// `close_connection`, so the probe runs with no in-process holder. The
+    /// retry window is belt-and-braces afterwards — external or transient
+    /// holders (an indexer, AV) can still hold the path; no Linux test
+    /// discriminates its presence, which is why it stays review-gated.
+    pub async fn restore(
+        self,
+        connections: &ConnectionManager,
+        handle: DbHandle,
+    ) -> Result<(), StoreError> {
+        drop(handle);
+        let db_path = self.db_path().to_path_buf();
+        let backup_path = self.backup_path().to_path_buf();
+        connections.close_connection(&db_path).await?;
+        let Some(root) = connections.exclusive_root() else {
+            return Err(StoreError::NoExclusiveRoot { db_path });
+        };
+        let db_claim = root.claim(&db_path)?;
+        let backup_claim = root.claim(&backup_path)?;
+        with_sqlite_file_lock_retry(
+            || -> Result<(), StoreError> {
+                remove_sqlite_database(db_claim)?;
+                rename_sqlite_database(backup_claim, db_claim)?;
+                Ok(())
+            },
+            FILE_LOCK_RETRY_DELAYS_MS.len(),
+            &RetryContext::system(),
+        )
+    }
 }
 
 /// Upstream `applySchemaMigrations`. Returns the applied target version, or
 /// the current version when nothing is pending.
+///
+/// `root` is the caller's exclusivity proof: a destructive upgrade needs one
+/// before its checkpoint and backup, and the failure path is returned as
+/// [`StoreError::MigrationRestorePending`] for the caller to settle.
 pub async fn apply_schema_migrations(
     db: &dyn Db,
     migrations: &[SchemaMigration],
     options: &MigrationOptions,
+    root: Option<&ExclusiveRoot>,
 ) -> Result<i64, StoreError> {
     let mut sorted = migrations.to_vec();
     sorted.sort_by_key(|migration| migration.version);
@@ -118,16 +169,26 @@ pub async fn apply_schema_migrations(
     let Some(target) = pending.last().copied() else {
         return Ok(current);
     };
-    // DIVERGENCE (reviewer note): upstream closes the handle before the
-    // backup copy; a borrowed `&dyn Db` cannot. Without a checkpoint the
-    // seeded `PRAGMA user_version` write may still live in the live WAL,
-    // so the copied main-file header can read stale. A truncating
-    // checkpoint makes the backup self-contained (tolerated failure: the
-    // sidecar copy below already covers the committed WAL).
+    // A backup that is taken must be restorable, and only a process that can
+    // prove root exclusivity may restore: refuse BEFORE the checkpoint and the
+    // copy, leaving the database and every sidecar byte-identical (46.4).
+    if let Some(db_path) = requires_backup(options.db_path.as_deref(), current)
+        && root.is_none()
+    {
+        return Err(StoreError::NoExclusiveRoot {
+            db_path: db_path.to_path_buf(),
+        });
+    }
+    // Truncating checkpoint: the backup wants a self-contained main file. The
+    // pragma returns a row, so it must go through `query` — `execute` refuses
+    // it ("unexpected row during execution"), and the old `let _ = execute`
+    // silently skipped the checkpoint entirely. The runner never unlinks a file
+    // it has open; on failure it returns `MigrationRestorePending` for the
+    // caller to settle (issue 46.4).
     let _ = db
-        .execute("PRAGMA wal_checkpoint(TRUNCATE)", Vec::new())
+        .query("PRAGMA wal_checkpoint(TRUNCATE)", Vec::new())
         .await;
-    let backup = backup_before_destructive(options.db_path.as_deref(), current)?;
+    let backup = backup_before_destructive(options.db_path.as_deref(), current, root)?;
     if backup.is_some() {
         tracing::info!(
             label = options.label,
@@ -174,18 +235,11 @@ pub async fn apply_schema_migrations(
 
     if let Some(original) = failure {
         if let (Some(backup_path), Some(db_path)) = (&backup, options.db_path.as_deref()) {
-            let restore = || restore_from_backup(db_path, backup_path);
-            let restore_result: Result<(), StoreError> = with_sqlite_file_lock_retry(
-                restore,
-                FILE_LOCK_RETRY_DELAYS_MS.len(),
-                &RetryContext::system(),
-            );
-            // Upstream catch block: a restore failure replaces the original;
-            // success re-raises the original error.
-            return match restore_result {
-                Ok(()) => Err(original),
-                Err(restore_error) => Err(restore_error),
-            };
+            // The runner must not unlink the file it has open (46.4): hand the
+            // restore to the caller, which drops its handle and settles it.
+            return Err(StoreError::MigrationRestorePending(Box::new(
+                MigrationRestorePending::new(db_path.to_path_buf(), backup_path.clone(), original),
+            )));
         }
         return Err(original);
     }
@@ -423,17 +477,24 @@ async fn table_has_column(db: &dyn Db, table: &str, column: &str) -> Result<bool
 /// # Backup
 ///
 /// One backup is taken for an EXISTING database before the v6 batch; a fresh
-/// root takes none. On final failure the backup is restored and the original
-/// error is re-raised. No code path deletes a `.bak`.
+/// root takes none. The destination is claimed from the caller's proof, and
+/// with no proof a needed backup refuses **before** the copy
+/// ([`StoreError::NoExclusiveRoot`]). On final failure the runner returns
+/// [`StoreError::MigrationRestorePending`] — it never unlinks a file it has
+/// open. No code path deletes a `.bak`.
 pub async fn apply_episodic_schema(
     db: &dyn Db,
     dimensions: u32,
     options: &MigrationOptions,
+    root: Option<&ExclusiveRoot>,
 ) -> Result<EpisodicSchemaOutcome, StoreError> {
     let current_before = get_user_version(db).await?;
 
-    // v1..v5 keep their exact existing semantics, backups included.
-    let version = apply_schema_migrations(db, &episodic_migrations(dimensions), options).await?;
+    // v1..v5 keep their exact existing semantics, backups included. This call
+    // returns early when none are pending, so the v6 backup below is reachable
+    // with `root: None` on a v5→v6 upgrade and repeats the same refusal.
+    let version =
+        apply_schema_migrations(db, &episodic_migrations(dimensions), options, root).await?;
     if version >= 6 {
         return Ok(EpisodicSchemaOutcome {
             version: version.max(6),
@@ -441,8 +502,9 @@ pub async fn apply_episodic_schema(
         });
     }
 
+    // The v6 backup needs the proof before the copy; no checkpoint precedes it.
     let backup = if current_before > 0 {
-        backup_before_destructive(options.db_path.as_deref(), current_before)?
+        backup_before_destructive(options.db_path.as_deref(), current_before, root)?
     } else {
         None
     };
@@ -493,16 +555,9 @@ pub async fn apply_episodic_schema(
 
     if let Some(original) = failure {
         if let (Some(backup_path), Some(db_path)) = (&backup, options.db_path.as_deref()) {
-            let restore = || restore_from_backup(db_path, backup_path);
-            let restore_result: Result<(), StoreError> = with_sqlite_file_lock_retry(
-                restore,
-                FILE_LOCK_RETRY_DELAYS_MS.len(),
-                &RetryContext::system(),
-            );
-            return match restore_result {
-                Ok(()) => Err(original),
-                Err(restore_error) => Err(restore_error),
-            };
+            return Err(StoreError::MigrationRestorePending(Box::new(
+                MigrationRestorePending::new(db_path.to_path_buf(), backup_path.clone(), original),
+            )));
         }
         return Err(original);
     }

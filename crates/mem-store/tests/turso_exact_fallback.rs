@@ -23,6 +23,7 @@ async fn test_finds_memories_via_exact_cosine_scan_without_vector_indexes() {
             db_path: None,
             label: "exact-fallback",
         },
+        None,
     )
     .await
     .expect("shard schema");

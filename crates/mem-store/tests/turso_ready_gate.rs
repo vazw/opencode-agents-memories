@@ -243,6 +243,8 @@ async fn test_failure_clears_in_flight_and_retry_reruns_all_steps() {
 async fn test_recovery_step_restores_interrupted_swap_before_warmup() {
     let config = common::store_config("ready-recovery");
     let (config, connections, shards) = real_components(config).await;
+    // The recovery rollback renames under the root's proof.
+    let _proof = common::exclusive_root(&config.storage_path);
     let storage = config.storage_path.clone();
     let registry: Arc<dyn ShardRegistry> = Arc::new(shards.clone());
 

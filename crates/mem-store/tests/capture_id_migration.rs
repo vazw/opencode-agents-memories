@@ -52,9 +52,10 @@ async fn test_capture_id_migration_adds_column() {
     let config = store_config("capture-id-column");
     let db = open_real_db(&config, "episodic.db").await.expect("open");
     let options = options(&config);
+    let proof = common::exclusive_root(&config.storage_path);
 
     // Fresh database: the full set reaches v4 and the column exists.
-    let version = apply_schema_migrations(&*db, &episodic_migrations(DIMS), &options)
+    let version = apply_schema_migrations(&*db, &episodic_migrations(DIMS), &options, Some(&proof))
         .await
         .expect("apply fresh");
     assert_eq!(version, 5, "the episodic migration set's max version is v5");
@@ -119,9 +120,10 @@ async fn test_capture_id_migration_idempotent() {
     let config = store_config("capture-id-idempotent");
     let db = open_real_db(&config, "episodic.db").await.expect("open");
     let options = options(&config);
+    let proof = common::exclusive_root(&config.storage_path);
 
     // A pre-existing v3 database (the state every W4.x install is in).
-    let version = apply_schema_migrations(&*db, &through_v3(), &options)
+    let version = apply_schema_migrations(&*db, &through_v3(), &options, Some(&proof))
         .await
         .expect("apply through v3");
     assert_eq!(version, 3);
@@ -132,13 +134,13 @@ async fn test_capture_id_migration_idempotent() {
     );
 
     // The v4 step upgrades it in place.
-    let first = apply_schema_migrations(&*db, &episodic_migrations(DIMS), &options)
+    let first = apply_schema_migrations(&*db, &episodic_migrations(DIMS), &options, Some(&proof))
         .await
         .expect("apply v4");
     assert_eq!(first, 5);
 
     // Re-applying is a no-op: no duplicate column, version unchanged.
-    let second = apply_schema_migrations(&*db, &episodic_migrations(DIMS), &options)
+    let second = apply_schema_migrations(&*db, &episodic_migrations(DIMS), &options, Some(&proof))
         .await
         .expect("re-apply");
     assert_eq!(second, 5, "nothing is pending after v5");

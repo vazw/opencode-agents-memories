@@ -48,6 +48,46 @@ pub fn cleanup_temp_dir(dir: &Path) {
     let _ = fs::remove_dir_all(dir);
 }
 
+/// A live exclusivity proof for `storage_root`, memoised per **exact** path.
+///
+/// Mirrors `crates/mem-store/tests/common/mod.rs`: the engine lock is one per
+/// root per process, so the proof is shared by every test in this binary that
+/// exercises a claimed mutation. Acquire with the same path the store was built
+/// with (`ExclusiveRoot::current` matches `storage_root()` exactly).
+pub fn exclusive_root(
+    storage_root: &Path,
+) -> std::sync::Arc<mem_store::delete_guard::ExclusiveRoot> {
+    static ROOTS: Mutex<
+        Vec<(
+            PathBuf,
+            std::sync::Arc<mem_store::delete_guard::ExclusiveRoot>,
+        )>,
+    > = Mutex::new(Vec::new());
+    let mut roots = ROOTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((_, proof)) = roots.iter().find(|(root, _)| root == storage_root) {
+        return proof.clone();
+    }
+    let outcome = mem_store::engine_lock::acquire_engine_lock(
+        storage_root,
+        std::sync::Arc::new(mem_store::platform::SystemProcessProbe),
+    )
+    .expect("acquire the engine lock for a test root");
+    let lock = match outcome {
+        mem_store::engine_lock::EngineLockOutcome::Acquired(lock) => lock,
+        mem_store::engine_lock::EngineLockOutcome::Lost { holder_pid } => {
+            panic!(
+                "test root {} is already locked by pid {holder_pid}",
+                storage_root.display()
+            )
+        }
+    };
+    let proof = std::sync::Arc::new(mem_store::delete_guard::ExclusiveRoot::new(lock));
+    roots.push((storage_root.to_path_buf(), proof.clone()));
+    proof
+}
+
 /// Owns a temp dir and removes it on drop (also on test panic).
 pub struct TestDir {
     path: PathBuf,

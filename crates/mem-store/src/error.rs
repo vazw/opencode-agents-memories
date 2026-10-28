@@ -207,6 +207,14 @@ pub struct MigrationRestorePending {
 }
 
 impl MigrationRestorePending {
+    pub(crate) fn new(db_path: PathBuf, backup_path: PathBuf, original: StoreError) -> Self {
+        Self {
+            db_path,
+            backup_path,
+            original,
+        }
+    }
+
     /// The schema failure the caller should re-raise after a successful restore.
     pub fn original(&self) -> &StoreError {
         &self.original

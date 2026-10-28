@@ -31,6 +31,8 @@ async fn test_legacy_import_preserves_source_dims_for_the_mismatch_detector() {
     base.embedding_dimensions = 384;
     base.embedding_model = "new-model".to_string();
     let (config, connections, manager) = real_components(base).await;
+    // The legacy import renames the source to its backup under the proof.
+    let _proof = common::exclusive_root(&config.storage_path);
     let storage = config.storage_path.clone();
 
     // Upstream `createLegacyShard` shape: plain BLOB vectors, no metadata.

@@ -31,6 +31,7 @@ async fn prepared_db(
             db_path: None,
             label: "search-battery",
         },
+        None,
     )
     .await
     .expect("shard schema");

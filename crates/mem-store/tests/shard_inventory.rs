@@ -496,6 +496,7 @@ async fn test_inventory_discovers_disk_only_shard_files() {
             db_path: None,
             label: "disk-only",
         },
+        None,
     )
     .await
     .expect("schema");

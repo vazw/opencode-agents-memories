@@ -83,6 +83,8 @@ struct Rig {
     connections: Arc<ConnectionManager>,
     shards: Arc<ShardManager>,
     sleeper: RecordingSleeper,
+    /// The live exclusivity proof the recovery/import mutations need (issue 46).
+    _proof: Arc<mem_store::delete_guard::ExclusiveRoot>,
 }
 
 async fn rig(prefix: &str, dims: u32, model: &str) -> Rig {
@@ -90,11 +92,13 @@ async fn rig(prefix: &str, dims: u32, model: &str) -> Rig {
     config.embedding_dimensions = dims;
     config.embedding_model = model.to_string();
     let (config, connections, manager) = real_components(config).await;
+    let proof = common::exclusive_root(&config.storage_path);
     Rig {
         storage: config.storage_path.clone(),
         connections,
         shards: Arc::new(manager),
         sleeper: RecordingSleeper::new(),
+        _proof: proof,
     }
 }
 

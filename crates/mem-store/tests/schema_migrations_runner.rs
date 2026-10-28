@@ -102,6 +102,11 @@ fn options_for(config: &StoreConfig, file: &str) -> MigrationOptions {
     }
 }
 
+/// The memoised root proof (a destructive upgrade needs one).
+fn root_proof(config: &StoreConfig) -> Arc<mem_store::delete_guard::ExclusiveRoot> {
+    common::exclusive_root(&config.storage_path)
+}
+
 fn migration(version: i64, sql: &str) -> SchemaMigration {
     SchemaMigration {
         version,
@@ -130,6 +135,7 @@ async fn test_applies_pending_migrations_in_ascending_version_order_and_records_
             db_path: None,
             label: "test",
         },
+        None,
     )
     .await
     .expect("applies");
@@ -173,6 +179,7 @@ async fn test_returns_current_version_when_nothing_is_pending() {
             db_path: None,
             label: "test",
         },
+        None,
     )
     .await
     .expect("noop");
@@ -189,8 +196,8 @@ async fn test_returns_current_version_when_nothing_is_pending() {
 // 3/6 backup before destructive upgrade
 // ---------------------------------------------------------------------------
 
-async fn seed_real_shard_v1(config: &StoreConfig, file: &str) -> DbHandle {
-    let db = common::open_real_db(config, file).await.expect("open");
+/// Seeds the v1 schema + one row through an already-open handle.
+async fn seed_v1(db: &dyn Db) {
     db.batch(
         vec![
             Statement::new(sql::shard_metadata_ddl(), Vec::new()),
@@ -235,6 +242,11 @@ async fn seed_real_shard_v1(config: &StoreConfig, file: &str) -> DbHandle {
     )
     .await
     .expect("seed row");
+}
+
+async fn seed_real_shard_v1(config: &StoreConfig, file: &str) -> DbHandle {
+    let db = common::open_real_db(config, file).await.expect("open");
+    seed_v1(db.as_ref()).await;
     db
 }
 
@@ -243,9 +255,14 @@ async fn test_creates_backup_before_destructive_upgrade_when_version_positive() 
     let config = common::store_config("mig-backup");
     let db = seed_real_shard_v1(&config, "shard.db").await;
     let options = &options_for(&config, "shard.db");
-    let version = apply_schema_migrations(db.as_ref(), &memory_shard_migrations(2), options)
-        .await
-        .expect("applies v2");
+    let version = apply_schema_migrations(
+        db.as_ref(),
+        &memory_shard_migrations(2),
+        options,
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect("applies v2");
     assert_eq!(version, 2);
 
     let backups: Vec<PathBuf> = std::fs::read_dir(&config.storage_path)
@@ -270,22 +287,51 @@ async fn test_creates_backup_before_destructive_upgrade_when_version_positive() 
 #[tokio::test]
 async fn test_failure_restores_backup_and_reraises() {
     let config = common::store_config("mig-restore");
-    let db_path_store = config.storage_path.clone();
-    let db = seed_real_shard_v1(&config, "shard.db").await;
+    let (_config, connections, _shards) = common::real_components(config.clone()).await;
+    let db_path = config.storage_path.join("shard.db");
+    let db = connections
+        .get_connection(&db_path)
+        .await
+        .expect("open through the manager");
+    seed_v1(db.as_ref()).await;
     let failing = vec![
         migration(1, "CREATE TABLE hero (id INTEGER)"),
         migration(2, "SELECTX certainly not sql"),
     ];
     let options = &options_for(&config, "shard.db");
-    let error = apply_schema_migrations(db.as_ref(), &failing, options)
-        .await
-        .expect_err("migration failure propagates");
-    drop(error);
-    drop(db); // caller drops before verifying the restored file (W1.5 wiring)
+    let error = apply_schema_migrations(
+        db.as_ref(),
+        &failing,
+        options,
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect_err("migration failure propagates");
 
-    let reopened = common::open_real_db(&config, "shard.db")
+    // 46.4: the runner never unlinks the file it has open. It hands the
+    // restore to the caller, which drops its handle and settles the pending.
+    let pending = match error {
+        StoreError::MigrationRestorePending(pending) => pending,
+        other => panic!("expected MigrationRestorePending, got {other:?}"),
+    };
+    assert_eq!(pending.db_path(), db_path.as_path());
+    assert!(
+        pending.backup_path().exists(),
+        "the backup must still exist while the pending is unsettled"
+    );
+    assert!(
+        !pending.original().to_string().is_empty(),
+        "the original failure travels with the pending value"
+    );
+    pending
+        .restore(&connections, db)
         .await
-        .expect("reopen");
+        .expect("the caller settles the restore");
+
+    let reopened = connections
+        .get_connection(&db_path)
+        .await
+        .expect("reopen through the same manager");
     let rows = reopened
         .query(sql::PRAGMA_USER_VERSION, Vec::new())
         .await
@@ -296,7 +342,6 @@ async fn test_failure_restores_backup_and_reraises() {
         .await
         .expect("rows probe");
     assert_eq!(kept.len(), 1, "seeded row restored");
-    let _ = db_path_store;
 }
 
 // ---------------------------------------------------------------------------
@@ -311,9 +356,14 @@ async fn test_failure_at_version_zero_leaves_original_untouched_and_reraises() {
         .expect("open");
     let failing = vec![migration(1, "SELECTX certainly not sql")];
     let options = &options_for(&config, "fresh.db");
-    let error = apply_schema_migrations(db.as_ref(), &failing, options)
-        .await
-        .expect_err("failure re-raised");
+    let error = apply_schema_migrations(
+        db.as_ref(),
+        &failing,
+        options,
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect_err("failure re-raised");
     assert!(
         !error.to_string().is_empty(),
         "original error carries through: {error}"
@@ -346,9 +396,14 @@ async fn test_memory_shard_migrations_apply_v1_and_v2() {
         .await
         .expect("open");
     let options = &options_for(&config, "shard.db");
-    let version = apply_schema_migrations(db.as_ref(), &memory_shard_migrations(4), options)
-        .await
-        .expect("applies");
+    let version = apply_schema_migrations(
+        db.as_ref(),
+        &memory_shard_migrations(4),
+        options,
+        Some(root_proof(&config).as_ref()),
+    )
+    .await
+    .expect("applies");
     assert_eq!(version, 2);
 
     let columns = db

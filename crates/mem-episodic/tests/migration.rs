@@ -69,6 +69,8 @@ async fn apply_v1_only(db: &dyn Db, db_path: &std::path::Path) {
             db_path: Some(db_path.to_path_buf()),
             label: EPISODIC_MIGRATION_LABEL,
         },
+        // v1 over a version-0 file takes no backup; no proof is needed.
+        None,
     )
     .await
     .expect("apply v1 only");
@@ -182,6 +184,8 @@ async fn test_fresh_db_is_idempotent() {
         second.as_ref(),
         &episodic_migrations(DIMS),
         &migration_options(&store),
+        // v6 is already applied: pending is empty, so no backup arises.
+        None,
     )
     .await
     .expect("re-apply");
@@ -436,6 +440,9 @@ async fn test_upgrade_v1_to_v2_adds_soft_delete_columns() {
 
     // The store upgrades it in place: v2 columns, the v3 milestone table, v4 capture_id, the v6 retention schema.
     let store = EpisodicStore::new(dir.to_path_buf(), dir.store_config());
+    // A v1→v6 upgrade takes a destructive backup: the store needs a live proof
+    // for its exact storage path (issue 46.4).
+    let _proof = common::exclusive_root(dir.path());
     let db = store.ready().await.expect("ready");
 
     let version = query_one(db.as_ref(), "PRAGMA user_version", Vec::new())
@@ -503,6 +510,9 @@ async fn test_v2_defaults_existing_rows_to_null_deleted_and_not_orphaned() {
     drop(raw);
 
     let store = EpisodicStore::new(dir.to_path_buf(), dir.store_config());
+    // A v1→v6 upgrade takes a destructive backup: the store needs a live proof
+    // for its exact storage path (issue 46.4).
+    let _proof = common::exclusive_root(dir.path());
     let db = store.ready().await.expect("ready");
 
     let row = query_one(
@@ -558,6 +568,9 @@ async fn milestone_columns(db: &dyn Db) -> Vec<String> {
 async fn test_v3_migration_creates_episodic_milestones_table_and_index() {
     let dir = TestDir::new("migration-v3-milestones");
     let store = EpisodicStore::new(dir.to_path_buf(), dir.store_config());
+    // A v1→v6 upgrade takes a destructive backup: the store needs a live proof
+    // for its exact storage path (issue 46.4).
+    let _proof = common::exclusive_root(dir.path());
     let db = store.ready().await.expect("ready");
 
     let version = query_one(db.as_ref(), "PRAGMA user_version", Vec::new())
@@ -658,6 +671,8 @@ async fn test_v2_migration_is_idempotent() {
         db.as_ref(),
         &episodic_migrations(DIMS),
         &migration_options(&store),
+        // v6 is already applied: pending is empty, so no backup arises.
+        None,
     )
     .await
     .expect("re-apply");

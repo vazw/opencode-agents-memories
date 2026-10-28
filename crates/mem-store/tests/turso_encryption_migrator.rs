@@ -108,6 +108,8 @@ async fn test_is_a_no_op_when_the_encryption_marker_already_exists() {
     let key_hex = common::hex_key_64();
     let config = common::encrypted_store_config("enc-mig-marker", &key_hex);
     let (config, connections, shards) = common::real_components(config).await;
+    // Converting shards copies, removes and renames under the root's proof.
+    let _proof = common::exclusive_root(&config.storage_path);
     let storage = config.storage_path.clone();
     let shards = Arc::new(shards);
 
@@ -150,6 +152,8 @@ async fn test_writes_marker_after_converting_plaintext_shards() {
     let key_hex = common::hex_key_64();
     let config = common::encrypted_store_config("enc-mig-convert", &key_hex);
     let (config, connections, shards) = common::real_components(config).await;
+    // Converting shards copies, removes and renames under the root's proof.
+    let _proof = common::exclusive_root(&config.storage_path);
     let storage = config.storage_path.clone();
     let shards = Arc::new(shards);
 
@@ -223,6 +227,8 @@ async fn test_refuses_already_encrypted_with_different_key() {
     // The configured key differs from the one the shard was created with.
     let config = common::encrypted_store_config("enc-mig-refuse", &"ab".repeat(32));
     let (config, connections, shards) = common::real_components(config).await;
+    // Converting shards copies, removes and renames under the root's proof.
+    let _proof = common::exclusive_root(&config.storage_path);
     let storage = config.storage_path.clone();
     let shards = Arc::new(shards);
 
@@ -265,6 +271,8 @@ async fn test_copy_failure_removes_the_staged_encrypt_tmp_file() {
     let key_hex = common::hex_key_64();
     let config = common::encrypted_store_config("enc-mig-copyfail", &key_hex);
     let (config, connections, _shards) = common::real_components(config).await;
+    // Converting shards copies, removes and renames under the root's proof.
+    let _proof = common::exclusive_root(&config.storage_path);
     let storage = config.storage_path.clone();
 
     // A `memories` table missing every column the fixed memories-copy SQL
@@ -311,6 +319,8 @@ async fn test_migrates_a_table_name_that_requires_identifier_quoting() {
     let key_hex = common::hex_key_64();
     let config = common::encrypted_store_config("enc-mig-quote", &key_hex);
     let (config, connections, shards) = common::real_components(config).await;
+    // Converting shards copies, removes and renames under the root's proof.
+    let _proof = common::exclusive_root(&config.storage_path);
     let storage = config.storage_path.clone();
     let shards = Arc::new(shards);
 

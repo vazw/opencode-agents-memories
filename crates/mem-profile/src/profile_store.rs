@@ -24,6 +24,7 @@ use mem_core::sync::lock_or_recover;
 use mem_store::config::StoreConfig;
 use mem_store::connection::ConnectionManager;
 use mem_store::db::{ConnectFactory, DbHandle, Value, query_one, turso_connect_factory};
+use mem_store::error::StoreError;
 use mem_store::platform::Platform;
 use mem_store::schema_migrations::{
     MigrationOptions, apply_schema_migrations, user_profiles_migrations,
@@ -656,8 +657,27 @@ impl ProfileStore {
             db_path: Some(self.db_path.clone()),
             label: USER_PROFILES_DB_NAME,
         };
-        apply_schema_migrations(db.as_ref(), &user_profiles_migrations(), &options).await?;
-        Ok(db)
+        // The set is v1-only today (no backup); the proof and settle keep the
+        // site honest for a future v2 (issue 46.4).
+        let root = self.connections.exclusive_root();
+        match apply_schema_migrations(
+            db.as_ref(),
+            &user_profiles_migrations(),
+            &options,
+            root.as_ref(),
+        )
+        .await
+        {
+            Ok(_) => Ok(db),
+            Err(StoreError::MigrationRestorePending(pending)) => {
+                let original = pending.original().clone();
+                match pending.restore(&self.connections, db).await {
+                    Ok(()) => Err(original.into()),
+                    Err(restore_error) => Err(restore_error.into()),
+                }
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     // -----------------------------------------------------------------------
