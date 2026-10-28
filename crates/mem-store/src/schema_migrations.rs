@@ -180,11 +180,11 @@ pub async fn apply_schema_migrations(
         });
     }
     // Truncating checkpoint: the backup wants a self-contained main file. The
-    // pragma returns a row, so it must go through `query` — `execute` refuses
-    // it ("unexpected row during execution"), and the old `let _ = execute`
-    // silently skipped the checkpoint entirely. The runner never unlinks a file
-    // it has open; on failure it returns `MigrationRestorePending` for the
-    // caller to settle (issue 46.4).
+    // pragma returns a row, so it goes through `query`. (`execute` also runs
+    // the checkpoint, then reports the row as "unexpected row during
+    // execution"; the old `let _ = execute` hid that error, not the
+    // checkpoint.) The runner never unlinks a file it has open; on failure it
+    // returns `MigrationRestorePending` for the caller to settle (issue 46.4).
     let _ = db
         .query("PRAGMA wal_checkpoint(TRUNCATE)", Vec::new())
         .await;
