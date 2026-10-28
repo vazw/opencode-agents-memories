@@ -430,8 +430,8 @@ test("test_v2_adapter_registers_no_tool_and_no_skills", { timeout: 5000 }, async
   assert.deepEqual(transformed, [], "tool registration is issue 22's; skill registration is issue 69's (setup, not the adapter)");
   assert.deepEqual(
     [...harness.hooks.keys()].sort(),
-    ["context", "prompt"],
-    "the adapter registers exactly the two session hooks the port's V1 wrapper answers"
+    ["compaction", "context", "prompt"],
+    "the adapter registers exactly the three supported session hooks: prompt, context and compaction"
   );
 
   await cleanup();

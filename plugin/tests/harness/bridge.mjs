@@ -1,11 +1,12 @@
 // W5.2 shared test harness for the staged-package cases. NOT a test file:
 // `node --test` only matches `*.test.mjs`, so this module has no cases of its
-// own — its correctness is proved by its seven users: `v2-plugin-adapter.test.mjs`
+// own — its correctness is proved by its eight users: `v2-plugin-adapter.test.mjs`
 // and `compaction-v2-inheritance.test.mjs` (`mode: "v2"`),
 // `wrapper-toast.test.mjs` (`mode: "v1"`), `compaction-hook.test.mjs`
 // (`mode: "v1-compaction"`), `compaction-capability.test.mjs`
 // (`mode: "v1-compaction"`, the capability gate), `memory-tools.test.mjs`
-// (`mode: "v2-tool"`) and `skills-bridge.test.mjs` (`mode: "v2-skills"`).
+// (`mode: "v2-tool"`), `skills-bridge.test.mjs` (`mode: "v2-skills"`) and
+// `v2-compaction-hook.test.mjs` (`mode: "v2-compaction"`).
 //
 // Why a subprocess and not an import: `plugin/src/plugin.js` spawns the engine
 // with piped stdio and no `detached`/`unref` (`:365-368`), and the stub exits
@@ -202,7 +203,7 @@ function respond(parsed) {
 
 /**
  * The driver script, written into the case's temp dir by its consumer. One
- * source, five modes (`DRIVER_MODE`), each reading its fixture from the JSON
+ * source, six modes (`DRIVER_MODE`), each reading its fixture from the JSON
  * file whose path the parent passes as argv[3]:
  *
  *   "v1" — imports the staged `dist/plugin.js`, builds `server()` from the
@@ -230,6 +231,15 @@ function respond(parsed) {
  *          `skills` request and writes
  *          `{ adds, updates, removes, disposed, catalogueRequests, helloCount,
  *          consoleErrors, elapsedMs }`.
+ *   "v2-compaction" — imports the staged `dist/v2/plugin.js`, calls `setup(ctx)`
+ *          against a complete fake ctx (session hooks, transcript, session
+ *          lookup, send spies and an ALWAYS-registered RPC recorder, so the
+ *          no-send row cannot be vacuous), requires the registered `compaction`
+ *          hook, fires the fixture prompts then each compaction step, releases
+ *          the recorded event stream, awaits cleanup and writes
+ *          `{ registeredHooks, systems, compactionErrors, injects, promptCalls,
+ *          syntheticCalls, sessionGetCalls, contextCalls, toastEmits,
+ *          consoleErrors, helloCount }`.
  */
 export const DRIVER_SOURCE = `import fs from "node:fs";
 import path from "node:path";
@@ -477,6 +487,137 @@ if (mode === "v2") {
   const helloCount = wire.filter((message) => message && message.method === "hello").length;
   const injectCount = wire.filter((message) => message && message.method === "inject").length;
   writeRecord({ helloCount, captureLine, injectCount, toastEmits, sessionGetCalls, consoleErrors });
+  process.exit(0);
+}
+
+if (mode === "v2-compaction") {
+  const mod = await import(pathToFileURL(path.join(pkgDir, "dist", "v2", "plugin.js")));
+  const sessionHooks = new Map();
+  const toastEmits = [];
+  const sessionGetCalls = [];
+  const contextCalls = [];
+  const promptCalls = [];
+  const syntheticCalls = [];
+  const consoleErrors = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => {
+    consoleErrors.push(args.map((arg) => String(arg)).join(" "));
+  };
+  // Released only after the hooks ran: the compaction callback is the subject,
+  // and a watcher that consumed an event first would only add scheduling noise.
+  let releaseEvents = null;
+  const eventsReleased = new Promise((resolve) => {
+    releaseEvents = resolve;
+  });
+  const ctx = {
+    location: fixture.location,
+    session: {
+      hook: async (name, callback) => {
+        sessionHooks.set(name, callback);
+      },
+      context: async (input) => {
+        contextCalls.push(input?.sessionID);
+        return fixture.session?.context ?? [];
+      },
+      get: async (input) => {
+        const sessionID = input?.sessionID;
+        sessionGetCalls.push(sessionID);
+        return fixture.session?.get?.[sessionID] ?? null;
+      },
+      // Recording send spies: the no-send row is vacuous without them.
+      prompt: async (input) => {
+        promptCalls.push(input);
+        return { data: {} };
+      },
+      synthetic: async (input) => {
+        syntheticCalls.push(input);
+        return { data: {} };
+      },
+    },
+    // Always installed: registerToastRpc registers only when ctx.rpc.register
+    // exists, so without it toastEmits stays [] even for a sending mutant.
+    rpc: {
+      register: async () => ({
+        events: {
+          emit: async (name, data) => {
+            toastEmits.push({ name, data });
+          },
+        },
+      }),
+    },
+    event: {
+      async *subscribe({ signal }) {
+        await eventsReleased;
+        for (const event of fixture.events ?? []) {
+          yield event;
+        }
+        if (signal.aborted) return;
+        await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+      },
+    },
+  };
+
+  const cleanup = await mod.setup(ctx);
+  const compactionHook = sessionHooks.get("compaction");
+  if (typeof compactionHook !== "function") {
+    // A missing registration must not surface as "... is not a function" at
+    // the call site.
+    throw new Error("no compaction hook");
+  }
+
+  if (Array.isArray(fixture.prompts) && fixture.prompts.length > 0) {
+    const promptHook = sessionHooks.get("prompt");
+    if (typeof promptHook !== "function") {
+      throw new Error("the v2 entry did not register a prompt hook");
+    }
+    for (const prompt of fixture.prompts) {
+      await promptHook(prompt);
+    }
+  }
+
+  const systems = [];
+  const compactionErrors = [];
+  for (const step of fixture.compactions ?? []) {
+    const sessionID = step.sessionID;
+    const system = step.system ?? [{ type: "text", text: "BASE" }];
+    const event = {
+      sessionID,
+      model: { providerID: "acme", id: "model-a" },
+      system,
+      messages: [],
+      options: {},
+      agent: "build",
+      tools: {},
+    };
+    try {
+      await compactionHook(event);
+    } catch (error) {
+      // Recording, not rethrowing: the field must never be vacuous, and the
+      // error is serialized so the record stays JSON.
+      compactionErrors.push({ sessionID, error: String(error) });
+    }
+    systems.push({ sessionID, system });
+  }
+
+  releaseEvents();
+  await cleanup();
+  console.error = originalConsoleError;
+  const wire = readWire();
+  writeRecord({
+    registeredHooks: [...sessionHooks.keys()].sort(),
+    systems,
+    compactionErrors,
+    injects: wire
+      .filter((message) => message && message.method === "inject")
+      .map((message) => ({ ...message.params })),
+    promptCalls,
+    syntheticCalls,
+    sessionGetCalls,
+    contextCalls,
+    toastEmits,
+    consoleErrors,
+    helloCount: wire.filter((message) => message && message.method === "hello").length,
+  });
   process.exit(0);
 }
 
