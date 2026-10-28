@@ -47,6 +47,10 @@ pub struct ComposedRuntime {
     /// The user-profile store the mem-web surface reads (W6.7), constructed
     /// here for the same reason.
     pub profile: Arc<ProfileStore>,
+    /// Issue 69: the skills manager the bridge's `skills` method reads. The
+    /// manager opens `skills.db` lazily, so a composition that never answers
+    /// `skills` creates no file.
+    pub skills: Arc<mem_skills::SkillsManager>,
     pub embedder: Arc<dyn mem_embed::embedder::Embedder>,
     pub episodic_config: mem_core::config::Episodic,
     /// The shared in-flight consolidation gate (set by the scheduler's RAII
@@ -146,6 +150,13 @@ pub async fn build_composed_runtime(
     // touches no disk.
     let vault_store = Arc::new(mem_vault::VaultStore::new(store_config.clone()));
     let vault_feeder = Arc::new(crate::vault_feeder::VaultFeeder::new(vault_store));
+    // Issue 69: the skills manager the bridge's `skills` method reads. It opens
+    // `skills.db` lazily on the first request; the web surface keeps its own
+    // manager (separate connection, same file) — see R2.
+    let skills = Arc::new(mem_skills::SkillsManager::new(
+        storage_root.to_path_buf(),
+        store_config.clone(),
+    ));
     let shards = Arc::new(ShardManager::new(
         storage_root.to_path_buf(),
         store_config,
@@ -296,6 +307,7 @@ pub async fn build_composed_runtime(
         shards,
         prompts,
         profile,
+        skills,
         embedder,
         episodic_config: config.episodic,
         consolidation_active,

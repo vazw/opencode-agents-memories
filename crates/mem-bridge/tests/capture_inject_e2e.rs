@@ -72,6 +72,7 @@ fn engine(dir: &TestDir) -> Arc<Engine> {
         capture,
         inject,
         recall,
+        skills: None,
     };
     Arc::new(Engine::with_runtime(
         EngineConfig::default(),

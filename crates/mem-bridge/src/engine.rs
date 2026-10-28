@@ -143,11 +143,15 @@ fn handshake_result(config: &EngineConfig) -> serde_json::Value {
             // issue 33 omitted the key; the wrapper then no-ops both hooks.
             "compaction": true,
             "fire_and_forget_capture": true,
+            // Issue 69: this build answers the `skills` runtime method. The
+            // wrapper registers the catalogue only when this is the boolean
+            // true; an engine that predates the method omits the key.
+            "skills": true,
             "standalone": true,
             "web": true,
         },
         "engine_version": config.engine_version,
-        "methods": ["capture", "inject", "recall", "health", "shutdown"],
+        "methods": ["capture", "inject", "recall", "skills", "health", "shutdown"],
         "protocol": config.protocol,
     })
 }
@@ -176,6 +180,10 @@ pub struct EngineRuntime {
     pub capture: Arc<CaptureService>,
     pub inject: Arc<InjectService>,
     pub recall: Arc<RecallService>,
+    /// Issue 69: the project-scoped catalogue read behind `skills`. `None` in
+    /// the fixture runtimes, which answer `skills` with `-32001` like the
+    /// other runtime methods.
+    pub skills: Option<Arc<crate::skills::SkillsService>>,
 }
 
 impl Engine {
@@ -215,6 +223,7 @@ impl Engine {
         if request.method.as_str() != "capture"
             && request.method.as_str() != "inject"
             && request.method.as_str() != "recall"
+            && request.method.as_str() != "skills"
             && request.method.as_str() != "health"
             && request.method.as_str() != "shutdown"
         {
@@ -224,6 +233,13 @@ impl Engine {
                 error_map::message_for(ErrorKind::UnknownMethod),
             );
         }
+        // Issue 69: `skills` is project-scoped and session-free (registration
+        // happens at plugin setup, before any session exists). It therefore
+        // bypasses the session-id gate exactly as `hello` does, but not the
+        // shutdown gate above.
+        if request.method.as_str() == "skills" {
+            return self.call_skills(request).await;
+        }
         if let Some(response) = self.check_session_id(request) {
             return response;
         }
@@ -231,6 +247,7 @@ impl Engine {
             "capture" => self.call_capture(request).await,
             "inject" => self.call_inject(request).await,
             "recall" => self.call_recall(request).await,
+            "skills" => self.call_skills(request).await,
             "health" => self.health(request),
             "shutdown" => self.shutdown(request),
             _ => Response::error(
@@ -439,6 +456,54 @@ impl Engine {
                 error_map::message_for(ErrorKind::InvalidParams),
             ),
             Err(crate::recall::RecallError::Internal) => Response::error(
+                request.id.clone(),
+                error_map::code_for(ErrorKind::Internal),
+                error_map::message_for(ErrorKind::Internal),
+            ),
+        }
+    }
+
+    /// `skills`: the project-scoped catalogue (issue 69). `project_id` is
+    /// required and non-blank (`-32602`); a runtime-less engine answers
+    /// `-32001` like `capture`/`inject`/`recall`; a store fault is `-32603`.
+    async fn call_skills(&self, request: &Request) -> Response {
+        let project_id = match request
+            .param("project_id")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some(project_id) if !project_id.trim().is_empty() => project_id,
+            _ => {
+                return Response::error(
+                    request.id.clone(),
+                    error_map::code_for(ErrorKind::InvalidParams),
+                    error_map::message_for(ErrorKind::InvalidParams),
+                );
+            }
+        };
+        let skills = match self
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.skills.as_ref())
+        {
+            Some(skills) => skills,
+            None => {
+                return Response::error(
+                    request.id.clone(),
+                    error_map::code_for(ErrorKind::Degraded),
+                    error_map::message_for(ErrorKind::Degraded),
+                );
+            }
+        };
+        match skills.catalogue(project_id).await {
+            Ok(entries) => {
+                Response::result(request.id.clone(), serde_json::json!({ "skills": entries }))
+            }
+            Err(crate::skills::CatalogueError::InvalidProject) => Response::error(
+                request.id.clone(),
+                error_map::code_for(ErrorKind::InvalidParams),
+                error_map::message_for(ErrorKind::InvalidParams),
+            ),
+            Err(crate::skills::CatalogueError::Store(_)) => Response::error(
                 request.id.clone(),
                 error_map::code_for(ErrorKind::Internal),
                 error_map::message_for(ErrorKind::Internal),
@@ -1056,6 +1121,10 @@ pub async fn run_in_runtime(
                     runtime.store.clone(),
                     runtime.embedder.clone(),
                 )),
+                skills: Some(Arc::new(crate::skills::SkillsService::new(
+                    runtime.skills.clone(),
+                    runtime.scope_resolver.clone(),
+                ))),
             }),
         ),
         None => Engine::new(engine_config),
