@@ -56,6 +56,7 @@ fn full_engine() -> Engine {
         capture: fixture.capture,
         inject: fixture.inject,
         recall: fixture.recall,
+        skills: None,
     };
     // The temp dir's lifetime: the guard is dropped with the engine's test
     // run (a leaked TestDir is bounded by the test count).
@@ -161,6 +162,24 @@ fn test_recall_request_fixture_byte_equal() {
     let bytes = fixture("recall-request.json");
     let request = parse_line(&bytes).expect("recall request parses");
     assert_eq!(request.method, "recall");
+    assert_eq!(encode_request(&request), bytes);
+}
+
+#[test]
+fn test_skills_request_fixture_byte_equal() {
+    let bytes = fixture("skills-request.json");
+    let request = parse_line(&bytes).expect("skills request parses");
+    assert_eq!(request.method, "skills");
+    assert_eq!(request.id.as_str(), Some("skills-1"));
+    assert_eq!(
+        request.params.get("project_id").and_then(Value::as_str),
+        Some("/workspace/project")
+    );
+    assert_eq!(
+        request.params.get("session_id"),
+        None,
+        "skills is session-free: registration precedes any session"
+    );
     assert_eq!(encode_request(&request), bytes);
 }
 

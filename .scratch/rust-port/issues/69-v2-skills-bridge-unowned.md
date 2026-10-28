@@ -1,6 +1,8 @@
 # 69 — The V2 skills bridge is unowned (re-homed from issue 26)
 
-Status: ready-for-agent — 2026-10-27 (owner ruled **option B**: a `skills` wire method feeding
+Status: done — 2026-10-29 — landed at `8cf9060` (merge of `ba337ed`; `capabilities.skills` + the `skills` wire method + the V2 `setup` registration with `skill.updated`; six runtime methods). The original triage line follows.
+
+_Original:_ ready-for-agent — 2026-10-27 (owner ruled **option B**: a `skills` wire method feeding
 `ctx.skill.transform`. Soft-blocked by issue 68's capability flag for the skew guard — both lanes edit the
 pinned `hello` fixture, so 68 goes first. Brief under `## Agent Brief`.)
 

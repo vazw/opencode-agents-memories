@@ -32,6 +32,7 @@ test("test_bundle_only_shipped_entries", () => {
     [
       "compaction.js",
       "plugin.js",
+      "skills.js",
       "tools.js",
       "tui.js",
       "v2/adapter.js",

@@ -427,11 +427,11 @@ test("test_v2_adapter_registers_no_tool_and_no_skills", { timeout: 5000 }, async
     event: async () => {},
   });
 
-  assert.deepEqual(transformed, [], "tool registration is issue 22's; skill registration is issue 26's");
+  assert.deepEqual(transformed, [], "tool registration is issue 22's; skill registration is issue 69's (setup, not the adapter)");
   assert.deepEqual(
     [...harness.hooks.keys()].sort(),
-    ["context", "prompt"],
-    "the adapter registers exactly the two session hooks the port's V1 wrapper answers"
+    ["compaction", "context", "prompt"],
+    "the adapter registers exactly the three supported session hooks: prompt, context and compaction"
   );
 
   await cleanup();
@@ -440,7 +440,7 @@ test("test_v2_adapter_registers_no_tool_and_no_skills", { timeout: 5000 }, async
 // The end-to-end case (blueprint Step 4.1 / AC10): a V2
 // `session.execution.succeeded` event produces exactly one wire `capture`,
 // through ONE staged engine child, carrying the mapped prompt and the host
-// directory as the project id — the same V1 closure, the same five methods.
+// directory as the project id — the same V1 closure, the same six methods.
 // It also fires the recorded `prompt` hook against an erroring stub, so the
 // toast path (`setup` → legacy client → `notifyHost` → RPC emit) is exercised
 // under V2, the one route the V1-only driver can never reach.

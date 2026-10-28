@@ -5,9 +5,11 @@
   landed) and `6f8801b` (the lane's commit). Every `file:line` pointer states its base; an unlabelled
   number is at `6f8801b`. Blueprint `20261027-0824-w5-5-compaction-hook-r17` (SYS-APPROVED
   2026-10-27T14:43Z).
-- **Binding on:** `plugin/src/plugin.js`, `plugin/src/compaction.js`, `plugin/package.json`,
-  `crates/mem-bridge/src/{compaction,inject,composition}.rs`,
-  `crates/mem-core/src/logging/signatures.rs`, and the two new JS test files.
+- **Binding on:** `plugin/src/plugin.js`, `plugin/src/compaction.js`, `plugin/src/v2/adapter.js`,
+  `plugin/package.json`, `crates/mem-bridge/src/{compaction,inject,composition}.rs`,
+  `crates/mem-core/src/logging/signatures.rs`, and the three JS test files that pin this seam
+  (`plugin/tests/compaction-hook.test.mjs`, `plugin/tests/compaction-capability.test.mjs`,
+  `plugin/tests/v2-compaction-hook.test.mjs`).
 - **Supersedes / amends:** implements the last host-lifecycle seam left by
   `docs/bridge-schema.md` (frozen; no wire change). Records a deliberate non-use of
   `experimental.compaction.autocontinue`.
@@ -94,24 +96,71 @@ response key, no fixture adjustment, no edit to the frozen document. This decisi
 `inject` request and response only; issue 68's `hello` capability is the additive change D-43
 permits and moves `hello-response.json` with it.
 
-**DECISION 5 — V2: the `session.compacted` half is inherited and pinned; the
-`experimental.session.compacting` half is not wired.** The V2 host exposes compaction under a
-different extension point (`SessionHooks { readonly compaction: SessionCompaction }`,
-`@opencode/plugin@2.0.27` `dist/promise/session.d.ts`): registration is
-`ctx.session.hook("compaction", cb)`, the callback is a single input with no output, and it can
-mutate `input.messages` / `input.system` or set `input.result`. The port's adapter registers only
-`prompt` (`plugin/src/v2/adapter.js:36`) and `context` (`:54`), and `plugin/src/v2/**` is frozen by
-issue 20's carve. That is a numbered follow-up created by this wave — **issue 67**
-(`.scratch/rust-port/issues/67-v2-compaction-hook.md`), derived as
-`max(zero-stripped existing numbers) + 1` — not a non-existent API. Its first task is to confirm
-host-side V2 dispatch: P18 confirms the *registrable surface* only, from published typings, and
-the caller is unconfirmed. Under V2 the restore read still happens (the event is inherited), but
-the message cannot be sent: `createLegacyClient` exposes neither `session.prompt` nor
-`session.get`. The handler therefore proceeds on an unknown session so the read still reaches the
-engine, and skips the send and the toast when the capability is absent — it must not throw.
-V2's own cache invalidation (`plugin/src/v2/adapter.js:66-68`) delivers the memory context on the
-next turn. The child gate is not enforced under V2 today; the follow-up owns both it and the send
-path.
+**DECISION 5 — V2: the host's `compaction` hook is registered in the adapter, delegates to the V1
+`experimental.session.compacting` closure and appends the render to `event.system`; the restore stays a
+read, announced by a typed line.** Measured **READ** on the host at `8faeb81e92` (v2.2.0); the full chain,
+the re-derivation greps and their output are in
+`docs/evidence/issue-67-v2-compaction-dispatch/MEASUREMENT.md`:
+
+1. `SessionHooks.compaction: SessionCompaction` (`packages/plugin/src/promise/session.ts:142`), registered
+   through `ctx.session.hook(name, callback)` (`packages/plugin/src/promise/registration.ts:15-19`).
+2. `summarize` calls `requests.compaction({...})` (`packages/core/src/session/compaction.ts:840`), and
+   `SessionModelRequest.compaction` runs
+   `prepare("compaction", input, agentHook("compaction", input.agent))`
+   (`packages/core/src/session/model-request.ts:414`).
+3. `agentHook` is `hooks.trigger("session", name, { ...draft, agent, tools })`
+   (`packages/core/src/session/model-request.ts:408-410`), and `PluginHooks.trigger` iterates the
+   registered callbacks and `yield*`s each one (`packages/core/src/plugin/hooks.ts:88-94`).
+4. The promise bridge wraps each callback as `Effect.promise(() => Promise.resolve(callback(event)))`
+   (`packages/plugin/src/promise/adapter.ts:599-603`), so the callback is **awaited** — a rejected
+   promise is an Effect defect that aborts the host's compaction, not a no-op.
+
+The callback takes a **single input and has no output pair** (`SessionContext extends SessionRequest`,
+`system: Array<SystemPart>`, `packages/plugin/src/promise/session.ts:25-36`). The adapter therefore calls
+the V1 closure with `{sessionID: event.sessionID}`, collects `output.context`, and pushes every non-empty
+string onto `event.system` as `{type: "text", text}` — the array the request builder reads back. Never
+`event.messages` (a render there becomes a user-role transcript message) and never `event.result` (setting
+it skips the model call and replaces the host's summary). `plugin/src/v2/adapter.js` registers
+`hook("compaction", ...)` beside `prompt` and `context`; the issue-68 capability gate and the 2 s request
+timeout are **inherited by delegation**, not re-implemented — there is no engine handle in
+`plugin/src/v2/**` to gate on a second time. ADR-0017 DECISION 2's child rule degrades to *proceed*
+under V2, because the legacy client cannot read a session at all (below).
+
+Two decisions are pinned by tests, not prose (`plugin/tests/v2-compaction-hook.test.mjs`):
+
+- **The child gate is not applied under V2.** `readSession` returns null because `createLegacyClient`
+  exposes no `session.get` (`plugin/src/v2/legacy-client.js:120-134`), and DECISION 2's
+  positive-evidence rule says *proceed*. A child session may now ingest its **own** captured rows — a
+  recorded divergence from V1's agent-only property, whose real fix is the capture gate (issue 63), not a
+  second check here. `legacy-client.js` is untouched; adding `session.get` would buy no observable gain
+  and would move the pinned `sessionGetCalls` oracle of `compaction-v2-inheritance.test.mjs`.
+- **There is no send on V2; the restore half stays a read.** `createLegacyClient` exposes no
+  `session.prompt`, and the host's `session.prompt` input cannot carry V1's
+  `{parts, noReply, agent, model, variant}` body (`PromptInput = {text, files?, agents?, skills?}`,
+  `packages/schema/src/prompt-input.ts:25-31`; the endpoint at
+  `packages/client/src/effect/generated/client.ts:538-559`). `session.synthetic` is the closest analogue
+  but wakes the runner unless `resume: false` (`packages/core/src/session/session.ts:323`), and it would
+  need a V1→V2 translation of agent and model. The restore read still happens (the event is inherited)
+  and `plugin/tests/compaction-v2-inheritance.test.mjs` pins it; the adapter announces the skipped
+  restore with exactly one `compaction.restore_skipped` line per forwarded `session.compacted` event,
+  carrying `{reason: "session.prompt unavailable"}` and nothing else — no session id, path, render or
+  error text, written to stderr by `logWarn` (`plugin/src/plugin.js:198`). The line is unconditional for
+  this bridge: `typeof ctx.session.prompt` is a function on the real host (`SessionDomain` includes
+  `prompt` and `synthetic`, `packages/plugin/src/promise/session.ts:154-174`), and the absence is a
+  property of `createLegacyClient`, which the adapter cannot see.
+
+**The hook covers the summarisation path only.** `compaction.ts:303` chooses
+`native ? compactNatively(...) : summarize(...)` (`:317-321`): a native model never reaches `prepare`, so
+it gets no ingest. A background `precompute` **does** run `summarize` earlier (`compaction.ts:337-389`,
+its own `:840` request with a message prefix), so the hook runs there and the held summary carries the
+ingest; swapping that summary in (`usePrecomputed`, `compaction.ts:395-419`, chosen at `:317-318`) runs
+no new hook — the held summary already carries the ingest. There is no second hook and none is added.
+
+**Carve.** Issue 20 is landed, and its tracker records no standing freeze of `plugin/src/v2/**`; that carve
+belonged to that wave. This lane owns `plugin/src/v2/plugin.js` and `adapter.js` for the compaction
+registration only, and `legacy-client.js` only if the child gate needed a capability it does not expose —
+it does not, so `legacy-client.js` is byte-unchanged. The new registration adds nothing to the V2 entry's
+cleanup order (`skills`, then the adapter): the host owns the registration lifecycle.
 
 **DECISION 6 — restore formatting lives in Rust, not in the wrapper.** The wrapper has no store
 and no config path; putting the renderer there would force a sixth wire method (engine is frozen)
@@ -254,11 +303,11 @@ red while `test_hello_response_schema_equal_after_mask` stays green.
 
 ## The follow-up
 
-**Issue 67 — V2 first-class compaction hook.** Wire `ctx.session.hook("compaction", cb)` in
-`plugin/src/v2/` so V2 gets a pre-compaction ingest, with three preconditions: confirm host-side V2
-dispatch (registrable surface only today), deliberately unfreeze `plugin/src/v2/**` (issue 20's
-carve), and decide the V2 child gate and send path — both depend on capabilities
-`createLegacyClient` deliberately omits today.
+**Issue 67 — V2 first-class compaction hook — RESOLVED (2026-10-28).** The wiring and both decisions are
+DECISION 5 above; the host dispatch is recorded, with its re-derivation greps, its three-way compaction
+shape and its honest limit, in `docs/evidence/issue-67-v2-compaction-dispatch/MEASUREMENT.md`. The
+residual measurement is a live host run: the source read is the only dispatch evidence in the wave that
+closed it, and the driver cases call the registered callback themselves.
 
 ## Consequences
 

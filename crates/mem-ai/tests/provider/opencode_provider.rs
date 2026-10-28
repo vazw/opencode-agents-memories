@@ -113,6 +113,7 @@ fn plain_request() -> CompletionRequest {
 
 #[tokio::test]
 async fn test_opencode_host_complete_streams() {
+    let _gate = crate::lock_global_capture();
     let transport = Arc::new(MockTransport::new());
     let provider = OpenCodeHostProvider::new(host_config(), transport.clone());
 
@@ -140,6 +141,7 @@ async fn test_opencode_host_complete_streams() {
 
 #[tokio::test]
 async fn test_opencode_host_structured_output_loop() {
+    let _gate = crate::lock_global_capture();
     let mut mock = MockTransport::new();
     mock.structured = true;
     let transport = Arc::new(mock);
@@ -185,6 +187,7 @@ async fn test_opencode_host_structured_output_loop() {
 
 #[tokio::test]
 async fn test_opencode_host_timeout_config() {
+    let _gate = crate::lock_global_capture();
     let mut mock = MockTransport::new();
     mock.hang_message = true;
     let transport = Arc::new(mock);

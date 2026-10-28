@@ -51,7 +51,7 @@ The wrapper's **first** message after spawn is `hello`. No runtime method may pr
 ```
 
 ```json
-{"id":"hello-1","jsonrpc":"2.0","result":{"capabilities":{"compaction":true,"fire_and_forget_capture":true,"standalone":true,"web":true},"engine_version":"0.1.0","methods":["capture","inject","recall","health","shutdown"],"protocol":"1.0.0"}}
+{"id":"hello-1","jsonrpc":"2.0","result":{"capabilities":{"compaction":true,"fire_and_forget_capture":true,"skills":true,"standalone":true,"web":true},"engine_version":"0.1.0","methods":["capture","inject","recall","skills","health","shutdown"],"protocol":"1.0.0"}}
 ```
 
 Protocol version is one semver line owned by ADR-0007; its current value is `1.0.0`.
@@ -68,15 +68,17 @@ The `capabilities` object is additive: each key is `true` exactly when this engi
 behaviour, and a wrapper reads only the keys it knows, ignoring unknown ones. `compaction`
 means the engine's `inject` honours `include.compaction`; an engine that omits the key answers
 the compaction request with the ordinary project chat block, so the wrapper MUST no-op both
-compaction hooks.
+compaction hooks. `skills` means the engine answers the `skills` runtime method (issue 69); an
+engine that omits the key predates the method, and the wrapper MUST NOT call it.
 
 `hello` is **not** a runtime method (D-40): it takes no `session_id` and is not counted in
-the five.
+the six.
 
-## 3. The five runtime methods (D-40, D-46)
+## 3. The six runtime methods (D-40, D-46)
 
-`session_id` is a **required top-level parameter of every method**, including `health` and
-`shutdown` (D-34). It is 1..=128 characters after the string is taken as-is (no trimming of
+`session_id` is a **required top-level parameter of every method except `skills`**, which
+takes `project_id` and carries no session id. It is required for `health` and `shutdown`
+(D-34). It is 1..=128 characters after the string is taken as-is (no trimming of
 the stored value; a whitespace-only value is **blank** and rejected). Missing, blank or
 over-long → `-32602`.
 
@@ -88,8 +90,18 @@ never grants access to another session's rows.
 | `capture` | no (fire-and-forget ack) | `session_id` (req), `capture_id` (req), `project_id?`, `agent_id?`, `agent_name?`, `parent_session_id?`, `transcript?`, `summary?`, `metadata?` | `{"accepted":true}` |
 | `inject` | **yes** | `session_id` (req), `project_id?`, `agent_id?`, `token_budget?`, `include?` | `{"block":string\|null,"memory_count":int,"tokens":int,"truncated":bool,"handling_ms":int}` |
 | `recall` | no | `session_id` (req); **canonical** when `projectId` is present (camelCase, no unknown keys): `projectId` (req), `mode?` (`"chronological"\|"semantic"\|"filtered"`), `query?` (semantic only), `since?`, `until?`, `lastNSessions?`, `touchedFiles?`, `agentId?`, `sessionId?` (filter key), `includeFullSessions?`; **legacy** otherwise: `query` (req, string), `limit?`, `scope?`, `tags?` (these keys only) | `{"items":[…],"count":int}` |
+| `skills` | **yes** | `project_id` (req); no `session_id` | `{"skills":[{"id":string,"name":string,"path":string,"content":string,"autoinvoke":bool,"description"?:string}]}` |
 | `health` | no | `session_id` (req) | `{"ok":bool,"mode":"full"\|"degraded","degraded_reason":string\|null,"protocol":semver,"engine_version":semver,"db":{"path":string,"ready":bool},"open_guard":{"override_active":bool},"uptime_ms":int,"sessions":int}` |
 | `shutdown` | teardown only | `session_id` (req) | `{"ok":true}` |
+
+`skills` (issue 69) returns the **enabled** skills tagged with the request's project plus the
+global ones (`container_tag IS NULL OR container_tag = <project tag>`); an unknown project is
+`{"skills":[]}`, never an error. Each entry is exactly the host's `Skill.Info` set — `id`,
+`name`, `path` (the absolute `SKILL.md` path), `content`, `autoinvoke`, plus `description` when
+non-empty. The order is the manager's `updated_at DESC, id ASC`; consumers MUST NOT depend on
+it. `project_id` is required and is never coerced to the global tag: missing, non-string or
+whitespace-only → `-32602`. The method is session-free because registration happens at plugin
+`setup`, before any session exists.
 
 `inject`'s `include?` accepts either the frozen `["summary","metadata"]` array or the additive options object `{"recent_count"?: int, "compaction"?: "ingest"|"restore", "query"?: string}`: `recent_count` bounds the episodic rows, `compaction` selects the session-scoped render (issue 33), and `query` carries the authored prompt (max 2000 code points; absent or blank keeps the tag-listed read). Unknown keys are ignored; no other field exists.
 

@@ -1,6 +1,8 @@
 # 67 — V2 first-class compaction hook (pre-compaction ingest)
 
-Status: ready-for-agent — 2026-10-27 (re-verified at `f41b9ef`: the V2 adapter registers only `prompt`/`context`;
+Status: done — 2026-10-29 — landed at `6f76295` (the V2 adapter registers `prompt`, `context` and `compaction`; the pre-compaction ingest is wired through the V1 hook; restore stays summary-only with one typed line per forwarded event).
+
+_Original triage:_ ready-for-agent — 2026-10-27 (re-verified at `f41b9ef`: the V2 adapter registers only `prompt`/`context`;
 the host's own plugins register the compaction hook in four places, and the compaction service describes
 consuming its edits. The exact invocation site is the wave's first measurement. Brief under `## Agent Brief`.)
 
@@ -109,3 +111,37 @@ registration only; `legacy-client.js` changes only if the child gate needs a cap
 
 **Out of scope:** the V1 lane (issue 33, complete); the host's own compaction policy; the V2 skills bridge
 (issue 69).
+
+## Comments
+
+**2026-10-28 — implemented (branch `issue-67/v2-compaction-hook`; `Status:` still `ready-for-agent` until
+the orchestrator records the landing).**
+
+- **Host dispatch measured — READ, not executed.** Host `/home/vaz/Code/Personal/JS/opencode` @
+  `8faeb81e92` (v2.2.0): `SessionHooks.compaction` (`packages/plugin/src/promise/session.ts:142`) →
+  `compaction.ts:840` (`summarize` → `requests.compaction`) → `model-request.ts:414` → `:408-410`
+  (`agentHook` → `hooks.trigger("session", …)`) → `hooks.ts:88-94` → `adapter.ts:599-603`
+  (`Effect.promise`, so the callback is awaited and a rejection is a defect). The re-derivation greps,
+  their output, the three-way native/summarise/precompute shape and the honest limit (a live host run
+  remains the residual measurement) are in
+  `docs/evidence/issue-67-v2-compaction-dispatch/MEASUREMENT.md`.
+- **Wiring.** `registerV2Adapter` registers `ctx.session.hook("compaction", async (event) => …)`, calls the
+  V1 `experimental.session.compacting` closure with `{sessionID: event.sessionID}`, and pushes every
+  rendered block onto `event.system` as `{type: "text", text}`. The issue-68 capability gate and the 2 s
+  timeout are inherited; never `event.messages`, never `event.result`, never `output.prompt`. The callback
+  never rejects (missing handler, throwing handler and a missing `system` array all settle).
+- **Child gate: not applied under V2.** `createLegacyClient` exposes no `session.get`, so `readSession`
+  returns null and ADR-0017 DECISION 2's positive-evidence rule says proceed; a child session may ingest
+  its own captured rows until the capture gate (issue 63) lands. `legacy-client.js` is untouched; pinned
+  by `test_v2_compaction_hook_does_not_apply_the_child_gate` (`sessionGetCalls === []`).
+- **Send path: no send; the restore stays a read, announced by one `compaction.restore_skipped` line.**
+  `createLegacyClient` exposes no `session.prompt`, and the host's `session.prompt` payload
+  (`{text, files?, agents?, skills?}`) cannot carry V1's `{parts, noReply, agent, model, variant}`;
+  `session.synthetic` wakes the runner unless `resume: false` and needs an agent/model translation. The
+  adapter therefore emits exactly one fixed line per forwarded `session.compacted`:
+  `logWarn("compaction.restore_skipped", {reason: "session.prompt unavailable"})` — no session id, path,
+  render or error text. Pinned by `test_v2_compaction_seam_ingests_then_reads_after_without_a_send`
+  (`promptCalls === 0`, `syntheticCalls === 0`, `toastEmits === []` with the RPC recorder installed).
+- **Tests.** `plugin/tests/v2-compaction-hook.test.mjs` (8 cases: 3 in-process, 5 driver); the existing
+  exact-key case widened to `["compaction", "context", "prompt"]`. Wrapper suite 122 → 130 (24 → 25
+  files), 130/130 green; `dist/v2/adapter.js` a byte copy (`cmp -s`).

@@ -70,6 +70,7 @@ async fn seeded_engine() -> Seeded {
         capture: fixture.capture,
         inject: fixture.inject,
         recall: fixture.recall,
+        skills: None,
     };
     Seeded {
         engine: Engine::with_runtime(EngineConfig::default(), Arc::new(runtime)),

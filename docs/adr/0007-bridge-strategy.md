@@ -142,7 +142,7 @@ silent-corruption failure class that motivates it.
 engine is what makes that ownership single. Upstream parity: upstream's `startWebServer` is called from inside
 the plugin's own process (`example/opencode-mem/src/index.ts:491`). Consequence: the web UI talks HTTP
 directly to the engine's axum port, so the bridge schema needs **no** web namespace and stays at the minimal
-five methods (D-40).
+six methods (D-40; issue 69 adds `skills`).
 
 Grounds: `crates/mem-web/Cargo.toml` carries the `mem-store` edge that makes the web server a DB opener, and
 `example/opencode-mem/src/index.ts:491` shows upstream calling `startWebServer` from the plugin's own process.
@@ -236,14 +236,23 @@ the same binary minus the stdio peer. The lock must be a distinct file from `.tu
 This section is the normative input to W5.1's blueprint: it is precise enough to blueprint from without a
 further decision.
 
-### D-40 — The runtime method set is exactly five: `capture`, `inject`, `recall`, `health`, `shutdown`
+### D-40 — The runtime method set is six: `capture`, `inject`, `recall`, `skills`, `health`, `shutdown`
 
-**The runtime method set is exactly these five methods and no others.** There is no web namespace (the web UI
+**The runtime method set is exactly these six methods and no others** (issue 69 adds `skills`; see the
+amendment below). There is no web namespace (the web UI
 speaks HTTP to the engine's axum port — D-32), no `web.*` methods, and no administrative methods beyond
 `shutdown`. A sixth method, `hello`, exists **only** for the handshake (D-43) and is not a runtime method.
 
 Grounds: D-32 puts the web server inside the engine, so the bridge carries no web surface; `shutdown` is the
 only administrative operation the wrapper needs because the engine's lifetime is the wrapper's to end (D-45).
+
+**Issue 69 amendment (2026-10-29).** The V2 host exposes a first-class skill domain (`ctx.skill`,
+`opencode v2.2.0`), and upstream registers the skills catalogue through it; the port therefore adds a
+sixth runtime method, `skills`, answered from the W6.4 `SkillsManager`. It is project-scoped and
+session-free (registration happens at plugin `setup`, before any session exists), so it bypasses the
+`session_id` gate exactly as `hello` does. Option A — the plugin reading `/api/skills` over HTTP — was
+rejected: the plugin has no base URL and no token for the engine's web port. `docs/bridge-schema.md` §3
+carries the row.
 
 ### D-41 — Only `inject` blocks the host
 
@@ -331,13 +340,16 @@ prevents the unread-pipe orphan that would otherwise outlive the wrapper.
 
 **`session_id` is a REQUIRED top-level parameter of every method**, including `health` and `shutdown` (D-34).
 For the two process-scoped methods it identifies the calling session and is recorded but does not scope the
-operation; the engine's own self-check uses the reserved value `"__engine__"`.
+operation; the engine's own self-check uses the reserved value `"__engine__"`. **Issue 69 exception:**
+`skills` takes `project_id` and carries no `session_id` — registration happens at plugin `setup`, before
+any session exists.
 
 | method | blocking | params | result |
 |---|---|---|---|
 | `capture` | no (fire-and-forget ack) | `session_id` (req), `capture_id` (req), `project_id?`, `agent_id?`, `agent_name?`, `parent_session_id?`, `transcript?`, `summary?`, `metadata?` | `{"accepted":true}` |
 | `inject` | **yes** | `session_id` (req), `project_id?`, `agent_id?`, `token_budget?`, `include?` | `{"block":string\|null,"memory_count":int,"tokens":int,"truncated":bool,"handling_ms":int}` |
 | `recall` | no | `session_id` (req); **canonical** when `projectId` is present (camelCase, no unknown keys): `projectId` (req), `mode?` (`"chronological"\|"semantic"\|"filtered"`), `query?` (semantic only), `since?`, `until?`, `lastNSessions?`, `touchedFiles?`, `agentId?`, `sessionId?` (filter key), `includeFullSessions?`; **legacy** otherwise: `query` (req, string), `limit?`, `scope?`, `tags?` (these keys only) | `{"items":[…],"count":int}` |
+| `skills` | **yes** | `project_id` (req); no `session_id` | `{"skills":[{"id":string,"name":string,"path":string,"content":string,"autoinvoke":bool,"description"?:string}]}` |
 | `health` | no | `session_id` (req) | `{"ok":bool,"mode":"full"\|"degraded","degraded_reason":string\|null,"protocol":semver,"engine_version":semver,"db":{"path":string,"ready":bool},"uptime_ms":int,"sessions":int}` |
 | `shutdown` | teardown only | `session_id` (req) | `{"ok":true}` |
 

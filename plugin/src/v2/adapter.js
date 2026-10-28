@@ -1,7 +1,7 @@
 // V2→V1 adapter (W5.2, blueprint D2) — translates V2 session hooks and the
 // event stream onto the hooks map `server()` returns, so the engine surface
 // cannot fork: under V2 the very same V1 closure mints the capture id, spawns
-// the one child and speaks the same five methods.
+// one child, one hello, the same six runtime methods.
 //
 // Crossing INTO V1: the prompt text and its injected parts, event envelopes,
 // the session id, the project directory. Crossing OUT: the injected text block.
@@ -16,6 +16,7 @@
 //
 // Upstream reference: example/opencode-mem/src/v2/adapter.ts.
 
+import { logWarn } from "../plugin.js";
 import { eventBelongsToLocation, toLegacyEvent } from "./legacy-client.js";
 
 /**
@@ -56,6 +57,30 @@ export async function registerV2Adapter(ctx, legacyHooks) {
     if (injected) event.system.push({ type: "text", text: injected });
   });
 
+  // Issue 67: the host's V2 compaction hook is a SINGLE input with no output
+  // pair, so the adapter delegates to the V1 closure — the issue-68 capability
+  // gate and the 2 s request timeout are inherited, not re-implemented — and
+  // copies the render onto `event.system`, the array the request builder reads
+  // back. Never `event.messages` (a user-role transcript message), never
+  // `event.result` (it skips the model call and replaces the host's summary).
+  await ctx.session.hook("compaction", async (event) => {
+    try {
+      const handler = legacyHooks["experimental.session.compacting"];
+      if (typeof handler !== "function") return;
+      const output = { context: [] };
+      await handler({ sessionID: event?.sessionID }, output);
+      if (!Array.isArray(event?.system) || !Array.isArray(output.context)) return;
+      for (const text of output.context) {
+        if (typeof text === "string" && text.length > 0) event.system.push({ type: "text", text });
+      }
+    } catch {
+      // The host bridges this callback with `Effect.promise`: a rejection is a
+      // defect that aborts its compaction. One fixed line — never the error
+      // object, never the render (it is memory text, possibly user-private).
+      console.error("opencode-mem compaction ingestion failed");
+    }
+  });
+
   const controller = new AbortController();
   const watcher = (async () => {
     if (typeof legacyHooks.event !== "function" || typeof ctx.event?.subscribe !== "function") return;
@@ -65,6 +90,11 @@ export async function registerV2Adapter(ctx, legacyHooks) {
         const event = toLegacyEvent(raw);
         if (event.type === "session.compacted" && event.properties?.sessionID) {
           contexts.delete(event.properties.sessionID);
+          // Issue 67: V2 has no send capability (createLegacyClient exposes no
+          // session.prompt), so the restore half stays a read and the summary
+          // carries the ingest. One fixed line, no session id, no render —
+          // never silence.
+          logWarn("compaction.restore_skipped", { reason: "session.prompt unavailable" });
         }
         await legacyHooks.event({ event });
       }

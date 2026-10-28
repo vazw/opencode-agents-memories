@@ -34,4 +34,6 @@ content-file-iff-enabled rule and the change-notification seam.
   handle the `skills.db` is opened through.
 
 The crate owns NO web surface: `mem-web` adapts it to the REST contract
-through the `SkillPort` seam.
+through the `SkillPort` seam. The bridge's `skills` method (issue 69) reads
+this same `list` through `mem-bridge`'s `SkillsService`; the wire carries
+`skill_path`'s absolute path.
