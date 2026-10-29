@@ -5,6 +5,7 @@
 //! removed under issue 46's exclusivity proof, after the `-tshm` liveness
 //! query answers `Free`/`Missing` at both call sites.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::db::{ConnectFactory, ConnectOptions, EncryptionOptions, TursoConnectFactory, Value};
@@ -108,6 +109,17 @@ impl ReapSkipReason {
     }
 }
 
+/// The per-`(scope, scope_hash)` facts the highest-row rule needs.
+#[derive(Debug, Clone, Copy, Default)]
+struct TupleState {
+    max_index: u32,
+    has_active: bool,
+}
+
+fn tuple_key(shard: &ShardInfo) -> (String, String) {
+    (shard.scope.as_str().to_string(), shard.scope_hash.clone())
+}
+
 /// The four file targets of one shard database.
 fn target_paths(db_path: &Path) -> [PathBuf; 4] {
     [
@@ -164,6 +176,14 @@ impl ShardManager {
             .map(|row| self.row_to_shard_info(row))
             .collect();
 
+        // One pass builds the tuple map the highest-row rule reads.
+        let mut tuples: HashMap<(String, String), TupleState> = HashMap::new();
+        for shard in &shards {
+            let state = tuples.entry(tuple_key(shard)).or_default();
+            state.max_index = state.max_index.max(shard.shard_index);
+            state.has_active |= shard.is_active;
+        }
+
         let mut report = ReapReport::default();
         let mut candidate_shards: Vec<ShardInfo> = Vec::new();
         for shard in &shards {
@@ -171,6 +191,19 @@ impl ShardManager {
                 report.skipped.push(SkippedShard {
                     shard_id: shard.id,
                     reason: ReapSkipReason::Active,
+                });
+                continue;
+            }
+            // The highest row of a ZERO-active tuple is the reactivation
+            // target (ADR-0022 D-22-5). In a tuple with an active row no
+            // reactivation can fire, so its highest inactive row may go.
+            let tuple = tuples.get(&tuple_key(shard)).copied().ok_or_else(|| {
+                StoreError::internal("shard tuple missing from the reap tuple map")
+            })?;
+            if !tuple.has_active && shard.shard_index == tuple.max_index {
+                report.skipped.push(SkippedShard {
+                    shard_id: shard.id,
+                    reason: ReapSkipReason::HighestWithoutActive,
                 });
                 continue;
             }

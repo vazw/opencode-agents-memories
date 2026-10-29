@@ -91,6 +91,11 @@ impl Rig {
     /// Opens `path` through the real factory and runs `init_shard_db` — the
     /// writable creation the fixture uses for a non-anchor shard.
     async fn init_file(&self, path: &Path) {
+        // The factory creates the database file but not its scope directory;
+        // the fixture owns the directory layout, not the reaper.
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create the scope directory");
+        }
         let options =
             ConnectOptions::for_config(&self.config, mem_store::platform::Platform::current());
         let handle = TursoConnectFactory
@@ -135,6 +140,9 @@ impl Rig {
     /// input.
     async fn inactive_with_rows(&self, index: u32, rows: &[&str]) -> ShardInfo {
         let path = self.path(index);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create the scope directory");
+        }
         let options =
             ConnectOptions::for_config(&self.config, mem_store::platform::Platform::current());
         let handle = TursoConnectFactory
@@ -341,6 +349,113 @@ async fn test_shard_with_rows_is_never_reaped() {
         "the candidate row survives"
     );
     assert!(candidate.db_path.exists(), "the candidate file survives");
+}
+
+// ---------------------------------------------------------------------------
+// T4 — the highest shard of a zero-active tuple is never reaped
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_highest_shard_of_a_zero_active_tuple_is_never_reaped() {
+    let rig = rig("w7-t4");
+    let lower = rig.inactive(0).await;
+    let highest = rig.inactive(1).await;
+    assert!(
+        !rig.manager
+            .get_active_shard(Scope::Project, HASH)
+            .await
+            .expect("active read")
+            .is_some(),
+        "the fixture's tuple has zero active rows"
+    );
+
+    let report = rig
+        .manager
+        .reap_retired_shards(false)
+        .await
+        .expect("reap over a zero-active tuple");
+
+    assert_eq!(report.candidates, vec![lower.id]);
+    assert_eq!(report.reaped, vec![lower.id]);
+    assert_eq!(
+        report.skipped,
+        vec![mem_store::reaping::SkippedShard {
+            shard_id: highest.id,
+            reason: mem_store::reaping::ReapSkipReason::HighestWithoutActive,
+        }],
+        "only the reactivation target is skipped"
+    );
+
+    assert!(
+        !rig.manager
+            .get_all_shards(Scope::Project, Some(HASH))
+            .await
+            .expect("registry read")
+            .iter()
+            .any(|shard| shard.id == lower.id),
+        "the lower row is reaped"
+    );
+    assert!(
+        rig.manager
+            .get_shard_by_id(highest.id)
+            .await
+            .expect("highest read")
+            .is_some(),
+        "the highest row survives"
+    );
+    assert!(highest.db_path.exists(), "the highest file survives");
+}
+
+// ---------------------------------------------------------------------------
+// T5 — the highest inactive shard BESIDE an active row is reaped
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_highest_inactive_shard_beside_an_active_row_is_reaped() {
+    let rig = rig("w7-t5");
+    let anchor = rig.anchor(0, &["anchor-row"]).await;
+    let highest = rig.inactive(1).await;
+
+    let report = rig
+        .manager
+        .reap_retired_shards(false)
+        .await
+        .expect("reap beside an active row");
+
+    assert_eq!(report.candidates, vec![highest.id]);
+    assert_eq!(report.reaped, vec![highest.id]);
+    assert!(
+        report.skipped.iter().any(|skip| skip.shard_id == anchor.id),
+        "the active anchor is listed in skipped: {:?}",
+        report.skipped
+    );
+    assert!(
+        !report
+            .skipped
+            .iter()
+            .any(|skip| skip.shard_id == highest.id),
+        "the highest inactive row beside an active row is not skipped: {:?}",
+        report.skipped
+    );
+    assert!(
+        rig.manager
+            .get_shard_by_id(anchor.id)
+            .await
+            .expect("anchor read")
+            .is_some(),
+        "the active anchor survives"
+    );
+    assert!(anchor.db_path.exists());
+    assert!(
+        !rig.manager
+            .get_all_shards(Scope::Project, Some(HASH))
+            .await
+            .expect("registry read")
+            .iter()
+            .any(|shard| shard.id == highest.id),
+        "the highest inactive row is gone"
+    );
+    assert!(!highest.db_path.exists(), "the highest file is gone");
 }
 
 // ---------------------------------------------------------------------------
