@@ -10,7 +10,7 @@ and W8 are absent from the tree, and the ADR set is partial: **0017 (`0017-compa
 in-repo at `docs/evidence/opsec-w6-design-2026-10-25/` — §9 lists twelve blockers, 1 closed, 2–12 open.
 W7 landed **2026-10-30** at `43d9954` — retired-shard reaping, 12 commits from `4307662`, 14 files
 (including the engine-shutdown stdout pin); review approved after one rework; `mem-store` 394/0/12,
-`reap_cli` 6/0, workspace 2094/0/22; ADR-0023 landed **Proposed** — owner acceptance open; ADR-0019
+`reap_cli` 6/0, workspace 2094/0/22; ADR-0023 landed and **Accepted** (owner, 2026-10-30); ADR-0019
 A14 amended.
 Next: **W5 (prompts v2) follows** per W7 ruling 1. Owner picks outstanding: **70** (wire method set),
 **53 O3** (vault half), **28** (live swap), and the **zstd advisories** re-derivation. The **ADR-0019
@@ -777,6 +777,6 @@ after **one** rework (two blockers: foreign reap flags are now refused on **pres
 both clippy gates green; no manifest or dependency change; production panic-free. Recorded
 deviations: `close_all()` after `ensure_ready()` (cached writable handles answer the `-tshm` query
 `Held`), and the 14th file `tests/engine_shutdown.rs` (stdout pin 2 → 3; the thirteen-file gate and
-the workspace gate cannot both pass). **ADR-0023 is Proposed — owner acceptance open.** ADR-0019 A14
+the workspace gate cannot both pass). **ADR-0023 is Accepted (owner, 2026-10-30).** ADR-0019 A14
 is amended. The ten-test battery plus the twelve mutation cells (M1–M10, M3b, M7b) are the wave's
 oracle; the discovery pass's `delete_shard` bypass is confirmed unused by the reaper.

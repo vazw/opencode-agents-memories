@@ -1,6 +1,6 @@
 # 0023 — Retired-shard reaping: row first, files under the engine-lock proof
 
-- **Status:** Proposed.
+- **Status:** Accepted (owner acceptance, 2026-10-30).
 - **Date:** 2026-10-30.
 - **Builds on:** `docs/adr/0022-one-active-shard.md` (one active row per `(scope,
   scope_hash)`; a zero-active tuple reactivates its highest row),
