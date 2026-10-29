@@ -55,6 +55,15 @@ const SKILLS_REQUEST_TIMEOUT_MS = 3000;
 // engine's `chars().take(2000)` cap counts (never UTF-16 units or bytes).
 const MAX_QUERY_CHARS = 2000;
 
+// Issue 75: the host-side registration of the agent the Rust provider sends in
+// its request body. These literals are a cross-process contract with
+// crates/mem-ai/src/provider/opencode_host.rs (STRUCTURED_OUTPUT_AGENT /
+// STRUCTURED_OUTPUT_MAX_STEPS) and plugin/tests/structured-output-agent-config.test.mjs
+// pins both sides against them.
+const STRUCTURED_OUTPUT_AGENT = "opencode-mem-structured";
+const STRUCTURED_OUTPUT_MAX_STEPS = 2;
+const STRUCTURED_OUTPUT_TOOLS = { "*": false, StructuredOutput: true };
+
 // ── canonical serialization (§1, D-42) ──────────────────────────────────
 // Wire objects serialize compactly with keys in lexicographic order at every
 // level; every line ends with exactly one newline.
@@ -717,6 +726,23 @@ async function runShutdown(sig) {
   process.kill(process.pid, sig);
 }
 
+// Upstream applyStructuredOutputAgentConfig (src/index.ts:277): the least-
+// privilege, step-capped agent the internal structured-output calls name.
+export function applyStructuredOutputAgentConfig(cfg) {
+  cfg.agent = {
+    ...(cfg.agent || {}),
+    [STRUCTURED_OUTPUT_AGENT]: {
+      description: "Internal least-privilege agent for opencode-mem structured output",
+      mode: "subagent",
+      steps: STRUCTURED_OUTPUT_MAX_STEPS,
+      maxSteps: STRUCTURED_OUTPUT_MAX_STEPS,
+      tools: STRUCTURED_OUTPUT_TOOLS,
+      permission: { "*": "deny", StructuredOutput: "allow" },
+      options: { thinking: { type: "disabled" } },
+    },
+  };
+}
+
 // ── plugin surface (D-34: session ids are hook data) ────────────────────
 
 export const server = async function server(input) {
@@ -735,6 +761,9 @@ export const server = async function server(input) {
   const captureIdByPrompt = new Map();
 
   const hooks = {
+    config: async (cfg) => {
+      applyStructuredOutputAgentConfig(cfg);
+    },
     "chat.message": async (hookInput, output) => {
       try {
         if (hookInput && typeof hookInput.sessionID === "string" && hookInput.sessionID.length > 0) {

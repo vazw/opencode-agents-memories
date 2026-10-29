@@ -2,7 +2,8 @@
 // example/opencode-mem/tests/plugin-loader-contract.test.ts:
 //   type PluginModule = { id?: string; server: Plugin }
 // The wrapper must load WITHOUT an engine (fail-open minimum, D-38): server()
-// returns the two hooks it implements and never spawns a child at load time.
+// returns the hooks it implements (chat.message, event,
+// experimental.session.compacting, config) and never spawns a child at load time.
 
 import test from "node:test";
 import assert from "node:assert/strict";
