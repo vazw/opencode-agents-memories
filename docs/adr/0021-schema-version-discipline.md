@@ -37,7 +37,7 @@ maximum. The maximum is a constant **beside the set**, not derived from the migr
 
 | set | constant | value |
 |---|---|---|
-| `metadata.db` | `METADATA_MAX_KNOWN` | 1 |
+| `metadata.db` | `METADATA_MAX_KNOWN` | 2 (W4) |
 | memory shards | `MEMORY_SHARD_MAX_KNOWN` | 3 (W2's v3) |
 | `user_prompts` | `USER_PROMPTS_MAX_KNOWN` | 1 (W5 raises it with prompts v2) |
 | `user_profiles` | `USER_PROFILES_MAX_KNOWN` | 1 |

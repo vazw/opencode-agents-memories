@@ -4,12 +4,16 @@
 //! Upstream behaviors preserved: the registry (`metadata.db`) is the SINGLE
 //! writer of shard lifecycle; shard FILES are initialized before the
 //! registry row insert (orphan-row guard comment preserved); unique-
-//! violation dedup in `create_shard`; rotation = mark read-only + create
-//! next; incompatible/corrupt shards REJECT writes with the original
-//! database left untouched (`ShardIncompatible`).
+//! violation dedup in `create_shard`; incompatible/corrupt shards REJECT
+//! writes with the original database left untouched (`ShardIncompatible`).
 //!
-//! Divergences (reviewer notes): `withScopeWriteLock` is DEFERRED to W1.3
-//! with its first caller; `CONFIG.storagePath` globals become the
+//! W4 (ADR-0022) replaces the rotation: `rotate_shard` retires the previous
+//! shard and inserts the next in ONE transaction (the shipped two-step could
+//! leave ZERO actives and hand the dedup an inactive row), a zero-active
+//! tuple reactivates its highest row through the normal write validation,
+//! and a second activation is `ActiveShardConflict`.
+//!
+//! Divergences (reviewer notes): `CONFIG.storagePath` globals become the
 //! `storage_path` field; `metadata: Mutex<Option<DbHandle>>` +
 //! `OnceCell` init cell preserve upstream `ensureInitialized` (in-flight
 //! dedup + revalidation: every call re-asks the connection manager; a
