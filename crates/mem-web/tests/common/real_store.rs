@@ -99,7 +99,22 @@ pub fn fresh_manager(config: &StoreConfig) -> ShardManager {
 }
 
 /// Creates one shard in the registry (and initializes its file).
+///
+/// W4/ADR-0022: exactly one active shard per `(scope, scope_hash)`, so a
+/// fixture that creates a second shard retires the current active row first.
 pub async fn create_shard(store: &RealStore, scope: Scope, hash: &str, index: u32) -> ShardInfo {
+    if let Some(active) = store
+        .manager
+        .get_active_shard(scope, hash)
+        .await
+        .expect("the fixture active shard is read")
+    {
+        store
+            .manager
+            .mark_shard_read_only(active.id)
+            .await
+            .expect("the fixture predecessor is retired");
+    }
     store
         .manager
         .create_shard(scope, hash, index)

@@ -282,6 +282,12 @@ async fn test_dedup_store_orders_near_groups_by_created_at_then_id() {
 async fn test_dedup_store_never_deduplicates_across_shards() {
     let store = new_store("dedup-store-shards");
     let shard0 = create_shard(&store, Scope::Project, HASH, 0).await;
+    // W4/ADR-0022: exactly one active shard per tuple.
+    store
+        .manager
+        .mark_shard_read_only(shard0.id)
+        .await
+        .expect("retire shard 0 before creating shard 1");
     let shard1 = create_shard(&store, Scope::Project, HASH, 1).await;
     // Same scope hash ⇒ same container tag by construction.
     insert(

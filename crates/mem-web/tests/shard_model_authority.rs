@@ -242,11 +242,17 @@ async fn real_store(label: &str, foreign: bool) -> RealStore {
         Arc::new(SystemProcessProbe),
         Some(identity_for(&config)),
     );
+    let project_shard_zero = manager
+        .create_shard(Scope::Project, PROJECT_HASH, 0)
+        .await
+        .expect("create project shard 0");
+    // W4/ADR-0022: exactly one active shard per tuple.
+    manager
+        .mark_shard_read_only(project_shard_zero.id)
+        .await
+        .expect("retire project shard 0 before creating shard 1");
     let project_shards = vec![
-        manager
-            .create_shard(Scope::Project, PROJECT_HASH, 0)
-            .await
-            .expect("create project shard 0"),
+        project_shard_zero,
         manager
             .create_shard(Scope::Project, PROJECT_HASH, 1)
             .await
