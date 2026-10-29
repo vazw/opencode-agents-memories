@@ -87,9 +87,9 @@ the `-32002` code row, the exit-code-75 row, the status-file-format row.
   retired. Flags: `--apply` alone is the confirmation (the default is a dry
   run) and `--storage-root` (the same root resolution as the other sync
   modes). `--apply=<value>`, `--apply <token>` (non-flag), `--scope`,
-  `--project`, `--session`, `--agent` and `--confirm` are usage errors (exit
-  **64**), validated in `src/main.rs` before `Config::load_default` so a bad
-  invocation never creates the root. Exit codes: **0** success including
+  `--project`, `--session`, `--agent` and `--confirm` (any occurrence, bare
+  included) are usage errors (exit **64**), validated in `src/main.rs` before
+  `Config::load_default` so a bad invocation never creates the root. Exit codes: **0** success including
   nothing to do, **1** a completed report with at least one file-operation
   failure, **64** usage, **74** store/operation failure including a lost
   engine lock (`reap.refused`), **75** busy (`reap.busy`, the operation lock

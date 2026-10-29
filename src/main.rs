@@ -343,6 +343,28 @@ fn main() {
         .windows(2)
         .any(|pair| pair[0] == "--apply" && !pair[1].starts_with('-'));
 
+    // A reap-foreign flag is a usage error on PRESENCE, not value: a bare
+    // `--scope` at end-of-argv parses to `None`, and `--apply --scope` would
+    // otherwise apply a root-wide reap with the filter silently dropped. Scan
+    // the raw argv so a foreign token swallowed as another flag's value is
+    // still refused.
+    let reap_foreign_flag = raw.iter().any(|arg| {
+        let name = arg.split_once('=').map_or(arg.as_str(), |(name, _)| name);
+        matches!(
+            name,
+            "--scope"
+                | "scope"
+                | "--project"
+                | "project"
+                | "--session"
+                | "session"
+                | "--agent"
+                | "agent"
+                | "--confirm"
+                | "confirm"
+        )
+    });
+
     // Special literal modes handled sync, BEFORE any runtime exists.
     if raw.iter().any(|a| a == "--version") {
         println!("{}", version_line());
@@ -412,12 +434,7 @@ fn main() {
             // W7: usage is validated HERE, before `Config::load_default` and
             // before any store is opened, so a bad invocation never creates
             // the root. A silently ignored scope filter is a data-safety trap.
-            let foreign_flag = args.scope.is_some()
-                || args.project.is_some()
-                || args.session.is_some()
-                || args.agent.is_some()
-                || args.confirm.is_some();
-            if args.apply_inline || apply_value_trap || foreign_flag {
+            if args.apply_inline || apply_value_trap || reap_foreign_flag {
                 eprintln!(
                     "usage: opencode-agents-memory --mode=reap-shards [--apply] [--storage-root <path>]"
                 );

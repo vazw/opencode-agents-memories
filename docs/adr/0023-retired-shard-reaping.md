@@ -70,7 +70,7 @@ ADR-0022 guarantees at most one active row per tuple and reactivates the **highe
 The engine lock is issue 46's binding structural proof (any unlink needs `ExclusiveRoot` + a `Free`/`Missing` database probe); the operation lock is the inter-operation mutex (ruling 7); the `-tshm` query is the liveness sensor for a **foreign** flag-on holder that takes neither of our locks. The probe queries (`F_OFD_GETLK`/`F_GETLK`, issue 60) and never takes; `Held` and `Unknown` skip. It runs **twice**: in the predicate (before the row is touched, so an obvious holder costs no registry write) and again **after the row delete, immediately before the first unlink** (so a holder that arrived while the read-only count open was in flight is seen). The window between the second probe and the first unlink is the residual (46's no-identity-recheck gap). A flag-off **holder** is invisible to the `-tshm` sensor; a flag-off engine of this build is caught by the engine lock, and a writable foreign flag-off holder by the 46 database probe. The class invisible to all three is a foreign **read-only** opener, which takes no lock; the dry run is the backstop for it. A **cached writable handle in the same process** also answers `Held` — the CLI therefore closes the ready gate's cached connections before the predicate (a measured requirement, see "Implementation notes"). *Rejected:* operation-lock-only reaping — it would delete files a live engine has open, and it cannot satisfy issue 46's proof for a single unlink. *Rejected:* a single probe in the predicate — a late flag-on holder would be invisible.
 
 **D-23-8 — The CLI is dry-run by default; `--apply` alone is the confirmation; the exit-code map is this plan's decision, aligned to the house.**
-`opencode-agents-memory --mode=reap-shards [--apply] [--storage-root <path>]`. **Exit codes:** 0 success including nothing to do; **1** a file-operation failure with a completed report (at least one `FileDeleteFailed` — nothing in `reembed`/`purge` covers this class); **64** usage (`reembed`'s invalid scope and `purge`'s invalid scope/confirmation both use 64); **74** store/operation failure including a lost engine lock (`reembed` returns 74 on a lost lock; `purge` uses 74 for `Failed`); **75** busy, i.e. the operation lock/legacy step is held (`purge` uses 75 for `Busy`). `--apply=<value>` and `--apply <token>` (non-flag) are 64. No `--confirm` string, no interactive prompt, no two-act design (ruling 14). One JSON line on stdout (`{"event":"reap.completed","dry_run":…,"candidates":[…],"reaped":[…],"skipped":[…],"bytes_freed":…}`); `structured_stderr` for refusals (`reap.refused`, `reap.busy`, `reap.failed`) and one `reap.file_delete_failed` line per failed file. The dry-run default is **not** a promise of a pure read: the ready gate reconciles before the report (D-23-5), so a CLI dry run may add registry rows — never remove files. *Rejected:* inventing an owner exit-code ruling (none is recorded) and inheriting 74/75 wholesale (the completed-report file failure is not an `Err`; 1 is the distinct code).
+`opencode-agents-memory --mode=reap-shards [--apply] [--storage-root <path>]`. **Exit codes:** 0 success including nothing to do; **1** a file-operation failure with a completed report (at least one `FileDeleteFailed` — nothing in `reembed`/`purge` covers this class); **64** usage (`reembed`'s invalid scope and `purge`'s invalid scope/confirmation both use 64); **74** store/operation failure including a lost engine lock (`reembed` returns 74 on a lost lock; `purge` uses 74 for `Failed`); **75** busy, i.e. the operation lock/legacy step is held (`purge` uses 75 for `Busy`). `--apply=<value>` and `--apply <token>` (non-flag) are 64. `--scope`, `--project`, `--session`, `--agent`, `--confirm` are usage errors **on presence** — any occurrence, including a bare flag with no value (`--apply --scope` must never apply root-wide with the filter dropped) — because a silently ignored scope filter is a data-safety trap. No `--confirm` string, no interactive prompt, no two-act design (ruling 14). One JSON line on stdout (`{"event":"reap.completed","dry_run":…,"candidates":[…],"reaped":[…],"skipped":[…],"bytes_freed":…}`); `structured_stderr` for refusals (`reap.refused`, `reap.busy`, `reap.failed`) and one `reap.file_delete_failed` line per failed file. The dry-run default is **not** a promise of a pure read: the ready gate reconciles before the report (D-23-5), so a CLI dry run may add registry rows — never remove files. *Rejected:* inventing an owner exit-code ruling (none is recorded) and inheriting 74/75 wholesale (the completed-report file failure is not an `Err`; 1 is the distinct code).
 
 **D-23-9 — Both crash windows are benign and named.**
 Row-first: a crash between the row delete and the file delete leaves the intact file, which the reconciler re-adopts on the next open (as inactive when it is below the tuple's highest, or skipped by D-22-8 when it is the highest beside an active row). File-first would leave a row pointing at a missing file — the worse window, which is why the file-first mutant is the T10 oracle. A partial file deletion leaves orphan sidecars (R-23-1); they are unreachable while the `.db` is absent, **not permanently inert** — a later `.db` minted at the same path can pair with a stale `-wal`, and issue 53 measured a stale `-tshm` inert, not a stale `-wal`. No undo; nothing is rolled back.
@@ -234,14 +234,22 @@ D-19-6) · files with no registry row · `metadata.db` · the vault ·
   no candidate was ever reported until `connections.close_all()` ran between
   `ensure_ready()` and `reap_retired_shards`. Closing mutates no file; the
   primitive reopens each candidate read-only for its count.
-- **CLI-14's fixture records the post-dry-child candidate's complete
+- **CLI-14's fixture writes the post-dry-child candidate's camelCase
   `.turso-migrate.json`.** The legacy marker branch runs only when
   `all_shards_complete` finds a complete sidecar for every shard file; a
   candidate created after the dry-run child has none, so the apply child
   re-runs `migrate_storage` and writes that sidecar inside the `0o555` scope
-  dir (EACCES, exit 74) before the reap. The fixture writes the exact body
-  `migrate_memory_shard` writes for an empty metadata-valid shard, which is the
-  precondition the blueprint states. This does not weaken the test: exit 1 with
+  dir (EACCES, exit 74) before the reap. The fixture writes the camelCase
+  `ShardMigrationSidecar` field set
+  (`sourceCount`/`expectedCount`/`importedCount`/`skippedCount`/`status`) for
+  an empty metadata-valid shard. **The r4 version of this note claimed a
+  snake_case body was the "exact body"; it was unparseable** (`read_sidecar`
+  requires the camelCase fields), so the apply child re-ran `migrate_storage`
+  and rewrote the sidecar and the root marker — the marker branch was never
+  taken. Re-measured after the fix: the root marker is unchanged (still
+  listing only the anchor), the sidecar stays compact, the candidate `.db`
+  survives, and the child exits 1 with `reap.file_delete_failed` and no
+  `reap.failed`. This does not weaken the test: exit 1 with
   `reap.file_delete_failed` and no `reap.failed` remains the discriminator.
 
 ## The battery and the acceptance claim
@@ -264,7 +272,7 @@ exclusivity is worth more than pinning a post-condition arithmetic.
 |---|---|
 | 0 | success, including nothing to do |
 | 1 | a completed report with at least one `FileDeleteFailed` |
-| 64 | usage (`--apply=<value>`, `--apply <token>`, a foreign scope/confirmation flag) |
+| 64 | usage (`--apply=<value>`, `--apply <token>`, or any occurrence — bare included — of `--scope`/`--project`/`--session`/`--agent`/`--confirm`) |
 | 74 | store/operation failure, including a lost engine lock (`reap.refused`) |
 | 75 | busy: the operation lock or the ready gate's legacy step is held (`reap.busy`) |
 

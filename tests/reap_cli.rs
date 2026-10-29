@@ -252,7 +252,12 @@ fn seed_anchor_only(root: &Path) -> ShardInfo {
 /// here is exactly what `migrate_memory_shard` writes for an empty,
 /// metadata-valid shard; it makes the `--apply` child take the marker branch
 /// (reconcile only), which is the precondition CLI-14 needs.
-fn seed_candidate_after_dry(root: &Path) {
+///
+/// `ShardMigrationSidecar` is `#[serde(rename_all = "camelCase")]` and
+/// `read_sidecar` requires `expectedCount`, `importedCount` and `status`; a
+/// snake_case body is unparseable and makes the apply child re-run
+/// `migrate_storage` (rewriting this file and the root marker).
+fn seed_candidate_after_dry(root: &Path) -> (PathBuf, PathBuf) {
     let candidate = run_async(async {
         let rig = rig(root);
         let candidate = rig.inactive(0).await;
@@ -266,9 +271,10 @@ fn seed_candidate_after_dry(root: &Path) {
     ));
     std::fs::write(
         &sidecar,
-        r#"{"source_count":0,"expected_count":0,"imported_count":0,"skipped_count":0,"status":"complete"}"#,
+        r#"{"sourceCount":0,"expectedCount":0,"importedCount":0,"skippedCount":0,"status":"complete"}"#,
     )
     .expect("write the candidate's complete migration sidecar");
+    (candidate.db_path, sidecar)
 }
 
 /// CLI-12's richer shape: anchor 2 (active, one row), a non-empty second
@@ -433,6 +439,11 @@ fn test_reap_shards_usage_exits_64_before_touching_the_root() {
         vec!["--apply=yes"],
         vec!["--apply", "false"],
         vec!["--scope", "x"],
+        // A bare foreign flag at end-of-argv parses to `None`; presence, not
+        // value, is the usage rule.
+        vec!["--scope"],
+        // The data-safety shape: apply plus a filter the old guard dropped.
+        vec!["--apply", "--scope"],
     ] {
         let root = fixture.join(format!("absent-{}", extra.join("-").replace('=', "-")));
         let output = run_child(&home, &root, &extra);
@@ -468,7 +479,10 @@ fn test_reap_shards_file_failure_exits_1() {
     seed_anchor_only(&root);
     let dry = run_child(&home, &root, &[]);
     assert_eq!(dry.status.code(), Some(0), "the settling dry run succeeds");
-    seed_candidate_after_dry(&root);
+    let (candidate_db, sidecar) = seed_candidate_after_dry(&root);
+    let marker = root.join(mem_store::legacy_migrator::MIGRATION_MARKER);
+    let marker_before = std::fs::read(&marker).expect("the dry child wrote the root marker");
+    let sidecar_before = std::fs::read(&sidecar).expect("the fixture wrote the sidecar");
 
     let scope_dir = root.join("projects");
     let original = std::fs::metadata(&scope_dir)
@@ -494,6 +508,26 @@ fn test_reap_shards_file_failure_exits_1() {
     assert!(
         !text.contains("reap.failed"),
         "a file failure is not a store failure: {text}"
+    );
+    // The decisive marker-branch check: a `migrate_storage` run rewrites the
+    // root marker (a new `completedAt` and the candidate entry); the marker
+    // branch returns before it. The sidecar staying compact is corroborating.
+    let marker_after = std::fs::read(&marker).expect("the apply child leaves the marker readable");
+    assert_eq!(
+        String::from_utf8_lossy(&marker_after),
+        String::from_utf8_lossy(&marker_before),
+        "the apply child must take the marker branch, not rewrite migrate_storage"
+    );
+    let sidecar_after =
+        std::fs::read(&sidecar).expect("the apply child leaves the sidecar readable");
+    assert_eq!(
+        String::from_utf8_lossy(&sidecar_after),
+        String::from_utf8_lossy(&sidecar_before),
+        "the complete sidecar must not be rewritten by the apply child"
+    );
+    assert!(
+        candidate_db.exists(),
+        "the candidate .db survives the blocked unlink"
     );
 }
 
