@@ -3,14 +3,14 @@
 Status: ready-for-human — 2026-10-27 (umbrella, not a single wave: **W0** `af01156`, **W1 write side**
 `3d5e940` and the **liveness blocker** `aa0dcc4` are landed; **W2 is landed on `main` at `e0bbd37`**
 (merge of `12feaa2` over `c558e52`, base `dc5bcad`; shard v3 + `shard_stats` + embedding fingerprint;
-review approved after one rework); **W3 is landed on `main` at `a4df6e7`** (count/model authority: typed read+write refusals incl. `update_memory`, count-at-commit, the re-embed CLI, ADR-0018 D-18-13; review approved after **two** reworks) — W4, W5, W7
+review approved after one rework); **W3 is landed on `main` at `a4df6e7`** (count/model authority: typed read+write refusals incl. `update_memory`, count-at-commit, the re-embed CLI, ADR-0018 D-18-13; review approved after **two** reworks); **W4 is landed on `main` at `030a0bd`** (one active shard: metadata v2 repair + `WHERE is_active = 1` partial unique index, one-transaction rotation, validated reactivation, reconcile skip; ADR-0022; 12 tests, `mem-store` 45/380/0/12, review approved first pass) — W5, W7
 and W8 are absent from the tree, and the ADR set is partial: **0017 (`0017-compaction-hook.md`) and 0026
 (`0026-context-assembly.md`) exist and 0018 (`0018-shard-facts-source-of-truth.md`) + 0021
 (`0021-schema-version-discipline.md`) landed with W2**. The audit that gates ADR-0019 and ADR-0025 is now preserved
 in-repo at `docs/evidence/opsec-w6-design-2026-10-25/` — §9 lists twelve blockers, 1 closed, 2–12 open.
-Next: **W4 is chosen** (owner, 2026-10-29) — one active shard is a constraint; W5 (prompts v2) and W7
-(reaping) follow or run parallel. The **ADR-0019 text** landed `Accepted` at `b36920e`, and **issue 72**
-consumed `delete_memories` at `6d2c1f4`.
+Next: the owner picks **W5 (prompts v2) or W7 (reaping)** — W7 now leans on W4's one-active invariant.
+The **ADR-0019 text** landed `Accepted` at `b36920e`, and **issue 72** consumed `delete_memories` at
+`6d2c1f4`. **ADR-0022 (one active shard) landed Proposed at `030a0bd`** — owner acceptance still open.
 **Blocks issue 39 (retention cleanup) and issue 41 (scheduler).**
 
 ## RE-VERIFICATION 2026-10-25 (architecture pass) — read this before the items below
