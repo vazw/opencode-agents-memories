@@ -26,3 +26,5 @@ deletes by id and counts by registry, which makes this load-bearing for it.
 - [x] An unreadable shard is a typed error (`ScopeShardUnreadable`, W1), not a silent skip — the delete must
       not fail open.
 - [x] No new dependency; production panic-free.
+
+Landed — 2026-10-29 — f436612; blueprint bp-20261029-0020-issue72-scope-delete-by-id-r3; mem-store 368/0/12, mem-web 249/0/1
