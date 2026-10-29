@@ -1,6 +1,6 @@
 # 0022 — One active shard per `(scope, scope_hash)` is a database constraint
 
-- **Status:** Proposed
+- **Status:** Accepted (owner acceptance, 2026-10-30) — residuals R-22-1…R-22-5 accepted as stated; R-22-2 is tracked as issue 77.
 - **Date:** 2026-10-29
 - **Builds on:** `docs/adr/0018-shard-facts-source-of-truth.md` (the shard owns its facts; the registry
   count is a cache), `docs/adr/0021-schema-version-discipline.md` (`max_known` is mandatory and a newer
