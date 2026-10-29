@@ -147,6 +147,9 @@ fn own_identity() -> (Option<String>, Option<String>) {
 struct Child {
     child: std::process::Child,
     out: PathBuf,
+    /// The fixture mode (e.g. `lock:cas-race:b`) — the identity a timeout
+    /// message names.
+    label: String,
 }
 
 impl Child {
@@ -159,7 +162,11 @@ impl Child {
             .map(|(key, value)| (key.as_str(), value.as_str()))
             .collect();
         let child = spawn_fixture_child(mode, &out, &refs).expect("spawn fixture child");
-        Self { child, out }
+        Self {
+            child,
+            out,
+            label: mode.to_string(),
+        }
     }
 
     fn report(mut self) -> serde_json::Value {
@@ -173,10 +180,31 @@ impl Child {
         read_child_report(&self.out)
     }
 
-    fn wait_for_barrier(&self, dir: &Path, name: &str) {
-        assert!(
-            wait_for_barrier(dir, name, BARRIER_TIMEOUT),
-            "barrier hs.{name} never appeared"
+    fn wait_for_barrier(&mut self, dir: &Path, name: &str) {
+        self.wait_for_barrier_for(dir, name, BARRIER_TIMEOUT);
+    }
+
+    /// Bounded barrier wait with a timeout message that names the side, the
+    /// child and its artifacts. The artifacts are collected **before** the
+    /// kill, and every read is panic-free: a panic while panicking aborts the
+    /// binary, so only `unwrap_or_else`/`unwrap_or_default` appear on this path.
+    fn wait_for_barrier_for(&mut self, dir: &Path, name: &str, timeout: Duration) {
+        if wait_for_barrier(dir, name, timeout) {
+            return;
+        }
+        let status = match self.child.try_wait() {
+            Ok(Some(status)) => format!("exited ({status})"),
+            Ok(None) => "still running (parked)".to_string(),
+            Err(error) => format!("try_wait failed ({error})"),
+        };
+        let report = read_bounded(&self.out.with_extension("json"));
+        let stderr = read_bounded(&self.out.with_extension("stderr"));
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        panic!(
+            "barrier hs.{name} never appeared within {timeout:?}; child={label}; status={status}; \
+             report={report}; stderr={stderr}",
+            label = self.label,
         );
     }
 
@@ -200,6 +228,69 @@ impl Child {
     }
 }
 
+impl Drop for Child {
+    /// A parked peer is killed and reaped on **every** panic path — today it
+    /// would otherwise exit only when its own 30 s `go.update` wait expires.
+    /// A second `kill`/`wait` on a reaped child is a no-op and is ignored.
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Panic-free artifact read for the timeout path: an absent file becomes a
+/// readable token instead of a second panic, and the text is truncated to 4096
+/// bytes on a `char` boundary (never mid-codepoint).
+fn read_bounded(path: &Path) -> String {
+    let text = std::fs::read_to_string(path).unwrap_or_else(|error| format!("<absent: {error}>"));
+    if text.len() <= 4096 {
+        return text;
+    }
+    let cutoff = text
+        .char_indices()
+        .map(|(index, _)| index)
+        .take_while(|index| *index <= 4096)
+        .last()
+        .unwrap_or(0);
+    format!("{}…<truncated>", &text[..cutoff])
+}
+
+/// Extracts a caught panic payload's text (the timeout test asserts on it).
+#[cfg(unix)]
+fn panic_payload_text(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else {
+        "<non-string panic payload>".to_string()
+    }
+}
+
+/// `kill(pid, 0)` is the only observable that separates a killed-and-**reaped**
+/// child (`ESRCH`) from a killed-but-unreaped **zombie** (`0`), which is why
+/// this pins the reap as well as the kill. A survivor is SIGKILLed before the
+/// assertion fails: no fixture child may keep the inherited `.tmp/build.lock`
+/// descriptor.
+#[cfg(unix)]
+fn assert_reaped(pid: u32, phase: &str) {
+    let alive = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    if alive == 0 {
+        // SAFETY: signalling a pid this test spawned and whose death it is
+        // asserting; the signal is SIGKILL and the child is already doomed.
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGKILL);
+        }
+        panic!("{phase}: child pid {pid} was killed but not reaped (kill(pid, 0) still answers 0)");
+    }
+    let errno = std::io::Error::last_os_error().raw_os_error();
+    assert_eq!(
+        errno,
+        Some(libc::ESRCH),
+        "{phase}: child pid {pid} must answer ESRCH (killed and reaped), got errno {errno:?}"
+    );
+}
+
 fn run_child(dir: &Path, mode: &str) -> serde_json::Value {
     Child::spawn(dir, mode).report()
 }
@@ -214,13 +305,74 @@ fn read_barrier(dir: &Path, name: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Issue 60 — the timeout names the side and the cause; Drop kills and reaps
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn test_barrier_timeout_message_names_the_side_the_exit_status_and_the_child_artifacts() {
+    let dir = TempDir::new("lock-timeout-message");
+    let mut child = Child::spawn(dir.path(), "lock:try");
+    let status = wait_bounded(&mut child.child, CHILD_TIMEOUT).expect("the lock:try child exits");
+    assert!(
+        status.success(),
+        "the lock:try child must exit 0, so the status text is stable: {status:?}"
+    );
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        child.wait_for_barrier_for(dir.path(), "seen.never", Duration::from_millis(50));
+    }))
+    .expect_err("a barrier that never appears must panic");
+    let message = panic_payload_text(payload.as_ref());
+    for needle in [
+        "hs.seen.never",
+        "lock:try",
+        "exit status: 0",
+        "\"acquired\":true",
+        "stderr",
+    ] {
+        assert!(
+            message.contains(needle),
+            "the timeout message must name {needle:?}: {message}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn test_drop_kills_and_reaps_a_parked_fixture_child() {
+    // Phase 1 — direct `drop` on a parked `lock:hold-forever` child.
+    let dir = TempDir::new("lock-drop-reap");
+    let mut child = Child::spawn(dir.path(), "lock:hold-forever");
+    child.wait_for_barrier(dir.path(), "acquired");
+    let pid = child.child.id();
+    drop(child);
+    assert_reaped(pid, "phase 1 (direct drop)");
+
+    // Phase 2 — the unwind path. `_parked` MUST own the Child: `let _ = parked`
+    // does not bind and drops it immediately, and `drop(parked)` before the
+    // panic drops it before the unwind. Either shape makes the "unwind → Drop"
+    // claim vacuous. The `move` closure takes ownership, and `catch_unwind`
+    // needs `AssertUnwindSafe` because `Child` is not `UnwindSafe`.
+    let dir = TempDir::new("lock-unwind-reap");
+    let mut parked = Child::spawn(dir.path(), "lock:hold-forever");
+    parked.wait_for_barrier(dir.path(), "acquired");
+    let pid = parked.child.id();
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let _parked = parked;
+        panic!("synthetic unwind with the parked peer in scope");
+    }));
+    assert!(payload.is_err(), "the synthetic panic must unwind");
+    assert_reaped(pid, "phase 2 (unwind drop)");
+}
+
+// ---------------------------------------------------------------------------
 // 1/15 — one grant, reacquire after release
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn test_grants_lock_to_exactly_one_process_and_release_frees_next() {
     let dir = TempDir::new("lock-grant");
-    let winner = Child::spawn(dir.path(), "lock:hold");
+    let mut winner = Child::spawn(dir.path(), "lock:hold");
     winner.wait_for_barrier(dir.path(), "acquired");
 
     // Positive invariant: while the winner is parked INSIDE its critical
@@ -354,8 +506,8 @@ async fn test_exactly_one_competitor_cas_reclaims_dead_owner() {
     )
     .await;
 
-    let a = Child::spawn(dir.path(), "lock:cas-race:a");
-    let b = Child::spawn(dir.path(), "lock:cas-race:b");
+    let mut a = Child::spawn(dir.path(), "lock:cas-race:a");
+    let mut b = Child::spawn(dir.path(), "lock:cas-race:b");
     a.wait_for_barrier(dir.path(), "seen.a");
     b.wait_for_barrier(dir.path(), "seen.b");
 
@@ -432,7 +584,7 @@ async fn test_stale_release_cannot_drop_new_owner_row_same_pid() {
 #[tokio::test]
 async fn test_sigkilled_holder_lock_reclaimed_by_new_process() {
     let dir = TempDir::new("lock-sigkill");
-    let holder = Child::spawn(dir.path(), "lock:hold-forever");
+    let mut holder = Child::spawn(dir.path(), "lock:hold-forever");
     holder.wait_for_barrier(dir.path(), "acquired");
     assert!(
         current_owner_token(dir.path()).await.is_some(),
