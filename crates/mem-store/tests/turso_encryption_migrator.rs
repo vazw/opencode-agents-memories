@@ -100,7 +100,7 @@ fn names_with(storage: &Path, needle: &str) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------------------
-// 1/4 — no-op when the encryption marker already exists
+// 1/8 — no-op when the encryption marker already exists
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -144,7 +144,7 @@ async fn test_is_a_no_op_when_the_encryption_marker_already_exists() {
 }
 
 // ---------------------------------------------------------------------------
-// 2/4 — writes the marker after converting plaintext shards
+// 2/8 — writes the marker after converting plaintext shards
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -219,7 +219,7 @@ async fn test_writes_marker_after_converting_plaintext_shards() {
 }
 
 // ---------------------------------------------------------------------------
-// 3/4 — refuse an already-encrypted shard with a different key
+// 3/8 — refuse an already-encrypted shard with a different key
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -263,7 +263,7 @@ async fn test_refuses_already_encrypted_with_different_key() {
 }
 
 // ---------------------------------------------------------------------------
-// 4/6 — a copy failure removes the staged `.encrypt-*.tmp`
+// 4/8 — a copy failure removes the staged `.encrypt-*.tmp`
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -311,7 +311,7 @@ async fn test_copy_failure_removes_the_staged_encrypt_tmp_file() {
 }
 
 // ---------------------------------------------------------------------------
-// 5/6 — identifier quoting round-trips a name containing a double quote
+// 5/8 — identifier quoting round-trips a name containing a double quote
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -367,7 +367,7 @@ async fn test_migrates_a_table_name_that_requires_identifier_quoting() {
 }
 
 // ---------------------------------------------------------------------------
-// 6/6 — the `is_already_encrypted` probe never mints a key file
+// 6/8 — the `is_already_encrypted` probe never mints a key file
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -393,6 +393,59 @@ async fn test_is_already_encrypted_probe_does_not_mint_a_key_file() {
         !key_path.exists(),
         "probing must not mint the file:// key as a side effect"
     );
+
+    common::cleanup_temp_dir(&storage).ok();
+}
+
+// 7/8 - encryption disabled is a total no-op (upstream
+// "is a no-op when encryption is disabled", line 124).
+#[tokio::test]
+async fn test_is_a_no_op_when_encryption_is_disabled() {
+    let config = common::store_config("enc-mig-disabled"); // enabled=false, key=None
+    let (config, connections, shards) = common::real_components(config).await;
+    let storage = config.storage_path.clone();
+    let shards = Arc::new(shards);
+
+    let data = storage.join("data.db");
+    create_plaintext_shard(&config, &data).await;
+
+    run_database_encryption_migration(&storage, &connections, &shards, &config)
+        .await
+        .expect("no-op when encryption is disabled");
+
+    assert!(
+        !marker_path(&storage).exists(),
+        "no marker when encryption is disabled"
+    );
+    assert!(
+        names_with(&storage, ".pre-encrypt-").is_empty(),
+        "no pre-encrypt backup when encryption is disabled"
+    );
+    assert!(
+        names_with(&storage, ".encrypt-").is_empty(),
+        "no staged .encrypt-*.tmp when encryption is disabled"
+    );
+    assert!(
+        !storage.join(OPERATION_LOCK_FILE).exists(),
+        "the disabled path never takes the operation lock"
+    );
+    let plain = mem_store::db::turso_connect_factory()
+        .connect(data.clone(), plain_options(&config))
+        .await
+        .expect("the shard still opens plaintext");
+    let rows = plain
+        .query(
+            "SELECT content FROM memories WHERE id = 'mem_1'",
+            Vec::new(),
+        )
+        .await
+        .expect("plaintext select");
+    assert_eq!(
+        rows.first().and_then(|row| row.text("content")).as_deref(),
+        Some("encrypt me"),
+        "the plaintext row is untouched"
+    );
+    drop(plain);
 
     common::cleanup_temp_dir(&storage).ok();
 }
