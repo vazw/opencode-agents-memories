@@ -640,3 +640,90 @@ async fn test_migration_lock_retries_three_attempts_then_errors_locked_by_anothe
 
     cleanup_temp_dir(&rig.storage).expect("cleanup");
 }
+
+// ---------------------------------------------------------------------------
+// 9/9 — W4: reconcile skips the one activation it cannot resolve
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_reconcile_skips_a_discovered_shard_whose_active_incumbent_has_no_file() {
+    let hash = "a1b2c3d4e5f60123";
+    let dims = 4;
+    let rig = rig("legacy-reconcile-skip", dims, "test-model").await;
+
+    // 1. A completed legacy migration: shard 0 + sidecar + marker, row 0
+    //    active in the registry.
+    rig.create_legacy_shard(
+        &rig.projects(),
+        &format!("project_{hash}_shard_0.db"),
+        &[LegacyRow::new(
+            "mem_skip_1",
+            "legacy memory",
+            vec![1.0f32, 0.0, 0.0, 0.0],
+            &format!("opencode_project_{hash}"),
+        )],
+    )
+    .await;
+    let file_zero = rig.projects().join(format!("project_{hash}_shard_0.db"));
+    rig.run().await.expect("first migration succeeds");
+    let active = rig
+        .shards
+        .get_active_shard(Scope::Project, hash)
+        .await
+        .expect("active read")
+        .expect("row 0 is active");
+    assert_eq!(active.shard_index, 0);
+
+    // 2. File 1 through the manager: `memories` (v3) and the dims key exist,
+    //    so `count_memories` returns 0 and readiness is true.
+    let file_one = rig
+        .shards
+        .get_shard_path(Scope::Project, hash, 1)
+        .expect("path 1");
+    let db = rig
+        .connections
+        .get_connection(&file_one)
+        .await
+        .expect("shard 1 connection");
+    rig.shards
+        .init_shard_db(db.as_ref(), dims, "test-model")
+        .await
+        .expect("init shard 1");
+    drop(db);
+
+    // 3. A camelCase Complete sidecar (a snake_case body fails `read_sidecar`
+    //    and the run would take the migration path instead of reconcile).
+    std::fs::write(
+        PathBuf::from(format!("{}.turso-migrate.json", file_one.display())),
+        r#"{"expectedCount":0,"importedCount":0,"status":"complete"}"#,
+    )
+    .expect("sidecar 1");
+
+    // 4. The reachable conflict: row 0 is active but its file (and sidecar)
+    //    are gone, so nothing deactivates it and the ascending registration of
+    //    file 1 cannot activate it.
+    rig.connections
+        .close_connection(&file_zero)
+        .await
+        .expect("close shard 0");
+    std::fs::remove_file(&file_zero).expect("remove shard 0");
+    std::fs::remove_file(PathBuf::from(format!(
+        "{}.turso-migrate.json",
+        file_zero.display()
+    )))
+    .expect("remove sidecar 0");
+
+    // 5. Marker present + every listed file complete → reconcile.
+    rig.run()
+        .await
+        .expect("reconcile skips the discovered shard it cannot activate");
+
+    let rows = rig
+        .shards
+        .get_all_shards(Scope::Project, Some(hash))
+        .await
+        .expect("registry read");
+    assert_eq!(rows.len(), 1, "the failed upsert is atomic: no row 1");
+    assert_eq!(rows[0].shard_index, 0);
+    assert!(rows[0].is_active, "the incumbent stays active");
+}

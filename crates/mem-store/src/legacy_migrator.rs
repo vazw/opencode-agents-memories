@@ -844,7 +844,7 @@ async fn reconcile_shard_registry(
             == *highest_index_by_scope.get(&key).ok_or_else(|| {
                 StoreError::internal("shard scope missing from the highest-index map")
             })?;
-        shards
+        let registration = shards
             .register_existing_shard(
                 shard.scope,
                 &shard.scope_hash,
@@ -853,7 +853,27 @@ async fn reconcile_shard_registry(
                 shard.vector_count,
                 is_active,
             )
-            .await?;
+            .await;
+        match registration {
+            Ok(_) => {}
+            // W4/ADR-0022 D-22-8: the ONE conflict reconcile cannot resolve.
+            // The registry's active row has no parsed file (deleted, archived
+            // or reaped while the row survived), so nothing deactivated it and
+            // the discovered higher-index file cannot be activated. Repairing
+            // here would change the write target on every open based on file
+            // presence; skip the file (W7 reaps it, or an operator inspects).
+            Err(StoreError::ActiveShardConflict {
+                active_shard_index, ..
+            }) => {
+                tracing::warn!(
+                    db_path = %shard.path.display(),
+                    active_shard_index,
+                    "Reconcile skipped a discovered shard it cannot activate"
+                );
+            }
+            // Every other registration failure still aborts the open.
+            Err(error) => return Err(error),
+        }
     }
     Ok(())
 }
