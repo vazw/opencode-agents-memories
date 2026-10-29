@@ -1,6 +1,6 @@
 # 0019 — Erasure posture: what leaves, what is retained, what the sweep covers
 
-- **Status:** Proposed (draft for owner approval)
+- **Status:** Accepted (owner acceptance, 2026-10-29)
 - **Date:** 2026-10-29
 - **Builds on:** `docs/adr/0012-vault-key-custody.md` (D-14: a purge is a logical deletion, and the vault's guarantee is key destruction, not a sweep); `docs/adr/0018-shard-facts-source-of-truth.md` (the shard owns its facts, and an authoritative count is a stored one); `docs/adr/0021-schema-version-discipline.md` (a file the sweep opens must be safe to open at its version); `docs/adr/0010-sound-memory-context-preservation.md` (raw context is destroyed only by an explicit, owner-initiated purge); `docs/adr/0007-bridge-strategy.md` (the bridge is the one place the episodic and profile stores are joined).
 - **Supersedes:** the routed "separate status endpoint" default for the delete surface (`.scratch/rust-port/issues/43-database-base-hardening.md:111-114`), reversed in D-19-2.

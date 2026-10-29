@@ -8,9 +8,9 @@ and W8 are absent from the tree, and the ADR set is partial: **0017 (`0017-compa
 (`0026-context-assembly.md`) exist and 0018 (`0018-shard-facts-source-of-truth.md`) + 0021
 (`0021-schema-version-discipline.md`) landed with W2**. The audit that gates ADR-0019 and ADR-0025 is now preserved
 in-repo at `docs/evidence/opsec-w6-design-2026-10-25/` — §9 lists twelve blockers, 1 closed, 2–12 open.
-Next: **W3 is landed**; the owner picks W4 (one-active index), W5 (prompts v2) or W7 (reaping) next. The
-**ADR-0019 text** is unblocked (blockers 6–11 closed by the 2026-10-28/29 rulings; blocker 12 moves to
-ADR-0025), and **issue 72** may now consume `delete_memories`.
+Next: **W4 is chosen** (owner, 2026-10-29) — one active shard is a constraint; W5 (prompts v2) and W7
+(reaping) follow or run parallel. The **ADR-0019 text** landed `Accepted` at `b36920e`, and **issue 72**
+consumed `delete_memories` at `6d2c1f4`.
 **Blocks issue 39 (retention cleanup) and issue 41 (scheduler).**
 
 ## RE-VERIFICATION 2026-10-25 (architecture pass) — read this before the items below
