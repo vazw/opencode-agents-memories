@@ -7,9 +7,10 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::db::Value;
+use crate::db::{ConnectFactory, ConnectOptions, EncryptionOptions, TursoConnectFactory, Value};
 use crate::error::StoreError;
 use crate::operation_lock::{METADATA_DB_NAME, acquire_turso_operation_lock};
+use crate::platform::Platform;
 use crate::shard_manager::{ShardInfo, ShardManager};
 use crate::sqlite_files::{
     FILE_LOCK_RETRY_DELAYS_MS, RetryContext, remove_sqlite_database_reporting, sidecar_path,
@@ -152,6 +153,10 @@ impl ShardManager {
             self.process_probe(),
             "reap-shards",
         )?;
+        // Resolve the encryption options ONCE, before the loop: a missing key
+        // is a store error (exit 74), never a per-shard `unopenable` skip that
+        // would report a config failure as a clean sweep.
+        let encryption = crate::db::resolve_database_encryption(self.config())?;
         let metadata = self.metadata_handle().await?;
         let rows = metadata.query(LIST_ALL_SHARDS, Vec::new()).await?;
         let shards: Vec<ShardInfo> = rows
@@ -166,6 +171,16 @@ impl ShardManager {
                 report.skipped.push(SkippedShard {
                     shard_id: shard.id,
                     reason: ReapSkipReason::Active,
+                });
+                continue;
+            }
+            let own_rows = self
+                .read_shard_count_read_only(&shard.db_path, encryption.clone())
+                .await?;
+            if own_rows > 0 {
+                report.skipped.push(SkippedShard {
+                    shard_id: shard.id,
+                    reason: ReapSkipReason::NonEmpty { rows: own_rows },
                 });
                 continue;
             }
@@ -201,5 +216,33 @@ impl ShardManager {
             }
         }
         Ok(report)
+    }
+
+    /// The zero-count proof: one **read-only** open of the shard file, then
+    /// `COUNT(*)` from the file itself. The handle is dropped before the
+    /// caller probes `-tshm`, so the count open can never be mistaken for a
+    /// live holder.
+    ///
+    /// A missing, unopenable or unreadable file is an `Err` here; Step 4 maps
+    /// it to [`ReapSkipReason::Unopenable`] (this step propagates it).
+    async fn read_shard_count_read_only(
+        &self,
+        db_path: &Path,
+        encryption: Option<EncryptionOptions>,
+    ) -> Result<u64, StoreError> {
+        if !db_path.exists() {
+            return Err(StoreError::Io {
+                message: format!("shard file is missing: {}", db_path.display()),
+                os_code: None,
+                kind: Some(std::io::ErrorKind::NotFound),
+            });
+        }
+        let mut options = ConnectOptions::for_config(self.config(), Platform::current());
+        options.read_only = true;
+        options.encryption = encryption;
+        let db = TursoConnectFactory
+            .connect(db_path.to_path_buf(), options)
+            .await?;
+        crate::shard_facts::read_count(db.as_ref()).await
     }
 }

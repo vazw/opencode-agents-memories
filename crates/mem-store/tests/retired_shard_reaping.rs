@@ -129,6 +129,38 @@ impl Rig {
         shard
     }
 
+    /// Creates an INACTIVE shard file at `index`, inserts `rows` with
+    /// `vector::insert_vector` and registers it with registry count 0. No
+    /// `sync_count` runs, so `shard_stats` has no row — T3's distinguishing
+    /// input.
+    async fn inactive_with_rows(&self, index: u32, rows: &[&str]) -> ShardInfo {
+        let path = self.path(index);
+        let options =
+            ConnectOptions::for_config(&self.config, mem_store::platform::Platform::current());
+        let handle = TursoConnectFactory
+            .connect(path.clone(), options)
+            .await
+            .expect("open the candidate file read-write");
+        self.manager
+            .init_shard_db(
+                handle.as_ref(),
+                self.config.embedding_dimensions,
+                &self.config.embedding_model,
+            )
+            .await
+            .expect("initialize the candidate file");
+        for id in rows {
+            vector::insert_vector(handle.as_ref(), &record(id))
+                .await
+                .expect("insert a candidate row");
+        }
+        drop(handle);
+        self.manager
+            .register_existing_shard(Scope::Project, HASH, index, &path, 0, false)
+            .await
+            .expect("register the inactive shard")
+    }
+
     /// Creates an INACTIVE, empty shard file at `index` and registers it.
     async fn inactive(&self, index: u32) -> ShardInfo {
         let path = self.path(index);
@@ -230,6 +262,85 @@ async fn test_eligible_retired_shard_is_fully_removed() {
         report.bytes_freed, expected_bytes,
         "bytes_freed is the sum of the pre-existing regular-file sizes"
     );
+}
+
+// ---------------------------------------------------------------------------
+// T3 — a shard with rows is never reaped (the ONLY `non_empty`-reason pin)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_shard_with_rows_is_never_reaped() {
+    let rig = rig("w7-t3");
+    let anchor = rig.anchor(1, &["anchor-row"]).await;
+    let candidate = rig.inactive_with_rows(0, &["candidate-row"]).await;
+
+    // The fixture's distinguishing input, asserted before the reap: one row,
+    // NO `shard_stats` row, and registry count 0. A count read from either of
+    // the latter would classify the shard as empty.
+    let stored = rig.manager.get_shard_by_id(candidate.id).await.unwrap();
+    assert_eq!(
+        stored.expect("the candidate row").vector_count,
+        0,
+        "the registry count is 0, not the file's COUNT(*)"
+    );
+    let options = ConnectOptions::for_config(&rig.config, Platform::current());
+    let handle = TursoConnectFactory
+        .connect(candidate.db_path.clone(), options)
+        .await
+        .expect("open the candidate");
+    let count = mem_store::shard_facts::read_count(handle.as_ref())
+        .await
+        .expect("read COUNT(*)");
+    assert_eq!(count, 1, "the file holds exactly one row");
+    let stored_count = mem_store::shard_facts::read_stored_count(handle.as_ref())
+        .await
+        .expect("read the stored count");
+    assert_eq!(stored_count, 0, "an absent shard_stats row collapses to 0");
+    let stats_rows = mem_store::db::query_one(
+        handle.as_ref(),
+        "SELECT COUNT(*) as count FROM shard_stats",
+        Vec::new(),
+    )
+    .await
+    .expect("count the shard_stats rows");
+    assert_eq!(
+        stats_rows.and_then(|row| row.i64("count")),
+        Some(0),
+        "the fixture writes no shard_stats row"
+    );
+    drop(handle);
+
+    let report = rig
+        .manager
+        .reap_retired_shards(false)
+        .await
+        .expect("reap over the one-row candidate");
+
+    assert!(report.candidates.is_empty());
+    assert!(report.reaped.is_empty());
+    assert!(
+        report.skipped.iter().any(|skip| skip.shard_id == anchor.id),
+        "the active anchor is listed in skipped: {:?}",
+        report.skipped
+    );
+    assert!(
+        report
+            .skipped
+            .iter()
+            .any(|skip| skip.shard_id == candidate.id
+                && skip.reason == mem_store::reaping::ReapSkipReason::NonEmpty { rows: 1 }),
+        "the candidate is skipped with the measured row count: {:?}",
+        report.skipped
+    );
+    assert!(
+        rig.manager
+            .get_shard_by_id(candidate.id)
+            .await
+            .unwrap()
+            .is_some(),
+        "the candidate row survives"
+    );
+    assert!(candidate.db_path.exists(), "the candidate file survives");
 }
 
 // ---------------------------------------------------------------------------
