@@ -420,7 +420,7 @@ fn test_probe_reports_free_for_an_unheld_database_file() {
     assert_eq!(
         outcome,
         ProbeOutcome::Free,
-        "an unheld file must read Free — the probe's own lock is taken and released"
+        "an unheld file must read Free — the probe queries and takes nothing"
     );
     let _ = common::cleanup_temp_dir(&dir);
 }
@@ -451,11 +451,11 @@ fn test_probe_posix_variant_reports_held_for_a_live_legacy_holder() {
     let holder = LegacyHolder::spawn(&path);
     let outcome = probe_database_file_with(&path, LockKind::Posix);
     holder.release();
-    println!("probe(F_SETLK) against a live legacy holder = {outcome:?}");
+    println!("probe(F_GETLK) against a live legacy holder = {outcome:?}");
     assert_eq!(
         outcome,
         ProbeOutcome::Held,
-        "45.10: the F_SETLK path is tested on Linux, not assumed"
+        "45.10: the F_GETLK path is tested on Linux, not assumed"
     );
     let _ = common::cleanup_temp_dir(&dir);
 }
@@ -1369,7 +1369,7 @@ async fn test_purge_session_option_set_stays_multiprocess() {
 ///
 /// **Linux only, because `Held` is a Linux fact here.** The first probe must conflict
 /// with a lock the *same process* holds, which only an OFD lock does: on another Unix
-/// the probe is `F_SETLK`, and a POSIX record lock never conflicts with a lock its own
+/// the probe is `F_GETLK`, and a POSIX record lock never conflicts with a lock its own
 /// process holds, so the first probe would read `Free` and this test would be asserting
 /// a platform-specific outcome under a broader `cfg`.
 #[cfg(target_os = "linux")]

@@ -15,6 +15,11 @@
 //! twice and never closed, because holding the lock ourselves would make us the
 //! holder the probe looks for.*
 //!
+//! **Issue 60 is the measured proof of that shape.** The old probe *took* the
+//! exclusive byte-0 lock and released it, so for the 20–85 µs it held the byte two
+//! conforming openers refused each other; the probe now queries
+//! (`F_OFD_GETLK`/`F_GETLK`) and acquires nothing.
+//!
 //! **The measured rule that constrains any future probe:** `close()` on a database
 //! file releases the process's own POSIX locks, for every fcntl variant (`t2
 //! S4/S6/S7`) — it is `close()`, not the lock call.
@@ -43,9 +48,10 @@
 //! on** unless design A §11's identity-keyed clearance registry lands first (still
 //! open).
 //!
-//! **Platform matrix (45.10).** Linux: `F_OFD_SETLK` (measured in both directions).
-//! Other Unix: `F_SETLK` (the syscall path is exercised on Linux through
-//! [`LockKind::Posix`]; the *platform selection* is untested — no runner). Windows:
+//! **Platform matrix (45.10).** Linux: `F_OFD_GETLK` (queried in both directions;
+//! the probe takes nothing). Other Unix: `F_GETLK` (the syscall path is exercised
+//! on Linux through [`LockKind::Posix`]; the *platform selection* is untested — no
+//! runner). Windows:
 //! no probe exists there, because `ConnectOptions::for_config` never enables
 //! multiprocess WAL on Windows and every open is therefore `WalMode::Legacy` ⇒
 //! [`StoreError::UnsupportedOpenMode`] before any syscall. Non-Linux-Unix
@@ -164,13 +170,15 @@ impl Writability {
     }
 }
 
-/// The lock flavour the probe uses. Linux alone has open-file-description locks.
+/// The lock flavour the probe queries with. Linux alone has
+/// open-file-description locks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LockKind {
-    /// `F_OFD_SETLK` — Linux. An OFD lock carries no `l_pid`, and it does not
-    /// disturb a foreign *POSIX* lock (that lock reads `Held`, `t2 S7`).
+    /// `F_OFD_GETLK` — Linux. An OFD lock carries no `l_pid`, and a foreign
+    /// *POSIX* lock is *reported* as a conflict (that lock reads `Held`, `t2
+    /// S7`), never replaced.
     Ofd,
-    /// `F_SETLK` — every other Unix.
+    /// `F_GETLK` — every other Unix.
     Posix,
 }
 
@@ -187,16 +195,22 @@ impl LockKind {
     }
 }
 
-/// `EAGAIN` / `EACCES` are the two contention answers an `fcntl` lock attempt can
-/// give; everything else is "the probe could not ask".
+/// `EAGAIN` / `EACCES` are the two contention answers a *lock attempt* can give;
+/// the probe queries and never attempts (issue 60), but this arm is the shared
+/// rule for any set-style caller and
+/// `test_fcntl_result_classification_treats_contention_as_held` still pins it.
+/// Everything else is "the probe could not ask".
 #[cfg(unix)]
 fn is_contention_errno(errno: i32) -> bool {
     errno == libc::EAGAIN || errno == libc::EACCES
 }
 
-/// Maps one `fcntl(…, &lock)` result onto a [`ProbeOutcome`]: `0` means the lock
-/// was taken (⇒ nothing holds the file), contention means held, anything else is
-/// unknown. Pure, so the rule is testable without a filesystem race.
+/// Maps one **failed** `fcntl(…, &lock)` result (`result != 0`) onto a
+/// [`ProbeOutcome`]: contention means held, anything else is unknown. The
+/// `0 ⇒ Free` arm is unreachable from the probe after issue 60 (a successful
+/// *query* carries its answer in `lock.l_type`, never in the result); it stays
+/// for set-style callers and for the pure classifier test. Pure, so the rule is
+/// testable without a filesystem race.
 #[cfg(unix)]
 pub(crate) fn classify_fcntl(result: i32, errno: Option<i32>) -> ProbeOutcome {
     if result == 0 {
@@ -753,7 +767,7 @@ pub(crate) fn ensure_mode_marker(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProbeOutcome {
-    /// The exclusive byte lock was taken and released: no legacy holder.
+    /// No conflicting lock on byte 0: no legacy holder (nothing was taken).
     Free,
     /// A live legacy (single-process) opener holds the file.
     Held,
@@ -772,18 +786,18 @@ pub fn probe_database_file(path: &Path) -> ProbeOutcome {
 }
 
 /// Probes `path` for a live **legacy** (single-process) holder with an explicit
-/// lock flavour — the injection point that lets the `F_SETLK` path be tested on
-/// Linux (45.10).
+/// lock flavour — the injection point that lets the POSIX (`F_GETLK`) leg be
+/// tested on Linux (45.10).
 ///
 /// Shape, and why each part is what it is:
 ///
 /// * `O_RDWR` **without** `O_CREAT`: a missing database is a *known* answer
 ///   ([`ProbeOutcome::Missing`]) and **no probe may create a database**.
-/// * exactly one byte at offset 0, taken `F_WRLCK` and immediately released: never
-///   destructive to another process, and it never replaces a foreign POSIX lock
-///   (an OFD lock conflicts with it instead — `t2 S7`).
-/// * `l_pid: 0` always — an OFD lock carries no pid, and claiming one would be an
-///   invented fact.
+/// * exactly one byte at offset 0, **queried** (`F_OFD_GETLK`/`F_GETLK`) as
+///   `F_WRLCK`: the probe acquires nothing, cannot block, cannot alter a foreign
+///   lock and cannot be seen by a peer probe.
+/// * `l_pid: 0` on the request; the answer's `l_pid` is ignored — the refusal
+///   never names a holder.
 #[cfg(unix)]
 #[must_use]
 pub fn probe_database_file_with(path: &Path, kind: LockKind) -> ProbeOutcome {
@@ -812,7 +826,7 @@ pub fn probe_database_file_with(path: &Path, kind: LockKind) -> ProbeOutcome {
     // valid bit pattern, and every field that carries meaning is overwritten
     // below. (Precedent: `mem-profile/src/learning_lock.rs:115`.)
     let mut lock: libc::flock = unsafe { std::mem::zeroed() };
-    lock.l_type = libc::F_WRLCK as _;
+    lock.l_type = libc::F_WRLCK as _; // the *requested* type — never F_UNLCK
     lock.l_whence = libc::SEEK_SET as _;
     lock.l_start = 0;
     lock.l_len = 1;
@@ -820,30 +834,34 @@ pub fn probe_database_file_with(path: &Path, kind: LockKind) -> ProbeOutcome {
 
     let command: libc::c_int = match kind {
         #[cfg(target_os = "linux")]
-        LockKind::Ofd => libc::F_OFD_SETLK,
+        LockKind::Ofd => libc::F_OFD_GETLK,
         // Non-Linux Unix has no OFD locks; `LockKind::platform()` never returns
         // `Ofd` there, and a caller that asks for it explicitly gets POSIX
         // semantics rather than a silently different answer.
         #[cfg(not(target_os = "linux"))]
-        LockKind::Ofd => libc::F_SETLK,
-        LockKind::Posix => libc::F_SETLK,
+        LockKind::Ofd => libc::F_GETLK,
+        LockKind::Posix => libc::F_GETLK,
     };
 
     // SAFETY: `fd` is owned by `file` for the whole call (nothing closes it before
-    // `file` drops at the end of this function), and `lock` is a fully initialised
-    // `libc::flock` that outlives the call.
-    let result = unsafe { libc::fcntl(fd, command, &lock) };
-    if result == 0 {
-        // Release immediately: the probe's answer is the attempt, never the hold.
-        let mut unlock = lock;
-        unlock.l_type = libc::F_UNLCK as _;
-        // SAFETY: same owned fd, same still-live `flock`. A failed unlock is
-        // harmless — dropping `file` closes the description, and `close()`
-        // releases the process's own locks anyway.
-        let _ = unsafe { libc::fcntl(fd, command, &unlock) };
-        return ProbeOutcome::Free;
+    // `file` drops at the end of this function). `lock` is a fully initialised
+    // `libc::flock`, passed as `&mut` because the kernel writes the answer into
+    // it. `F_GETLK`/`F_OFD_GETLK` never block and never acquire: they return a
+    // conflicting lock (or F_UNLCK), or fail with an errno.
+    let result = unsafe { libc::fcntl(fd, command, &mut lock) };
+    if result != 0 {
+        // A *failed* call only: a successful query is 0 and its answer is in
+        // `lock.l_type`, so it must never be routed through `classify_fcntl`
+        // (0 there means "took it").
+        return classify_fcntl(result, std::io::Error::last_os_error().raw_os_error());
     }
-    classify_fcntl(result, std::io::Error::last_os_error().raw_os_error())
+    if lock.l_type == libc::F_UNLCK as libc::c_short {
+        ProbeOutcome::Free
+    } else {
+        ProbeOutcome::Held
+    }
+    // No unlock: nothing was taken. Dropping `file` still closes the description,
+    // which is the probe's only side effect.
 }
 
 /// No probe exists on non-Unix targets. Unreachable from production: every open
