@@ -119,9 +119,12 @@ R-22-5 and is healed by the resolver on the next write.
    `rollback_failed` → the journal is kept → `recover_interrupted_swap` returns
    `Internal("Failed to recover path-migrate swap …")` → the store refuses to open; `:619` (inventory
    registration) aborts the migration with the typed conflict; `legacy_migrator.rs:848` is the reconcile
-   site, now skipped (D-22-8) rather than fatal. *Inverted world:* an operator reporting "refuses to
-   open — Failed to recover path-migrate swap" names a conflicting activation during rollback; the
-   remedy is to inspect the journal and registry by hand. *Trigger to act:* the first such report.
+   site, now skipped (D-22-8) rather than fatal. The failed attempt consumes the archive, so the **next**
+   open returns early from `rollback_archived` and completes: the cost is one refused start, not an
+   unopenable store. *Inverted world:* an operator reporting "refuses to open — Failed to recover
+   path-migrate swap" names a conflicting activation during rollback; the remedy is to retry, and only a
+   retry that also fails calls for inspecting the journal and registry by hand. *Trigger to act:* the
+   first such report. Tracked as **issue 77**, which also carries the state a test must build.
 - **R-22-3 — `reassign_shard_scope` is unchanged.** A path migration moving an active shard into a tuple
    that already has one surfaces the engine's constraint; the path-migration path already aborts on any
    registry error. *Inverted world:* a path-migration abort citing a unique constraint on `shards` names
