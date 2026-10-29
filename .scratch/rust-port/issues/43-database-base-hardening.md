@@ -3,12 +3,18 @@
 Status: ready-for-human — 2026-10-27 (umbrella, not a single wave: **W0** `af01156`, **W1 write side**
 `3d5e940` and the **liveness blocker** `aa0dcc4` are landed; **W2 is landed on `main` at `e0bbd37`**
 (merge of `12feaa2` over `c558e52`, base `dc5bcad`; shard v3 + `shard_stats` + embedding fingerprint;
-review approved after one rework); **W3 is landed on `main` at `a4df6e7`** (count/model authority: typed read+write refusals incl. `update_memory`, count-at-commit, the re-embed CLI, ADR-0018 D-18-13; review approved after **two** reworks); **W4 is landed on `main` at `030a0bd`** (one active shard: metadata v2 repair + `WHERE is_active = 1` partial unique index, one-transaction rotation, validated reactivation, reconcile skip; ADR-0022; 12 tests, `mem-store` 45/380/0/12, review approved first pass; residual R-22-2 tracked as **issue 77**) — W5, W7
+review approved after one rework); **W3 is landed on `main` at `a4df6e7`** (count/model authority: typed read+write refusals incl. `update_memory`, count-at-commit, the re-embed CLI, ADR-0018 D-18-13; review approved after **two** reworks); **W4 is landed on `main` at `030a0bd`** (one active shard: metadata v2 repair + `WHERE is_active = 1` partial unique index, one-transaction rotation, validated reactivation, reconcile skip; ADR-0022; 12 tests, `mem-store` 45/380/0/12, review approved first pass; residual R-22-2 tracked as **issue 77**) — W5
 and W8 are absent from the tree, and the ADR set is partial: **0017 (`0017-compaction-hook.md`) and 0026
 (`0026-context-assembly.md`) exist and 0018 (`0018-shard-facts-source-of-truth.md`) + 0021
 (`0021-schema-version-discipline.md`) landed with W2**. The audit that gates ADR-0019 and ADR-0025 is now preserved
 in-repo at `docs/evidence/opsec-w6-design-2026-10-25/` — §9 lists twelve blockers, 1 closed, 2–12 open.
-Next: **W7 (reaping) is chosen** (owner, 2026-10-30) — its sixteen rulings are recorded below; ADR-0022 was accepted first at `ad9a9fa`. W5 follows. The **ADR-0019 text** landed `Accepted` at `b36920e`, and **issue 72** consumed `delete_memories` at `6d2c1f4`.
+W7 landed **2026-10-30** at `43d9954` — retired-shard reaping, 12 commits from `4307662`, 14 files
+(including the engine-shutdown stdout pin); review approved after one rework; `mem-store` 394/0/12,
+`reap_cli` 6/0, workspace 2094/0/22; ADR-0023 landed **Proposed** — owner acceptance open; ADR-0019
+A14 amended.
+Next: **W5 (prompts v2) follows** per W7 ruling 1. Owner picks outstanding: **70** (wire method set),
+**53 O3** (vault half), **28** (live swap), and the **zstd advisories** re-derivation. The **ADR-0019
+text** landed `Accepted` at `b36920e`, and **issue 72** consumed `delete_memories` at `6d2c1f4`.
 **Blocks issue 39 (retention cleanup) and issue 41 (scheduler).**
 
 ## RE-VERIFICATION 2026-10-25 (architecture pass) — read this before the items below
@@ -758,3 +764,19 @@ W7's safety condition rests on the one-active invariant.
 14. **`--apply` alone is the confirmation**; the two-act design is the deliberate step.
 15. **Yield is cleanup after deletion, not space reclamation.** A retired shard that still holds live
     rows is never reapable, and ADR-0023 says so plainly.
+
+---
+
+## W7 LANDED 2026-10-30 (`43d9954`)
+
+Merged fast-forward onto `main` from `4307662` (12 commits, 14 files, +2577/−15). The review approved
+after **one** rework (two blockers: foreign reap flags are now refused on **presence**, so
+`--apply --scope` exits 64 and touches nothing; CLI-14's fixture is the camelCase
+`ShardMigrationSidecar` body, and the marker branch is now actually taken and pinned). Counts:
+`mem-store` **394/0/12**, `--lib reaping` **1**, `reap_cli` **6/0**, workspace **2094/0/22**; fmt and
+both clippy gates green; no manifest or dependency change; production panic-free. Recorded
+deviations: `close_all()` after `ensure_ready()` (cached writable handles answer the `-tshm` query
+`Held`), and the 14th file `tests/engine_shutdown.rs` (stdout pin 2 → 3; the thirteen-file gate and
+the workspace gate cannot both pass). **ADR-0023 is Proposed — owner acceptance open.** ADR-0019 A14
+is amended. The ten-test battery plus the twelve mutation cells (M1–M10, M3b, M7b) are the wave's
+oracle; the discovery pass's `delete_shard` bypass is confirmed unused by the reaper.
