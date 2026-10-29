@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::db::{ConnectFactory, ConnectOptions, EncryptionOptions, TursoConnectFactory, Value};
 use crate::error::StoreError;
+use crate::open_guard::ProbeOutcome;
 use crate::operation_lock::{METADATA_DB_NAME, acquire_turso_operation_lock};
 use crate::platform::Platform;
 use crate::shard_manager::{ShardInfo, ShardManager};
@@ -120,6 +121,28 @@ fn tuple_key(shard: &ShardInfo) -> (String, String) {
     (shard.scope.as_str().to_string(), shard.scope_hash.clone())
 }
 
+/// The pure `-tshm` decision. One registration for the mapping, used by both
+/// call sites (the predicate and the post-row-delete re-probe).
+///
+/// `Free`/`Missing` permit; `Held` and `Unknown` fail closed. `Missing` is a
+/// permit because a sidecar whose database is gone cannot be found by the
+/// next opener, and the probe never creates it.
+fn tshm_verdict_with(outcome: ProbeOutcome) -> Option<ReapSkipReason> {
+    match outcome {
+        ProbeOutcome::Free | ProbeOutcome::Missing => None,
+        ProbeOutcome::Held => Some(ReapSkipReason::LiveTshmHolder),
+        ProbeOutcome::Unknown { errno } => Some(ReapSkipReason::TshmProbeUnknown { errno }),
+    }
+}
+
+/// Queries the `-tshm` sidecar's byte-0 lock. The probe **queries** and takes
+/// nothing (issue 60); the verdict mapping has one registration.
+fn tshm_verdict(db_path: &Path) -> Option<ReapSkipReason> {
+    tshm_verdict_with(crate::open_guard::probe_database_file(&sidecar_path(
+        db_path, "-tshm",
+    )))
+}
+
 /// The four file targets of one shard database.
 fn target_paths(db_path: &Path) -> [PathBuf; 4] {
     [
@@ -207,13 +230,38 @@ impl ShardManager {
                 });
                 continue;
             }
-            let own_rows = self
+            let own_rows = match self
                 .read_shard_count_read_only(&shard.db_path, encryption.clone())
-                .await?;
+                .await
+            {
+                Ok(rows) => rows,
+                Err(error) => {
+                    tracing::debug!(
+                        shard_id = shard.id,
+                        db_path = %shard.db_path.display(),
+                        error = %error.message(),
+                        "reaping: shard is unopenable"
+                    );
+                    report.skipped.push(SkippedShard {
+                        shard_id: shard.id,
+                        reason: ReapSkipReason::Unopenable,
+                    });
+                    continue;
+                }
+            };
             if own_rows > 0 {
                 report.skipped.push(SkippedShard {
                     shard_id: shard.id,
                     reason: ReapSkipReason::NonEmpty { rows: own_rows },
+                });
+                continue;
+            }
+            // Probe AFTER the read-only count handle is dropped (the helper
+            // returns), so the count open is never mistaken for a holder.
+            if let Some(reason) = tshm_verdict(&shard.db_path) {
+                report.skipped.push(SkippedShard {
+                    shard_id: shard.id,
+                    reason,
                 });
                 continue;
             }
@@ -229,6 +277,17 @@ impl ShardManager {
                 report.skipped.push(SkippedShard {
                     shard_id: shard.id,
                     reason: ReapSkipReason::RowGone,
+                });
+                continue;
+            }
+            // Re-probe immediately before the first unlink: a flag-on holder
+            // that arrived while the read-only count open was in flight is
+            // seen here. The row is already gone — the benign row-first
+            // window (the reconciler re-adopts an intact file).
+            if let Some(reason) = tshm_verdict(&shard.db_path) {
+                report.skipped.push(SkippedShard {
+                    shard_id: shard.id,
+                    reason,
                 });
                 continue;
             }
@@ -277,5 +336,30 @@ impl ShardManager {
             .connect(db_path.to_path_buf(), options)
             .await?;
         crate::shard_facts::read_count(db.as_ref()).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// M7b's named test: the pure seam is total and the `Unknown` arm maps to
+    /// a fail-closed skip carrying the errno. A real `-tshm` fixture cannot
+    /// produce `Unknown`: turso opens the sidecar O_RDWR even on a read-only
+    /// database open, so a `0444` sidecar fails the count open first.
+    ///
+    /// It deliberately does NOT assert `Held`, so M7 stays T7-only.
+    #[test]
+    fn test_tshm_verdict_maps_unknown_to_a_skip_with_the_errno() {
+        assert_eq!(tshm_verdict_with(ProbeOutcome::Free), None);
+        assert_eq!(tshm_verdict_with(ProbeOutcome::Missing), None);
+        assert_eq!(
+            tshm_verdict_with(ProbeOutcome::Unknown { errno: Some(11) }),
+            Some(ReapSkipReason::TshmProbeUnknown { errno: Some(11) })
+        );
+        assert_eq!(
+            tshm_verdict_with(ProbeOutcome::Unknown { errno: None }),
+            Some(ReapSkipReason::TshmProbeUnknown { errno: None })
+        );
     }
 }

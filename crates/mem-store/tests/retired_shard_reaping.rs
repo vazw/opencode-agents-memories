@@ -459,6 +459,129 @@ async fn test_highest_inactive_shard_beside_an_active_row_is_reaped() {
 }
 
 // ---------------------------------------------------------------------------
+// T6 — an unopenable shard is skipped with a reason
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_unopenable_shard_is_skipped_with_a_reason() {
+    let rig = rig("w7-t6");
+    let anchor = rig.anchor(2, &["anchor-row"]).await;
+    let garbage = rig.inactive(0).await;
+    std::fs::write(&garbage.db_path, b"not a database").expect("overwrite with garbage");
+    let missing = rig.inactive(1).await;
+    std::fs::remove_file(&missing.db_path).expect("remove the missing row's file");
+
+    let report = rig
+        .manager
+        .reap_retired_shards(false)
+        .await
+        .expect("an unopenable shard is a skip, not an Err");
+
+    assert!(report.candidates.is_empty());
+    assert!(report.reaped.is_empty());
+    assert!(
+        report.skipped.iter().any(|skip| skip.shard_id == anchor.id),
+        "the active anchor is listed in skipped: {:?}",
+        report.skipped
+    );
+    for shard in [&garbage, &missing] {
+        assert!(
+            report.skipped.iter().any(|skip| skip.shard_id == shard.id
+                && skip.reason == mem_store::reaping::ReapSkipReason::Unopenable),
+            "shard {} is skipped as unopenable: {:?}",
+            shard.id,
+            report.skipped
+        );
+        assert!(
+            rig.manager
+                .get_shard_by_id(shard.id)
+                .await
+                .expect("row read")
+                .is_some(),
+            "the unopenable row {} survives",
+            shard.id
+        );
+    }
+    assert_eq!(
+        std::fs::read(&garbage.db_path).expect("read the garbage file"),
+        b"not a database",
+        "the garbage file is untouched"
+    );
+    assert!(!missing.db_path.exists(), "the missing file stays missing");
+}
+
+// ---------------------------------------------------------------------------
+// T7 — a live -tshm holder is skipped
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn test_live_tshm_holder_is_skipped() {
+    use std::os::unix::io::AsRawFd;
+
+    let rig = rig("w7-t7");
+    let anchor = rig.anchor(1, &["anchor-row"]).await;
+    let candidate = rig.inactive(0).await;
+    let tshm = PathBuf::from(format!("{}-tshm", candidate.db_path.display()));
+    assert!(tshm.exists(), "the writable creation leaves a -tshm");
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&tshm)
+        .expect("open the -tshm for the shared lock");
+    // SAFETY: `libc::flock` is plain old data; all-zero is a valid pattern and
+    // every meaningful field is overwritten below (the open_guard precedent).
+    let mut lock: libc::flock = unsafe { std::mem::zeroed() };
+    lock.l_type = libc::F_RDLCK as _;
+    lock.l_whence = libc::SEEK_SET as _;
+    lock.l_start = 0;
+    lock.l_len = 1;
+    lock.l_pid = 0;
+    // SAFETY: `file` owns the fd for the whole test; `lock` is a fully
+    // initialised `libc::flock` and `F_OFD_SETLK` does not block.
+    let result = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_OFD_SETLK, &mut lock) };
+    assert_eq!(
+        result,
+        0,
+        "the shared OFD lock must be taken (errno {:?})",
+        std::io::Error::last_os_error()
+    );
+
+    let report = rig
+        .manager
+        .reap_retired_shards(false)
+        .await
+        .expect("a live holder is a skip, not an Err");
+
+    assert!(report.candidates.is_empty());
+    assert!(report.reaped.is_empty());
+    assert!(
+        report.skipped.iter().any(|skip| skip.shard_id == anchor.id),
+        "the active anchor is listed in skipped: {:?}",
+        report.skipped
+    );
+    assert!(
+        report
+            .skipped
+            .iter()
+            .any(|skip| skip.shard_id == candidate.id
+                && skip.reason == mem_store::reaping::ReapSkipReason::LiveTshmHolder),
+        "the candidate is skipped as live-held: {:?}",
+        report.skipped
+    );
+    assert!(
+        rig.manager
+            .get_shard_by_id(candidate.id)
+            .await
+            .expect("row read")
+            .is_some(),
+        "the live-held row survives"
+    );
+    assert!(candidate.db_path.exists(), "the .db survives");
+    assert!(tshm.exists(), "the -tshm survives");
+}
+
+// ---------------------------------------------------------------------------
 // T2 — an active shard is never reaped (the ONLY `active`-reason pin)
 // ---------------------------------------------------------------------------
 
