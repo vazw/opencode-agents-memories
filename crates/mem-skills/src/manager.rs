@@ -211,6 +211,27 @@ impl SkillsManager {
         self.handle = tokio::sync::OnceCell::new();
     }
 
+    /// Upstream `tursoConnectionManager.closeConnection(skills.db)` as seen
+    /// through this manager. Drop our cached clone FIRST, then close the
+    /// shared entry: `close_connection` removes the manager's reference, and
+    /// with the cell already empty that is the last one, so the file is
+    /// released. (The cell is NOT the last reference by itself — the
+    /// manager's map holds a clone too.) `reset()` alone never reaches the
+    /// manager: it prunes the cell and leaves the shared handle live.
+    pub async fn close_db_connection(&mut self) -> Result<(), SkillsError> {
+        self.handle = tokio::sync::OnceCell::new();
+        self.connections.close_connection(&self.db_path).await?;
+        Ok(())
+    }
+
+    /// True while the shared connection manager holds a live handle for
+    /// `skills.db`. This is the port's observable for upstream's
+    /// `current === this.db` identity check: false after a close, true again
+    /// only when `ready()` re-opened through the manager.
+    pub fn has_open_db_connection(&self) -> Result<bool, SkillsError> {
+        Ok(self.connections.has_open_connection(&self.db_path)?)
+    }
+
     /// Upstream `CONFIG.storagePath = <new>; reset()`.
     pub fn rebind(&mut self, storage_path: PathBuf, store_config: StoreConfig) {
         self.storage_path = storage_path.clone();

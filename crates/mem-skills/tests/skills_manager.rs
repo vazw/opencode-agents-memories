@@ -16,6 +16,7 @@
 //! | `v2_bridge_skill_path_absolute` | "exposes absolute skill paths for OpenCode Skill.INFO" |
 //! | `rejects_duplicate_and_invalid_ids` | "rejects invalid and duplicate ids" |
 //! | `reopens_after_reset` | "reopens after closeTursoAndInvalidateCaches" |
+//! | `skills_manager_reopens_after_close_connection_without_reset` | "reopens after closeConnection on skills.db without lifecycle reset" |
 //! | `scratch_base_is_absolute_under_the_target_dir` | — (house fixture invariant, issue 59; no upstream counterpart) |
 
 use std::path::{Path, PathBuf};
@@ -552,6 +553,40 @@ async fn reopens_after_reset() {
     let listed = manager.list(None, true).await.expect("list");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, "keep-me");
+}
+
+// Upstream "reopens after closeConnection on skills.db without lifecycle
+// reset" (tests/skills-manager.test.ts:149): the raw close, NOT reset().
+#[tokio::test]
+async fn skills_manager_reopens_after_close_connection_without_reset() {
+    let _serial = test_lock();
+    let dir = scratch_dir("close-connection");
+    let mut manager = SkillsManager::new(dir.clone(), store_config(&dir));
+    manager
+        .create(input("stale-guard", "Stale", "body"))
+        .await
+        .expect("create");
+    assert_eq!(manager.list(None, true).await.expect("list").len(), 1);
+    assert!(
+        manager
+            .has_open_db_connection()
+            .expect("open before the close")
+    );
+
+    // The raw close: the cached handle AND the shared manager's entry.
+    manager.close_db_connection().await.expect("close");
+    assert!(
+        !manager.has_open_db_connection().expect("closed"),
+        "the close must reach the shared connection manager"
+    );
+
+    let listed = manager.list(None, true).await.expect("list reopens");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, "stale-guard");
+    assert!(
+        manager.has_open_db_connection().expect("reopened"),
+        "list() must reopen through the connection manager, not serve a stale handle"
+    );
 }
 
 #[tokio::test]
