@@ -286,6 +286,17 @@ Artefacts:
 | A13 | portability exports, media, CoW/SSD/external backups | copy | yes (an export bundle is a copy; media is the user's file; snapshots are the filesystem's) | excluded | no |
 | A14 | `{root}/**/*-tshm` | none | no (header counters + a page→frame index of two integers) | retained permanently: **the byte-0 shared lock is the legacy-liveness oracle**; presence, size and header are never signals (`delete_guard.rs:33-35`, `sqlite_files.rs:164-166`) | n/a |
 
+**Amendment — 2026-10-30, ADR-0023 narrows A14 for the reap case.** Owner ruling
+3 (issue 43 W7 rulings, item 3: the deletion unit is the shard, registry row
+first, then `.db`, `-wal`, `-tshm`) is the authority. A14's "retained
+permanently" continues to mean exactly what it meant for the erasure sweep and
+debris: they never delete a `-tshm`. A **retired-shard reap** may delete it only
+as the **last element of its own shard's file set**, after the `.db` is gone,
+under issue 46's engine-lock and database-probe proof, **never alone** and
+**never under a live holder** (`docs/adr/0023-retired-shard-reaping.md`, D-23-4
+and D-23-7). The sensor rule is unchanged: presence, size and header are never
+signals; only the byte-0 query is.
+
 ## Blocker closures
 
 | blocker | closed by | what changed |
@@ -332,7 +343,7 @@ Artefacts:
 - **R-19-6** — CoW snapshots, SSD wear-levelling and external backups are outside the promise by construction.
 - **R-19-7** — `.bak` reaping reaches only the exclusive root.
 - **R-19-8** — The host transcript (A6) survives a prompt delete by design.
-- **R-19-9** — `-tshm` is retained permanently; the byte-0 lock is the oracle, the file is not a signal.
+- **R-19-9** — `-tshm` is retained permanently; the byte-0 lock is the oracle, the file is not a signal. **Amended by ADR-0023 (D-23-4) for the reap case:** the erasure sweep and debris never delete it; a retired-shard reap deletes it only as the last element of its own shard's file set, after the `.db`, under issue 46's proof, never alone and never under a live holder.
 - **R-19-10** — The sweep's liveness is unmeasured (`w6/erase/sweep-liveness`); this ADR adopts the audit's second closure ("opportunistic and unbounded") rather than inventing a bound.
 
 ## Security and edge cases

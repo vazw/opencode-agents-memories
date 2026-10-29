@@ -81,6 +81,30 @@ the `-32002` code row, the exit-code-75 row, the status-file-format row.
   line with counts and a mandatory, non-empty `not_erased` array naming the
   surviving legacy `memories` shard.
 
+**Issue 43 W7 additions (retired-shard reaping, ADR-0023):**
+
+- **`--mode=reap-shards`** — removes the files of shards a scope has already
+  retired. Flags: `--apply` alone is the confirmation (the default is a dry
+  run) and `--storage-root` (the same root resolution as the other sync
+  modes). `--apply=<value>`, `--apply <token>` (non-flag), `--scope`,
+  `--project`, `--session`, `--agent` and `--confirm` are usage errors (exit
+  **64**), validated in `src/main.rs` before `Config::load_default` so a bad
+  invocation never creates the root. Exit codes: **0** success including
+  nothing to do, **1** a completed report with at least one file-operation
+  failure, **64** usage, **74** store/operation failure including a lost
+  engine lock (`reap.refused`), **75** busy (`reap.busy`, the operation lock
+  or the ready gate's legacy step is held); any other store error is
+  `reap.failed` + 74. A completed run prints exactly one JSON line
+  (`reap.completed`: `dry_run`, `candidates`, `reaped`, `skipped`,
+  `bytes_freed`) and one `reap.file_delete_failed` stderr line per failed
+  file.
+- **The CLI dry run is not side-effect-free.** The ready gate's legacy step
+  reconciles the registry before the report, so a dry run may adopt an orphan
+  shard file as a row (it never removes files). The store-level dry run
+  mutates nothing. The reaper closes the ready gate's cached read-write
+  connections before its predicate: a cached writable handle answers the
+  `-tshm` liveness query `Held` for this same process.
+
 ## W8a additions
 
 - `vault_source_ref` (single construction site for vault `source_ref` strings).
