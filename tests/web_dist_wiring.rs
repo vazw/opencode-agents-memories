@@ -40,7 +40,7 @@ const STARTUP_BOUND: Duration = Duration::from_secs(30);
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// A unique, gitignored scratch directory under the repo's `tmp/scratch`
+/// A unique, gitignored scratch directory under the repo's `.tmp/scratch`
 /// (never `/tmp`: this host's tmpfs truncates under pressure). Absolute, so
 /// `resolve` never has to interpret the fixture path relative to a test's
 /// pretend cwd.
@@ -53,7 +53,7 @@ fn scratch_dir(prefix: &str) -> PathBuf {
     let serial = COUNTER.fetch_add(1, Ordering::Relaxed);
     let root = std::env::current_dir().expect("repo root");
     let dir = root
-        .join("tmp")
+        .join(".tmp")
         .join("scratch")
         .join("web-dist-wiring")
         .join(format!("{prefix}-{}-{nanos}-{serial}", std::process::id()));
@@ -275,7 +275,7 @@ fn test_resolve_explicit_ready_when_index_html_present() {
     write_shell(&dist, "MARKER-EXPLICIT-READY");
     let resolved = web_dist::resolve(
         Some(&dist),
-        Path::new("tmp/scratch/unused-exe"),
+        Path::new(".tmp/scratch/unused-exe"),
         Path::new("/"),
     );
     assert_eq!(
@@ -291,7 +291,7 @@ fn test_resolve_explicit_missing_when_index_html_absent() {
     let dist = scratch_dir("explicit-empty");
     let resolved = web_dist::resolve(
         Some(&dist),
-        Path::new("tmp/scratch/unused-exe"),
+        Path::new(".tmp/scratch/unused-exe"),
         Path::new("/"),
     );
     assert_eq!(
@@ -314,7 +314,7 @@ fn test_resolve_index_html_directory_is_not_ready() {
     std::fs::create_dir_all(dist.join("index.html")).expect("create index.html as a directory");
     let resolved = web_dist::resolve(
         Some(&dist),
-        Path::new("tmp/scratch/unused-exe"),
+        Path::new(".tmp/scratch/unused-exe"),
         Path::new("/"),
     );
     assert_eq!(
@@ -423,7 +423,7 @@ fn test_error_message_names_explicit_path() {
     let dist = scratch_dir("message-explicit");
     let resolved = web_dist::resolve(
         Some(&dist),
-        Path::new("tmp/scratch/unused-exe"),
+        Path::new(".tmp/scratch/unused-exe"),
         Path::new("/"),
     );
     let message = resolved.error_message();
@@ -443,7 +443,7 @@ fn test_missing_payload_ready_is_null() {
     write_shell(&dist, "MARKER-PAYLOAD-READY");
     let resolved = web_dist::resolve(
         Some(&dist),
-        Path::new("tmp/scratch/unused-exe"),
+        Path::new(".tmp/scratch/unused-exe"),
         Path::new("/"),
     );
     assert_eq!(
@@ -458,7 +458,7 @@ fn test_missing_payload_missing_carries_candidates_and_reason() {
     let dist = scratch_dir("payload-missing");
     let resolved = web_dist::resolve(
         Some(&dist),
-        Path::new("tmp/scratch/unused-exe"),
+        Path::new(".tmp/scratch/unused-exe"),
         Path::new("/"),
     );
     let payload = resolved.missing_payload();

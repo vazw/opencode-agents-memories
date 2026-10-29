@@ -87,7 +87,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(20);
 // Helpers (mirroring tests/web_dist_wiring.rs)
 // ---------------------------------------------------------------------------
 
-/// A unique, gitignored scratch directory under the repo's `tmp/scratch`
+/// A unique, gitignored scratch directory under the repo's `.tmp/scratch`
 /// (never `/tmp`: this host's tmpfs truncates files to zero under pressure).
 fn scratch_dir(prefix: &str) -> PathBuf {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -98,7 +98,7 @@ fn scratch_dir(prefix: &str) -> PathBuf {
     let serial = COUNTER.fetch_add(1, Ordering::Relaxed);
     let root = std::env::current_dir().expect("repo root");
     let dir = root
-        .join("tmp")
+        .join(".tmp")
         .join("scratch")
         .join("production-api-wiring")
         .join(format!("{prefix}-{}-{nanos}-{serial}", std::process::id()));

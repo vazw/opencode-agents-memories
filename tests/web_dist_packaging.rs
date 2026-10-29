@@ -23,9 +23,10 @@
 //! mandates `TMPDIR=<repo>/.tmp/scratch` on every cargo command — so
 //! `temp_dir()` resolves into the *same* tree. Hardcoding
 //! `CARGO_MANIFEST_DIR/.tmp/…` therefore deviates from that rule in letter only.
-//! It is chosen over `<repo>/tmp/scratch` (where `tests/web_dist_wiring.rs:47-59`
-//! writes `tmp/scratch/web-dist-wiring`) so this shard adds no second scratch
-//! root of its own. The root is gitignored (`.gitignore:6`, `/.tmp/`) and left
+//! It matches the sibling wiring tests (`tests/web_dist_wiring.rs`,
+//! `tests/production_api_wiring.rs`, `tests/skills_live_wiring.rs`), which also
+//! write under `<repo>/.tmp/scratch`, so the root package's fixtures share one
+//! scratch root. The root is gitignored (`.gitignore:6`, `/.tmp/`) and left
 //! in place — the wave deletes nothing. Nothing large is ever written here: the
 //! engine binary is `hard_link`ed first, and the ~75 MB `copy` happens only if
 //! the link fails.

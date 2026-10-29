@@ -38,7 +38,7 @@ const SKILL_ID: &str = "live-wiring-skill";
 // Harness
 // ---------------------------------------------------------------------------
 
-/// A unique, gitignored scratch directory under the repo's `tmp/scratch`
+/// A unique, gitignored scratch directory under the repo's `.tmp/scratch`
 /// (never `/tmp`: this host's tmpfs truncates under pressure).
 fn scratch_dir(prefix: &str) -> PathBuf {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -49,7 +49,7 @@ fn scratch_dir(prefix: &str) -> PathBuf {
     let serial = COUNTER.fetch_add(1, Ordering::Relaxed);
     let root = std::env::current_dir().expect("repo root");
     let dir = root
-        .join("tmp")
+        .join(".tmp")
         .join("scratch")
         .join("skills-live-wiring")
         .join(format!("{prefix}-{}-{nanos}-{serial}", std::process::id()));
