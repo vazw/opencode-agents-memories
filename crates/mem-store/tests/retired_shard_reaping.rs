@@ -582,6 +582,116 @@ async fn test_live_tshm_holder_is_skipped() {
 }
 
 // ---------------------------------------------------------------------------
+// T8 — a dry run deletes nothing and reports the same candidates
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_dry_run_deletes_nothing_and_reports_the_same_candidates() {
+    let rig = rig("w7-t8");
+    let anchor = rig.anchor(1, &["anchor-row"]).await;
+    let candidate = rig.inactive(0).await;
+
+    let dry = rig
+        .manager
+        .reap_retired_shards(true)
+        .await
+        .expect("dry run");
+
+    assert_eq!(dry.candidates, vec![candidate.id]);
+    assert!(dry.reaped.is_empty(), "a dry run reaps nothing");
+    assert!(
+        dry.skipped.iter().any(|skip| skip.shard_id == anchor.id),
+        "the active anchor is listed in skipped: {:?}",
+        dry.skipped
+    );
+    assert_eq!(dry.bytes_freed, 0);
+    assert!(
+        rig.manager
+            .get_shard_by_id(candidate.id)
+            .await
+            .expect("row read")
+            .is_some(),
+        "the dry run leaves the candidate row intact"
+    );
+    assert!(
+        candidate.db_path.exists(),
+        "the dry run leaves the candidate .db intact"
+    );
+
+    let apply = rig
+        .manager
+        .reap_retired_shards(false)
+        .await
+        .expect("apply after the dry run");
+
+    assert_eq!(
+        apply.reaped, dry.candidates,
+        "the apply reaps exactly the dry run's candidates"
+    );
+    assert!(
+        rig.manager
+            .get_shard_by_id(candidate.id)
+            .await
+            .expect("row read")
+            .is_none(),
+        "the apply removes the candidate row"
+    );
+    assert!(!candidate.db_path.exists(), "the apply removes the .db");
+}
+
+// ---------------------------------------------------------------------------
+// T9 — a second run is a no-op, and a file with no row is ignored
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_second_run_is_a_no_op_and_ignores_a_file_with_no_row() {
+    let rig = rig("w7-t9");
+    let anchor = rig.anchor(1, &["anchor-row"]).await;
+    let candidate = rig.inactive(0).await;
+    let orphan_path = rig.path(2);
+    rig.init_file(&orphan_path).await;
+    assert!(orphan_path.exists(), "the orphan file exists");
+    assert!(
+        rig.manager
+            .get_shard_by_path(&orphan_path)
+            .await
+            .expect("registry lookup")
+            .is_none(),
+        "the orphan has no registry row"
+    );
+
+    let first = rig
+        .manager
+        .reap_retired_shards(false)
+        .await
+        .expect("first apply");
+    assert_eq!(first.candidates, vec![candidate.id]);
+    assert_eq!(first.reaped, vec![candidate.id]);
+    assert!(
+        orphan_path.exists(),
+        "the orphan file survives the first run"
+    );
+
+    let second = rig
+        .manager
+        .reap_retired_shards(false)
+        .await
+        .expect("second apply");
+    assert!(second.candidates.is_empty());
+    assert!(second.reaped.is_empty());
+    assert!(
+        second.skipped.iter().any(|skip| skip.shard_id == anchor.id),
+        "the active anchor is still listed in skipped: {:?}",
+        second.skipped
+    );
+    assert_eq!(second.bytes_freed, 0);
+    assert!(
+        orphan_path.exists(),
+        "the orphan file survives the second run"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // T2 — an active shard is never reaped (the ONLY `active`-reason pin)
 // ---------------------------------------------------------------------------
 

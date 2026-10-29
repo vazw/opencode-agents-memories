@@ -175,7 +175,7 @@ impl ShardManager {
     /// delete: the returned report names the candidates and mutates nothing.
     /// `dry_run == false` deletes each candidate's registry row first, then
     /// its `.db` and sidecars under the engine-lock proof.
-    pub async fn reap_retired_shards(&self, _dry_run: bool) -> Result<ReapReport, StoreError> {
+    pub async fn reap_retired_shards(&self, dry_run: bool) -> Result<ReapReport, StoreError> {
         let Some(proof) = self.exclusive_root() else {
             return Err(StoreError::NoExclusiveRoot {
                 db_path: self.config().storage_path.join(METADATA_DB_NAME),
@@ -267,6 +267,12 @@ impl ShardManager {
             }
             report.candidates.push(shard.id);
             candidate_shards.push(shard.clone());
+        }
+
+        // The dry run stops after both locks and the full predicate, before
+        // any row delete: nothing is mutated end-to-end at the store level.
+        if dry_run {
+            return Ok(report);
         }
 
         for shard in candidate_shards {
