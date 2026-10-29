@@ -59,7 +59,7 @@ pub struct MigrationOptions {
 }
 
 /// Highest `metadata.db` schema version this build knows.
-pub const METADATA_MAX_KNOWN: i64 = 1;
+pub const METADATA_MAX_KNOWN: i64 = 2;
 /// Highest `user_prompts` schema version this build knows (prompts v2 is
 /// W5's half of ADR-0021).
 pub const USER_PROMPTS_MAX_KNOWN: i64 = 1;
@@ -319,15 +319,34 @@ pub fn memory_shard_migrations(dimensions: u32) -> Vec<SchemaMigration> {
 }
 
 /// Upstream `METADATA_DB_MIGRATIONS`.
+///
+/// v2 (W4, ADR-0022) makes "exactly one active shard per `(scope, scope_hash)`"
+/// a database constraint. The order inside the batch is load-bearing: the
+/// repair retires redundant active rows **first**, then the partial unique
+/// index is created. Reversed, every root that already holds two actives
+/// refuses the index and cannot open.
 pub fn metadata_db_migrations() -> Vec<SchemaMigration> {
-    vec![SchemaMigration {
-        version: 1,
-        description: "Baseline shards registry",
-        statements: [crate::sql::SHARDS_DDL, crate::sql::SHARDS_ACTIVE_INDEX]
+    vec![
+        SchemaMigration {
+            version: 1,
+            description: "Baseline shards registry",
+            statements: [crate::sql::SHARDS_DDL, crate::sql::SHARDS_ACTIVE_INDEX]
+                .iter()
+                .map(|sql| Statement::new(*sql, Vec::new()))
+                .collect(),
+        },
+        SchemaMigration {
+            version: 2,
+            description: "One active shard per (scope, scope_hash): repair extra actives, then enforce",
+            statements: [
+                crate::shard_registry_sql::SHARDS_REPAIR_EXTRA_ACTIVE,
+                crate::shard_registry_sql::SHARDS_ONE_ACTIVE_INDEX,
+            ]
             .iter()
             .map(|sql| Statement::new(*sql, Vec::new()))
             .collect(),
-    }]
+        },
+    ]
 }
 
 /// Upstream `USER_PROMPTS_MIGRATIONS` (data-only until W3.1).

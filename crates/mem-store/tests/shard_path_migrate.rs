@@ -496,7 +496,11 @@ async fn test_refuses_still_linked_source_unless_explicitly_allowed() {
 #[tokio::test]
 async fn test_restores_exact_source_files_and_registry_metadata_after_partial_swap_failure() {
     let rig = rig("pm-fault").await;
-    seed_shard(&rig, OLD_HASH, 0, 1, None).await;
+    let first = seed_shard(&rig, OLD_HASH, 0, 1, None).await;
+    rig.shards
+        .mark_shard_read_only(first.id)
+        .await
+        .expect("retire shard 0 before creating shard 1");
     seed_shard(&rig, OLD_HASH, 1, 1, None).await;
 
     let faulting = FaultingRegistry {

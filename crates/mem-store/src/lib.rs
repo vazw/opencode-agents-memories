@@ -32,6 +32,7 @@ pub mod shard_facts;
 pub mod shard_inventory;
 pub mod shard_manager;
 pub mod shard_path_migration;
+pub mod shard_registry_sql;
 pub mod sql;
 pub mod sqlite_files;
 pub mod vector;

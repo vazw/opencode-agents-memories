@@ -438,25 +438,25 @@ impl ShardManager {
     }
 
     async fn init_metadata_db(&self, db: &DbHandle) -> Result<(), StoreError> {
-        // Metadata is a no-settle site (Ruling 2a): it has exactly one v1
-        // migration, `backup_before_destructive` returns `None` at
-        // `from_version <= 0`, and a v1 database returns early on empty
-        // pending — so `MigrationRestorePending` cannot arise here. The proof
-        // is still passed (and alive across the await) so a future v2 can
-        // refuse before a backup.
-        let root = self.connections.exclusive_root();
+        // Metadata is a no-backup site (Ruling 2a, W4/ADR-0022 D-22-7): v2
+        // deletes no row — the repair only clears a redundant `is_active`
+        // flag — and the repair + unique index commit as ONE atomic batch.
+        // Nothing recoverable is lost, so no backup is owed, and `db_path:
+        // None` keeps this hot open path free of both settle sites: callers
+        // without the engine lock (the ready gate's early phases,
+        // `real_components`) would otherwise get `NoExclusiveRoot` before
+        // the batch, and callers with it would become
+        // `MigrationRestorePending` sites with no settle path.
         crate::schema_migrations::apply_schema_migrations(
             db.as_ref(),
             &crate::schema_migrations::metadata_db_migrations(),
             &crate::schema_migrations::MigrationOptions {
-                db_path: Some(
-                    self.storage_path
-                        .join(crate::operation_lock::METADATA_DB_NAME),
-                ),
+                db_path: None,
                 label: "metadata.db",
                 max_known: crate::schema_migrations::METADATA_MAX_KNOWN,
             },
-            root.as_ref(),
+            // No backup is taken without a `db_path`, so no proof is needed.
+            None,
         )
         .await
         .map(|_| ())

@@ -127,6 +127,10 @@ async fn two_shard_duplicate(label: &str) -> Duplicate {
         .create_shard(Scope::Project, HASH, 0)
         .await
         .expect("create shard 0");
+    manager
+        .mark_shard_read_only(shard_zero.id)
+        .await
+        .expect("retire shard 0 before creating shard 1");
     let shard_one = manager
         .create_shard(Scope::Project, HASH, 1)
         .await
@@ -336,6 +340,10 @@ async fn test_delete_memory_in_scope_fails_closed_when_a_registered_shard_file_i
         .create_shard(Scope::Project, HASH, 0)
         .await
         .expect("create shard 0");
+    manager
+        .mark_shard_read_only(shard_zero.id)
+        .await
+        .expect("retire shard 0 before creating shard 1");
     let shard_one = manager
         .create_shard(Scope::Project, HASH, 1)
         .await
