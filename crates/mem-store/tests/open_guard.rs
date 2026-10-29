@@ -258,15 +258,42 @@ impl Drop for LegacyHolder {
     }
 }
 
-/// The fixture child itself: a legacy (no `experimental_multiprocess_wal`) turso
-/// handle held open until the parent says `release` on stdin.
+/// The re-exec'd fixture child dispatcher. One test binary serves every fixture
+/// mode; the parent selects the mode with `MEM_FIXTURE_CHILD`.
 #[cfg(unix)]
 #[test]
 #[ignore = "re-exec'd fixture child"]
 fn fixture_child_entry() {
-    if std::env::var("MEM_FIXTURE_CHILD").as_deref() != Ok("legacy-holder") {
-        return;
+    match std::env::var("MEM_FIXTURE_CHILD")
+        .unwrap_or_default()
+        .as_str()
+    {
+        "legacy-holder" => legacy_holder_child(),
+        "guarded-open" => guarded_open_child(),
+        _ => {}
     }
+}
+
+/// The shipping option set over an explicit root, built locally so no other
+/// mem-store test binary is affected (all nine fields are `pub`).
+fn pair_config(root: std::path::PathBuf) -> StoreConfig {
+    StoreConfig {
+        storage_path: root,
+        embedding_dimensions: 2,
+        embedding_model: "test-model".to_string(),
+        max_vectors_per_shard: 1000,
+        container_tag_prefix: "opencode".to_string(),
+        database_encryption_enabled: false,
+        database_encryption_cipher: "aes256gcm".to_string(),
+        database_encryption_key: None,
+        allow_unguarded_open: false,
+    }
+}
+
+/// The legacy-holder body: a single-process (no `experimental_multiprocess_wal`)
+/// turso handle held open until the parent says `release` on stdin.
+#[cfg(unix)]
+fn legacy_holder_child() {
     use std::io::{BufRead, Write};
 
     let path = std::env::var("MEM_FIXTURE_DB").expect("MEM_FIXTURE_DB");
@@ -298,6 +325,68 @@ fn fixture_child_entry() {
     drop(runtime);
     println!("RELEASED");
     let _ = std::io::stdout().flush();
+}
+
+/// The concurrent-pair body: one guarded open through the shipping factory seam,
+/// then one real `SELECT 1`. It must never panic on the guard's answer — the
+/// parent parses the JSON report and makes the judgement, so a refusal is
+/// reported as data instead of a child crash.
+#[cfg(unix)]
+fn guarded_open_child() {
+    use mem_store::config::StoreConfig;
+    use mem_store::db::{ConnectOptions, turso_connect_factory};
+    use mem_store::platform::Platform;
+
+    let db = std::path::PathBuf::from(std::env::var("MEM_FIXTURE_DB").expect("MEM_FIXTURE_DB"));
+    let out = std::path::PathBuf::from(std::env::var("MEM_FIXTURE_OUT").expect("MEM_FIXTURE_OUT"));
+    let root = db.parent().expect("the database's parent").to_path_buf();
+    let config: StoreConfig = pair_config(root);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("child runtime");
+    let report = runtime.block_on(async move {
+        match turso_connect_factory()
+            .connect(db, ConnectOptions::for_config(&config, Platform::current()))
+            .await
+        {
+            Ok(handle) => match handle.query("SELECT 1", Vec::new()).await {
+                Ok(_) => serde_json::json!({"outcome": "ok", "served": true}),
+                Err(error) => guarded_open_error_report(&error),
+            },
+            Err(error) => guarded_open_error_report(&error),
+        }
+    });
+    std::fs::write(out.with_extension("json"), report.to_string()).expect("write the child report");
+}
+
+/// The error half of a guarded-open child report. `direction` is resolved by
+/// matching the `StoreError` **variant**, never by matching the Display text —
+/// `direction_label` is tracing-only and the Display never renders the token.
+#[cfg(unix)]
+fn guarded_open_error_report(error: &StoreError) -> serde_json::Value {
+    let direction = match error {
+        StoreError::OpenBlocked {
+            direction: OpenDirection::LegacyAuthority,
+            ..
+        } => "legacy-authority",
+        StoreError::OpenBlocked {
+            direction: OpenDirection::Unknown { .. },
+            ..
+        } => "unknown",
+        StoreError::OpenBlocked {
+            direction: OpenDirection::ModeMarkerConflict { .. },
+            ..
+        } => "mode-marker-conflict",
+        StoreError::UnsupportedOpenMode { .. } => "unsupported-open-mode",
+        _ => "other",
+    };
+    serde_json::json!({
+        "outcome": "error",
+        "open_guard_refusal": error.is_open_guard_refusal(),
+        "direction": direction,
+        "text": error.to_string(),
+    })
 }
 
 #[cfg(unix)]
@@ -380,6 +469,135 @@ fn test_probe_posix_variant_reports_free_for_an_unheld_database_file() {
     let outcome = probe_database_file_with(&path, LockKind::Posix);
     assert_eq!(outcome, ProbeOutcome::Free);
     let _ = common::cleanup_temp_dir(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// Issue 60 — two concurrent guarded opens must never refuse each other
+// ---------------------------------------------------------------------------
+
+const PAIR_ROUNDS: usize = 12;
+const PAIR_CHILD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Bounded wait over an owned child: `Some(status)` when it exits in time;
+/// `None` after killing and reaping it on the deadline. It never panics on the
+/// deadline itself, so both pair children are always reaped before the caller
+/// judges either — a survivor would hold this process's `.tmp/build.lock`
+/// descriptor and stall every later serialised cargo call.
+#[cfg(unix)]
+fn reap_child_within(mut child: std::process::Child) -> Option<std::process::ExitStatus> {
+    let deadline = std::time::Instant::now() + PAIR_CHILD_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+}
+
+/// Issue 60: two conforming processes opening one database concurrently must
+/// both succeed — that is the configuration multiprocess WAL exists to serve.
+///
+/// **Why this seam, not a unit seam.** A single-process fixture that *holds* the
+/// byte reads `Held` under both the old take-probe and the new query probe, so
+/// such a fixture cannot separate them and would be vacuous. The defect exists
+/// only as a race between two probes in two processes, so this fixture seeds one
+/// database, spawns two children back-to-back with no wait between them, and
+/// judges their **parsed** reports.
+///
+/// **The numbers.** The surviving pair harness (mem-profile fixture children, a
+/// `lock:probe` acquire racing on the coordination database) attests a guard
+/// refusal in 8 of 12 pairs
+/// (`.tmp/scratch/issue60/pairs/p1,p3,p4,p6,p7,p8,p9,p12`), so one 12-round run
+/// is all-green on the take-probe with probability `(1/3)^12 ≈ 1.9e-6`. The
+/// operative protection is the blueprint's ≤3-run RED gate.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_two_concurrent_guarded_opens_never_refuse_each_other() {
+    let root = common::temp_dir("guarded-pair");
+    let config = pair_config(root.clone());
+    for round in 0..PAIR_ROUNDS {
+        let path = root.join(format!("pair-{round}.db"));
+        // The measured pair harness had the database already present: seed it
+        // through the same guarded seam, then drop the handle.
+        let seeded = turso_connect_factory()
+            .connect(
+                path.clone(),
+                ConnectOptions::for_config(&config, Platform::current()),
+            )
+            .await
+            .expect("seed the pair database through the guarded seam");
+        drop(seeded);
+
+        let mut children = Vec::new();
+        for label in ["a", "b"] {
+            let out = root.join(format!("pair-{round}-{label}.out"));
+            let child = std::process::Command::new(
+                std::env::current_exe().expect("the running test binary's path"),
+            )
+            .arg("--exact")
+            .arg("fixture_child_entry")
+            .arg("--ignored")
+            .arg("--test-threads=1")
+            .env("MEM_FIXTURE_CHILD", "guarded-open")
+            .env("MEM_FIXTURE_DB", &path)
+            .env("MEM_FIXTURE_OUT", &out)
+            // An inherited override skips the probe (pre *and* post), which would
+            // make this test green on the mutant for the wrong reason.
+            .env_remove(mem_store::open_guard::ALLOW_UNGUARDED_OPEN_ENV)
+            .stdout(std::fs::File::create(out.with_extension("stdout")).expect("child stdout file"))
+            .stderr(std::fs::File::create(out.with_extension("stderr")).expect("child stderr file"))
+            .spawn()
+            .expect("spawn the guarded-open child");
+            children.push((label, out, child));
+        }
+        // Reap both before judging either: a panic must never leave the second
+        // child running with this process's build-lock descriptor inherited.
+        let mut finished = Vec::new();
+        for (label, out, child) in children {
+            finished.push((label, out, reap_child_within(child)));
+        }
+        for (label, out, status) in finished {
+            let status = status.unwrap_or_else(|| {
+                panic!(
+                    "round {round}, side {label}: the guarded-open child did not finish within \
+                     {PAIR_CHILD_TIMEOUT:?} and was killed; stderr={}",
+                    std::fs::read_to_string(out.with_extension("stderr")).unwrap_or_default()
+                )
+            });
+            assert!(
+                status.success(),
+                "round {round}, side {label}: the guarded-open child exited {status}; stderr={}",
+                std::fs::read_to_string(out.with_extension("stderr")).unwrap_or_default()
+            );
+            let report_path = out.with_extension("json");
+            let raw_report = std::fs::read_to_string(&report_path).unwrap_or_default();
+            let report: serde_json::Value =
+                serde_json::from_str(&raw_report).unwrap_or_else(|error| {
+                    panic!(
+                        "round {round}, side {label}: the child report must be JSON ({error}): \
+                         {raw_report:?}"
+                    )
+                });
+            assert_eq!(
+                report["outcome"],
+                serde_json::json!("ok"),
+                "round {round}, side {label}: guarded open was refused (direction={direction}, \
+                 open_guard_refusal={refusal}); raw report={raw_report}; stderr={stderr}",
+                direction = report["direction"].as_str().unwrap_or("<absent>"),
+                refusal = report["open_guard_refusal"].as_bool().unwrap_or(false),
+                raw_report = std::fs::read_to_string(&report_path).unwrap_or_default(),
+                stderr = std::fs::read_to_string(out.with_extension("stderr")).unwrap_or_default(),
+            );
+        }
+    }
+    let _ = common::cleanup_temp_dir(&root);
 }
 
 // ---------------------------------------------------------------------------
