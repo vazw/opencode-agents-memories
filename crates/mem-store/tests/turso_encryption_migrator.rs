@@ -16,6 +16,7 @@ use mem_store::encryption_migrator::{
     run_database_encryption_migration,
 };
 use mem_store::operation_lock::OPERATION_LOCK_FILE;
+use mem_store::scope::Scope;
 
 /// Upstream `buildConnectOptions(encryption)`.
 fn encrypted_options(config: &StoreConfig, hexkey: &str) -> ConnectOptions {
@@ -446,6 +447,86 @@ async fn test_is_a_no_op_when_encryption_is_disabled() {
         "the plaintext row is untouched"
     );
     drop(plain);
+
+    common::cleanup_temp_dir(&storage).ok();
+}
+
+// 8/8 - the shard manager is usable after metadata.db is encrypted (upstream
+// "keeps shard manager usable after encrypting metadata.db", line 210).
+#[tokio::test]
+async fn test_shard_manager_lists_shards_after_metadata_db_encryption() {
+    const HASH: &str = "a1b2c3d4e5f67890";
+    let key_hex = common::hex_key_64();
+    let mut config = common::store_config("enc-mig-shardmgr");
+    let storage = config.storage_path.clone();
+
+    // Previous run: encryption off, plaintext metadata.db + one shard row.
+    {
+        let (_, connections, shards) = common::real_components(config.clone()).await;
+        shards
+            .create_shard(Scope::Project, HASH, 0)
+            .await
+            .expect("seed a plaintext shard");
+        assert_eq!(
+            shards
+                .get_all_shards(Scope::Project, Some(HASH))
+                .await
+                .expect("plaintext read")
+                .len(),
+            1,
+            "the seed is visible before the migration"
+        );
+        drop(shards);
+        drop(connections);
+    }
+
+    // Next run: encryption on over the same root.
+    config.database_encryption_enabled = true;
+    config.database_encryption_key = Some(key_hex.clone());
+    let (config, connections, shards) = common::real_components(config).await;
+    let _proof = common::exclusive_root(&storage);
+    let shards = Arc::new(shards);
+
+    run_database_encryption_migration(&storage, &connections, &shards, &config)
+        .await
+        .expect("migrates the plaintext root");
+
+    // The active metadata.db really is the encrypted file.
+    let metadata_path = storage.join(mem_store::operation_lock::METADATA_DB_NAME);
+    let factory = mem_store::db::turso_connect_factory();
+    // The existing `test_writes_marker_after_converting_plaintext_shards`
+    // pins connect-time failure for a converted file; if a platform defers the
+    // refusal to the first read, fall back to asserting the query errors and
+    // record in the ledger which arm fired.
+    assert!(
+        factory
+            .connect(metadata_path.clone(), plain_options(&config))
+            .await
+            .is_err(),
+        "metadata.db no longer opens plaintext"
+    );
+    let encrypted = factory
+        .connect(metadata_path, encrypted_options(&config, &key_hex))
+        .await
+        .expect("encrypted metadata open");
+    assert_eq!(
+        encrypted
+            .query("SELECT scope_hash FROM shards", Vec::new())
+            .await
+            .expect("encrypted select")
+            .len(),
+        1,
+        "the registry row survived the conversion"
+    );
+    drop(encrypted);
+
+    let listed = shards
+        .get_all_shards(Scope::Project, Some(HASH))
+        .await
+        .expect("the shard manager lists shards after metadata.db encryption");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].scope_hash, HASH);
+    assert_eq!(listed[0].shard_index, 0);
 
     common::cleanup_temp_dir(&storage).ok();
 }
