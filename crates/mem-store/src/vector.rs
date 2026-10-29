@@ -667,7 +667,11 @@ pub async fn get_memory_by_id(db: &dyn Db, memory_id: &str) -> Result<Option<Row
     .await
 }
 
-/// Upstream `deleteVector` (L335–337).
+/// Upstream `deleteVector` (L335–337). Legacy single-shard primitive: it
+/// deletes at most the one row in this `Db` and does NOT sync `shard_stats`,
+/// so it is not a production caller — the port deletes through
+/// [`ShardManager::delete_memory_in_scope`](crate::shard_manager::ShardManager::delete_memory_in_scope),
+/// which owns the scope-wide address space and the absolute count.
 pub async fn delete_memory_by_id(db: &dyn Db, memory_id: &str) -> Result<(), StoreError> {
     db.execute(
         crate::sql::DELETE_MEMORY_BY_ID,
@@ -684,7 +688,9 @@ pub async fn delete_memory_by_id(db: &dyn Db, memory_id: &str) -> Result<(), Sto
 /// `ids` empty is a read-only no-op: it returns the stored count (0 when no
 /// `shard_stats` row exists) and changes nothing.
 ///
-/// Unbounded in batch size by contract; issue 72 must chunk large id sets.
+/// Unbounded in batch size by contract: a caller that passes more than one id
+/// must chunk. The scope-wide single-id delete passes one id per shard; the
+/// batch consumer, issue 39, chunks its own id sets.
 pub async fn delete_memories(db: &dyn Db, ids: &[String]) -> Result<u64, StoreError> {
     if ids.is_empty() {
         return crate::shard_facts::read_stored_count(db).await;

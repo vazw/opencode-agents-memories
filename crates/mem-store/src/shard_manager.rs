@@ -587,6 +587,98 @@ impl ShardManager {
         Ok(None)
     }
 
+    /// Deletes every copy of `id` in the shards of `(scope, scope_hash)` —
+    /// active and retired — and returns the number of shards that held a copy
+    /// at lookup.
+    ///
+    /// CONTRACT
+    ///
+    /// `Ok(c)` implies exactly `c` shards of the tuple held `id` at their
+    /// lookup and held no copy immediately after their batch; every shard from
+    /// which a copy was deleted was migrated to v3 first
+    /// ([`ensure_shard_schema`](Self::ensure_shard_schema)) and has
+    /// `shard_stats` = `COUNT(*)` with the registry equal to that committed
+    /// value; shards with no copy are untouched.
+    ///
+    /// The address space is the anchor's `(scope, scope_hash)`: it never
+    /// crosses `scope_hash` (another project is another tenant) and never
+    /// crosses `Scope` (project -> user). `scope_hash` is validated before the
+    /// registry query, so `""` can never reach the wildcard branch.
+    ///
+    /// Best-effort under concurrent writers: no scope lock is taken, so a row
+    /// inserted after a shard's batch is a new write and may recreate a copy.
+    /// `Err(ScopeShardUnreadable)` names the first unreadable shard and stops;
+    /// the visited prefix has been deleted/counted. A migration, delete or
+    /// adoption failure keeps its own typed error (a newer-than-build shard is
+    /// a refusal, not an unreadable shard), and deletes are never
+    /// model-refused (ADR-0018 D-18-10).
+    ///
+    /// Loop invariant: before iteration *i*, every visited shard either held
+    /// no copy of `id` or held one and has since deleted it and adopted its
+    /// own committed count; the visited count equals `copies`.
+    /// Termination: `get_all_shards` is finite and each iteration consumes
+    /// exactly one entry.
+    pub async fn delete_memory_in_scope(
+        &self,
+        scope: Scope,
+        scope_hash: &str,
+        id: &str,
+    ) -> Result<usize, StoreError> {
+        assert_safe_scope_hash(scope_hash)?;
+        let ids = [id.to_string()];
+        let mut shards = self.get_all_shards(scope, Some(scope_hash)).await?;
+        // DESC by shard_index: deterministic, newest first (W1's precedence).
+        // The scan is only an ordering choice — every shard is visited, so
+        // the residue of a mid-scan failure is the older copies.
+        shards.sort_by_key(|shard| std::cmp::Reverse(shard.shard_index));
+
+        let mut copies = 0_usize;
+        for info in shards {
+            let unreadable = |message: String| StoreError::ScopeShardUnreadable {
+                scope: scope.as_str(),
+                scope_hash: scope_hash.to_string(),
+                shard_index: u64::from(info.shard_index),
+                db_path: info.db_path.clone(),
+                id: id.to_string(),
+                message: message.into(),
+            };
+
+            // Stat BEFORE opening: `open_shard` CREATES a missing database
+            // file, so opening first would resurrect a dead shard and turn the
+            // fail-closed path into a silent recreation.
+            if let Err(error) = std::fs::metadata(&info.db_path) {
+                return Err(unreadable(format!(
+                    "shard file is missing or unreadable ({error})"
+                )));
+            }
+
+            let db = self
+                .open_shard(&info.db_path)
+                .await
+                .map_err(|error| unreadable(error.message()))?;
+
+            let existing = crate::vector::get_memory_by_id(db.as_ref(), id)
+                .await
+                .map_err(|error| unreadable(error.message()))?;
+            if existing.is_none() {
+                continue;
+            }
+
+            // Migrate-on-touch (issue 39 line 80): `open_shard` does not
+            // migrate and the counted batch needs `shard_stats`. A v3 shard is
+            // a no-op; a v2-stamped shard gains the table here; a
+            // newer-than-build shard propagates its own typed refusal.
+            self.ensure_shard_schema(db.as_ref(), self.config.embedding_dimensions)
+                .await?;
+            // The batch owns the statement-measured `COUNT(*)`; the registry
+            // adopts the committed value (no delta, no guessed number).
+            crate::vector::delete_memories(db.as_ref(), &ids).await?;
+            self.adopt_stored_count(db.as_ref(), info.id).await?;
+            copies += 1;
+        }
+        Ok(copies)
+    }
+
     /// Upstream `createShard`: init the shard FILE first (orphan-row guard):
     /// get_connection + init_shard_db, then INSERT; unique violation yields
     /// a re-fetch of the existing row (idempotent dedup).

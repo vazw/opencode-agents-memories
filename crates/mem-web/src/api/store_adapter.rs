@@ -463,6 +463,21 @@ impl MemoryPort for ProductionMemory {
         shard: &ShardRef,
         id: &str,
     ) -> Result<Option<MemoryRow>, PortError> {
+        // Stat BEFORE opening: `open_shard` CREATES a missing database file,
+        // and `find_memory` (the delete anchor scan, PUT, pin/unpin, the bulk
+        // path and the prompt cascade) walks every shard of both scopes — one
+        // dangling registry file would otherwise be silently resurrected.
+        // The posture is global and deliberate: the request fails closed (the
+        // generic D-9 500) and the operator remedy is to repair or remove the
+        // dangling registry row (W7's reaping is the long-term owner).
+        if let Err(error) = std::fs::metadata(&shard.db_path) {
+            return Err(PortError::Store(format!(
+                "shard {}/{}#{} is missing or unreadable ({error}); the lookup was refused",
+                shard.scope.as_str(),
+                shard.scope_hash,
+                shard.shard_index
+            )));
+        }
         let db = self.open(shard).await?;
         let row = vector::get_memory_by_id(db.as_ref(), id)
             .await
@@ -543,24 +558,22 @@ impl MemoryPort for ProductionMemory {
 
     async fn delete_memory(&self, shard: &ShardRef, id: &str) -> Result<(), PortError> {
         // Deletes are never model-refused: erasure must not depend on a
-        // re-embed (D-W3-3). The count is still absolute.
-        let db = self.open(shard).await?;
-        let count = vector::delete_memories(db.as_ref(), &[id.to_string()])
+        // re-embed (D-W3-3, ADR-0018 D-18-10). The scope-wide seam deletes
+        // EVERY copy of the id in the anchor's `(scope, scope_hash)` — active
+        // and retired shards — one counted batch per touched shard, each
+        // adopting its own committed `COUNT(*)` (no delta, no guessed number).
+        let copies = self
+            .manager
+            .delete_memory_in_scope(shard.scope, &shard.scope_hash, id)
             .await
             .map_err(store_failure)?;
-        // The registry row is located by the shard path (the port's
-        // `ShardRef` may carry no registry id).
-        if let Some(info) = self
-            .manager
-            .get_shard_by_path(&shard.db_path)
-            .await
-            .map_err(store_failure)?
-        {
-            self.manager
-                .set_vector_count(info.id, count)
-                .await
-                .map_err(store_failure)?;
-        }
+        tracing::info!(
+            memory_id = %id,
+            scope = shard.scope.as_str(),
+            scope_hash = %shard.scope_hash,
+            copies,
+            "deleted every copy of a memory id"
+        );
         Ok(())
     }
 

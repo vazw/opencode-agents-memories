@@ -60,17 +60,42 @@ pub fn new_store(label: &str) -> RealStore {
         config.clone(),
         connections,
         Arc::new(SystemProcessProbe),
-        Some(mem_core::embedding::EmbeddingIdentity {
-            model: MODEL.to_string(),
-            dimensions: DIMENSIONS as u32,
-            pooling: mem_core::config::EmbeddingPooling::Mean,
-            dtype: None,
-            use_task_prefixes: false,
-            query_prefix: None,
-            document_prefix: None,
-        }),
+        Some(identity()),
     );
     RealStore { config, manager }
+}
+
+/// The fixture's embedding identity (the config's model and dimensions).
+fn identity() -> mem_core::embedding::EmbeddingIdentity {
+    mem_core::embedding::EmbeddingIdentity {
+        model: MODEL.to_string(),
+        dimensions: DIMENSIONS as u32,
+        pooling: mem_core::config::EmbeddingPooling::Mean,
+        dtype: None,
+        use_task_prefixes: false,
+        query_prefix: None,
+        document_prefix: None,
+    }
+}
+
+/// A NEW manager over `config`'s storage root — a fresh `ConnectionManager`
+/// and therefore no cached DB handle. A test that observes a FILE-level effect
+/// (a missing shard must stay missing) must use this: a cached handle would
+/// keep reading the unlinked file and mask the absence.
+pub fn fresh_manager(config: &StoreConfig) -> ShardManager {
+    let connections = Arc::new(ConnectionManager::new(
+        config.storage_path.clone(),
+        config.clone(),
+        Platform::current(),
+        Arc::new(TursoConnectFactory),
+    ));
+    ShardManager::new(
+        config.storage_path.clone(),
+        config.clone(),
+        connections,
+        Arc::new(SystemProcessProbe),
+        Some(identity()),
+    )
 }
 
 /// Creates one shard in the registry (and initializes its file).

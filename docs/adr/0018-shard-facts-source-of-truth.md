@@ -219,8 +219,10 @@ mutations are each RED (and the path-only mutant leaves it GREEN — the mechani
 - **R-5** — the only remaining gap is promotion's single-execute insert: its resync is the next statement,
   outside that execute's window (R-4); every delete path writes the absolute count in its own batch.
 - **R-6** — unchanged: retired shards may carry no `shard_stats` row until opened; the model authority
-  reads `shard_metadata`, never `shard_stats`, so search is unaffected. `delete_memories` is unbounded and
-  issue 72 must chunk.
+  reads `shard_metadata`, never `shard_stats`, so search is unaffected. `delete_memories` stays unbounded;
+  the singleton delete passes one id per shard; the batch consumer, issue 39, chunks its own id sets. A
+  shard touched by the scope-wide delete is migrated first (`ensure_shard_schema`, issue 39 line 80's
+  migrate-on-touch).
 - **R-7** — no `.bak` for shard migrations; v3 is additive and convergent, and a v2 binary ignores the
   extra table.
 - **R-12** — an upgraded install (`legacy-unknown`, or any foreign model) is refused, by design; the way

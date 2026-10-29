@@ -21,8 +21,8 @@ deletes by id and counts by registry, which makes this load-bearing for it.
 
 ## Acceptance
 
-- [ ] A test seeds the same id in two shards of one scope and deletes it once; both copies are gone and a
+- [x] A test seeds the same id in two shards of one scope and deletes it once; both copies are gone and a
       differently-id'd neighbour survives.
-- [ ] An unreadable shard is a typed error (`ScopeShardUnreadable`, W1), not a silent skip — the delete must
+- [x] An unreadable shard is a typed error (`ScopeShardUnreadable`, W1), not a silent skip — the delete must
       not fail open.
-- [ ] No new dependency; production panic-free.
+- [x] No new dependency; production panic-free.

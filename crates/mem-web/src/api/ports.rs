@@ -427,6 +427,10 @@ pub trait MemoryPort: Send + Sync {
         limit: usize,
     ) -> Result<Vec<MemoryRow>, PortError>;
 
+    /// One row lookup in one shard. Production adapters stat before open: a
+    /// missing shard file is a `Store` failure, never a silent recreation
+    /// (`open_shard` creates a missing database), so the anchor scan of
+    /// `delete_memory`, PUT, pin/unpin and the prompt cascade fails closed.
     async fn memory_by_id(
         &self,
         shard: &ShardRef,
@@ -447,6 +451,12 @@ pub trait MemoryPort: Send + Sync {
     /// Delete+insert in one transaction.
     async fn update_memory(&self, shard: &ShardRef, update: MemoryUpdate) -> Result<(), PortError>;
 
+    /// Deletes every copy of `id` in the shard's `(scope, scope_hash)` across
+    /// all registered shards (active and retired): one `delete_memories` batch
+    /// plus absolute count adoption per touched shard, with
+    /// `ensure_shard_schema` (migrate-on-touch) before the counted batch on a
+    /// pre-v3 shard. An unreadable shard is a `Store` failure; deletes are
+    /// never model-refused.
     async fn delete_memory(&self, shard: &ShardRef, id: &str) -> Result<(), PortError>;
 
     async fn pin_memory(&self, shard: &ShardRef, id: &str) -> Result<(), PortError>;
