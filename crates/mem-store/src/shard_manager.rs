@@ -225,6 +225,23 @@ impl ShardManager {
         Arc::clone(&self.probe)
     }
 
+    /// This process's exclusivity proof for the manager's storage root, when
+    /// it holds the root's engine lock.
+    ///
+    /// Delegates to the connection manager, which owns the exact root the
+    /// proof is matched against (never canonicalised, never by prefix).
+    /// `None` is a fact, not an error: the reaper converts it into
+    /// [`StoreError::NoExclusiveRoot`] before opening anything for deletion.
+    pub(crate) fn exclusive_root(&self) -> Option<crate::delete_guard::ExclusiveRoot> {
+        self.connections.exclusive_root()
+    }
+
+    /// The initialized metadata handle — the reaping module's alias of
+    /// [`Self::ensure_initialized`], which stays module-private.
+    pub(crate) async fn metadata_handle(&self) -> Result<DbHandle, StoreError> {
+        self.ensure_initialized().await
+    }
+
     /// Upstream `withScopeWriteLock`: per-`(scope, scope_hash)` async
     /// mutex — operations on the same scope serialize; distinct scopes run
     /// unblocked. The std guard is cloned out and DROPPED before `.await`
@@ -1113,7 +1130,7 @@ impl ShardManager {
         .await
     }
 
-    fn row_to_shard_info(&self, row: Row) -> ShardInfo {
+    pub(crate) fn row_to_shard_info(&self, row: Row) -> ShardInfo {
         let id = row.i64("id").unwrap_or(0);
         let scope_text = row.text("scope").unwrap_or_else(|| "user".to_string());
         let scope = match scope_text.as_str() {

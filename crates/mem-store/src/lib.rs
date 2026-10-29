@@ -27,6 +27,7 @@ pub mod platform;
 pub mod project_tags;
 pub mod prompts;
 pub mod ready;
+pub mod reaping;
 pub mod schema_migrations;
 pub mod shard_facts;
 pub mod shard_inventory;

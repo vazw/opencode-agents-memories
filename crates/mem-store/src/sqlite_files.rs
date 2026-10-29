@@ -211,6 +211,74 @@ pub fn remove_sqlite_database(claim: FileClaim<'_>) -> Result<(), StoreError> {
     unlink_sqlite_files(claim.path())
 }
 
+/// One file a reporting removal could not delete.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileRemovalFailure {
+    /// The file whose unlink failed.
+    pub path: std::path::PathBuf,
+    /// The OS error message.
+    pub message: String,
+}
+
+/// What a reporting removal removed and what it could not.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RemovalOutcome {
+    /// Every file that is gone after the attempt.
+    pub removed: Vec<std::path::PathBuf>,
+    /// Every file the attempt could not delete.
+    pub failed: Vec<FileRemovalFailure>,
+}
+
+/// Remove a database file and then its sidecars, **reporting** every failure
+/// instead of stopping at the first one.
+///
+/// The additive counterpart of [`remove_sqlite_database`] (issue 46.1): the
+/// same proof is required, and the probe runs once at the top, before the
+/// first unlink. The removal order is load-bearing:
+///
+/// 1. the `.db` is attempted **first**; if it fails, the function returns with
+///    that one failure and leaves every sidecar untouched — a `-wal` is
+///    committed data of the database that still exists (a clean close never
+///    checkpoints);
+/// 2. once the `.db` is gone, each sidecar (`-wal`, `-shm`, `-tshm`) is
+///    attempted independently; `NotFound` is success, exactly as
+///    [`unlink_sqlite_files`] treats it, and every other failure is collected.
+///
+/// [`remove_sqlite_database`] and its shipped callers keep their
+/// stop-at-first-failure body; no shipped caller's stop-set changes. The
+/// caller decides what a non-empty [`RemovalOutcome::failed`] means (W7
+/// records `file_delete_failed` and keeps the row out of `reaped`).
+pub fn remove_sqlite_database_reporting(
+    claim: FileClaim<'_>,
+) -> Result<RemovalOutcome, StoreError> {
+    claim.assert_exclusive()?;
+    let db_path = claim.path();
+    let mut outcome = RemovalOutcome::default();
+    match std::fs::remove_file(db_path) {
+        Ok(()) => outcome.removed.push(db_path.to_path_buf()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            outcome.failed.push(FileRemovalFailure {
+                path: db_path.to_path_buf(),
+                message: error.to_string(),
+            });
+            return Ok(outcome);
+        }
+    }
+    for suffix in SIDECAR_SUFFIXES {
+        let target = sidecar_path(db_path, suffix);
+        match std::fs::remove_file(&target) {
+            Ok(()) => outcome.removed.push(target),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => outcome.failed.push(FileRemovalFailure {
+                path: target,
+                message: error.to_string(),
+            }),
+        }
+    }
+    Ok(outcome)
+}
+
 /// The unlink body behind the claimed function: database plus the three
 /// sidecars, `NotFound` tolerated either way.
 fn unlink_sqlite_files(db_path: &Path) -> Result<(), StoreError> {
@@ -233,7 +301,7 @@ struct SidecarPaths {
     to: std::path::PathBuf,
 }
 
-fn sidecar_path(base: &Path, suffix: &str) -> std::path::PathBuf {
+pub(crate) fn sidecar_path(base: &Path, suffix: &str) -> std::path::PathBuf {
     let mut text = base.as_os_str().to_os_string();
     text.push(suffix);
     std::path::PathBuf::from(text)
