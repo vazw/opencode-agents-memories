@@ -8,9 +8,7 @@ and W8 are absent from the tree, and the ADR set is partial: **0017 (`0017-compa
 (`0026-context-assembly.md`) exist and 0018 (`0018-shard-facts-source-of-truth.md`) + 0021
 (`0021-schema-version-discipline.md`) landed with W2**. The audit that gates ADR-0019 and ADR-0025 is now preserved
 in-repo at `docs/evidence/opsec-w6-design-2026-10-25/` — §9 lists twelve blockers, 1 closed, 2–12 open.
-Next: the owner picks **W5 (prompts v2) or W7 (reaping)** — W7 now leans on W4's one-active invariant.
-The **ADR-0019 text** landed `Accepted` at `b36920e`, and **issue 72** consumed `delete_memories` at
-`6d2c1f4`. **ADR-0022 (one active shard) landed Proposed at `030a0bd`** — owner acceptance still open.
+Next: **W7 (reaping) is chosen** (owner, 2026-10-30) — its sixteen rulings are recorded below; ADR-0022 was accepted first at `ad9a9fa`. W5 follows. The **ADR-0019 text** landed `Accepted` at `b36920e`, and **issue 72** consumed `delete_memories` at `6d2c1f4`.
 **Blocks issue 39 (retention cleanup) and issue 41 (scheduler).**
 
 ## RE-VERIFICATION 2026-10-25 (architecture pass) — read this before the items below
@@ -723,3 +721,40 @@ the claim rule; D-16; the narrowing; the hot-cold rider; the W3 hand-off) and
 `current`, no error-message matching; W2 ships the mechanism, W5 ships prompts v2).
 
 **Both false ADR statements are corrected**: 0017 and 0026 exist; 0018 and 0021 land with W2 (this edit).
+
+---
+
+## W7 OWNER RULINGS 2026-10-30 (reaping — bind the wave)
+
+Grilling session, sixteen branches, each answered. ADR-0022 was accepted first (`ad9a9fa`), because
+W7's safety condition rests on the one-active invariant.
+
+1. **Next wave is W7** (retired-shard reaping); W5 follows.
+2. **Surface:** an explicit CLI subcommand; **dry-run by default**, `--apply` to act; the safety
+   conditions live in the store layer, not the CLI.
+3. **Deletion unit is the shard:** registry row first, then `.db`, `-wal`, `-tshm`. A `-tshm` never
+   dies without its `.db` — that is how the sensor ruling (line 106) and the debris finding (line 447)
+   stop contradicting each other.
+4. **"Own count zero" comes from the shard file**, in the same read-only open that proves it "opens
+   cleanly". A file that will not open or will not count fails the predicate.
+5. **"Not the highest index" applies only to a tuple with no active row.** A tuple with an active row
+   may reap its highest inactive shard; reactivation cannot fire.
+6. **Crash order:** row first, best-effort files, one log line per failure. Both windows are benign —
+   the intact file is re-adopted by the reconciler, or orphan sidecars remain. **ADR-0023 names the
+   orphan-sidecar residual.**
+7. **Concurrency:** the operation lock **plus** a per-candidate `-tshm` liveness query (the sensor,
+   queried not taken, using the now-non-intrusive probe). A **flag-off** engine is invisible;
+   documented, with the dry run as the backstop.
+8. **Candidate set is the registry only.** A file with no row is invisible to the reaper.
+9. **`.bak` files stay with ADR-0019's erasure sweep.** W7 is shard-only.
+10. **Full ready gate first** (legacy, reconcile, path-migration recovery, warmup), then reap under
+    the lock.
+11. **One root-wide entry point:** `reap_retired_shards(dry_run) -> ReapReport`
+    (`candidates`, `reaped`, `skipped: (id, reason)`, `bytes_freed`). No per-shard API, no plan/apply
+    pair (TOCTOU).
+12. **Ten-test battery, one mutant per rule**, including the live-`-tshm` skip and the crash window
+    (a read-only shard directory fails the file deletion after the row is gone).
+13. **One wave:** primitive + CLI + ADR-0023 + battery.
+14. **`--apply` alone is the confirmation**; the two-act design is the deliberate step.
+15. **Yield is cleanup after deletion, not space reclamation.** A retired shard that still holds live
+    rows is never reapable, and ADR-0023 says so plainly.
