@@ -1,6 +1,6 @@
 # 60 — `mem-profile` · `test_exactly_one_competitor_cas_reclaims_dead_owner` times out intermittently, in isolation
 
-Status: ready-for-agent — 2026-10-27 (diagnosis first; the test is pre-existing and its failure is intermittent at ~1/6 in isolation; brief under `## Agent Brief`)
+Status: done — 2026-10-29 (landed at `2bb01b4`; root cause was the issue-45 open guard taking instead of querying; 20/20 isolation runs, workspace 2077/0/22; review APPROVED — `.tmp/progress/bp-20261029-1721-issue60-open-guard-probe-r4.review-1.md`)
 `barrier hs.seen.b never appeared` after ~30 s, including when run alone.** It surfaced twice in one day
 (a workspace run and a reviewer's isolation run) and passes otherwise, so it is a flake — but an
 unexplained one, in a test that exists to prove a lock property.
@@ -70,6 +70,12 @@ Two consequences:
   `test_probe_reports_held_for_a_live_legacy_holder` and `test_hazard_requires_two_distinct_resolved_configs`
   green, and **20/20** consecutive isolation runs of `test_exactly_one_competitor_cas_reclaims_dead_owner`.
   Barrier timeouts now name the side, the child's exit status, its report and its stderr.
+- **2026-10-29 — landed** at `2bb01b4` (four commits, branch `issue-60/open-guard-probe`, base `05dbecd`).
+  Review APPROVED; the take-and-release inversion, M4a and M4c were re-executed independently on a scratch
+  copy, and the orphan helper's positive control ran against a real `lock:hold-forever` child. Suites:
+  `open_guard` **26+1**, lib **15**, `profile_learning_lock` **17+1**; workspace **2077 / 0 / 22**; fmt and
+  both clippy gates green; manifest untouched. The regression test's RED is pinned to the unmodified probe
+  (commit 1's parent) and the mutant reddens at round 4.
 
 ## Agent Brief
 
