@@ -88,6 +88,33 @@ pub trait ShardRegistry: Send + Sync {
 
 type InitCell = OnceCell<Result<(), StoreError>>;
 
+/// Which registry writer is classifying a failed write (W4/ADR-0022).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExistingRow {
+    /// `create_shard`: an existing row at the target key is the idempotent
+    /// dedup result.
+    Dedup,
+    /// `register_existing_shard`: the target key row is the upsert's own row.
+    Activate,
+    /// `rotate_shard`: a rotation never treats an existing row as success.
+    Occupied,
+}
+
+/// The typed refusal for a write that would leave a second active row.
+fn active_shard_conflict(
+    scope: Scope,
+    scope_hash: &str,
+    shard_index: u32,
+    active: &ShardInfo,
+) -> StoreError {
+    StoreError::ActiveShardConflict {
+        scope: scope.as_str(),
+        scope_hash: scope_hash.to_string(),
+        shard_index,
+        active_shard_index: active.shard_index,
+    }
+}
+
 /// The manager.
 pub struct ShardManager {
     storage_path: PathBuf,
@@ -756,18 +783,14 @@ impl ShardManager {
                     .await
             }
             Err(error) => {
-                let unique = error.message().contains("UNIQUE constraint failed")
-                    || error.message().contains("SQLITE_CONSTRAINT");
-                if unique {
-                    // Upstream dedup: the re-fetch IS the return value.
-                    let existing = self
-                        .find_shard_by_key(scope, scope_hash, shard_index)
-                        .await?;
-                    if let Some(existing) = existing {
-                        return Ok(existing);
-                    }
-                }
-                Err(error)
+                self.classify_registry_write(
+                    scope,
+                    scope_hash,
+                    shard_index,
+                    error,
+                    ExistingRow::Dedup,
+                )
+                .await
             }
         }
     }
@@ -790,6 +813,66 @@ impl ShardManager {
         )
         .await?;
         Ok(row.map(|row| self.row_to_shard_info(row)))
+    }
+
+    /// Classifies a failed registry write by RE-READING the registry (W4,
+    /// decision 6). `is_unique_violation()` only decides that a probe is worth
+    /// it — the message never becomes a verdict; and inside `BatchMode::Write`
+    /// `is_constraint` is false, so it is never consulted.
+    ///
+    /// Probe order is load-bearing: the tuple's ACTIVE row is consulted BEFORE
+    /// the target key row, and no success is returned while `A` is `Some` and
+    /// `A.id != K.id`. A key-first classifier would answer `Ok(inactive row)`
+    /// when the target already exists inactive and a *different* row is
+    /// active — silently dropping the activation.
+    async fn classify_registry_write(
+        &self,
+        scope: Scope,
+        scope_hash: &str,
+        shard_index: u32,
+        error: StoreError,
+        mode: ExistingRow,
+    ) -> Result<ShardInfo, StoreError> {
+        if !error.is_unique_violation() {
+            return Err(error);
+        }
+        let key = self
+            .find_shard_by_key(scope, scope_hash, shard_index)
+            .await?;
+        let active = self.get_active_shard(scope, scope_hash).await?;
+        match (active, key) {
+            (Some(active), Some(key)) if active.id == key.id => match mode {
+                // Upstream dedup: the re-fetch IS the return value, and the
+                // row is the active row the caller observed.
+                ExistingRow::Dedup | ExistingRow::Activate => Ok(key),
+                ExistingRow::Occupied => Err(StoreError::ShardIndexOccupied { shard_index }),
+            },
+            (Some(active), Some(_)) => match mode {
+                // A rotation was inserting over an existing (inactive) key:
+                // the index, not the activation, is the conflict.
+                ExistingRow::Occupied => Err(StoreError::ShardIndexOccupied { shard_index }),
+                ExistingRow::Dedup | ExistingRow::Activate => Err(active_shard_conflict(
+                    scope,
+                    scope_hash,
+                    shard_index,
+                    &active,
+                )),
+            },
+            (Some(active), None) => Err(active_shard_conflict(
+                scope,
+                scope_hash,
+                shard_index,
+                &active,
+            )),
+            (None, Some(key)) => match mode {
+                ExistingRow::Dedup | ExistingRow::Activate => Ok(key),
+                ExistingRow::Occupied => Err(StoreError::ShardIndexOccupied { shard_index }),
+            },
+            // Neither unique constraint's row is present: defensive, and
+            // unreachable by construction (`shards` has exactly two unique
+            // constraints, both probed above).
+            (None, None) => Err(error),
+        }
     }
 
     /// Upstream `registerExistingShard` (upsert + re-fetch).

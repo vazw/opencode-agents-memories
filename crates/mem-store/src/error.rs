@@ -266,6 +266,27 @@ pub enum StoreError {
     /// enforcement.
     #[error("{0}")]
     ShardModelMismatch(Box<ShardModelMismatch>),
+    /// A write tried to leave two active shards in one `(scope, scope_hash)`
+    /// tuple (W4/ADR-0022). The registry is re-read before this verdict: the
+    /// tuple's active row and the target key row are both probed, so a
+    /// success is never returned while a *different* row is active.
+    ///
+    /// Carries the tuple and both indices only — never a path, never content.
+    #[error(
+        "Shard {scope}/{scope_hash}#{shard_index} cannot be active: \
+         shard {active_shard_index} is already the active shard for this scope"
+    )]
+    ActiveShardConflict {
+        scope: &'static str,
+        scope_hash: String,
+        shard_index: u32,
+        active_shard_index: u32,
+    },
+    /// A rotation target index already holds a registry row (W4/ADR-0022).
+    /// A rotation never treats an existing row as success, so the conflict is
+    /// the occupied index rather than an activation.
+    #[error("Shard index {shard_index} is already registered; rotation refused")]
+    ShardIndexOccupied { shard_index: u32 },
 }
 
 /// The value a failing schema migration hands its caller: the runner never

@@ -187,3 +187,44 @@ async fn test_metadata_v2_repairs_extra_active_shards_to_the_highest_index() {
         .and_then(|row| row.i64("user_version"));
     assert_eq!(version, Some(2), "the repair committed with v2");
 }
+
+// ---------------------------------------------------------------------------
+// Step 2 — typed conflict from `create_shard`
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_create_shard_refuses_a_second_active_shard_with_a_typed_conflict() {
+    let config = common::test_store_config("w4-create-conflict", 2, 1000);
+    let (_config, _connections, manager) = common::real_components(config).await;
+    let first = manager
+        .create_shard(Scope::Project, HASH, 0)
+        .await
+        .expect("first active shard");
+
+    let error = manager
+        .create_shard(Scope::Project, HASH, 1)
+        .await
+        .expect_err("a second active shard is refused");
+    match error {
+        StoreError::ActiveShardConflict {
+            scope,
+            scope_hash,
+            shard_index,
+            active_shard_index,
+        } => {
+            assert_eq!(scope, "project");
+            assert_eq!(scope_hash, HASH);
+            assert_eq!(shard_index, 1);
+            assert_eq!(active_shard_index, 0);
+        }
+        other => panic!("expected ActiveShardConflict, got {other:?}"),
+    }
+
+    let active = manager
+        .get_active_shard(Scope::Project, HASH)
+        .await
+        .expect("active read")
+        .expect("active row present");
+    assert_eq!(active.id, first.id);
+    assert_eq!(active.shard_index, 0);
+}
