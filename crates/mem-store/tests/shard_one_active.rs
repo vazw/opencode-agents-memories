@@ -228,3 +228,92 @@ async fn test_create_shard_refuses_a_second_active_shard_with_a_typed_conflict()
     assert_eq!(active.id, first.id);
     assert_eq!(active.shard_index, 0);
 }
+
+#[tokio::test]
+async fn test_registering_a_second_active_shard_is_a_typed_conflict() {
+    let config = common::test_store_config("w4-register-conflict", 2, 1000);
+    let (_config, _connections, manager) = common::real_components(config).await;
+    let first = manager
+        .create_shard(Scope::Project, HASH, 0)
+        .await
+        .expect("first active shard");
+    let path = manager
+        .get_shard_path(Scope::Project, HASH, 1)
+        .expect("path 1");
+
+    let error = manager
+        .register_existing_shard(Scope::Project, HASH, 1, &path, 0, true)
+        .await
+        .expect_err("a second active shard is refused");
+    match error {
+        StoreError::ActiveShardConflict {
+            shard_index,
+            active_shard_index,
+            ..
+        } => {
+            assert_eq!(shard_index, 1);
+            assert_eq!(active_shard_index, 0);
+        }
+        other => panic!("expected ActiveShardConflict, got {other:?}"),
+    }
+
+    let active = manager
+        .get_active_shard(Scope::Project, HASH)
+        .await
+        .expect("active read")
+        .expect("active row present");
+    assert_eq!(active.id, first.id);
+}
+
+#[tokio::test]
+async fn test_registering_an_inactive_row_as_active_when_another_is_active_is_a_typed_conflict() {
+    let config = common::test_store_config("w4-register-existing", 2, 1000);
+    let (_config, _connections, manager) = common::real_components(config).await;
+    let first = manager
+        .create_shard(Scope::Project, HASH, 0)
+        .await
+        .expect("first active shard");
+    let path = manager
+        .get_shard_path(Scope::Project, HASH, 1)
+        .expect("path 1");
+    let inactive = manager
+        .register_existing_shard(Scope::Project, HASH, 1, &path, 0, false)
+        .await
+        .expect("inactive row 1");
+    assert!(!inactive.is_active);
+
+    let error = manager
+        .register_existing_shard(Scope::Project, HASH, 1, &path, 0, true)
+        .await
+        .expect_err("activating row 1 is refused");
+    match error {
+        StoreError::ActiveShardConflict {
+            shard_index,
+            active_shard_index,
+            ..
+        } => {
+            assert_eq!(shard_index, 1);
+            assert_eq!(active_shard_index, 0);
+        }
+        other => panic!("expected ActiveShardConflict, got {other:?}"),
+    }
+
+    let rows = manager
+        .get_all_shards(Scope::Project, Some(HASH))
+        .await
+        .expect("registry read");
+    let row_one = rows
+        .iter()
+        .find(|row| row.shard_index == 1)
+        .expect("row 1 present");
+    assert!(
+        !row_one.is_active,
+        "the activation was not dropped into row 1"
+    );
+    let active = manager
+        .get_active_shard(Scope::Project, HASH)
+        .await
+        .expect("active read")
+        .expect("active row present");
+    assert_eq!(active.id, first.id);
+}

@@ -893,19 +893,34 @@ impl ShardManager {
         let db = self.ensure_initialized().await?;
         let stored = self.stored_path_string(db_path, scope);
         let now = now_millis();
-        db.execute(
-            crate::sql::REGISTER_EXISTING_SHARD,
-            vec![
-                Value::Text(scope.as_str().to_string()),
-                Value::Text(scope_hash.to_string()),
-                Value::Integer(i64::from(shard_index)),
-                Value::Text(stored),
-                Value::Integer(i64::try_from(vector_count).unwrap_or(i64::MAX)),
-                Value::Integer(i64::from(is_active)),
-                Value::Integer(now),
-            ],
-        )
-        .await?;
+        let write = db
+            .execute(
+                crate::sql::REGISTER_EXISTING_SHARD,
+                vec![
+                    Value::Text(scope.as_str().to_string()),
+                    Value::Text(scope_hash.to_string()),
+                    Value::Integer(i64::from(shard_index)),
+                    Value::Text(stored),
+                    Value::Integer(i64::try_from(vector_count).unwrap_or(i64::MAX)),
+                    Value::Integer(i64::from(is_active)),
+                    Value::Integer(now),
+                ],
+            )
+            .await;
+        if let Err(error) = write {
+            // The upsert can be refused by the one-active index when it
+            // promotes an existing inactive row while another row is active
+            // (T6). Re-read the registry rather than parse the message.
+            return self
+                .classify_registry_write(
+                    scope,
+                    scope_hash,
+                    shard_index,
+                    error,
+                    ExistingRow::Activate,
+                )
+                .await;
+        }
         let row = query_one(
             db.as_ref(),
             crate::sql::FIND_SHARD_BY_KEY,
