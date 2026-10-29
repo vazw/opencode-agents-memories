@@ -247,6 +247,10 @@ struct ParsedArgs {
     agent: Option<String>,
     confirm: Option<String>,
     scope: Option<String>,
+    /// The bare `--apply` confirmation (reap-shards only).
+    apply: bool,
+    /// `--apply=<value>` was seen: a usage error in reap mode.
+    apply_inline: bool,
 }
 
 /// The sync arg-parse (M1): mode, storage root, web host/port overrides, the
@@ -261,6 +265,7 @@ fn parse_args<I: Iterator<Item = (String, Option<String>)>>(args: I) -> ParsedAr
             "--mode=stdio" => parsed.mode = Some("stdio".to_owned()),
             "--mode=standalone" => parsed.mode = Some("standalone".to_owned()),
             "--mode=hang-on-shutdown" => parsed.mode = Some("hang-on-shutdown".to_owned()),
+            "--mode=reap-shards" => parsed.mode = Some("reap-shards".to_owned()),
             "--storage-root" | "storage-root" => parsed.storage_root = inline,
             "--web-host" | "web-host" => parsed.web_host = inline,
             "--web-port" | "web-port" => {
@@ -272,6 +277,10 @@ fn parse_args<I: Iterator<Item = (String, Option<String>)>>(args: I) -> ParsedAr
             "--agent" | "agent" => parsed.agent = inline,
             "--confirm" | "confirm" => parsed.confirm = inline,
             "--scope" | "scope" => parsed.scope = inline,
+            "--apply" => match inline {
+                None => parsed.apply = true,
+                Some(_) => parsed.apply_inline = true,
+            },
             other => eprintln!("ignoring argument {other:?}"),
         }
     }
@@ -288,6 +297,20 @@ fn main() {
     let mut index = 0usize;
     while index < raw.len() {
         let arg = raw[index].clone();
+        // `--apply` is a bare boolean: it never swallows a following value.
+        // `--apply false` must be a usage error, never "apply and discard
+        // false" (the value stays a separate argument for the trap check).
+        if arg == "--apply" {
+            let next = raw.get(index + 1).cloned();
+            let swallows_value = next.as_deref().is_some_and(|value| !value.starts_with('-'));
+            argv.push((arg, None));
+            index += 1;
+            if swallows_value && let Some(value) = next {
+                argv.push((value, None));
+                index += 1;
+            }
+            continue;
+        }
         if !arg.contains('=')
             && (arg == "--mode"
                 || arg == "--storage-root"
@@ -313,6 +336,12 @@ fn main() {
             index += 1;
         }
     }
+
+    // `--apply <token>` (token not starting with `-`) is the value trap: a
+    // bare boolean must never swallow a value and then apply.
+    let apply_value_trap = raw
+        .windows(2)
+        .any(|pair| pair[0] == "--apply" && !pair[1].starts_with('-'));
 
     // Special literal modes handled sync, BEFORE any runtime exists.
     if raw.iter().any(|a| a == "--version") {
@@ -346,6 +375,8 @@ fn main() {
     // load (it needs no config to reject a bad tag, but does need it to
     // compose the embedder).
     let mut reembed_tag: Option<String> = None;
+    // The reap confirmation, built at parse time. `None` for every other mode.
+    let mut reap_request: Option<mem_bridge::reap::ReapRequest> = None;
     if let Some(mode) = args.mode.clone() {
         let mode = mode.trim().to_owned();
         if mode == "print-crates" {
@@ -377,6 +408,22 @@ fn main() {
             // W3: the scope tag travels as-is; an absent flag is the empty
             // tag, which the runner rejects with 64 (invalid scope).
             reembed_tag = Some(args.scope.clone().unwrap_or_default());
+        } else if mode == "reap-shards" {
+            // W7: usage is validated HERE, before `Config::load_default` and
+            // before any store is opened, so a bad invocation never creates
+            // the root. A silently ignored scope filter is a data-safety trap.
+            let foreign_flag = args.scope.is_some()
+                || args.project.is_some()
+                || args.session.is_some()
+                || args.agent.is_some()
+                || args.confirm.is_some();
+            if args.apply_inline || apply_value_trap || foreign_flag {
+                eprintln!(
+                    "usage: opencode-agents-memory --mode=reap-shards [--apply] [--storage-root <path>]"
+                );
+                std::process::exit(64);
+            }
+            reap_request = Some(mem_bridge::reap::ReapRequest { apply: args.apply });
         } else {
             match LaunchMode::parse(&mode) {
                 Ok(parsed) => {
@@ -442,6 +489,17 @@ fn main() {
             &core_config,
             &config.storage_root,
             &mem_bridge::reembed::ReembedRequest { container_tag },
+        ));
+    }
+
+    // W7 — the reap dispatch also sits BEFORE the engine runtime and BEFORE
+    // the log sink: never start the stdio loop, the web server or an engine
+    // runtime in this mode.
+    if let Some(request) = reap_request {
+        std::process::exit(mem_bridge::reap::run(
+            &core_config,
+            &config.storage_root,
+            &request,
         ));
     }
 
