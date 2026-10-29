@@ -17,6 +17,7 @@
 //! | `import_missing_tiers_ok` | AC4 — a missing tier never deletes |
 //! | `import_extra_tiers_preserved` | AC4 — an extra tier is preserved |
 //! | `import_aborts_on_duplicate_ids` | upstream parity — zero writes |
+//! | `import_501_rows_is_one_atomic_transaction` | upstream "imports more than 500 memories in one atomic transaction" |
 //! | `import_dry_run_writes_nothing` | the dry-run mode |
 //! | `import_replace_mode_replaces_the_row` | the replace mode |
 //! | `import_rejects_unsupported_schema_version` | upstream's version guard |
@@ -25,6 +26,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use mem_embed::embedder::{BoxFuture, Embedder};
@@ -145,6 +147,61 @@ impl FactStore for FakeFacts {
             )));
         }
         Ok(())
+    }
+}
+
+/// A [`FactStore`] that fails the (fail_after + 1)-th INSERT. Only
+/// `insert_memory` counts; the pre-scan's `memory_exists` calls do not.
+struct FaultyFacts {
+    inner: FakeFacts,
+    fail_after: usize,
+    inserts: AtomicUsize,
+}
+
+impl FaultyFacts {
+    fn new(fail_after: usize) -> Self {
+        Self {
+            inner: FakeFacts::new(),
+            fail_after,
+            inserts: AtomicUsize::new(0),
+        }
+    }
+    fn count(&self) -> usize {
+        self.inner.count()
+    }
+    fn inserts(&self) -> usize {
+        self.inserts.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl FactStore for FaultyFacts {
+    async fn list_memories(&self, tag: &str) -> Result<Vec<ExportedMemory>, PortabilityError> {
+        self.inner.list_memories(tag).await
+    }
+    async fn memory_exists(&self, id: &str, tag: &str) -> Result<bool, PortabilityError> {
+        self.inner.memory_exists(id, tag).await
+    }
+    async fn insert_memory(
+        &self,
+        tag: &str,
+        memory: ExportedMemory,
+        embedding: Vec<f32>,
+        tags_embedding: Option<Vec<f32>>,
+        metadata_json: String,
+    ) -> Result<(), PortabilityError> {
+        let attempt = self.inserts.fetch_add(1, Ordering::SeqCst) + 1;
+        if attempt > self.fail_after {
+            return Err(PortabilityError::Store(format!(
+                "injected write fault at insert {attempt}"
+            )));
+        }
+        self.inner
+            .insert_memory(tag, memory, embedding, tags_embedding, metadata_json)
+            .await
+    }
+    async fn delete_memory(&self, id: &str, tag: &str) -> Result<(), PortabilityError> {
+        self.inner.delete_memory(id, tag).await
     }
 }
 
@@ -1296,6 +1353,93 @@ async fn import_aborts_on_duplicate_ids() {
     let rows = target_facts.with_tag(&scope.container_tag);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].memory.id, "m-1");
+}
+
+// Upstream "imports more than 500 memories in one atomic transaction"
+// (tests/memory-portability.test.ts:205). The port's atomicity is
+// compensation (FactStore has no transaction seam): a fault after 500 of 501
+// inserts must leave ZERO rows.
+/// The 501-row bundle (the shape of `import_aborts_on_duplicate_ids` at `:1261-1271`).
+fn big_bundle(ids: &[String]) -> Bundle {
+    let mut bundle = Bundle::empty();
+    bundle.exported_at = "2026-10-29T00:00:00.000Z".to_string();
+    bundle.source = SourceInfo {
+        container_tag: "test_project_0123456789abcdef".to_string(),
+        scope: mem_portability::bundle::BundleScope::Project,
+        scope_hash: "0123456789abcdef".to_string(),
+        project_path: None,
+        project_name: None,
+        git_repo_url: None,
+    };
+    bundle.embedding = mem_portability::bundle::EmbeddingInfo {
+        model: "test-model".to_string(),
+        dimensions: DIMENSIONS,
+    };
+    bundle.memories = ids
+        .iter()
+        .enumerate()
+        .map(|(index, id)| exported_memory(id, &format!("portable memory {index}")))
+        .collect();
+    bundle
+}
+
+#[tokio::test]
+async fn import_501_rows_is_one_atomic_transaction() {
+    const ROWS: usize = 501;
+
+    // Half 1 - the happy path: every row lands.
+    let root = scratch_root("bulk-501");
+    let target_dir = project_dir(&root, "target-project");
+    let target_store = root.join("target-store");
+    std::fs::create_dir_all(&target_store).expect("target store");
+    let target_facts = Arc::new(FakeFacts::new());
+    let target = harness(&target_store, target_facts.clone());
+    let ids: Vec<String> = (0..ROWS).map(|i| format!("mem_large_{i}")).collect();
+    let report = target
+        .service
+        .import(&target_dir, big_bundle(&ids), ReplaceMode::Merge, false)
+        .await
+        .expect("the 501-row import succeeds");
+    assert_eq!(report.imported, ROWS);
+    assert_eq!(target_facts.count(), ROWS, "every row landed");
+
+    // Half 2 - a write fault after 500 inserts leaves zero rows.
+    let root = scratch_root("bulk-501-fault");
+    let target_dir = project_dir(&root, "target-project");
+    let target_store = root.join("target-store");
+    std::fs::create_dir_all(&target_store).expect("target store");
+    let faulty = Arc::new(FaultyFacts::new(ROWS - 1));
+    let profiles = Arc::new(ProfileStore::new(
+        target_store.clone(),
+        store_config(&target_store),
+        ProfileConfig::default(),
+    ));
+    let episodic = Arc::new(EpisodicStore::new(
+        target_store.clone(),
+        store_config(&target_store),
+    ));
+    let service =
+        PortabilityService::new(faulty.clone(), profiles, episodic, Arc::new(FixedEmbedder))
+            .with_container_tag_prefix(TAG_PREFIX)
+            .with_embedding_info("test-model", DIMENSIONS);
+    let error = service
+        .import(&target_dir, big_bundle(&ids), ReplaceMode::Merge, false)
+        .await
+        .expect_err("the injected write fault aborts the import");
+    assert!(
+        error.to_string().contains("injected write fault"),
+        "unexpected error: {error:?}"
+    );
+    assert_eq!(
+        faulty.inserts(),
+        ROWS,
+        "the fault fired on the LAST insert, after 500 landed"
+    );
+    assert_eq!(
+        faulty.count(),
+        0,
+        "the failed import left zero rows (compensation)"
+    );
 }
 
 #[tokio::test]
