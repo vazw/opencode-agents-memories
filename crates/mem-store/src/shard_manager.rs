@@ -1276,13 +1276,19 @@ impl ShardManager {
         scope: Scope,
         scope_hash: &str,
     ) -> Result<ShardInfo, StoreError> {
-        // Upstream budget: 3 attempts; both terminal branches return, so the
-        // third iteration is unreachable unless a future branch keeps looping.
-        #[allow(clippy::never_loop)]
+        // Upstream budget: 3 attempts. The loop is live: the zero-active arm
+        // activates the highest registered row and `continue`s, so the
+        // reactivated shard runs the SAME `Some` body below. Termination is
+        // bounded: each iteration either returns or activates exactly once,
+        // and a third `None` reaches the `Internal` tail.
         for _attempt in 0..3 {
             match self.get_active_shard(scope, scope_hash).await? {
                 None => {
-                    return self.create_shard(scope, scope_hash, 0).await;
+                    // W4/ADR-0022 D-22-5: no shortcut — the next iteration
+                    // runs `is_shard_valid`, `prepare_write_shard` (W3's
+                    // fingerprint refusal), the count sync and the cap check.
+                    self.activate_latest_shard(scope, scope_hash).await?;
+                    continue;
                 }
                 Some(shard) => {
                     if !self.is_shard_valid(&shard).await {
@@ -1330,6 +1336,55 @@ impl ShardManager {
                 scope.as_str()
             ),
         })
+    }
+
+    /// Activates the highest-index registered shard of a zero-active tuple
+    /// (W4/ADR-0022 D-22-5).
+    ///
+    /// Returns `()` on purpose: the caller continues into the ordinary `Some`
+    /// arm, so the reactivated shard is validated exactly like any other write
+    /// shard — `is_shard_valid`, `prepare_write_shard`'s fingerprint refusal,
+    /// the count sync and the cap check. A reduced tail here would be a second
+    /// path to keep in sync, and a foreign-fingerprint or full shard could
+    /// accept an over-cap write.
+    ///
+    /// With no registry row at all it creates index 0 (the resolver's
+    /// first-write path); with a row already active it is a no-op. The update
+    /// is re-read before returning: a vanished row is `Internal`, never a
+    /// panic (ADR-0013).
+    async fn activate_latest_shard(
+        &self,
+        scope: Scope,
+        scope_hash: &str,
+    ) -> Result<(), StoreError> {
+        assert_safe_scope_hash(scope_hash)?;
+        // `get_all_shards` is ASC by `shard_index`, so `next_back` is the
+        // highest — the row the legacy migrator's map and the inventory
+        // default already treat as latest.
+        let shards = self.get_all_shards(scope, Some(scope_hash)).await?;
+        let Some(latest) = shards.into_iter().next_back() else {
+            self.create_shard(scope, scope_hash, 0).await?;
+            return Ok(());
+        };
+        if latest.is_active {
+            return Ok(());
+        }
+        let db = self.ensure_initialized().await?;
+        db.execute(
+            crate::shard_registry_sql::SET_SHARD_ACTIVE,
+            vec![Value::Integer(latest.id)],
+        )
+        .await?;
+        self.get_active_shard(scope, scope_hash)
+            .await?
+            .ok_or_else(|| StoreError::Internal {
+                message: format!(
+                    "Failed to activate shard {} for {}/{scope_hash}",
+                    latest.id,
+                    scope.as_str()
+                ),
+            })?;
+        Ok(())
     }
 
     /// Upstream `markShardReadOnly`.

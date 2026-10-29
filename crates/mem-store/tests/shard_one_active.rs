@@ -501,3 +501,128 @@ async fn test_rotation_does_not_retire_a_shard_outside_its_scope() {
         "B's active row is untouched by A's rotation"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Step 5 — the zero-active half, through the `Some` arm
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_a_scope_with_no_active_shard_reactivates_its_highest_index() {
+    let config = common::test_store_config("w4-reactivate", 2, 1000);
+    let (_config, _connections, manager) = common::real_components(config).await;
+    let zero = manager
+        .create_shard(Scope::Project, HASH, 0)
+        .await
+        .expect("shard 0");
+    manager
+        .mark_shard_read_only(zero.id)
+        .await
+        .expect("retire shard 0");
+    let one = manager
+        .create_shard(Scope::Project, HASH, 1)
+        .await
+        .expect("shard 1");
+    // One memory so the reactivation's count sync is observable.
+    let db = manager
+        .open_shard(&one.db_path)
+        .await
+        .expect("open shard 1");
+    insert_vector(db.as_ref(), &record("m1", 0))
+        .await
+        .expect("insert into shard 1");
+    drop(db);
+    manager
+        .mark_shard_read_only(one.id)
+        .await
+        .expect("retire shard 1");
+
+    // The `A = None, K = Some` classifier cell: create-only, row unchanged.
+    let existing = manager
+        .create_shard(Scope::Project, HASH, 1)
+        .await
+        .expect("the existing row is returned unchanged");
+    assert_eq!(existing.id, one.id);
+    assert_eq!(existing.shard_index, 1);
+    assert!(!existing.is_active);
+
+    let write = manager
+        .get_write_shard(Scope::Project, HASH)
+        .await
+        .expect("the zero-active tuple reactivates its highest index");
+    assert_eq!(write.shard_index, 1);
+    assert_eq!(write.id, one.id);
+    assert!(write.is_active);
+    assert_eq!(write.vector_count, 1, "the count is synced on reactivation");
+
+    let rows = manager
+        .get_all_shards(Scope::Project, Some(HASH))
+        .await
+        .expect("registry read");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows.iter().filter(|row| row.is_active).count(),
+        1,
+        "exactly one active row"
+    );
+    let row_one = rows
+        .iter()
+        .find(|row| row.shard_index == 1)
+        .expect("row 1 present");
+    assert_eq!(row_one.vector_count, 1, "registry count synced");
+}
+
+#[tokio::test]
+async fn test_a_reactivated_shard_is_validated_like_any_other_write_shard() {
+    let config = common::test_store_config("w4-reactivate-mismatch", 2, 1000);
+    let (_config, _connections, manager) = common::real_components(config).await;
+    let zero = manager
+        .create_shard(Scope::Project, HASH, 0)
+        .await
+        .expect("shard 0");
+    manager
+        .mark_shard_read_only(zero.id)
+        .await
+        .expect("retire shard 0");
+    let one = manager
+        .create_shard(Scope::Project, HASH, 1)
+        .await
+        .expect("shard 1");
+    manager
+        .mark_shard_read_only(one.id)
+        .await
+        .expect("retire shard 1");
+
+    // The fixture identity is `None`, so the authority falls back to model
+    // equality; a foreign `embedding_model` is positive evidence.
+    let db = manager
+        .open_shard(&one.db_path)
+        .await
+        .expect("open shard 1");
+    db.execute(
+        "INSERT OR REPLACE INTO shard_metadata (key, value) VALUES ('embedding_model', ?)",
+        vec![Value::Text("foreign-model".to_string())],
+    )
+    .await
+    .expect("rewrite the stored model");
+    drop(db);
+    manager
+        .invalidate_model_facts(&one.db_path)
+        .expect("R-13 invalidation");
+
+    let error = manager
+        .get_write_shard(Scope::Project, HASH)
+        .await
+        .expect_err("the reactivated shard is still validated");
+    match error {
+        StoreError::ShardModelMismatch(_) => {}
+        other => panic!("expected ShardModelMismatch, got {other:?}"),
+    }
+
+    let active = manager
+        .get_active_shard(Scope::Project, HASH)
+        .await
+        .expect("active read")
+        .expect("the highest row was activated before validation");
+    assert_eq!(active.id, one.id);
+    assert_eq!(active.vector_count, 0, "no write landed");
+}
