@@ -304,9 +304,16 @@ impl ShardManager {
                 FILE_LOCK_RETRY_DELAYS_MS.len(),
                 &RetryContext::system(),
             )?;
-            // Step 1 ignores the failure report; Step 6 turns it into a skip.
-            let _ = outcome;
-            report.reaped.push(shard.id);
+            if outcome.failed.is_empty() {
+                report.reaped.push(shard.id);
+            } else {
+                report.skipped.push(SkippedShard {
+                    shard_id: shard.id,
+                    reason: ReapSkipReason::FileDeleteFailed {
+                        failures: outcome.failed,
+                    },
+                });
+            }
             for (path, size) in pre_existing {
                 if !path.exists() {
                     report.bytes_freed = report.bytes_freed.saturating_add(size);

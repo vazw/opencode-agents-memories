@@ -692,6 +692,111 @@ async fn test_second_run_is_a_no_op_and_ignores_a_file_with_no_row() {
 }
 
 // ---------------------------------------------------------------------------
+// T10 — a file-delete failure after the row is gone is reported
+// ---------------------------------------------------------------------------
+
+/// Restores a directory's original permissions on drop (also on panic).
+struct RestorePermissions {
+    path: PathBuf,
+    permissions: std::fs::Permissions,
+}
+
+impl Drop for RestorePermissions {
+    fn drop(&mut self) {
+        let _ = std::fs::set_permissions(&self.path, self.permissions.clone());
+    }
+}
+
+#[tokio::test]
+async fn test_file_delete_failure_after_the_row_is_gone_is_reported() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let rig = rig("w7-t10");
+    let anchor = rig.anchor(1, &["anchor-row"]).await;
+    let candidate = rig.inactive(0).await;
+    let scope_dir = candidate
+        .db_path
+        .parent()
+        .expect("the candidate has a scope directory")
+        .to_path_buf();
+    let original = std::fs::metadata(&scope_dir)
+        .expect("scope dir metadata")
+        .permissions();
+    let probe = scope_dir.join(".unlink-probe");
+    std::fs::write(&probe, b"probe").expect("write the unlink probe");
+    let mut locked = original.clone();
+    locked.set_mode(0o555);
+    std::fs::set_permissions(&scope_dir, locked.clone()).expect("chmod the scope dir 0o555");
+    let guard = RestorePermissions {
+        path: scope_dir.clone(),
+        permissions: original.clone(),
+    };
+
+    // The positive control: a non-root uid cannot unlink inside a 0o555
+    // directory, so the `.db` failure below is the permission bit, not a
+    // missing file. Root would make this fixture pass vacuously.
+    let control = std::fs::remove_file(&probe);
+    assert!(
+        matches!(&control, Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied),
+        "this fixture needs a non-root uid: the probe unlink did not fail with EACCES ({control:?})"
+    );
+    std::fs::set_permissions(&scope_dir, original.clone()).expect("restore the scope dir");
+    std::fs::remove_file(&probe).expect("remove the probe");
+    std::fs::set_permissions(&scope_dir, locked).expect("re-apply 0o555");
+
+    let report = rig
+        .manager
+        .reap_retired_shards(false)
+        .await
+        .expect("a file failure is a report, not an Err");
+    drop(guard);
+
+    assert_eq!(
+        report.candidates,
+        vec![candidate.id],
+        "a failing candidate stays in candidates"
+    );
+    assert!(
+        report.reaped.is_empty(),
+        "a candidate with a failed file removal is not reaped"
+    );
+    assert!(
+        report.skipped.iter().any(|skip| skip.shard_id == anchor.id),
+        "the active anchor is listed in skipped: {:?}",
+        report.skipped
+    );
+    let failure = report
+        .skipped
+        .iter()
+        .find(|skip| skip.shard_id == candidate.id)
+        .expect("the failed candidate is additionally listed in skipped");
+    match &failure.reason {
+        mem_store::reaping::ReapSkipReason::FileDeleteFailed { failures } => {
+            assert!(
+                failures
+                    .iter()
+                    .any(|failed| failed.path == candidate.db_path),
+                "the .db unlink is the reported failure: {failures:?}"
+            );
+        }
+        other => panic!("expected file_delete_failed, got {other:?}"),
+    }
+    assert!(
+        rig.manager
+            .get_shard_by_id(candidate.id)
+            .await
+            .expect("row read")
+            .is_none(),
+        "the row delete succeeded before the file removal"
+    );
+    assert!(
+        candidate.db_path.exists(),
+        "the .db survives the failed unlink"
+    );
+    assert_eq!(report.bytes_freed, 0, "nothing was freed");
+}
+
+// ---------------------------------------------------------------------------
 // T2 — an active shard is never reaped (the ONLY `active`-reason pin)
 // ---------------------------------------------------------------------------
 
