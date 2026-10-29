@@ -10,6 +10,7 @@ use mem_store::db::{Value, query_one};
 use mem_store::error::StoreError;
 use mem_store::scope::Scope;
 use mem_store::sql;
+use mem_store::vector::{MemoryInsert, insert_vector};
 
 const HASH: &str = "a1b2c3d4e5f60001";
 
@@ -316,4 +317,187 @@ async fn test_registering_an_inactive_row_as_active_when_another_is_active_is_a_
         .expect("active read")
         .expect("active row present");
     assert_eq!(active.id, first.id);
+}
+
+fn record(id: &str, created: i64) -> MemoryInsert {
+    MemoryInsert {
+        id: id.to_string(),
+        content: "rotation".to_string(),
+        vector: vec![1.0f32, 0.0],
+        tags_vector: None,
+        container_tag: format!("opencode_project_{HASH}"),
+        tags: None,
+        memory_type: None,
+        created_at: created,
+        updated_at: created,
+        metadata: None,
+        session_id: None,
+        display_name: None,
+        user_name: None,
+        user_email: None,
+        project_path: None,
+        project_name: None,
+        git_repo_url: None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Step 4 — one-transaction rotation
+// ---------------------------------------------------------------------------
+
+/// A failed rotation must leave the previous shard active: the retire and the
+/// insert are ONE batch, so the key conflict rolls the retire back.
+#[tokio::test]
+async fn test_a_failed_rotation_leaves_the_previous_shard_active() {
+    let config = common::test_store_config("w4-rotate-fail", 2, 1);
+    let (_config, _connections, manager) = common::real_components(config).await;
+    let first = manager
+        .get_write_shard(Scope::Project, HASH)
+        .await
+        .expect("shard 0");
+    let db = manager
+        .open_shard(&first.db_path)
+        .await
+        .expect("open shard 0");
+    insert_vector(db.as_ref(), &record("m0", 0))
+        .await
+        .expect("fill shard 0");
+    drop(db);
+    let path_one = manager
+        .get_shard_path(Scope::Project, HASH, 1)
+        .expect("path 1");
+    manager
+        .register_existing_shard(Scope::Project, HASH, 1, &path_one, 0, false)
+        .await
+        .expect("inactive row 1");
+
+    let error = manager
+        .get_write_shard(Scope::Project, HASH)
+        .await
+        .expect_err("the occupied index refuses the rotation");
+    match error {
+        StoreError::ShardIndexOccupied { shard_index } => assert_eq!(shard_index, 1),
+        other => panic!("expected ShardIndexOccupied, got {other:?}"),
+    }
+
+    let active = manager
+        .get_active_shard(Scope::Project, HASH)
+        .await
+        .expect("active read")
+        .expect("the previous shard stays active");
+    assert_eq!(active.id, first.id);
+    assert_eq!(active.shard_index, 0);
+}
+
+#[tokio::test]
+async fn test_two_rotations_from_one_observation_leave_exactly_one_active_shard() {
+    let config = common::test_store_config("w4-rotate-stale", 2, 1000);
+    let (config, connections, manager) = common::real_components(config).await;
+    let a = manager
+        .get_write_shard(Scope::Project, HASH)
+        .await
+        .expect("shard 0");
+    let rotated = manager
+        .rotate_shard(Scope::Project, HASH, a.id, 1)
+        .await
+        .expect("first rotation");
+    assert_eq!(rotated.shard_index, 1);
+    assert!(rotated.is_active);
+
+    let error = manager
+        .rotate_shard(Scope::Project, HASH, a.id, 2)
+        .await
+        .expect_err("the stale retire id cannot rotate again");
+    match error {
+        StoreError::ActiveShardConflict {
+            shard_index,
+            active_shard_index,
+            ..
+        } => {
+            assert_eq!(shard_index, 2);
+            assert_eq!(active_shard_index, 1);
+        }
+        other => panic!("expected ActiveShardConflict, got {other:?}"),
+    }
+
+    let metadata = connections
+        .get_connection(&config.storage_path.join("metadata.db"))
+        .await
+        .expect("metadata connection");
+    let active_rows = metadata
+        .query(
+            "SELECT id FROM shards WHERE scope = ? AND scope_hash = ? AND is_active = 1",
+            vec![project(), hash()],
+        )
+        .await
+        .expect("active rows");
+    assert_eq!(active_rows.len(), 1, "exactly one active row");
+}
+
+#[tokio::test]
+async fn test_rotation_does_not_retire_a_shard_outside_its_scope() {
+    const OTHER_HASH: &str = "a1b2c3d4e5f60002";
+    let config = common::test_store_config("w4-rotate-scope", 2, 1000);
+    let (_config, _connections, manager) = common::real_components(config).await;
+    let b = manager
+        .create_shard(Scope::Project, OTHER_HASH, 0)
+        .await
+        .expect("B active shard");
+    let a = manager
+        .create_shard(Scope::Project, HASH, 0)
+        .await
+        .expect("A active shard");
+
+    let error = manager
+        .rotate_shard(Scope::Project, HASH, b.id, 1)
+        .await
+        .expect_err("a foreign retire id cannot rotate A");
+    match error {
+        StoreError::ActiveShardConflict {
+            shard_index,
+            active_shard_index,
+            ..
+        } => {
+            assert_eq!(shard_index, 1);
+            assert_eq!(active_shard_index, 0);
+        }
+        other => panic!("expected ActiveShardConflict, got {other:?}"),
+    }
+
+    let b_active = manager
+        .get_active_shard(Scope::Project, OTHER_HASH)
+        .await
+        .expect("B active read")
+        .expect("B active row present");
+    assert_eq!(b_active.id, b.id, "B's active row is untouched");
+    let a_active = manager
+        .get_active_shard(Scope::Project, HASH)
+        .await
+        .expect("A active read")
+        .expect("A active row present");
+    assert_eq!(a_active.id, a.id);
+
+    // The id-only mutant is only observable on a SUCCESSFUL batch (a failed
+    // one rolls its deactivate back): A has no active row, so the scoped
+    // retire of a foreign id is a no-op and the rotation succeeds. An id-only
+    // retire would deactivate B while A rotates.
+    manager
+        .mark_shard_read_only(a.id)
+        .await
+        .expect("retire A before the success arm");
+    let rotated = manager
+        .rotate_shard(Scope::Project, HASH, b.id, 2)
+        .await
+        .expect("a scoped retire of a foreign id is a no-op");
+    assert_eq!(rotated.shard_index, 2);
+    assert!(rotated.is_active);
+    let b_active = manager
+        .get_active_shard(Scope::Project, OTHER_HASH)
+        .await
+        .expect("B active read")
+        .expect("B active row present after A's successful rotation");
+    assert_eq!(
+        b_active.id, b.id,
+        "B's active row is untouched by A's rotation"
+    );
 }

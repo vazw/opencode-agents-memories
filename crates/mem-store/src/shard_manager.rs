@@ -765,22 +765,7 @@ impl ShardManager {
                 // A populated file whose registry row was lost reaches this
                 // path: the observed count (not a false 0) becomes the row's
                 // value, and the write-once identity keys survive (D-16).
-                let outcome = crate::shard_facts::prepare_active_shard(
-                    shard_db.as_ref(),
-                    self.config.embedding_dimensions,
-                    self.embedding_identity.as_ref(),
-                    &self.config.embedding_model,
-                )
-                .await?;
-                if matches!(outcome.step, crate::shard_facts::FingerprintStep::Claimed) {
-                    // The claim wrote `shard_metadata`; the cached pre-claim
-                    // facts (if any) are stale.
-                    self.connections
-                        .model_facts_cache()
-                        .invalidate(&shard.db_path)?;
-                }
-                self.sync_shard_vector_count(shard, outcome.vector_count)
-                    .await
+                self.finish_created_shard(shard, shard_db.as_ref()).await
             }
             Err(error) => {
                 self.classify_registry_write(
@@ -793,6 +778,133 @@ impl ShardManager {
                 .await
             }
         }
+    }
+
+    /// The tail shared by [`create_shard`](Self::create_shard) and
+    /// [`rotate_shard`](Self::rotate_shard): claim the configured identity on
+    /// the freshly-active shard and sync its committed count.
+    ///
+    /// R-13: a claim wrote `shard_metadata`, so the cached facts for the path
+    /// are stale and are invalidated.
+    async fn finish_created_shard(
+        &self,
+        shard: ShardInfo,
+        shard_db: &dyn Db,
+    ) -> Result<ShardInfo, StoreError> {
+        let outcome = crate::shard_facts::prepare_active_shard(
+            shard_db,
+            self.config.embedding_dimensions,
+            self.embedding_identity.as_ref(),
+            &self.config.embedding_model,
+        )
+        .await?;
+        if matches!(outcome.step, crate::shard_facts::FingerprintStep::Claimed) {
+            // The claim wrote `shard_metadata`; the cached pre-claim facts (if
+            // any) are stale.
+            self.connections
+                .model_facts_cache()
+                .invalidate(&shard.db_path)?;
+        }
+        self.sync_shard_vector_count(shard, outcome.vector_count)
+            .await
+    }
+
+    /// Rotates one scope from `retire_shard_id` to a new shard at
+    /// `next_index` — **atomically** (W4/ADR-0022 D-22-4).
+    ///
+    /// CONTRACT
+    ///
+    /// The shard FILE is initialized first (the pre-existing orphan-row guard:
+    /// a failed init leaves no registry row), then ONE `BatchMode::Write` batch
+    /// retires the previous row and inserts the new one. A failed create thus
+    /// rolls the retire back: the previous shard stays active, which the
+    /// shipped two-step could not promise (it left ZERO actives and the dedup
+    /// then returned the inactive row as the write shard).
+    ///
+    /// The caller holds the scope write lock
+    /// ([`with_scope_write_lock`](Self::with_scope_write_lock)). A stale or
+    /// foreign `retire_shard_id` retires nothing and yields a typed conflict;
+    /// an occupied target index yields [`StoreError::ShardIndexOccupied`]. An
+    /// orphan shard *file* may remain after a failure (W7 reaps it, and
+    /// reconcile normally re-registers it).
+    pub async fn rotate_shard(
+        &self,
+        scope: Scope,
+        scope_hash: &str,
+        retire_shard_id: i64,
+        next_index: u32,
+    ) -> Result<ShardInfo, StoreError> {
+        assert_safe_scope_hash(scope_hash)?;
+        let db = self.ensure_initialized().await?;
+        let full_path = self.get_shard_path(scope, scope_hash, next_index)?;
+        let stored = self.stored_path_string(&full_path, scope);
+        let now = now_millis();
+
+        // File init stays OUTSIDE the transaction (orphan-row guard).
+        let shard_db = self.connections.get_connection(&full_path).await?;
+        self.init_shard_db(
+            shard_db.as_ref(),
+            self.config.embedding_dimensions,
+            &self.config.embedding_model,
+        )
+        .await?;
+        self.connections
+            .model_facts_cache()
+            .invalidate(&full_path)?;
+
+        let statements = vec![
+            Statement::new(
+                crate::shard_registry_sql::MARK_SHARD_INACTIVE_IN_SCOPE,
+                vec![
+                    Value::Integer(retire_shard_id),
+                    Value::Text(scope.as_str().to_string()),
+                    Value::Text(scope_hash.to_string()),
+                ],
+            ),
+            Statement::new(
+                crate::sql::CREATE_SHARD,
+                vec![
+                    Value::Text(scope.as_str().to_string()),
+                    Value::Text(scope_hash.to_string()),
+                    Value::Integer(i64::from(next_index)),
+                    Value::Text(stored),
+                    Value::Integer(now),
+                ],
+            ),
+        ];
+        let results = match db.batch(statements, BatchMode::Write).await {
+            Ok(results) => results,
+            Err(error) => {
+                return self
+                    .classify_registry_write(
+                        scope,
+                        scope_hash,
+                        next_index,
+                        error,
+                        ExistingRow::Occupied,
+                    )
+                    .await;
+            }
+        };
+        let Some(result) = results.last() else {
+            return Err(StoreError::Internal {
+                message: format!(
+                    "Rotation for {}/{scope_hash}#{next_index} committed no insert result",
+                    scope.as_str()
+                ),
+            });
+        };
+        let shard = ShardInfo {
+            id: result.last_insert_rowid,
+            scope,
+            scope_hash: scope_hash.to_string(),
+            shard_index: next_index,
+            db_path: full_path,
+            vector_count: 0,
+            is_active: true,
+            created_at: now,
+        };
+        self.finish_created_shard(shard, shard_db.as_ref()).await
     }
 
     async fn find_shard_by_key(
@@ -1201,9 +1313,11 @@ impl ShardManager {
                         .sync_shard_vector_count(shard, outcome.facts.vector_count)
                         .await?;
                     if shard.vector_count >= u64::from(self.config.max_vectors_per_shard) {
-                        self.mark_shard_read_only_off(shard.id).await?;
+                        // W4: ONE transaction (retire + insert) — a failed
+                        // create leaves the previous shard active, where the
+                        // shipped two-step left ZERO actives.
                         return self
-                            .create_shard(scope, scope_hash, shard.shard_index + 1)
+                            .rotate_shard(scope, scope_hash, shard.id, shard.shard_index + 1)
                             .await;
                     }
                     return Ok(shard);
