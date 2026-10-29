@@ -328,8 +328,8 @@ impl ShardManager {
     /// caller probes `-tshm`, so the count open can never be mistaken for a
     /// live holder.
     ///
-    /// A missing, unopenable or unreadable file is an `Err` here; Step 4 maps
-    /// it to [`ReapSkipReason::Unopenable`] (this step propagates it).
+    /// A missing, unopenable or unreadable file is an `Err` here; the
+    /// predicate maps it to [`ReapSkipReason::Unopenable`] (fail closed).
     async fn read_shard_count_read_only(
         &self,
         db_path: &Path,
