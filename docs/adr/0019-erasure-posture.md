@@ -114,7 +114,7 @@ a claim: the injected context *is* the memories (`FINDINGS-DETAIL.md:163-171`), 
 - **memories** (A7, class C) — derived knowledge under a separate promise, counted by `surviving_derived.memories`, which is `null` today: no populated provenance exists, and the delete is single-shard until issue 72 lands;
 - the **host transcript** (A6) — retained, and only `purge-session` reaches it;
 - **facts** (A8, class C) — derived; a prompt delete retains them, and only `purge-session`'s facts leg erases them;
-- **milestones as historical** — on a `purge-session` the contributor entry leaves, but a prompt delete does not reach the milestone (`FINDINGS-DETAIL.md:163-171`); the merged `summary` (C-H) and its `embedding` (V-inv) stay, `source_count` and the window stay, and the W6 report adds `milestones_rewritten` (H6, planned);
+- **milestones** — the shipped `purge-session` **deletes the whole milestone row** when the triple is a contributor (`purge.rs:206-210`; `episodic_sql.rs:416`), so no part of that row is retained today; the **planned** H6 rewrite is what removes only the contributor entry, keeps the merged `summary` (C-H) and its `embedding` (V-inv) as named residuals (D-19-8), leaves `source_count` and the window unchanged, and adds `milestones_rewritten` to the report — and a prompt delete does not reach the milestone (`FINDINGS-DETAIL.md:163-171`);
 - the **vault** (A10) — named, with its per-request tri-state (D-19-9);
 - **profile rows and changelogs** (A2) — erased at delete time by the watermark rule (`erasure.rs:29-31`).
 
@@ -273,11 +273,11 @@ Artefacts:
 |---|---|---|---|---|---|
 | A1 | `{root}/user-prompts.db` + `-wal` | V | yes, verbatim (`sql.rs:44-58`) | row deleted now, bytes at sweep | yes |
 | A2 | `{root}/user-profiles.db` + `-wal`, incl. `user_profile_changelogs.profile_data_snapshot` | V-W | near-verbatim, **derived** (`REPORT.md:243`; `sql.rs:166`) | rows + changelogs erased at delete by the watermark test (`erasure.rs:29-31`) | yes |
-| A3 | `episodic.db` `episodic_milestones.contributors[].summary` | V | yes, verbatim (D-27) | contributor entry rewritten by `purge-session` | yes |
-| A4 | `episodic.db` `episodic_milestones.summary` | C-H | paraphrase of the contributor set | retained, named (D-19-8) | yes (compaction) |
-| A5 | `episodic.db` `episodic_milestones.embedding` | V-inv | invertible to the summary's text | retained, named, reported (D-19-8) | yes (compaction) |
+| A3 | `episodic.db` `episodic_milestones.contributors[].summary` | V | yes, verbatim (D-27) | shipped `purge-session` deletes the whole milestone row (`purge.rs:206-210`; `episodic_sql.rs:416`); the **planned** H6 rewrite is what removes the contributor entry | yes |
+| A4 | `episodic.db` `episodic_milestones.summary` | C-H | paraphrase of the contributor set | deleted with the row by the shipped `purge-session` (`purge.rs:206-210`); retained and named only by the **planned** H6 rewrite (D-19-8) | yes (compaction) |
+| A5 | `episodic.db` `episodic_milestones.embedding` | V-inv | invertible to the summary's text | deleted with the row by the shipped `purge-session` (`purge.rs:206-210`); retained, named and reported only by the **planned** H6 rewrite (D-19-8) | yes (compaction) |
 | A6 | `episodic.db` `episodic_raw_context`, `episodic_segments`, `agent_sessions.summary` | V-R | yes, verbatim (`FINDINGS-DETAIL.md:163-171`) | retained; erased only by `purge-session` | no |
-| A7 | `{root}/memories/*.db` + `-wal` | C | derived | rows deleted by id; knowledge outlives | no (declared) |
+| A7 | `{root}/projects/project_<hash16>_shard_<n>.db`, `{root}/users/user_<hash16>_shard_<n>.db` (each + `-wal`; `shard_manager.rs:300-306`, `golden_sql.rs:566`, `:1278`) | C | derived | rows deleted by id; knowledge outlives | no (declared) |
 | A8 | `{root}/facts.db` | C | derived | erased by `purge-session`'s facts leg | no |
 | A9 | `{root}/metadata.db` | none | no (counts, registry) | n/a | n/a |
 | A10 | `{root}/vault/{scope_hash}/vault.db` | V | yes, encrypted | excluded; tri-state (D-19-9) | no (D-14) |
