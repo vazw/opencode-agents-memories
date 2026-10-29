@@ -297,6 +297,10 @@ own handle. Its trigger binds the **first legacy opener** to land the clearance 
 - [ ] **45.10** Platform matrix stated and tested: Linux `F_OFD_SETLK`, other unix `F_SETLK`, Windows
       recorded as vacuous-by-construction with the `db.rs:258-262` rationale. Untested platforms are
       named as untested.
+  > **Superseded 2026-10-29 by issue 60:** the primitive is `F_OFD_GETLK` (Linux) / `F_GETLK` (other Unix) —
+  > the probe *queries* byte 0 and takes nothing, because a take-probe makes two conforming openers refuse
+  > each other. Range (one byte at offset 0), `O_RDWR` without `O_CREAT`, `classify_fcntl` and the
+  > close-release residual are unchanged. Measurement: issue 60, `## Comments` 2026-10-29.
 - [ ] **45.11** No new dependency: `libc` is already a workspace dependency (`Cargo.toml:47`, used by
       `mem-profile`); it is added to `mem-store` only. Any other crate needs its own justification.
 - [ ] **45.12** The probe cost per open is measured and recorded.

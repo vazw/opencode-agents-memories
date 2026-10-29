@@ -58,6 +58,18 @@ Two consequences:
 - **2026-10-27** — filed from the issue-56 review after the failure appeared twice. Evidence:
   the coder's workspace log (30.08 s) and the reviewer's six isolation runs (1 fail at 30.01 s, five passes
   at 0.04–0.05 s). No code in that wave touches `crates/mem-profile`.
+- **2026-10-29** — root cause is the issue-45 open guard, not the barrier: `probe_database_file_with`
+  (`crates/mem-store/src/open_guard.rs`) detects a legacy holder by *taking* an `F_OFD_SETLK`/`F_SETLK`
+  byte-0 lock and mapping `EAGAIN` to `Held`, so two conforming openers refuse each other inside the peer's
+  20–85 µs probe window. Measured: 8 of 12 surviving pair artifacts attest a refusal (`res=-1 … .db$` in the
+  loser's stderr; `.tmp/scratch/issue60/pairs/p1,p3,p4,p6,p7,p8,p9,p12`); the loser exits with
+  `{"acquired":false}` and never writes `hs.seen.*`, which is the 30 s timeout. Fix: the probe **queries**
+  (`F_OFD_GETLK`/`F_GETLK`) and acquires nothing — this supersedes issue 45 §45.10's primitive; range, the
+  `O_RDWR`-without-`O_CREAT` open, the classifiers and the close-release residual are unchanged. Verified by
+  `test_two_concurrent_guarded_opens_never_refuse_each_other` (RED on the old probe, GREEN after),
+  `test_probe_reports_held_for_a_live_legacy_holder` and `test_hazard_requires_two_distinct_resolved_configs`
+  green, and **20/20** consecutive isolation runs of `test_exactly_one_competitor_cas_reclaims_dead_owner`.
+  Barrier timeouts now name the side, the child's exit status, its report and its stderr.
 
 ## Agent Brief
 
