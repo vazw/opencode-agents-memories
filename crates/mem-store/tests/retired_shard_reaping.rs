@@ -29,6 +29,7 @@ const TAG: &str = "opencode_project_a1b2c3d4e5f60009";
 
 struct Rig {
     config: StoreConfig,
+    connections: Arc<ConnectionManager>,
     manager: ShardManager,
     /// Kept alive for the whole test: the reaper needs the engine-lock proof.
     _proof: Arc<ExclusiveRoot>,
@@ -48,12 +49,13 @@ fn rig(prefix: &str) -> Rig {
     let manager = ShardManager::new(
         config.storage_path.clone(),
         config.clone(),
-        connections,
+        connections.clone(),
         Arc::new(SystemProcessProbe),
         None,
     );
     Rig {
         config,
+        connections,
         manager,
         _proof: proof,
     }
@@ -131,6 +133,13 @@ impl Rig {
                     .expect("insert an anchor row");
             }
         }
+        // Release the manager's cached writable handle: a live handle answers
+        // the `-tshm` byte-0 query `Held` for this same process, which would
+        // make an otherwise-eligible skip indistinguishable from a holder.
+        self.connections
+            .close_all()
+            .await
+            .expect("close the anchor's cached handle");
         shard
     }
 
