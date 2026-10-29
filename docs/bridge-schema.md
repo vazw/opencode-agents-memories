@@ -107,12 +107,17 @@ whitespace-only → `-32602`. The method is session-free because registration ha
 
 W5.1 shipped `capture` and `inject` as **stubs**:
 
-- `capture` answers `{"accepted":true}`. **The ack carries no durability guarantee in
-  W5.1.** D-48's "an ack means durably queued" arrives with W5.3's inbox, which is W5.3's
-  entry criterion; until then the stub emits the structured stderr line
-  `{"level":"warn","component":"engine","event":"capture.stub_not_durable"}` with **no
-  params** (the params include the transcript, and no transcript may reach stderr).
-- `inject` answers `{"block":null,"memory_count":0,"tokens":0,"truncated":false,"handling_ms":<n>}`.
+- `capture` is no longer a stub: the engine awaits the D-48 durable inbox enqueue
+  (`CaptureService::enqueue` → `CaptureInbox::enqueue`, a conditional insert into
+  `episodic.db`) before it answers `{"accepted":true}`. An ack therefore means
+  durably queued, not processed. A full inbox answers `-32002` (`MEM_INBOX_FULL`),
+  never a silent drop; degraded mode refuses the write with `-32001` and writes no
+  inbox entry.
+- `inject` is no longer a stub: it runs the real assembly (`InjectService::assemble`)
+  and returns its `<memory_context>` block when the assembly has content. `block` can
+  be `null` when there is nothing to render — a missing or blank `project_id`
+  (answered without a store query), a project with no memories and no stored profile,
+  or the compaction leg's no-op arms — which is an empty result, not a stub answer.
 - `recall` is no longer a stub: the **canonical** shape (above) reads the episodic store and
   returns its matching rows; only the **legacy** shape answers the logged empty page
   `{"items":[],"count":0}` and emits the structured stderr event
