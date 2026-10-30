@@ -39,7 +39,7 @@ maximum. The maximum is a constant **beside the set**, not derived from the migr
 |---|---|---|
 | `metadata.db` | `METADATA_MAX_KNOWN` | 2 (W4) |
 | memory shards | `MEMORY_SHARD_MAX_KNOWN` | 3 (W2's v3) |
-| `user_prompts` | `USER_PROMPTS_MAX_KNOWN` | 1 (W5 raises it with prompts v2) |
+| `user_prompts` | `USER_PROMPTS_MAX_KNOWN` | 2 (W5) |
 | `user_profiles` | `USER_PROFILES_MAX_KNOWN` | 1 |
 | episodic | `EPISODIC_MAX_KNOWN` | 6 |
 | `facts.db` | `FACTS_MAX_KNOWN` | 1 |
@@ -74,9 +74,9 @@ the batch and falls back to a separate `execute`. No `.bak` is added to `ensure_
 additive and idempotent (ADR-0018 R-7).
 
 **D-21-6 — No error-message matching for version state.**
-Version decisions are rows (`PRAGMA user_version`), never string matches on an error message. The one
-surviving string match (`ensure_user_prompt_columns`) is W5's to remove by replacing the `ALTER` attempts
-with a `PRAGMA table_info` probe.
+Version decisions are rows (`PRAGMA user_version`), never string matches on an error message. W5 replaced
+the `ALTER` attempts in `ensure_user_prompt_columns` with a `PRAGMA table_info` probe and deleted the
+function.
 
 ## Scope note
 

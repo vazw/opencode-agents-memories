@@ -6,7 +6,7 @@ mod common;
 
 use mem_store::db::{Statement, Value};
 use mem_store::schema_migrations::{
-    MigrationOptions, apply_schema_migrations, ensure_user_prompt_columns, user_prompts_migrations,
+    MigrationOptions, apply_schema_migrations, user_prompts_migrations,
 };
 use mem_store::sql;
 
@@ -47,7 +47,9 @@ async fn test_applies_user_version_migrations_idempotently() {
     let first = apply_schema_migrations(&*db, &migrations, &options, Some(&proof))
         .await
         .expect("first apply");
-    ensure_user_prompt_columns(&*db).await.expect("columns");
+    // The v1/v2 split (issue 43 W5): this mirror pins the runner's v1
+    // idempotency; the v2 column step is covered by
+    // `tests/user_prompts_schema_v2.rs`.
     let second = apply_schema_migrations(&*db, &migrations, &options, Some(&proof))
         .await
         .expect("second apply");

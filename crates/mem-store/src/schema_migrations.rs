@@ -35,6 +35,7 @@ use crate::sqlite_files::{
     FILE_LOCK_RETRY_DELAYS_MS, RetryContext, copy_sqlite_database, remove_sqlite_database,
     rename_sqlite_database, with_sqlite_file_lock_retry,
 };
+use crate::user_prompts_sql::{USER_PROMPTS_V2_COLUMNS, user_prompts_v2_alter};
 
 /// A single versioned schema step; statements run as ONE write batch.
 #[derive(Debug, Clone)]
@@ -60,9 +61,11 @@ pub struct MigrationOptions {
 
 /// Highest `metadata.db` schema version this build knows.
 pub const METADATA_MAX_KNOWN: i64 = 2;
-/// Highest `user_prompts` schema version this build knows (prompts v2 is
-/// W5's half of ADR-0021).
-pub const USER_PROMPTS_MAX_KNOWN: i64 = 1;
+/// Highest `user_prompts` schema version this build knows: 2 because
+/// [`apply_user_prompts_schema`] applies v2 itself, so the migration slice
+/// (`user_prompts_migrations`) stays v1 — the same split
+/// [`EPISODIC_MAX_KNOWN`]` = 6` records.
+pub const USER_PROMPTS_MAX_KNOWN: i64 = 2;
 /// Highest `user_profiles` schema version this build knows.
 pub const USER_PROFILES_MAX_KNOWN: i64 = 1;
 /// Highest memory-shard schema version this build knows.
@@ -635,43 +638,60 @@ pub async fn apply_episodic_schema(
 }
 
 // ---------------------------------------------------------------------------
-// user_prompt column upgrade
+// user_prompts v2 — the probe-then-ALTER apply (issue 43 W5, ADR-0021)
 // ---------------------------------------------------------------------------
-/// Upstream `ensureUserPromptColumns` (L340-355): three ADD COLUMN attempts;
-/// duplicate-column failures are silently tolerated, every other failure is
-/// logged (`tracing::warn!`) and tolerated — startup never aborts. Always
-/// `Ok(())`.
-pub async fn ensure_user_prompt_columns(db: &dyn Db) -> Result<(), StoreError> {
-    for column in USER_PROMPT_EXTRA_COLUMNS {
-        let sql = format!("ALTER TABLE user_prompts ADD COLUMN {column}");
-        match db.execute(&sql, Vec::new()).await {
-            Ok(_) => {}
-            Err(error) => {
-                if !is_duplicate_column_error(&error) {
-                    tracing::warn!(
-                        column,
-                        error = %error.message(),
-                        "Failed to add user_prompts column"
-                    );
-                }
-            }
+
+/// Applies the `user_prompts` schema fold: v1 through the shared runner, then
+/// the v2 column step convergently.
+///
+/// # Contract
+///
+/// - **Precondition:** `options.max_known` is [`USER_PROMPTS_MAX_KNOWN`], this
+///   set's maximum, and the file is not newer than it.
+/// - **Postcondition:** `PRAGMA user_version == 2` and every column of
+///   [`USER_PROMPTS_V2_COLUMNS`] exists.
+/// - **Convergence** exists only for the crash window between the v2 ALTER
+///   batch and the version pragma: a file already carrying the columns
+///   converges silently. A file stamped 2 with columns missing is **not**
+///   repaired — the version is the authority.
+/// - **No backup** is taken by this function: one transactional batch plus one
+///   pragma converge under the probe, so a restore would have nothing to roll
+///   back beyond the batch the engine already rolls back itself (the shard-v3
+///   precedent; the episodic v6 apply, which does back up, is not the model).
+///
+/// The newer-file refusal stays the runner's: `apply_schema_migrations` runs
+/// first, so a v3 file is refused before any probe, before the pending check
+/// and before any DDL.
+pub async fn apply_user_prompts_schema(
+    db: &dyn Db,
+    options: &MigrationOptions,
+    root: Option<&ExclusiveRoot>,
+) -> Result<i64, StoreError> {
+    let version = apply_schema_migrations(db, &user_prompts_migrations(), options, root).await?;
+    if version >= 2 {
+        return Ok(version);
+    }
+    let mut missing: Vec<Statement> = Vec::new();
+    for (name, declaration) in USER_PROMPTS_V2_COLUMNS {
+        if !table_has_column(db, "user_prompts", name).await? {
+            missing.push(Statement::new(
+                user_prompts_v2_alter(name, declaration),
+                Vec::new(),
+            ));
         }
     }
-    Ok(())
-}
-
-/// Upstream column list, order preserved.
-pub const USER_PROMPT_EXTRA_COLUMNS: [&str; 3] = [
-    "capture_attempts INTEGER DEFAULT 0",
-    "provider_id TEXT",
-    "model_id TEXT",
-];
-
-/// Duplicate-column detection (upstream checks the lowercased message for
-/// `duplicate column`; SQLite variants (e.g. `column already exists`) are
-/// matched the same way as turso's catch-all — recorded N-A: upstream pins
-/// ITS turso dialect via the exact substring).
-pub fn is_duplicate_column_error(error: &StoreError) -> bool {
-    let message = error.message().to_ascii_lowercase();
-    message.contains("duplicate column")
+    if !missing.is_empty() {
+        db.batch(missing, BatchMode::Write).await?;
+    }
+    db.execute(&set_user_version_statement(2).sql, Vec::new())
+        .await?;
+    let stamped = get_user_version(db).await?;
+    if stamped != 2 {
+        return Err(StoreError::Internal {
+            message: format!(
+                "user_prompts v2 apply did not stamp user_version = 2 (found {stamped})"
+            ),
+        });
+    }
+    Ok(2)
 }

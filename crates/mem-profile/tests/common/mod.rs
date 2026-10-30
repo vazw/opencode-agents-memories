@@ -252,6 +252,20 @@ pub fn append_event(path: &Path, value: &serde_json::Value) {
 // lock row while a child is parked.
 // ---------------------------------------------------------------------------
 
+/// Opens a real turso database at `config.storage_path/<name>` through the
+/// production factory (mirror of `crates/mem-store/tests/common/mod.rs`).
+pub async fn open_real_db(
+    config: &StoreConfig,
+    name: &str,
+) -> Result<mem_store::db::DbHandle, mem_store::error::StoreError> {
+    use mem_store::db::ConnectFactory as _;
+    let options =
+        mem_store::db::ConnectOptions::for_config(config, mem_store::platform::Platform::current());
+    mem_store::db::turso_connect_factory()
+        .connect(config.storage_path.join(name), options)
+        .await
+}
+
 pub use mem_profile::learning_lock::PROFILE_LEARNING_COORDINATION_DB;
 
 /// Opens the coordination DB directly for fixture setup / assertions.

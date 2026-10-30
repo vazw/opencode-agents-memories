@@ -1036,3 +1036,85 @@ pub fn write_reembed_swap_state(db_path: &Path, staged: &Path, backup: &Path) ->
     std::fs::write(&state_path, body).expect("swap state write");
     state_path
 }
+
+// ---------------------------------------------------------------------------
+// user_prompts schema fixtures (issue 43 W5)
+// ---------------------------------------------------------------------------
+
+/// Builds the `user_prompts` fixture for the schema-v2 battery.
+///
+/// The fixture table is the single authority for shape, `db_path` and `root`
+/// (`proof` is `exclusive_root(&config.storage_path)` bound to a `let` local in
+/// each test; never call `.as_ref()` on the call's own temporary):
+///
+/// | fixture | seed / build | table shape | `MigrationOptions.db_path` | `root` | extra assertions |
+/// |---|---|---|---|---|---|
+/// | fresh | empty file, no seed | none | `Some(dir/user-prompts.db)` | `Some(proof.as_ref())` | 12 columns, `Ok(2)` |
+/// | v0-legacy | `seed_user_prompts(0, false, true)` | 9 cols, 1 row | `Some(…)` | `Some(proof.as_ref())` | row intact, defaults 0/NULL |
+/// | v1-without | `seed_user_prompts(1, false, false)` | 9 cols, **no row** | `Some(…)` | `Some(proof.as_ref())` | types/defaults, INSERT roundtrip, **no `.schema-v*`** |
+/// | v1-with | `seed_user_prompts(1, true, false)` | 12 cols, **no row** | `Some(…)` | `Some(proof.as_ref())` | 12 cols after, `Ok(2)` twice |
+/// | v2-noop | `seed_user_prompts(2, true, false)` | 12 cols, **no row** | `Some(…)` | `Some(proof.as_ref())` | `USER_PROMPTS_MAX_KNOWN == 2`, `Ok(2)` |
+/// | v3 | `seed_user_prompts(3, true, true)` | 12 cols, 1 row | `Some(…)` | `Some(proof.as_ref())` | typed refusal, version/columns/row unchanged |
+/// | fail-surface arm (a) | empty file + `PRAGMA user_version = 1` by hand | **no table** | `Some(…)` | `Some(proof.as_ref())` | `Err`, **no `.schema-v*`** |
+/// | fail-surface arm (b) | `PromptsDb`, `version = 0`, `probe_error = "disk I/O error"` | — | `None` | `None` | `Err` propagates, no ALTER batch |
+/// | no-write | `PromptsDb`, `version = 2`, 12 columns | — | `None` | `None` | `Ok(2)`, SQL allowlist `["PRAGMA user_version"]` |
+///
+/// The 9-column legacy shape is created with `CREATE TABLE IF NOT EXISTS`;
+/// the three v2 columns are appended only when `with_v2_columns`. Exactly one
+/// row (`prompt_legacy`, content `preserve this prompt`, `captured = 1`, no
+/// `project_path`) is inserted only when `with_row`, and the file is stamped
+/// `PRAGMA user_version = {version}` only when `version > 0`.
+pub async fn seed_user_prompts(
+    db: &dyn Db,
+    version: i64,
+    with_v2_columns: bool,
+    with_row: bool,
+) -> Result<(), StoreError> {
+    let mut ddl = String::from(
+        "CREATE TABLE IF NOT EXISTS user_prompts (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            project_path TEXT,
+            content TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            captured INTEGER DEFAULT 0,
+            user_learning_captured BOOLEAN DEFAULT 0,
+            linked_memory_id TEXT",
+    );
+    if with_v2_columns {
+        ddl.push_str(", capture_attempts INTEGER DEFAULT 0, provider_id TEXT, model_id TEXT");
+    }
+    ddl.push(')');
+    db.execute(&ddl, Vec::new()).await?;
+    if with_row {
+        db.execute(
+            "INSERT INTO user_prompts (id, session_id, message_id, content, created_at, captured)
+             VALUES (?, ?, ?, ?, ?, ?)",
+            vec![
+                Value::Text("prompt_legacy".to_string()),
+                Value::Text("session_legacy".to_string()),
+                Value::Text("message_legacy".to_string()),
+                Value::Text("preserve this prompt".to_string()),
+                Value::Integer(123),
+                Value::Integer(1),
+            ],
+        )
+        .await?;
+    }
+    if version > 0 {
+        db.execute(&format!("PRAGMA user_version = {version}"), Vec::new())
+            .await?;
+    }
+    Ok(())
+}
+
+/// Column names of `user_prompts` in definition order (`PRAGMA table_info`).
+pub async fn user_prompt_columns(db: &dyn Db) -> Vec<String> {
+    db.query("PRAGMA table_info(user_prompts)", Vec::new())
+        .await
+        .expect("table_info(user_prompts)")
+        .into_iter()
+        .filter_map(|row| row.text("name"))
+        .collect()
+}

@@ -1,55 +1,32 @@
 //! User-prompts auxiliary DB upgrade battery (blueprint W1.2 step 6).
 //!
-//! Adapted from upstream `tests/turso-auxiliary-db-upgrade.test.ts` — the
-//! legacy-9-column case runs through our `ensure_user_prompt_columns`
-//! instead of the upstream userPromptManager wiring (manager arrives with
-//! the memory waves; the COLUMN-UPGRADE semantics are what this battery
-//! pins).
+//! Adapted from upstream `tests/turso-auxiliary-db-upgrade.test.ts`. Both
+//! remaining cases run through [`apply_user_prompts_schema`] (issue 43 W5),
+//! which probes `PRAGMA table_info` before ALTERing; the column table lives in
+//! `mem_store::user_prompts_sql`.
+//!
+//! Case dispositions, declared: case 2 is renamed because the applier
+//! **prevents** the duplicate instead of tolerating the error; upstream's
+//! "swallow non-duplicate errors" case is **retired** in favour of
+//! `test_missing_table_at_v1_is_surfaced_not_swallowed` in
+//! `tests/user_prompts_schema_v2.rs` (the port refuses where upstream
+//! swallowed).
 
 mod common;
 
 use mem_store::db::Value;
 use mem_store::schema_migrations::{
-    MigrationOptions, apply_schema_migrations, ensure_user_prompt_columns, user_prompts_migrations,
+    MigrationOptions, USER_PROMPTS_MAX_KNOWN, apply_user_prompts_schema,
 };
 
 async fn legacy_prompts_db(config: &mem_store::config::StoreConfig) -> mem_store::db::DbHandle {
     let db = common::open_real_db(config, "user-prompts.db")
         .await
         .expect("open");
-    // Upstream legacy shape: 9 columns, no capture_attempts/provider_id/model_id.
-    db.execute(
-        "CREATE TABLE user_prompts (
-            id TEXT PRIMARY KEY,
-            session_id TEXT NOT NULL,
-            message_id TEXT NOT NULL,
-            project_path TEXT,
-            content TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            captured INTEGER DEFAULT 0,
-            user_learning_captured BOOLEAN DEFAULT 0,
-            linked_memory_id TEXT
-        )",
-        Vec::new(),
-    )
-    .await
-    .expect("legacy table");
-    db.execute(
-        "INSERT INTO user_prompts (
-            id, session_id, message_id, project_path, content, created_at, captured
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        vec![
-            Value::Text("prompt_legacy".to_string()),
-            Value::Text("session_legacy".to_string()),
-            Value::Text("message_legacy".to_string()),
-            Value::Text("/legacy/project".to_string()),
-            Value::Text("preserve this prompt".to_string()),
-            Value::Integer(123),
-            Value::Integer(1),
-        ],
-    )
-    .await
-    .expect("legacy row");
+    // Upstream legacy shape: 9 columns, one row, no version pragma.
+    common::seed_user_prompts(db.as_ref(), 0, false, true)
+        .await
+        .expect("seed the legacy shape");
     db
 }
 
@@ -62,31 +39,31 @@ async fn column_names(db: &mem_store::db::DbHandle) -> Vec<String> {
         .collect()
 }
 
+fn migration_options(config: &mem_store::config::StoreConfig) -> MigrationOptions {
+    MigrationOptions {
+        db_path: Some(config.storage_path.join("user-prompts.db")),
+        label: "test",
+        max_known: USER_PROMPTS_MAX_KNOWN,
+    }
+}
+
 // ---------------------------------------------------------------------------
-// 1/3
+// 1/2
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn test_preserves_legacy_prompts_while_adding_newer_columns() {
     let config = common::store_config("aux-upgrade");
     let db = legacy_prompts_db(&config).await;
+    let proof = common::exclusive_root(&config.storage_path);
 
-    // The v1 baseline migration is idempotent on the legacy shape.
-    apply_schema_migrations(
+    apply_user_prompts_schema(
         db.as_ref(),
-        &user_prompts_migrations(),
-        &MigrationOptions {
-            db_path: Some(config.storage_path.join("user-prompts.db")),
-            label: "test",
-            max_known: mem_store::schema_migrations::USER_PROMPTS_MAX_KNOWN,
-        },
-        Some(common::exclusive_root(&config.storage_path).as_ref()),
+        &migration_options(&config),
+        Some(proof.as_ref()),
     )
     .await
-    .expect("baseline applies");
-    ensure_user_prompt_columns(db.as_ref())
-        .await
-        .expect("upgrade");
+    .expect("the legacy file upgrades");
 
     let rows = db
         .query(
@@ -115,19 +92,23 @@ async fn test_preserves_legacy_prompts_while_adding_newer_columns() {
 }
 
 // ---------------------------------------------------------------------------
-// 2/3
+// 2/2
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_repeated_upgrade_tolerates_duplicate_columns() {
+async fn test_repeated_upgrade_adds_no_duplicate_columns() {
     let config = common::store_config("aux-repeat");
     let db = legacy_prompts_db(&config).await;
-    ensure_user_prompt_columns(db.as_ref())
+    let proof = common::exclusive_root(&config.storage_path);
+    let options = migration_options(&config);
+
+    apply_user_prompts_schema(db.as_ref(), &options, Some(proof.as_ref()))
         .await
         .expect("first upgrade");
-    ensure_user_prompt_columns(db.as_ref())
+    apply_user_prompts_schema(db.as_ref(), &options, Some(proof.as_ref()))
         .await
         .expect("repeat upgrade");
+
     let names = column_names(&db).await;
     for expected in ["capture_attempts", "provider_id", "model_id"] {
         assert_eq!(
@@ -139,28 +120,4 @@ async fn test_repeated_upgrade_tolerates_duplicate_columns() {
             "no duplicate {expected}"
         );
     }
-}
-
-// ---------------------------------------------------------------------------
-// 3/3
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_non_duplicate_errors_are_swallowed_after_warning() {
-    let config = common::store_config("aux-swallow");
-    // No user_prompts table at all: every ALTER fails with a non-duplicate
-    // error. Upstream `ensureUserPromptColumns` logs
-    // ("Failed to add user_prompts column") and continues — startup language:
-    // `catch (error) { if (!message.includes("duplicate column")) { log(...) } }`
-    // — never aborts the process.
-    let db = common::open_real_db(&config, "empty.db")
-        .await
-        .expect("open");
-    ensure_user_prompt_columns(db.as_ref())
-        .await
-        .expect("still Ok(())");
-    // even a repeated missing-table upgrade stays tolerated
-    ensure_user_prompt_columns(db.as_ref())
-        .await
-        .expect("repeated, still Ok(())");
 }
