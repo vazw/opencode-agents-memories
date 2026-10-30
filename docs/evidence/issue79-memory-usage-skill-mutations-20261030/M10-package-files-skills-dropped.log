@@ -1,0 +1,44 @@
+# mutant M10 package-files-skills-dropped
+# oracle command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin && node --test tests/v2-loader-contract.test.mjs
+# oracle exit code: 1
+
+opencode-mem toast rpc registration failed Error: registry refused the descriptor
+    at Object.register (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin/tests/v2-loader-contract.test.mjs:95:15)
+    at registerToastRpc (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin/dist/v2/plugin.js:30:26)
+    at Module.setup (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin/dist/v2/plugin.js:40:26)
+    at Module.setup (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin/dist/plugin.js:1104:36)
+    at async TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin/tests/v2-loader-contract.test.mjs:99:19)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+opencode-mem tool registration skipped: no tool surface
+✖ test_v2_loader_contract_exports_map_declares_v2_and_tui (5.64936ms)
+✔ test_v2_loader_contract_v2_entry_is_a_plugin_definition (10.183247ms)
+✔ test_v2_loader_contract_tui_entry_is_a_companion_definition (0.535034ms)
+✔ test_v2_loader_contract_main_entry_exposes_server_and_setup (0.288942ms)
+✔ test_v2_loader_contract_setup_delegates_to_the_v2_entry (2.322037ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 4
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 85.804358
+
+✖ failing tests:
+
+test at tests/v2-loader-contract.test.mjs:26:1
+✖ test_v2_loader_contract_exports_map_declares_v2_and_tui (5.64936ms)
+  AssertionError [ERR_ASSERTION]: the published files must carry the packaged skill
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin/tests/v2-loader-contract.test.mjs:43:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

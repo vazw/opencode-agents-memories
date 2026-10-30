@@ -1,0 +1,41 @@
+# mutant M08 throwing-read-registers-empty
+# oracle command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin && node --test --test-name-pattern='test_register_skills_skips_an_unreadable_or_empty_plugin_entry_without_throwing' tests/skills-bridge.test.mjs
+# oracle exit code: 1
+
+✖ test_register_skills_skips_an_unreadable_or_empty_plugin_entry_without_throwing (2.196211ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 73.385467
+
+✖ failing tests:
+
+test at tests/skills-bridge.test.mjs:418:1
+✖ test_register_skills_skips_an_unreadable_or_empty_plugin_entry_without_throwing (2.196211ms)
+  AssertionError [ERR_ASSERTION]: a throwing reader yields no entry
+  + actual - expected
+  
+  + {
+  +   autoinvoke: false,
+  +   content: '',
+  +   description: 'How to use the memory tool: its ten modes, the scope rule, the four portability modes, and failures as values.',
+  +   id: 'opencode-mem.memory-usage',
+  +   name: 'Memory Usage',
+  +   path: '/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin/skills/memory-usage/SKILL.md'
+  + }
+  - null
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin/tests/skills-bridge.test.mjs:440:12)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: { id: 'opencode-mem.memory-usage', name: 'Memory Usage', description: 'How to use the memory tool: its ten modes, the scope rule, the four portability modes, and failures as values.', path: '/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin/skills/memory-usage/SKILL.md', content: '', autoinvoke: false },
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

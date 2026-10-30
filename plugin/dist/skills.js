@@ -2,10 +2,21 @@
 // catalogue, registered on the host through `ctx.skill.transform`, re-read on
 // the host's `skill.updated` event.
 //
-// The engine owns `skills.db`; the host owns skill state. This module is the
-// bridge between them and follows the same fail-open law as
-// `registerMemoryTools`: no skill domain, no catalogue, a throwing transform
-// or a rejecting reload/dispose all leave capture and injection untouched.
+// The engine owns `skills.db`; the plugin owns exactly one static entry
+// (`opencode-mem.memory-usage`, appended last, never written back) and the host
+// owns skill state. This module is the bridge between them and follows the
+// same fail-open law as `registerMemoryTools`: no skill domain, no catalogue,
+// a throwing transform or a rejecting reload/dispose all leave capture and
+// injection untouched.
+//
+// A failed catalogue read is NOT an empty catalogue: `readSkillCatalogue`
+// returns `null` on every failure (no engine, no capability, a transport or a
+// shape error), so a null refresh keeps every entry already registered and only
+// re-reads the plugin entry. Evicting on it would unregister the whole DB
+// catalogue on one transient failure. A present-but-empty catalogue IS
+// authoritative and reconciles (a vanished id is removed). A failed or empty
+// plugin-file read logs `skills.plugin_entry_unreadable` and skips only that
+// entry; the DB entries still register.
 //
 // Two races are closed explicitly:
 //   - `refresh` re-checks `disposed` AFTER its await, so a read that lands
@@ -17,9 +28,52 @@
 // spread across reads can chain, reads never run in parallel, and the last
 // event is never lost.
 
-import { isAbsolute } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, isAbsolute, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { logWarn, shortError } from "./plugin.js";
+
+/** The plugin-owned static skill's id: dot-namespaced, no path separator. */
+export const PLUGIN_SKILL_ID = "opencode-mem.memory-usage";
+
+const PLUGIN_SKILL_NAME = "Memory Usage";
+
+const PLUGIN_SKILL_DESCRIPTION =
+  "How to use the memory tool: its ten modes, the scope rule, the four portability modes, and failures as values.";
+
+// Identical depth from `src/` and `dist/`: both resolve to the packaged
+// `skills/memory-usage/SKILL.md` beside the module's parent directory.
+const PLUGIN_SKILL_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../skills/memory-usage/SKILL.md"
+);
+
+/**
+ * Reads the packaged `memory-usage` skill and returns it in the host's
+ * `Skill.Info` shape, or `null` when the file cannot be read.
+ */
+export function pluginSkillEntry(readFile = (file) => readFileSync(file, "utf8")) {
+  let content;
+  try {
+    content = String(readFile(PLUGIN_SKILL_PATH));
+  } catch {
+    logWarn("skills.plugin_entry_unreadable", { id: PLUGIN_SKILL_ID });
+    return null;
+  }
+  if (content.trim().length === 0) {
+    logWarn("skills.plugin_entry_unreadable", { id: PLUGIN_SKILL_ID });
+    return null;
+  }
+  return {
+    id: PLUGIN_SKILL_ID,
+    name: PLUGIN_SKILL_NAME,
+    description: PLUGIN_SKILL_DESCRIPTION,
+    path: PLUGIN_SKILL_PATH,
+    content,
+    autoinvoke: false,
+  };
+}
 
 /**
  * Validates one catalogue entry before it reaches the host editor.
@@ -45,7 +99,10 @@ function validate(entry) {
  * `{ refresh, cleanup }`. Never throws: every failure is a logged line and a
  * no-op.
  */
-export async function registerSkills(ctx, { readCatalogue } = {}) {
+export async function registerSkills(
+  ctx,
+  { readCatalogue, readPluginSkill = pluginSkillEntry } = {}
+) {
   const noop = { refresh: async () => {}, cleanup: async () => {} };
   const transform = ctx?.skill?.transform;
   if (typeof transform !== "function") return noop; // fail-open: no skill domain
@@ -102,15 +159,26 @@ export async function registerSkills(ctx, { readCatalogue } = {}) {
     // in-flight refresh would register a NEW transform after disposal (when the
     // initial registration failed) or call reload on the disposed one.
     if (disposed) return;
-    if (catalogue === null) return; // capability absent / engine down
     const accepted = [];
-    const rejected = new Map(); // reason -> count
-    for (const entry of catalogue) {
-      const reason = validate(entry); // "malformed" | "relative_path" | null
-      if (reason === null) accepted.push(entry);
-      else rejected.set(reason, (rejected.get(reason) ?? 0) + 1);
+    if (catalogue === null) {
+      accepted.push(...entries.filter((entry) => entry.id !== PLUGIN_SKILL_ID));
+    } else {
+      const rejected = new Map(); // reason -> count
+      for (const entry of catalogue) {
+        const reason = validate(entry); // "malformed" | "relative_path" | null
+        if (reason === null) accepted.push(entry);
+        else rejected.set(reason, (rejected.get(reason) ?? 0) + 1);
+      }
+      for (const [reason, count] of rejected) logWarn("skills.entry_rejected", { reason, count });
     }
-    for (const [reason, count] of rejected) logWarn("skills.entry_rejected", { reason, count });
+    let plugin = null;
+    try {
+      plugin = readPluginSkill();
+    } catch {
+      logWarn("skills.plugin_entry_unreadable", { id: PLUGIN_SKILL_ID });
+    }
+    if (plugin !== null && plugin !== undefined) accepted.push(plugin);
+    if (catalogue === null && accepted.length === 0) return;
     entries.splice(0, entries.length, ...accepted);
     if (registration === null) {
       try {

@@ -1,0 +1,60 @@
+# mutant M01 plugin-entry-dropped
+# oracle command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin && node --test --test-name-pattern='test_register_skills_registers_the_plugin_entry_last_beside_the_catalogue|test_setup_stays_fail_open_with_a_skill_surface_and_no_engine' tests/skills-bridge.test.mjs
+# oracle exit code: 1
+
+✖ test_register_skills_registers_the_plugin_entry_last_beside_the_catalogue (3.40046ms)
+✖ test_setup_stays_fail_open_with_a_skill_surface_and_no_engine (57.323469ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 134.597762
+
+✖ failing tests:
+
+test at tests/skills-bridge.test.mjs:362:1
+✖ test_register_skills_registers_the_plugin_entry_last_beside_the_catalogue (3.40046ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      'alpha',
+      'beta',
+  -   'opencode-mem.memory-usage'
+    ]
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin/tests/skills-bridge.test.mjs:368:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'alpha', 'beta' ],
+    expected: [ 'alpha', 'beta', 'opencode-mem.memory-usage' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/skills-bridge.test.mjs:630:1
+✖ test_setup_stays_fail_open_with_a_skill_surface_and_no_engine (57.323469ms)
+  AssertionError [ERR_ASSERTION]: setup resolves and registers only the plugin-owned skill
+  + actual - expected
+  
+  + []
+  - [
+  -   'opencode-mem.memory-usage'
+  - ]
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin/tests/skills-bridge.test.mjs:638:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [ 'opencode-mem.memory-usage' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

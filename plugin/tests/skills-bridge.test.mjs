@@ -18,7 +18,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { registerSkills } from "../src/skills.js";
+import { pluginSkillEntry, registerSkills } from "../src/skills.js";
+import { MEMORY_TOOL_MODES } from "../src/tools.js";
 import {
   DEFAULT_STUB_CAPABILITIES,
   DRIVER_SOURCE,
@@ -29,6 +30,10 @@ import {
 } from "./harness/bridge.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const ID = "opencode-mem.memory-usage";
+const DESCRIPTION =
+  "How to use the memory tool: its ten modes, the scope rule, the four portability modes, and failures as values.";
+const FILE = path.resolve(here, "..", "skills", "memory-usage", "SKILL.md");
 
 // The pre-69 hello: the four capabilities issue 68 left, `skills` absent.
 const PRE_69_CAPABILITIES = { ...DEFAULT_STUB_CAPABILITIES };
@@ -167,7 +172,7 @@ async function runSkillsDriver(t, { stub = true, capabilities = DEFAULT_STUB_CAP
   return { record: JSON.parse(fs.readFileSync(donePath, "utf8")), tmp, directory };
 }
 
-// ── the nine unit cases ────────────────────────────────────────────────
+// ── the thirteen unit cases ────────────────────────────────────────────
 
 test("test_register_skills_adds_each_catalogue_entry_with_the_host_payload", async () => {
   const { ctx, adds } = fakeSkillDomain();
@@ -178,7 +183,7 @@ test("test_register_skills_adds_each_catalogue_entry_with_the_host_payload", asy
     ],
   });
 
-  assert.deepEqual(adds, [
+  assert.deepEqual(adds.slice(0, 2), [
     {
       id: "alpha",
       name: "Alpha",
@@ -195,6 +200,12 @@ test("test_register_skills_adds_each_catalogue_entry_with_the_host_payload", asy
       autoinvoke: false,
     },
   ]);
+  assert.deepEqual(adds.map((skill) => skill.id), ["alpha", "beta", ID]);
+  assert.equal(adds[2].name, "Memory Usage");
+  assert.ok(adds[2].description.includes("ten modes"));
+  assert.equal(adds[2].path, FILE);
+  assert.ok(adds[2].content.includes("# Memory usage"));
+  assert.equal(adds[2].autoinvoke, false);
   await handle.cleanup();
 });
 
@@ -208,8 +219,8 @@ test("test_register_skills_removes_a_vanished_id_on_refresh_and_leaves_the_survi
 
   assert.deepEqual(removes, ["beta"]);
   assert.ok(updates.includes("alpha"), "the survivor is updated, never re-added");
-  assert.equal(adds.length, 2, "a refresh must not add the survivor again");
-  assert.deepEqual([...skills.keys()], ["alpha"]);
+  assert.equal(adds.length, 3, "a refresh must not add the survivor or the plugin entry again");
+  assert.deepEqual([...skills.keys()], ["alpha", ID]);
   await handle.cleanup();
 });
 
@@ -241,7 +252,7 @@ test("test_register_skills_rejects_an_entry_with_a_relative_path", async () => {
 
   assert.deepEqual(
     adds.map((skill) => skill.id),
-    ["absolute"],
+    ["absolute", ID],
     "a relative path is never registered: the host's AbsolutePath brand is unchecked at runtime"
   );
   await handle.cleanup();
@@ -255,7 +266,7 @@ test("test_register_skills_rejects_a_non_string_description", async () => {
 
   assert.deepEqual(
     adds.map((skill) => skill.id),
-    ["clean"],
+    ["clean", ID],
     "description: 123 is malformed, not truthy-but-typed"
   );
   await handle.cleanup();
@@ -278,14 +289,19 @@ test("test_register_skills_is_a_no_op_without_a_skill_editor_surface", async () 
   await handle.cleanup();
 });
 
-test("test_register_skills_is_a_no_op_when_the_catalogue_is_unavailable", async () => {
+test("test_register_skills_registers_only_the_plugin_entry_when_the_catalogue_is_unavailable", async () => {
   const { ctx, adds, state } = fakeSkillDomain();
   const handle = await registerSkills(ctx, { readCatalogue: async () => null });
 
-  assert.equal(state.transformCalls, 0, "no catalogue means the transform is never called");
-  assert.deepEqual(adds, []);
+  assert.equal(
+    state.transformCalls,
+    1,
+    "no catalogue at the first refresh still registers the plugin-owned skill"
+  );
+  assert.deepEqual(adds.map((skill) => skill.id), [ID]);
   await handle.refresh();
-  assert.equal(state.transformCalls, 0);
+  assert.equal(state.transformCalls, 1);
+  assert.equal(state.reloadCalls, 1);
   await handle.cleanup();
 });
 
@@ -335,12 +351,157 @@ test("test_register_skills_does_not_register_after_cleanup", async () => {
 
   assert.deepEqual(
     adds.map((skill) => skill.id),
-    ["alpha"],
+    ["alpha", ID],
     "a read that lands after cleanup mutates nothing"
   );
   assert.deepEqual(updates, []);
   assert.deepEqual(removes, []);
   assert.equal(state.disposeCalls, 1);
+});
+
+test("test_register_skills_registers_the_plugin_entry_last_beside_the_catalogue", async () => {
+  const { ctx, adds } = fakeSkillDomain();
+  const handle = await registerSkills(ctx, {
+    readCatalogue: async () => [entry("alpha"), entry("beta")],
+  });
+
+  assert.deepEqual(adds.map((skill) => skill.id), ["alpha", "beta", ID]);
+  const plugin = adds[2];
+  assert.equal(plugin.name, "Memory Usage");
+  assert.ok(plugin.description.includes("ten modes"));
+  assert.equal(plugin.path, FILE, "the entry carries the real absolute skill path");
+  assert.equal(plugin.autoinvoke, false);
+  assert.ok(plugin.content.includes("# Memory usage"));
+  assert.ok(plugin.content.includes("name: memory-usage"));
+  assert.ok(
+    plugin.content.includes(`description: "${DESCRIPTION}"`),
+    "the frontmatter description is the quoted D2 sentence"
+  );
+  assert.ok(plugin.content.includes("## The ten modes"));
+  const modes = [...plugin.content.matchAll(/^\| `([a-z-]+)` \|/gm)]
+    .map((match) => match[1])
+    .sort();
+  assert.deepEqual(modes, [...MEMORY_TOOL_MODES].sort(), "the table teaches exactly the tool's modes");
+  for (const token of ["all-projects", "dryRun", "allowLinkedSource"]) {
+    assert.ok(plugin.content.includes(token), `the skill body teaches ${token}`);
+  }
+  await handle.cleanup();
+
+  // The entry is appended last, so a catalogue entry carrying the same id is
+  // replaced by the file's content: last wins.
+  const collision = fakeSkillDomain();
+  const collisionHandle = await registerSkills(collision.ctx, {
+    readCatalogue: async () => [entry(ID, { content: "catalogue-body" })],
+  });
+  assert.equal(collision.skills.get(ID).content, plugin.content);
+  assert.notEqual(collision.skills.get(ID).content, "catalogue-body");
+  await collisionHandle.cleanup();
+});
+
+test("test_register_skills_keeps_the_plugin_entry_when_an_empty_catalogue_removes_every_db_id", async () => {
+  const { ctx, adds, removes, skills } = fakeSkillDomain();
+  let catalogue = [entry("alpha")];
+  const handle = await registerSkills(ctx, { readCatalogue: async () => catalogue });
+  assert.deepEqual([...skills.keys()], ["alpha", ID]);
+
+  catalogue = [];
+  await handle.refresh();
+
+  assert.deepEqual(removes, ["alpha"], "the vanished DB id is reconciled away");
+  assert.equal(removes.includes(ID), false, "the plugin entry is never removed");
+  assert.equal(skills.has("alpha"), false);
+  assert.equal(skills.has(ID), true);
+  assert.equal(adds.length, 2, "the plugin entry is updated, never re-added");
+  await handle.cleanup();
+});
+
+test("test_register_skills_skips_an_unreadable_or_empty_plugin_entry_without_throwing", async () => {
+  const originalWrite = process.stderr.write;
+  const lines = [];
+  const capture = async (fn) => {
+    lines.length = 0;
+    process.stderr.write = (chunk) => {
+      lines.push(String(chunk));
+      return true;
+    };
+    try {
+      return await fn();
+    } finally {
+      process.stderr.write = originalWrite;
+    }
+  };
+
+  try {
+    const missing = await capture(() =>
+      pluginSkillEntry(() => {
+        throw new Error("ENOENT");
+      })
+    );
+    assert.equal(missing, null, "a throwing reader yields no entry");
+    assert.equal(lines.length, 1, "exactly one line for an unreadable file");
+    assert.ok(lines[0].includes("skills.plugin_entry_unreadable"));
+    assert.ok(lines[0].includes(ID));
+
+    const blank = await capture(() => pluginSkillEntry(() => "   \n"));
+    assert.equal(blank, null, "a whitespace-only file is unreadable, not an empty skill");
+    assert.equal(lines.length, 1);
+    assert.ok(lines[0].includes("skills.plugin_entry_unreadable"));
+    assert.ok(lines[0].includes(ID));
+
+    const injectedNull = fakeSkillDomain();
+    let nullHandle = null;
+    await capture(async () => {
+      nullHandle = await registerSkills(injectedNull.ctx, {
+        readCatalogue: async () => [entry("alpha")],
+        readPluginSkill: () => null,
+      });
+    });
+    assert.deepEqual(injectedNull.adds.map((skill) => skill.id), ["alpha"]);
+    await nullHandle.cleanup();
+
+    const injectedThrow = fakeSkillDomain();
+    let throwHandle = null;
+    await capture(async () => {
+      throwHandle = await registerSkills(injectedThrow.ctx, {
+        readCatalogue: async () => [entry("alpha")],
+        readPluginSkill: () => {
+          throw new Error("ENOENT");
+        },
+      });
+    });
+    assert.deepEqual(injectedThrow.adds.map((skill) => skill.id), ["alpha"]);
+    assert.equal(lines.length, 1, "the injected throw is logged, not propagated");
+    assert.ok(lines[0].includes("skills.plugin_entry_unreadable"));
+    await throwHandle.cleanup();
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+});
+
+test("test_register_skills_keeps_the_db_entries_when_a_refresh_loses_the_catalogue", async () => {
+  const { ctx, adds, removes, skills, state } = fakeSkillDomain();
+  let catalogue = [entry("alpha")];
+  let calls = 0;
+  const readPluginSkill = () => {
+    const content = calls === 0 ? "body-A" : "body-B";
+    calls += 1;
+    return { id: ID, name: "Memory Usage", path: FILE, content, autoinvoke: false };
+  };
+  const handle = await registerSkills(ctx, {
+    readCatalogue: async () => catalogue,
+    readPluginSkill,
+  });
+  assert.equal(skills.get(ID).content, "body-A");
+
+  catalogue = null;
+  await handle.refresh(); // a failed catalogue read must not throw
+
+  assert.deepEqual(removes, [], "a null catalogue evicts nothing");
+  assert.equal(skills.has("alpha"), true, "a failed catalogue read is not an empty catalogue");
+  assert.equal(skills.get(ID).content, "body-B", "the plugin entry is re-read per refresh");
+  assert.equal(adds.length, 2);
+  assert.equal(state.reloadCalls, 1);
+  await handle.cleanup();
 });
 
 // ── the five driver cases (the real V2 `setup(ctx)`) ───────────────────
@@ -377,7 +538,7 @@ test(
       [{ project_id: directory }],
       "the host directory is the project_id, and the request is session-free"
     );
-    assert.deepEqual(record.adds, [
+    assert.deepEqual(record.adds.slice(0, 2), [
       {
         id: "alpha",
         name: "Alpha",
@@ -394,6 +555,10 @@ test(
         autoinvoke: false,
       },
     ]);
+    assert.deepEqual(record.adds.map((skill) => skill.id), ["alpha", "beta", ID]);
+    const staged = path.join(tmp, "opencode-mem", "skills", "memory-usage", "SKILL.md");
+    assert.equal(record.adds[2].path, staged, "the e2e entry points at the staged real file");
+    assert.ok(record.adds[2].content.includes("# Memory usage"));
     assert.ok(record.elapsedMs < 8000, "the awaited setup stays inside the 5 s + 3 s bound");
     assert.deepEqual(record.consoleErrors, []);
   }
@@ -424,7 +589,7 @@ test(
       [],
       "a pre-69 engine is never asked: an absent flag is not an invitation"
     );
-    assert.deepEqual(record.adds, []);
+    assert.deepEqual(record.adds.map((skill) => skill.id), [ID]);
   }
 );
 
@@ -455,7 +620,7 @@ test(
 
     assert.deepEqual(
       record.adds.map((skill) => skill.id),
-      ["absolute"],
+      ["absolute", ID],
       "the absolute-path guard survives the JSON boundary"
     );
     assert.equal(record.adds[0].path, skillPath(tmp, "absolute"));
@@ -470,7 +635,11 @@ test(
 
     assert.equal(record.helloCount, 0, "no engine means no wire at all");
     assert.deepEqual(record.catalogueRequests, []);
-    assert.deepEqual(record.adds, [], "setup resolves and registers nothing");
+    assert.deepEqual(
+      record.adds.map((skill) => skill.id),
+      [ID],
+      "setup resolves and registers only the plugin-owned skill"
+    );
     assert.deepEqual(record.consoleErrors, []);
   }
 );
@@ -514,7 +683,7 @@ test(
       2,
       "setup reads once; the host's skill.updated triggers exactly one re-read"
     );
-    assert.equal(record.adds.length, 2, "the survivor is updated, never re-added");
+    assert.equal(record.adds.length, 3, "the survivor is updated, never re-added");
     assert.ok(record.updates.includes("alpha"));
     assert.deepEqual(record.removes, ["beta"], "the vanished id is removed");
     assert.equal(record.disposed, true, "cleanup disposed the registration");

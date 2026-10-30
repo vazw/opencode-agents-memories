@@ -1,0 +1,36 @@
+# mutant M04 null-catalogue-evicts
+# oracle command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin && node --test --test-name-pattern='test_register_skills_keeps_the_db_entries_when_a_refresh_loses_the_catalogue' tests/skills-bridge.test.mjs
+# oracle exit code: 1
+
+✖ test_register_skills_keeps_the_db_entries_when_a_refresh_loses_the_catalogue (2.910792ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 74.635281
+
+✖ failing tests:
+
+test at tests/skills-bridge.test.mjs:481:1
+✖ test_register_skills_keeps_the_db_entries_when_a_refresh_loses_the_catalogue (2.910792ms)
+  AssertionError [ERR_ASSERTION]: a null catalogue evicts nothing
+  + actual - expected
+  
+  + [
+  +   'alpha'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin/tests/skills-bridge.test.mjs:499:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [ 'alpha' ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

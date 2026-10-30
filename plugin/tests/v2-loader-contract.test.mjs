@@ -40,6 +40,7 @@ test("test_v2_loader_contract_exports_map_declares_v2_and_tui", () => {
     default: "./dist/plugin.js",
   });
   assert.ok(pkg.files.includes("dist"), "the published files must carry the shipped bundle");
+  assert.ok(pkg.files.includes("skills"), "the published files must carry the packaged skill");
 });
 
 test("test_v2_loader_contract_v2_entry_is_a_plugin_definition", async () => {

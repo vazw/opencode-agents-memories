@@ -1,0 +1,32 @@
+# mutant M11 skill-body-truncated
+# oracle command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin && node --test --test-name-pattern='test_register_skills_registers_the_plugin_entry_last_beside_the_catalogue' tests/skills-bridge.test.mjs
+# oracle exit code: 1
+
+✖ test_register_skills_registers_the_plugin_entry_last_beside_the_catalogue (7.255514ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 85.207058
+
+✖ failing tests:
+
+test at tests/skills-bridge.test.mjs:362:1
+✖ test_register_skills_registers_the_plugin_entry_last_beside_the_catalogue (7.255514ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert.ok(plugin.content.includes("name: memory-usage"))
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin/tests/skills-bridge.test.mjs:375:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

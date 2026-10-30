@@ -36,7 +36,8 @@ const REAL_PKG_ROOT = path.resolve(here, "..", "..");
 /**
  * Complete temp copy of the package: `package.json` (the bundle's JSON import
  * attribute needs it), ALL of `dist/**` (H5: a `setup()` call resolves
- * `./v2/plugin.js` inside the staged package), all of `src/**` and `index.js`.
+ * `./v2/plugin.js` inside the staged package), all of `src/**`, all of
+ * `skills/**` (the packaged skill the bridge reads) and `index.js`.
  */
 export function stagePackageTree(tmpRoot) {
   const pkgDir = path.join(tmpRoot, "opencode-mem");
@@ -44,6 +45,7 @@ export function stagePackageTree(tmpRoot) {
   fs.copyFileSync(path.join(REAL_PKG_ROOT, "package.json"), path.join(pkgDir, "package.json"));
   fs.cpSync(path.join(REAL_PKG_ROOT, "dist"), path.join(pkgDir, "dist"), { recursive: true });
   fs.cpSync(path.join(REAL_PKG_ROOT, "src"), path.join(pkgDir, "src"), { recursive: true });
+  fs.cpSync(path.join(REAL_PKG_ROOT, "skills"), path.join(pkgDir, "skills"), { recursive: true });
   fs.copyFileSync(path.join(REAL_PKG_ROOT, "index.js"), path.join(pkgDir, "index.js"));
   return pkgDir;
 }

@@ -1,0 +1,50 @@
+# mutant M05 null-catalogue-returns-early
+# oracle command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin && node --test --test-name-pattern='test_register_skills_registers_only_the_plugin_entry_when_the_catalogue_is_unavailable|test_register_skills_keeps_the_db_entries_when_a_refresh_loses_the_catalogue' tests/skills-bridge.test.mjs
+# oracle exit code: 1
+
+✖ test_register_skills_registers_only_the_plugin_entry_when_the_catalogue_is_unavailable (1.992729ms)
+✖ test_register_skills_keeps_the_db_entries_when_a_refresh_loses_the_catalogue (1.270704ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 82.707599
+
+✖ failing tests:
+
+test at tests/skills-bridge.test.mjs:292:1
+✖ test_register_skills_registers_only_the_plugin_entry_when_the_catalogue_is_unavailable (1.992729ms)
+  AssertionError [ERR_ASSERTION]: no catalogue at the first refresh still registers the plugin-owned skill
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin/tests/skills-bridge.test.mjs:296:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/skills-bridge.test.mjs:481:1
+✖ test_register_skills_keeps_the_db_entries_when_a_refresh_loses_the_catalogue (1.270704ms)
+  AssertionError [ERR_ASSERTION]: the plugin entry is re-read per refresh
+  
+  'body-A' !== 'body-B'
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-79-memory-usage-skill/plugin/tests/skills-bridge.test.mjs:501:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'body-A',
+    expected: 'body-B',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

@@ -51,6 +51,7 @@
     "dist",
     "index.js",
     "engine",
+    "skills",
     "package.json"
   ]
 }
