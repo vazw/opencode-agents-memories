@@ -13,11 +13,14 @@
 
 ## Context
 
-Decision 4 (owner, 2026-10-25) fixed a **100 ms p95** search budget and moved
-`max_vectors_per_shard` from 50,000 to ≈12,500 because `2 × cap × 4 µs ≤ 100 ms` — one config line, no
-schema change. The arithmetic was never measured at the sizes the corpus is heading for: P11 measured
-3,000 rows, and the issue itself records the live corpus as 2 341 rows over 19 shards (now stale; the
-run-time copy read **3,030 rows over 22 shards**).
+Decision 4 (owner, 2026-10-25) fixed a **100 ms p95** search budget and set
+`max_vectors_per_shard` to ≈12,500 from the then-current 50,000 because `2 × cap × 4 µs ≤ 100 ms` — one
+config line, no schema change. The code default **remains `50_000`**
+(`crates/mem-core/src/config/schema.rs:583`, `crates/mem-core/tests/config_defaults.rs:105`): the wave's
+decision is D4, not CAP-CHANGE, so Step 10 skipped the edit and no source file changed. The arithmetic
+was never measured at the sizes the corpus is heading for: P11 measured 3,000 rows, and the issue
+itself records the live corpus as 2 341 rows over 19 shards (now stale; the run-time copy read
+**3,030 rows over 22 shards**).
 
 W8 measured the memory half of a tag-filtered scope-wide search through production
 `vector::search_in_shard` (inline) and a harness-local narrow twin, over nine cells: `x1` anchor,
@@ -44,7 +47,8 @@ verification, scans, hydrate and merge.
 ## Decisions
 
 **D-24-1 — Decision 4's arithmetic is re-derived, and it is optimistic.**
-The warm exact-only diagnostic measures both exact scans at **11.18 µs/row** at 303,000 rows with
+The warm exact-only diagnostic (query serialization + shard resolution/open + both scans; open
+is ≤0.01 % of the measured time) measures both exact scans at **11.18 µs/row** at 303,000 rows with
 `cap 50,000` (5.59 µs/row/column) and **12.22 µs/row** with `cap 12,500` (6.11 µs/row/column). Decision
 4's own formula with the measured rate gives `2 × 12,500 × 6.11 µs = 152.8 ms` for a full-cap scope —
 1.53× the budget — and an implied cap of `floor(100,000 / 12.223679) = 8,180` rows, not 12,500. The cap
@@ -61,9 +65,11 @@ this evidence.
 **D-24-3 — The budget's input is the scope's total rows (F-W8-1).**
 A scope-wide query fans out over every shard of the scope; `max_vectors_per_shard` bounds one file only.
 At the measured 12.22 µs/row the 100 ms budget supports `scope_rows_budget ≈ 8,180` rows per queried
-scope. Today's largest real scope is 885 rows, so today's worst request is ~10.8 ms warm; one project
-accumulating ≥ 8,180 memories crosses the budget independent of the cap. If the owner meant the budget
-per shard, it already holds at every measured size.
+scope. Today's largest real scope is 885 rows, whose two exact scans alone are ≈10.8 ms at the 100× rate
+(7.9 ms at the x1 rate; the measured x1 anchor, 3,030 rows, is 59,938 µs warm / 76,941 µs cold p95); one
+project accumulating ≥ 8,180 memories crosses the budget independent of the cap. The per-shard reading
+**does not hold** at the measured sizes either: the 10×/cap-50,000 cell is a single 30,300-row shard at
+723,554 µs cold p95, and a 12,500-row shard's two exact scans alone are 152.8 ms at the 100× rate.
 
 **D-24-4 — Named next lever.**
 The next lever is an **ANN index** (a different data structure, not a layout) or a **scope-size

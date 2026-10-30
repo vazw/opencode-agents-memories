@@ -3,10 +3,10 @@
 Status: ready-for-human — 2026-10-27 (umbrella, not a single wave: **W0** `af01156`, **W1 write side**
 `3d5e940` and the **liveness blocker** `aa0dcc4` are landed; **W2 is landed on `main` at `e0bbd37`**
 (merge of `12feaa2` over `c558e52`, base `dc5bcad`; shard v3 + `shard_stats` + embedding fingerprint;
-review approved after one rework); **W3 is landed on `main` at `a4df6e7`** (count/model authority: typed read+write refusals incl. `update_memory`, count-at-commit, the re-embed CLI, ADR-0018 D-18-13; review approved after **two** reworks); **W4 is landed on `main` at `030a0bd`** (one active shard: metadata v2 repair + `WHERE is_active = 1` partial unique index, one-transaction rotation, validated reactivation, reconcile skip; ADR-0022; 12 tests, `mem-store` 45/380/0/12, review approved first pass; residual R-22-2 tracked as **issue 77**) — W5
-and W8 are absent from the tree, and the ADR set is partial: **0017 (`0017-compaction-hook.md`) and 0026
-(`0026-context-assembly.md`) exist and 0018 (`0018-shard-facts-source-of-truth.md`) + 0021
-(`0021-schema-version-discipline.md`) landed with W2**. The audit that gates ADR-0019 and ADR-0025 is now preserved
+review approved after one rework); **W3 is landed on `main` at `a4df6e7`** (count/model authority: typed read+write refusals incl. `update_memory`, count-at-commit, the re-embed CLI, ADR-0018 D-18-13; review approved after **two** reworks); **W4 is landed on `main` at `030a0bd`** (one active shard: metadata v2 repair + `WHERE is_active = 1` partial unique index, one-transaction rotation, validated reactivation, reconcile skip; ADR-0022; 12 tests, `mem-store` 45/380/0/12, review approved first pass; residual R-22-2 tracked as **issue 77**) — at this **2026-10-27 snapshot** W5
+and W8 were absent from the tree and the ADR set was partial
+(**0017** and **0026** existed; **0018** + **0021** landed with W2); both have since landed (W5
+`e9c2da3`; W8 measured below). The audit that gates ADR-0019 and ADR-0025 is now preserved
 in-repo at `docs/evidence/opsec-w6-design-2026-10-25/` — §9 lists twelve blockers, 1 closed, 2–12 open.
 W7 landed **2026-10-30** at `43d9954` — retired-shard reaping, 12 commits from `4307662`, 14 files
 (including the engine-shutdown stdout pin); review approved after one rework; `mem-store` 394/0/12,

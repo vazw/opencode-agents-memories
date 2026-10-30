@@ -683,6 +683,15 @@ fn test_generated_lengths_match_the_measured_multiset() {
         .collect();
     assert_eq!(one_cycle, multiset);
 
+    let seed = 0x5eed_0000_0000_0043_u64;
+    for index in [0, 1, 2_953, 2_954, 3_015, 3_016, 30_299] {
+        assert_eq!(
+            generated_row(seed, index).content.len(),
+            length_for(index, &multiset),
+            "generated content length must follow the measured multiset at index {index}"
+        );
+    }
+
     let one_sum: usize = multiset.iter().sum();
     let ten_sum: usize = (0..10 * multiset.len())
         .map(|index| length_for(index, &multiset))
@@ -995,6 +1004,8 @@ async fn test_narrow_scan_matches_inline_top_k() {
 
     let inline_map = similarity_map(&inline_results);
     let narrow_map = similarity_map(&narrow_results);
+    assert_eq!(inline_map.len(), 40, "inline arm must fill k=40 window");
+    assert_eq!(narrow_map.len(), 40, "narrow arm must fill k=40 window");
     let union: HashSet<&String> = inline_map.keys().chain(narrow_map.keys()).collect();
     let mut max_delta = 0.0_f64;
     for id in union {
