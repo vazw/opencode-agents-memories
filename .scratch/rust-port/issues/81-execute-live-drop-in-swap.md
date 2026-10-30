@@ -1,7 +1,9 @@
 # 81 — ops · Execute the live drop-in swap: migrate in place, provision, swap the plugin, verify, dogfood, roll back
 
-Status: paused — behind W6.6 (issue 30) and the owner's stop/go; then owner-executed with the
-config-editor after the human gate. Evidence lands in `docs/evidence/live-swap-<date>/`.
+Status: ready-for-human — 2026-10-31: the runbook landed at `70d9206` and W6.6 at `1bf1e8a`.
+Owner-executed: rebuild the engine from `main`, then run `docs/runbooks/live-swap.md`; the
+config-editor applies the plugin-entry swap after the human gate. Evidence lands in
+`docs/evidence/live-swap-<date>/`.
 
 ## What is missing
 

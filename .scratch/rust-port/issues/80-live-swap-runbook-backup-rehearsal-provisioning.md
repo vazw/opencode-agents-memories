@@ -1,8 +1,8 @@
 # 80 — ops · Live-swap runbook: backup, restore rehearsal, cache provisioning, verification and rollback
 
-Status: ready-for-agent — creates `docs/runbooks/live-swap.md` and
-`docs/evidence/live-swap-2026-10-30/` (the runbook, the provisioning procedure, the executed backup +
-restore rehearsal, and the verification/rollback checklist).
+Status: done — 2026-10-31 — landed at `70d9206` (9 files, +1339): `docs/runbooks/live-swap.md`,
+`docs/evidence/live-swap-2026-10-30/`, and `scripts/provision-onnx-cache.sh`. Rehearsed on copies;
+the live store was never written. See `## Landed`.
 
 ## What is missing
 
@@ -94,3 +94,29 @@ version expectations move).
 - A code change making the cache root configurable; this issue records the chosen provisioning procedure
   and names the code change as a follow-up if the owner wants one.
 - Re-embedding, or migrating the other 21 projects' directory paths.
+
+## Landed
+
+2026-10-31 — landed at `70d9206` (9 files, +1339): `docs/runbooks/live-swap.md` (350 lines),
+`docs/evidence/live-swap-2026-10-30/` (README, dry-run, export-import, backup-restore, provisioning,
+the 85-line manifest and 85-OK verification), and `scripts/provision-onnx-cache.sh` (offline,
+idempotent). Handoff: `.tmp/progress/issue80-live-swap-runbook.handoff.md`.
+
+Measured (all on copies; the live store was never written — metadata v1, prompts v1, 22/22 shards v2,
+no `.auth-token`/`.engine.lock`):
+
+- **Backup** — 29 checkpoints all `0|0|0`; base-file vectors 3,052 → 3,104 after WAL applied; 29/29
+  `integrity_check`; dated backup **617 MB / 85 files / 29 DBs**; manifest **85/85 OK**, rc 0.
+- **Restore** — byte-identical (0 DB sha diffs; 31 identical non-DB files); open 1 migrated
+  `metadata.db` 1→2 (242 ms), open 2 `user-prompts.db` 1→2; final 29/29 integrity, `bak_files=0`;
+  22 shards / 3,104 memories / 1,745 prompts / 2 profiles + 10 changelogs preserved; lazy shard 2→3
+  reproduced (`shard_stats 1|932`; the other 21 stay v2).
+- **Provisioning A/B/C** — absent → `-32603` in 11 ms; tokenizer 1.0 → `-32603` after 3,753 ms;
+  canonical 2.0 → search 2,947 ms then 63 ms, add 73 ms, canary rank-1; provisioner 37.6 s cold;
+  the curl path: 401 token-mint, search 200, add 200, UI 200.
+- `sh -n` ok, `shellcheck` rc 0; the runbook's command forms were re-executed verbatim.
+
+Deviations recorded: the live store could not be stopped, so the rehearsal checkpointed the copy (the
+runbook's §3 checkpoints the live DBs after the stop); `rsync` is absent, so the restore is move-aside
++ `cp -a` (rehearsed); the engine is the `e5154bc` build (issue 81 rebuilds from `main` and re-checks
+the web UI); the dry-run report's 1,732 prompts vs its artifacts' 1,733 for `data-final`.
