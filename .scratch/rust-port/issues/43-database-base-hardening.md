@@ -12,9 +12,11 @@ W7 landed **2026-10-30** at `43d9954` — retired-shard reaping, 12 commits from
 (including the engine-shutdown stdout pin); review approved after one rework; `mem-store` 394/0/12,
 `reap_cli` 6/0, workspace 2094/0/22; ADR-0023 landed and **Accepted** (owner, 2026-10-30); ADR-0019
 A14 amended.
-Next: **W5 (prompts v2) follows** per W7 ruling 1. Owner picks outstanding: **70** (wire method set),
-**53 O3** (vault half), **28** (live swap), and the **zstd advisories** re-derivation. The **ADR-0019
-text** landed `Accepted` at `b36920e`, and **issue 72** consumed `delete_memories` at `6d2c1f4`.
+W5 landed **2026-10-30** at `e9c2da3` (prompts v2: 14 files, +1054/−143; review approved; `mem-store`
+401/0/12, `mem-profile` 250/0/4, workspace 2103/0/22; ADR-0020 and ADR-0021 both **Proposed** — owner
+acceptance open). **53 O3** landed its repo half at `7c24329` (owner applies the drafted wiki paragraph).
+Next: owner picks **70** (wire method set), **28** (live swap), or the **zstd advisories** re-derivation.
+The **ADR-0019 text** landed `Accepted` at `b36920e`, and **issue 72** consumed `delete_memories` at `6d2c1f4`.
 **Blocks issue 39 (retention cleanup) and issue 41 (scheduler).**
 
 ## RE-VERIFICATION 2026-10-25 (architecture pass) — read this before the items below
@@ -785,6 +787,8 @@ oracle; the discovery pass's `delete_shard` bypass is confirmed unused by the re
 
 ## W5 PAUSED 2026-10-30 (owner chose 53 O3 first)
 
+> **Superseded — W5 landed at `e9c2da3`; see the W5 LANDED block below.**
+
 W5 (prompts v2) is paused after **three** plan-gate rounds: r1 rejected with 16, r2 with 9, r3 with 5;
 the normal two-revision cap is reached. The design core is gate-accepted (the applier calls
 `apply_schema_migrations` first so the refusal stays the runner's; four fixtures v0/v1-without/v1-with/v2
@@ -793,3 +797,26 @@ ADR-0020/0021 Proposed). The five open items are mutation-battery precision: M12
 M14's arm (a), M5's no-write refusal, and the fixture/count precision. Resume with an r4 only on owner
 direction. The owner chose **issue 53 O3** first; that docs wave runs with
 `opencode/deepseek-v4.1-flash-free` as the coder trial.
+
+---
+
+## W5 LANDED 2026-10-30 (`e9c2da3`)
+
+Merged fast-forward onto `main` from `8d6fe6f` (one commit, 14 files, +1054/−143). Counts: `mem-store`
+**401/0/12**, `mem-profile` **250/0/4**, workspace **2103/0/22**; fmt and both clippy gates green;
+`sql.rs`, `golden_sql.rs` and the manifests untouched. Review **APPROVED** first pass; one measured
+deviation: **M5 is `{2,5,6}`, not the pinned `{5,6}`** — row 2's blueprint-mandated second
+`apply_user_prompts_schema` call re-opens the stamped-2 file, so the lowered maximum refuses it. The
+reviewer ruled the pinned set a **plan defect**, not an implementation one; no code or test changed.
+
+The applier calls `apply_schema_migrations` first (the `SchemaNewerThanBuild` refusal stays the
+runner's), then probes `PRAGMA table_info`, applies one ALTER batch when columns are missing, and
+stamps `user_version = 2`; `USER_PROMPTS_MAX_KNOWN = 2`; the label stays `USER_PROMPTS_DB_NAME`
+(`user-prompts.db`). The three swallow helpers are deleted; the retired case 3 is declared with its
+replacement; ADR-0020 is new **Proposed**; ADR-0021 stays **Proposed** with only the `user_prompts`
+cell (`2 (W5)`) and D-21-6's tense corrected.
+
+Residuals: a v2 file with missing columns is not repaired (the early return is pinned by row 6/M4; add
+a fixture if that becomes load-bearing); the handoff's fmt-scope sentence and one stale pristine hash
+are evidence-administration notes; the Step 2–5 ledger stamps are estimates rather than `date -u`
+(the `mem_1792317820721_85ljkv5hf` recurrence; no gate depends on them).
