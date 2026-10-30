@@ -109,6 +109,30 @@ exists yet — that is the residual, not a guarantee.
 - **Enumerability:** `vault-keys/` enumerates every project's vault under one
   storage root. Containment is per key compromise, not per store access;
   filesystem permissions are the directory-level barrier.
+- **Built-in encryption × experimental multiprocess WAL: excluded by turso's
+  manual for page codecs, permitted by the engine, forced by the vault,
+  measured.** Every non-Windows vault open carries both: `VaultStore::ready`
+  refuses a config with encryption disabled and `build_manager` enables it,
+  while `mem-store`'s `ConnectOptions::for_config` enables the flag on every
+  non-Windows platform. Turso's manual says page codecs "do not support MVCC,
+  experimental multiprocess WAL, `ATTACH`, or partial sync"
+  (`manual.md:1320-1323`, doc-sourced) and does not say whether the built-in
+  cipher counts as one; the engine refuses that pairing only for external page
+  codecs (`turso_core-0.8.3/database.rs:908-927`, HEAD `aa93d669`
+  `core_database.rs:968-1000`) and has no check for the built-in cipher.
+  Measured 2026-10-27 on turso 0.8.3, x86_64 Linux: four gate probes and four
+  extensions, all 8 PASS — two-process read/write on an encrypted vault with
+  `REOPEN-HASHES count=19 exact match` and `REOPEN-INTEGRITY ok`, a `-tshm` of
+  86 016 bytes created and backfilled when a flag-off database is opened flag-on
+  (`probe.db-tshm=86016`), and a keyless open refused ("Database is encrypted
+  but no encryption options provided"). The archived record of a `.tshm`
+  backfill-proof `Corrupt("database header magic mismatch")` was not observed in
+  any shape measured here, and this measurement neither confirms nor disproves
+  it. Not covered: simultaneous in-flight commits, crash or power loss,
+  tmpfs probe roots, one engine version on one platform. This is a documented
+  divergence, not a configuration turso supports; ADR-0012 `## Consequences`
+  carries the full record and `docs/evidence/issue-53-encryption-multiprocess/`
+  holds the logs.
 
 ## Boundaries
 

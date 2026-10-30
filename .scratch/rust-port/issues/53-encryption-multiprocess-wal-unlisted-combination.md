@@ -112,13 +112,17 @@ Whichever is chosen, this issue owns **only** the cell. It does not re-open 43's
 - [ ] **53.3** **G1, G2, G3 and the inversion arm run** (W0-style harness: `crates/mem-store/tests/turso_capabilities.rs`
       already builds a flag-off variant at `:2012`), and the results are pasted in — including which side
       errored, if any. A result that cannot be produced records the blocker, not a guess.
-- [ ] **53.4** The ruling is recorded as **O1 / O2 / O3 / O4** with a one-paragraph rationale, and the two
-      questions of the premise are answered in it rather than left to the implementer.
+- [x] **53.4** The ruling is recorded as **O1 / O2 / O3 / O4** with a one-paragraph rationale, and the two
+      questions of the premise are answered in it rather than left to the implementer. — O3, ruled
+      2026-10-28; the two answers and the execution record are under `## Comments`, entry 2026-10-30.
 - [ ] **53.5** If O1 or O2: the change lands in the config/connect seam (`db.rs:258-268` or the vault's
       `build_manager`), with tests for both directions — encrypted ⇒ no multiprocess WAL (or a typed refusal),
       unencrypted ⇒ unchanged — and every affected family exercised, **the vault included**.
-- [ ] **53.6** If O3: the limitation is written where a user meets it (the ADR, and the vault's own
-      documentation), with G1/G2 numbers, not adjectives.
+- [x] **53.6** If O3: the limitation is written where a user meets it (the ADR, and the vault's own
+      documentation), with G1/G2 numbers, not adjectives. — ADR-0012 `## Consequences`; written in
+      `crates/mem-vault/CONTEXT.md` under "Accepted, documented, not mitigated"; the owner's vault wiki
+      text is drafted at `docs/evidence/issue-53-encryption-multiprocess/vault-limitation-draft.md`
+      (applied by the owner; the vault's commit is out of scope).
 - [ ] **53.7** **No re-litigation:** 43's W6 flag decision is referenced, never decided here (`43:312-320`);
       45's guard is referenced, never restated; 49's config census is not touched (this is a behaviour cell,
       not a dead key).
@@ -191,6 +195,27 @@ Whichever is chosen, this issue owns **only** the cell. It does not re-open 43's
 - **2026-10-28 — owner ruling: O3.** Keep the combination and record it. The wave is **documentation only**:
   one paragraph in ADR-0012's `## Consequences` (the vault's own ADR) and the vault's documented limitation,
   carrying the G1/G2 numbers, not adjectives. No connect-seam change, no flag change, no re-probe.
+
+- **2026-10-30 — O3 executed as a documentation-only wave.** 53.4 and 53.6 are ticked above. ADR-0012's
+  `## Consequences` carries the limitation paragraph, and the vault's own documentation carries it too:
+  `crates/mem-vault/CONTEXT.md`, `## Accepted, documented, not mitigated`, third bullet. Both quote the
+  manual (`manual.md:1320-1323`, doc-sourced: not in this repository) against the engine
+  (`turso_core-0.8.3/database.rs:908-927`; HEAD `aa93d669` `core_database.rs:968-1000`) and carry the
+  measured G1/G2 numbers and the four residual limits. The owner's vault wiki text is drafted, not
+  applied, at `docs/evidence/issue-53-encryption-multiprocess/vault-limitation-draft.md`; that
+  repository's commit is the owner's, outside this wave.
+  The premise's two questions, answered by the measurement rather than by preference: (1) whether "page
+  codecs" includes the built-in cipher — the manual's sentence is scoped to **external** page codecs and
+  never mentions the built-in cipher, the engine refuses an external codec with the flag and built-in
+  encryption only when combined with an external codec, and has no built-in-cipher check, so the
+  ambiguity is documented and not resolved; (2) whether the failure needs a second opener — there is no
+  observed failure to place, the archived ingest record `Corrupt("database header magic mismatch")` is
+  not reproduced in any shape measured here, so the harm lead stays unreproduced either way. No
+  connect-seam, flag or probe change; probes not re-run; ADR-0012's status and decisions untouched; 45's
+  matrix untouched; 43's W6 flag decision referenced, not decided (53.7). 53.1–53.3, 53.5, 53.7 and 53.8
+  are not touched by this wave (53.1–53.3 belong to the 2026-10-28 measurement record; 53.5 and 53.8 are
+  N/A under O3). `Status:` is deliberately unchanged: the flip to `done` belongs to the orchestrator after
+  the ff-only merge, not to the branch that awaits review.
 
 ## Agent Brief
 

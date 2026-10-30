@@ -774,6 +774,42 @@ lock, and `MultiprocessWal` deliberately admits concurrent processes).
   rows, while the vault is not named in `not_erased` (D-11). The gap is live in the tree
   as of W8a (`55f16da`); W8b's leg closes it, and no production use may precede it.
 
+- **The vault ships a cell turso's manual excludes for page codecs: built-in encryption
+  × experimental multiprocess WAL.** Excluded by the manual, which says page codecs "do
+  not support MVCC, experimental multiprocess WAL, `ATTACH`, or partial sync"
+  (`manual.md:1320-1323`, doc-sourced: the manual is not in this repository) and does
+  not say whether the built-in cipher counts as one; permitted by the engine, whose
+  `turso_core-0.8.3/database.rs:908-927` hard-errors an **external** page codec combined
+  with the flag, and built-in encryption combined with an external codec, while carrying
+  **no** check for the built-in cipher with the flag (HEAD `aa93d669`
+  `core_database.rs:968-1000` is the same); and forced by the vault, because
+  `VaultStore::ready` refuses a config with encryption disabled, `build_manager` enables
+  it for the manager it opens, and `ConnectOptions::for_config` pushes
+  `ExperimentalFeature::MultiprocessWal` on every non-Windows platform — so every
+  non-Windows vault open is in the cell and no configuration leaves it. Measured
+  2026-10-27 (turso 0.8.3, x86_64 Linux): G1, a fresh encrypted database with the flag
+  on and a live writer, a second process reading then writing, a parent commit and a
+  reopen — `REOPEN-IDS [1, 2, 3, 4, 100] (exact)`, `REOPEN-INTEGRITY ok`, over
+  128 filler rows of 4 KiB each,
+  `-wal` 1 734 552 bytes before the child's write and 1 742 792 after, main file
+  4 096 bytes, `-tshm` 86 016 bytes; G2, a real vault on its own scope and key —
+  `REOPEN-HASHES count=19 exact match`, `REOPEN-INTEGRITY ok`,
+  `vault.db-wal` 379 072 bytes before the child's write and 403 792 after; G3, the
+  encryption-off control — `KEYLESS-READ ok ids=[1, 2, 3, 4, 100]`; the inversion arm,
+  encryption on with the flag off and run sequentially because a live second writable
+  opener is refused by the engine's own file lock — `REOPEN-INTEGRITY ok`; G1C, a
+  flag-off database opened flag-on, which created and backfilled its `-tshm`
+  (`probe.db-tshm=86016`) and reopened `REOPEN-INTEGRITY ok`. All 8 probes report PASS.
+  The cipher is applied, not merely configured: a keyless open of an encrypted cell
+  fails ("file is not a database"; the vault: "Database is encrypted but no encryption
+  options provided") while the same read succeeds on the plaintext control. Not covered:
+  no simultaneous in-flight commits (a child's commit completes before the parent's next
+  one — that window is issue 45's collision matrix), no crash or power-loss arm (every
+  close was clean), probe roots on tmpfs under `/tmp` rather than the XFS storage root,
+  and one engine version on one platform (turso 0.8.3, x86_64 Linux; Windows never gets
+  the flag). Evidence: `docs/evidence/issue-53-encryption-multiprocess/` — issue 53,
+  ruling O3.
+
 **Neutral / forward**
 
 - The marker format gains a generation field when the rekey lands (D-8); no W7.2-created
