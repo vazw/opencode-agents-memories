@@ -133,7 +133,7 @@ A grilling session was conducted across all five phases, producing concrete, loc
 - Health: upstream-parity shape (`{ status, version }`).
 - Static hosting: `tower-http::ServeDir` + SPA fallback to `index.html`.
 - Entry: dual (CLI `mem serve` + library `mem-web::serve`).
-- Default port: **3742** (`mem_bridge::engine::DEFAULT_WEB_PORT`; the original 7474 decision was superseded in implementation — config-overridable via `OPENCODE_MEM_WEB_PORT`).
+- Default port: **4747** (`webServerPort` in `opencode-mem.jsonc`; the original 7474 decision was superseded in implementation. `mem_bridge::engine::DEFAULT_WEB_PORT` is the bridge fallback 3742; `OPENCODE_MEM_WEB_PORT` overrides at launch).
 
 **W6.2 — API Handlers Parity:**
 - Structure: router modules per group (`memories_router`, `tags_router`, etc.).
