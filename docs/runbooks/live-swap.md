@@ -37,8 +37,10 @@ grep -n '"storagePath"\|"embeddingModel"\|"webServerPort"' ~/.config/opencode/op
 #   expected: "~/.opencode-mem/data" / "Xenova/nomic-embed-text-v1" / 4747
 ```
 
-Expected: all paths exist; the values are the ones above (the web UI will be on
-`http://127.0.0.1:4747`).
+Expected: all paths exist; the values are the ones above. The config's `webServerPort` is 4747, but
+the plugin's engine launch does not forward it: the engine's web server binds **3742** by default
+(measured 2026-10-31 on the live swap). Open `http://127.0.0.1:3742` unless `OPENCODE_MEM_WEB_PORT` is
+set.
 
 ## 2. Stop OpenCode cleanly
 
@@ -159,8 +161,9 @@ Verify it *works*, not just exists — start the engine against the store copy f
 swap, against the live store:
 
 ```sh
-# replace <STORE> with the store root and <PORT> with the configured port (4747 live)
-STORE=~/.opencode-mem/data; PORT=4747
+# replace <STORE> with the store root; PORT is the engine's web port (3742 by default;
+# OPENCODE_MEM_WEB_PORT overrides; the config's webServerPort is not forwarded by the plugin launch)
+STORE=~/.opencode-mem/data; PORT=3742
 curl -s -o /dev/null -w 'mint=%{http_code}\n' "http://127.0.0.1:$PORT/api/stats"   # first gated call: 401
 TOKEN=$(cat "$STORE/.auth-token")                                                 # minted by that call
 curl -s -H "x-opencode-mem-token: $TOKEN" \
@@ -262,7 +265,7 @@ endpoints, not the port's web server.
 | 8 | list | `memory` tool `mode:"list"` | newest-first, `count` 20 for the default page; `all-projects` caps at 1,000 |
 | 9 | search | `memory` tool `mode:"search"` for `W8 brute-force search cost benchmark shard layout` | rank 1 `mem_1792900662953_j6e64unbf`, similarity ≈0.54 (JSON-RPC; REST measured 0.5619 on the restored copy) |
 | 10 | profile | `memory` tool `mode:"profile"` | non-null profile (version 157 at 2026-10-30T14:05Z; changes as it learns) |
-| 11 | web UI | open `http://127.0.0.1:4747` | HTTP 200, `OpenCode Memory Explorer` shell; `/api/health` = `{"success":true,"status":"ok","authEnabled":false}`; `/api/stats` total = memory count |
+| 11 | web UI | open `http://127.0.0.1:3742` (the engine's default; `OPENCODE_MEM_WEB_PORT` overrides) | HTTP 200, `OpenCode Memory Explorer` shell; `/api/health` = `{"success":true,"status":"ok","authEnabled":false}`; `/api/stats` total = memory count |
 | 12 | add + search | the §7 curl pair, or `memory` tool `mode:"add"` then `mode:"search"` for the canary | add 200 / `success:true`; canary is rank 1 (similarity ≈0.79–0.90) |
 | 13 | capture | a real session with a prompt | a row appears in `user-prompts.db` (count grows past 1,745) and, with the provider configured, an auto-captured memory |
 | 14 | injection | start a second session in the same project | memory context is prepended (the response reflects stored facts); `injectProfile: true` also injects the profile block |

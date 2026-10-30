@@ -41,8 +41,8 @@ store you have not backed up.
 
 The workspace is Rust **edition 2024**. Dependencies live once in `[workspace.dependencies]`; the
 registry root is `~/.opencode-mem/data`, the embedding model
-`Xenova/nomic-embed-text-v1` (768 dimensions), and the web explorer's default port is **4747**
-(the `webServerPort` config key; `OPENCODE_MEM_WEB_PORT` overrides it at launch).
+`Xenova/nomic-embed-text-v1` (768 dimensions), and the engine's web server listens on **3742** by
+default (`mem_bridge::engine::DEFAULT_WEB_PORT`; `OPENCODE_MEM_WEB_PORT` overrides it at launch).
 
 ## Build and test
 
@@ -92,8 +92,10 @@ git config core.hooksPath .githooks
 
 3. The plugin reads the same `~/.config/opencode/opencode-mem.jsonc` as upstream (camelCase, unknown
    keys tolerated). Defaults: `storagePath` `~/.opencode-mem/data`, `embeddingModel`
-   `Xenova/nomic-embed-text-v1`. The web explorer listens on `webServerPort` from the config
-   (default **4747**); `OPENCODE_MEM_WEB_PORT` overrides it at launch.
+   `Xenova/nomic-embed-text-v1`. The engine's web server listens on **3742** by default
+   (`mem_bridge::engine::DEFAULT_WEB_PORT`; `OPENCODE_MEM_WEB_PORT` overrides it at launch). The
+   `webServerPort` key in `opencode-mem.jsonc` is read by the standalone `mem-web` server, not by the
+   plugin's engine launch — measured 2026-10-31: the live engine bound 3742 while the config said 4747.
 
 Two operational caveats:
 
