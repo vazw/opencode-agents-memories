@@ -1,10 +1,10 @@
 # 30 — W6.6 · Agent contribution view (US 5.1)
 
-Status: ready-for-agent — 2026-10-27 (web-ui slice landed `66e78e7`; residual creates a `RouteSpec`
-milestone row in `mem-web`'s `ROUTE_TABLE`, a port seam over `EpisodicStore::list_milestones`, the
-panel's single fetch at `web_ui::agents::initial_outcome()`, and the `api_endpoint_contract`
-re-baseline — agent brief under `## Comments`). This line read `needs-triage` while the view had
-shipped six days earlier: that is `surface-built-ahead-of-wiring`, not an unstarted issue.
+Status: done — 2026-10-31 — landed at `1bf1e8a` (`43aaef3` feat + `1bf1e8a` docs; ff-only from
+`issue-30-agents-view`; base `e5154bc`). Reviewer APPROVED on independent re-execution: api_milestones
+11, api_endpoint_contract 18 (`ROUTE_TABLE` 39, `/api/*` 37), api_route_auth 8 (token walk 36,
+non-health 38), facts_store 12 (crate 18), mem-web lib 14, workspace 2193, wasm 159; 3/3 mutants
+killed; security 10/10 PASS. `## Landed` below records the gate results and the outcome.
 
 ## What to build
 
@@ -121,3 +121,33 @@ already defines.
 - A cross-project or global Agents view.
 - Reworking milestone consolidation, or adding an `agent_id` column to `memories`.
 - Any other screen's route, owner labels or catalog rows.
+
+## Landed
+
+2026-10-31 — W6.6 landed at `1bf1e8a` (`43aaef3` feat, 32 files; `1bf1e8a` docs, 3 files; base
+`e5154bc`; fast-forward from `issue-30-agents-view`). Reviewer APPROVED on independent re-execution
+(`.tmp/progress/bp-20261030-1513-issue30-agents-view-r6.review-1.md`).
+
+| gate | result |
+|---|---|
+| `api_milestones` | **11 passed** — projection, scope, order/tie, default 200, strict 400, facts join, 500, never-create, 404/400/traversal |
+| `api_endpoint_contract` | **18 passed** — `ROUTE_TABLE` **39**, `/api/*` **37**, milestone row pinned `GET /api/projects/{project_id}/milestones` |
+| `api_route_auth` | **8 passed** — token walk **36**, non-health **38**, 401/403 pins |
+| `facts_store` | **12 passed** (crate total **18**) |
+| `mem-web --lib` | **14 passed** — private limit parser (`+5`, `" 5"`, `5.0`, `-1`, `0`, `501` refused) |
+| `workspace_deps` / `production_api_wiring` (exact) | **1 / 1 passed** |
+| workspace tests | **2193** listed, exit 0 |
+| wasm tests (14 suites) | **159 passed** (agents 20, api_paths 5, nav 12, screens 9, …) |
+| fmt + both clippy gates, root and `web-ui` | green |
+| mutants | **3/3 killed** — dropped `deleted_at` join, dropped ASCII-digit limit guard, disabled adapter join |
+| security (10 mandates) | **10/10 PASS**, no violation |
+| doc gates | gate 1 empty; gate 2 `DOC PINS OK` (eight pins) |
+| post-wave pins | mem-web **263**, mem-facts **18**, root **63**, workspace **2193**, wasm **159**, `ROUTE_TABLE` **39** |
+| forced paths | none — no committed path is ignored; `example/` tracks **0** files |
+
+Handoff: `.tmp/progress/bp-20261030-1513-issue30-agents-view-r6.handoff-1.md`; ledger 14/14 `[x]`,
+0 open. Non-blocking notes accepted by the reviewer: the milestone fixtures share one embedding while
+the plan preamble said no two rows share a vector (no criterion reads vectors); the `facts_store`
+binary runs 12 while the crate total is 18 (the blueprint's Step-2 line conflated them; both stated
+precisely). Residuals: none. The manual smoke was executed once for §G.1; §G.2 stays a documented
+recipe.
