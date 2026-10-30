@@ -780,3 +780,16 @@ deviations: `close_all()` after `ensure_ready()` (cached writable handles answer
 the workspace gate cannot both pass). **ADR-0023 is Accepted (owner, 2026-10-30).** ADR-0019 A14
 is amended. The ten-test battery plus the twelve mutation cells (M1–M10, M3b, M7b) are the wave's
 oracle; the discovery pass's `delete_shard` bypass is confirmed unused by the reaper.
+
+---
+
+## W5 PAUSED 2026-10-30 (owner chose 53 O3 first)
+
+W5 (prompts v2) is paused after **three** plan-gate rounds: r1 rejected with 16, r2 with 9, r3 with 5;
+the normal two-revision cap is reached. The design core is gate-accepted (the applier calls
+`apply_schema_migrations` first so the refusal stays the runner's; four fixtures v0/v1-without/v1-with/v2
+plus fresh and v3; the label stays `USER_PROMPTS_DB_NAME`; shard v3 is the only no-backup precedent;
+ADR-0020/0021 Proposed). The five open items are mutation-battery precision: M12's red set, M15's row 6,
+M14's arm (a), M5's no-write refusal, and the fixture/count precision. Resume with an r4 only on owner
+direction. The owner chose **issue 53 O3** first; that docs wave runs with
+`opencode/deepseek-v4.1-flash-free` as the coder trial.
