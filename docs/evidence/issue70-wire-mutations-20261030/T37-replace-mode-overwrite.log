@@ -1,0 +1,27 @@
+# mutant T37 (replace-mode-overwrite)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p opencode-agents-memory --test portability_backend test_production_backend_import_aborts_on_a_duplicate_id_with_zero_writes
+
+   Compiling opencode-agents-memory v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.72s
+     Running tests/portability_backend.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/portability_backend-62df4f4c6d914137)
+
+running 1 test
+test test_production_backend_import_aborts_on_a_duplicate_id_with_zero_writes ... FAILED
+
+failures:
+
+---- test_production_backend_import_aborts_on_a_duplicate_id_with_zero_writes stdout ----
+
+thread 'test_production_backend_import_aborts_on_a_duplicate_id_with_zero_writes' (13669) panicked at tests/portability_backend.rs:345:14:
+the duplicate must abort in merge mode
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_production_backend_import_aborts_on_a_duplicate_id_with_zero_writes
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.27s
+
+error: test failed, to rerun pass `-p opencode-agents-memory --test portability_backend`
+
+exit=101

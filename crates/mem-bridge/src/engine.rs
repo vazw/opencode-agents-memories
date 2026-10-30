@@ -47,6 +47,27 @@ pub const PROTOCOL_VERSION: &str = "1.0.0";
 /// `session_id` upper bound (Step 1's concrete bound, M6).
 pub const SESSION_ID_MAX_CHARS: usize = 128;
 
+/// The runtime method set, in advertised order. `hello` is not a runtime
+/// method (D-40); `skills` is session-free, the nine tool methods are not.
+pub const RUNTIME_METHODS: [&str; 15] = [
+    "capture",
+    "inject",
+    "recall",
+    "skills",
+    "health",
+    "shutdown",
+    // Issue 70 wave 1: the nine `memory` tool modes that need the wire.
+    "add",
+    "search",
+    "forget",
+    "list",
+    "profile",
+    "list-shards",
+    "migrate",
+    "export",
+    "import",
+];
+
 /// Default web bind host (loopback; bridge-schema.md §9).
 pub const DEFAULT_WEB_HOST: &str = "127.0.0.1";
 /// Default web bind port (3742; bridge-schema.md §9).
@@ -149,9 +170,21 @@ fn handshake_result(config: &EngineConfig) -> serde_json::Value {
             "skills": true,
             "standalone": true,
             "web": true,
+            // Issue 70 wave 1: one key per `memory` tool method. The key means
+            // "this build's dispatch answers this method", never "the store
+            // has data"; an engine that predates a method omits its key.
+            "add": true,
+            "search": true,
+            "forget": true,
+            "list": true,
+            "profile": true,
+            "list-shards": true,
+            "migrate": true,
+            "export": true,
+            "import": true,
         },
         "engine_version": config.engine_version,
-        "methods": ["capture", "inject", "recall", "skills", "health", "shutdown"],
+        "methods": RUNTIME_METHODS,
         "protocol": config.protocol,
     })
 }
@@ -184,6 +217,10 @@ pub struct EngineRuntime {
     /// the fixture runtimes, which answer `skills` with `-32001` like the
     /// other runtime methods.
     pub skills: Option<Arc<crate::skills::SkillsService>>,
+    /// Issue 70 wave 1: the nine `memory` tool methods' dispatch services.
+    /// `None` is the fixture/degraded runtime: the nine answer `-32001`
+    /// exactly as `capture`/`inject`/`recall` do without a runtime.
+    pub tools: Option<Arc<crate::tools::ToolServices>>,
 }
 
 impl Engine {
@@ -204,6 +241,32 @@ impl Engine {
         engine
     }
 
+    /// The ONE production assembly path. `run_in_runtime`'s composed arm
+    /// calls it, and so does T38. The portability FACTORY is consulted HERE,
+    /// so "the factory is never called" and "`tools: None` in production" are
+    /// both red oracles, not silent `-32001`s.
+    pub fn from_composed(
+        config: EngineConfig,
+        composed: &crate::composition::ComposedRuntime,
+        core: &mem_core::config::Config,
+        portability: Option<&dyn crate::tools::portability::PortabilityFactory>,
+    ) -> Self {
+        let backend = portability.and_then(|factory| {
+            let deps = crate::tools::portability::PortabilityDeps::from_composed(composed, core);
+            let backend = factory.build(&deps);
+            if backend.is_none() {
+                structured_stderr(
+                    "tools.portability_unavailable",
+                    "warn",
+                    "engine",
+                    serde_json::json!({ "component": "portability" }),
+                );
+            }
+            backend
+        });
+        Self::with_runtime(config, Arc::new(runtime_for(composed, core, backend)))
+    }
+
     /// Dispatches one parsed request. Always answers with either a result
     /// or a SPECIFIC error code — a classifyable failure NEVER gets the
     /// generic -32603 (step 6's map).
@@ -220,13 +283,7 @@ impl Engine {
         }
         // Method resolution FIRST: an unknown method is `-32601` even when
         // its params are also wrong (the errors.rs oracle pins this).
-        if request.method.as_str() != "capture"
-            && request.method.as_str() != "inject"
-            && request.method.as_str() != "recall"
-            && request.method.as_str() != "skills"
-            && request.method.as_str() != "health"
-            && request.method.as_str() != "shutdown"
-        {
+        if !RUNTIME_METHODS.contains(&request.method.as_str()) {
             return Response::error(
                 request.id.clone(),
                 error_map::code_for(ErrorKind::UnknownMethod),
@@ -250,12 +307,127 @@ impl Engine {
             "skills" => self.call_skills(request).await,
             "health" => self.health(request),
             "shutdown" => self.shutdown(request),
+            // Issue 70 wave 1: the nine `memory` tool methods. Their services
+            // arrive with the composed runtime; a runtime-less engine degrades
+            // exactly like `capture`/`inject`/`recall`.
+            "add" => self.call_add(request).await,
+            "search" => self.call_search(request).await,
+            "forget" => self.call_forget(request).await,
+            "list" => self.call_list(request).await,
+            "profile" => self.call_profile(request).await,
+            "list-shards" => self.call_list_shards(request).await,
+            "migrate" => self.call_migrate(request).await,
+            "export" => self.call_export(request).await,
+            "import" => self.call_import(request).await,
             _ => Response::error(
                 request.id.clone(),
                 error_map::code_for(ErrorKind::UnknownMethod),
                 error_map::message_for(ErrorKind::UnknownMethod),
             ),
         }
+    }
+
+    /// The nine tool methods' shared degrade tail: this engine carries no tool
+    /// services, so they answer `-32001` exactly as the four W5.3 runtime
+    /// methods do without a runtime.
+    fn call_tools_unavailable(&self, request: &Request) -> Response {
+        Response::error(
+            request.id.clone(),
+            error_map::code_for(ErrorKind::Degraded),
+            error_map::message_for(ErrorKind::Degraded),
+        )
+    }
+
+    /// The composed tool services, when this runtime has them.
+    fn tool_services(&self) -> Option<&Arc<crate::tools::ToolServices>> {
+        self.runtime
+            .as_ref()
+            .and_then(|runtime| runtime.tools.as_ref())
+    }
+
+    /// `add`: the memory-tier write, mapped onto the wire.
+    async fn call_add(&self, request: &Request) -> Response {
+        let Some(tools) = self.tool_services() else {
+            return self.call_tools_unavailable(request);
+        };
+        crate::tools::respond(request, tools.memories.add(request).await)
+    }
+
+    /// `list`: the project-scoped page, mapped onto the wire.
+    async fn call_list(&self, request: &Request) -> Response {
+        let Some(tools) = self.tool_services() else {
+            return self.call_tools_unavailable(request);
+        };
+        crate::tools::respond(request, tools.memories.list(request).await)
+    }
+
+    /// `search`: the ranked, hydrated page, mapped onto the wire.
+    async fn call_search(&self, request: &Request) -> Response {
+        let Some(tools) = self.tool_services() else {
+            return self.call_tools_unavailable(request);
+        };
+        crate::tools::respond(request, tools.memories.search(request).await)
+    }
+
+    /// `forget`: the scope-wide delete, mapped onto the wire.
+    async fn call_forget(&self, request: &Request) -> Response {
+        let Some(tools) = self.tool_services() else {
+            return self.call_tools_unavailable(request);
+        };
+        crate::tools::respond(request, tools.memories.forget(request).await)
+    }
+
+    /// `profile`: the read/write pair, mapped onto the wire.
+    async fn call_profile(&self, request: &Request) -> Response {
+        let Some(tools) = self.tool_services() else {
+            return self.call_tools_unavailable(request);
+        };
+        crate::tools::respond(request, tools.profile.profile(request).await)
+    }
+
+    /// `list-shards`: the inventory DTO, mapped onto the wire.
+    async fn call_list_shards(&self, request: &Request) -> Response {
+        let Some(tools) = self.tool_services() else {
+            return self.call_tools_unavailable(request);
+        };
+        crate::tools::respond(request, tools.inventory.list_shards(request).await)
+    }
+
+    /// `migrate`: the path migration, mapped onto the wire.
+    async fn call_migrate(&self, request: &Request) -> Response {
+        let Some(tools) = self.tool_services() else {
+            return self.call_tools_unavailable(request);
+        };
+        crate::tools::respond(request, tools.inventory.migrate(request).await)
+    }
+
+    /// `export`: the portability seam, mapped onto the wire. A build without
+    /// a backend degrades (`-32001`), never an empty success.
+    async fn call_export(&self, request: &Request) -> Response {
+        let Some(tools) = self.tool_services() else {
+            return self.call_tools_unavailable(request);
+        };
+        let Some(backend) = tools.portability.as_ref() else {
+            return self.call_tools_unavailable(request);
+        };
+        crate::tools::respond(
+            request,
+            crate::tools::portability::export(backend.as_ref(), request).await,
+        )
+    }
+
+    /// `import`: the portability seam, mapped onto the wire.
+    async fn call_import(&self, request: &Request) -> Response {
+        let Some(tools) = self.tool_services() else {
+            return self.call_tools_unavailable(request);
+        };
+        let Some(backend) = tools.portability.as_ref() else {
+            return self.call_tools_unavailable(request);
+        };
+        crate::tools::respond(
+            request,
+            crate::tools::portability::import(backend.as_ref(), request).await,
+        )
     }
 
     /// D-43 handshake: no `session_id` requirement (D-40). The compat rule
@@ -573,6 +745,32 @@ impl Engine {
     }
 }
 
+/// The dispatch services for one composed runtime. PRIVATE: the only caller
+/// is [`Engine::from_composed`], so a second `tools: None` site cannot appear.
+fn runtime_for(
+    composed: &crate::composition::ComposedRuntime,
+    core: &mem_core::config::Config,
+    portability: Option<Arc<dyn crate::tools::portability::PortabilityBackend>>,
+) -> EngineRuntime {
+    EngineRuntime {
+        capture: composed.capture.clone(),
+        inject: composed.inject.clone(),
+        recall: Arc::new(RecallService::new(
+            composed.store.clone(),
+            composed.embedder.clone(),
+        )),
+        skills: Some(Arc::new(crate::skills::SkillsService::new(
+            composed.skills.clone(),
+            composed.scope_resolver.clone(),
+        ))),
+        tools: Some(Arc::new(crate::tools::ToolServices::build(
+            composed,
+            core,
+            portability,
+        ))),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Launch modes + host configuration (env/args with defaults, §9)
 // ---------------------------------------------------------------------------
@@ -880,6 +1078,7 @@ pub fn run(
     config: HostConfig,
     core_config: mem_core::config::Config,
     launcher: Box<dyn WebLauncher>,
+    portability: Option<Box<dyn crate::tools::portability::PortabilityFactory>>,
 ) -> i32 {
     // W7.1/M12 — the MCP refusal is the FIRST statement: a direct caller can
     // never fall through to a runtime, a lock or a config read.
@@ -915,6 +1114,7 @@ pub fn run(
             core_config,
             launcher,
             graceful_signal_futures(mode),
+            portability,
         ))
         .unwrap_or_else(|error| {
             structured_stderr(
@@ -1013,6 +1213,7 @@ pub async fn run_in_runtime(
     core_config: mem_core::config::Config,
     launcher: Box<dyn WebLauncher>,
     shutdown_signal: Pin<Box<dyn Future<Output = ()> + Send>>,
+    portability: Option<Box<dyn crate::tools::portability::PortabilityFactory>>,
 ) -> Result<i32, String> {
     // The exclusive lifetime lock FIRST: a loser never opens the DB.
     let probe: Arc<dyn mem_store::platform::ProcessProbe> =
@@ -1113,21 +1314,11 @@ pub async fn run_in_runtime(
     };
 
     let engine = match &composed {
-        Some(runtime) => Engine::with_runtime(
-            engine_config,
-            Arc::new(EngineRuntime {
-                capture: runtime.capture.clone(),
-                inject: runtime.inject.clone(),
-                recall: Arc::new(RecallService::new(
-                    runtime.store.clone(),
-                    runtime.embedder.clone(),
-                )),
-                skills: Some(Arc::new(crate::skills::SkillsService::new(
-                    runtime.skills.clone(),
-                    runtime.scope_resolver.clone(),
-                ))),
-            }),
-        ),
+        Some(runtime) => {
+            // The ONE production assembly path (issue 70): every service and
+            // the portability FACTORY are consulted here.
+            Engine::from_composed(engine_config, runtime, &core_config, portability.as_deref())
+        }
         None => Engine::new(engine_config),
     };
 

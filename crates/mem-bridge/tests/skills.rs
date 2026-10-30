@@ -48,6 +48,7 @@ async fn engine_over(dir: &TestDir, manager: Arc<SkillsManager>) -> Engine {
         inject: fixture.inject,
         recall: fixture.recall,
         skills: Some(Arc::new(SkillsService::new(manager, resolver))),
+        tools: None,
     };
     Engine::with_runtime(EngineConfig::default(), Arc::new(runtime))
 }

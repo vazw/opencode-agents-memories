@@ -49,6 +49,7 @@ use mem_web::api::ports::ApiServices;
 use mem_web::api::store_adapter::{
     ProductionDeps, ProductionEmbed, episodic_session_port, production_skill_port,
 };
+use opencode_agents_memory::portability_backend::ProductionPortabilityFactory;
 use opencode_agents_memory::web_dist::{self, ResolvedDist};
 
 /// The workspace crates in composition order — printed by
@@ -554,6 +555,9 @@ fn main() {
             config: core_config,
             log_dir,
         }),
+        // Issue 70 wave 1: the ONE portability factory the engine seam
+        // consults; export/import degrade (-32001) only if it builds none.
+        Some(Box::new(ProductionPortabilityFactory)),
     );
     std::process::exit(exit);
 }

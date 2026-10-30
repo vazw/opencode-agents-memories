@@ -1,0 +1,29 @@
+# mutant T34 (invalid-json-collapsed-to-internal)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p mem-bridge --test wire_portability test_import_surfaces_every_typed_fault_reason
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.67s
+     Running tests/wire_portability.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/wire_portability-918f0a2e9bbb2026)
+
+running 1 test
+test test_import_surfaces_every_typed_fault_reason ... FAILED
+
+failures:
+
+---- test_import_surfaces_every_typed_fault_reason stdout ----
+
+thread 'test_import_surfaces_every_typed_fault_reason' (11486) panicked at crates/mem-bridge/tests/wire_portability.rs:418:9:
+assertion `left == right` failed: fault invalid_json must ride -32602
+  left: -32603
+ right: -32602
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_import_surfaces_every_typed_fault_reason
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.06s
+
+error: test failed, to rerun pass `-p mem-bridge --test wire_portability`
+
+exit=101

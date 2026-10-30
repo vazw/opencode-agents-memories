@@ -1,0 +1,29 @@
+# mutant T06 (raw-content-embedded)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p mem-bridge --test wire_methods test_add_embeds_the_redacted_content_and_the_tags
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.63s
+     Running tests/wire_methods.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/wire_methods-96cec3be58dc2b58)
+
+running 1 test
+test test_add_embeds_the_redacted_content_and_the_tags ... FAILED
+
+failures:
+
+---- test_add_embeds_the_redacted_content_and_the_tags stdout ----
+
+thread 'test_add_embeds_the_redacted_content_and_the_tags' (17224) panicked at crates/mem-bridge/tests/wire_methods.rs:360:5:
+assertion `left == right` failed: the embedded inputs are the sanitized content and the shared tags formatter
+  left: ["<private>x</private>kept", "Topics: a, b"]
+ right: ["[REDACTED]kept", "Topics: a, b"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_add_embeds_the_redacted_content_and_the_tags
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.09s
+
+error: test failed, to rerun pass `-p mem-bridge --test wire_methods`
+
+exit=101

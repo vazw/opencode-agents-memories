@@ -1,0 +1,27 @@
+# mutant T24 (learning-lock-refusal-ignored)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p mem-bridge --test wire_profile test_profile_write_fails_closed_while_the_learning_lock_is_held
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.02s
+     Running tests/wire_profile.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/wire_profile-a0901ecf7baa2b7d)
+
+running 1 test
+test test_profile_write_fails_closed_while_the_learning_lock_is_held ... FAILED
+
+failures:
+
+---- test_profile_write_fails_closed_while_the_learning_lock_is_held stdout ----
+
+thread 'test_profile_write_fails_closed_while_the_learning_lock_is_held' (2171) panicked at crates/mem-bridge/tests/wire_profile.rs:47:10:
+error envelope
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_profile_write_fails_closed_while_the_learning_lock_is_held
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.06s
+
+error: test failed, to rerun pass `-p mem-bridge --test wire_profile`
+
+exit=101

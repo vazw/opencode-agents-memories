@@ -1,0 +1,27 @@
+# mutant T35 (store-fault-detail-echoed)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p mem-bridge --test wire_portability test_store_faults_become_internal_without_echoing_detail
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.46s
+     Running tests/wire_portability.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/wire_portability-918f0a2e9bbb2026)
+
+running 1 test
+test test_store_faults_become_internal_without_echoing_detail ... FAILED
+
+failures:
+
+---- test_store_faults_become_internal_without_echoing_detail stdout ----
+
+thread 'test_store_faults_become_internal_without_echoing_detail' (12215) panicked at crates/mem-bridge/tests/wire_portability.rs:510:5:
+the store fault carries no advisory data, so no detail can leak
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_store_faults_become_internal_without_echoing_detail
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `-p mem-bridge --test wire_portability`
+
+exit=101

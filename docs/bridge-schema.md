@@ -51,7 +51,7 @@ The wrapper's **first** message after spawn is `hello`. No runtime method may pr
 ```
 
 ```json
-{"id":"hello-1","jsonrpc":"2.0","result":{"capabilities":{"compaction":true,"fire_and_forget_capture":true,"skills":true,"standalone":true,"web":true},"engine_version":"0.1.0","methods":["capture","inject","recall","skills","health","shutdown"],"protocol":"1.0.0"}}
+{"id":"hello-1","jsonrpc":"2.0","result":{"capabilities":{"add":true,"compaction":true,"export":true,"fire_and_forget_capture":true,"forget":true,"import":true,"list":true,"list-shards":true,"migrate":true,"profile":true,"search":true,"skills":true,"standalone":true,"web":true},"engine_version":"0.1.0","methods":["capture","inject","recall","skills","health","shutdown","add","search","forget","list","profile","list-shards","migrate","export","import"],"protocol":"1.0.0"}}
 ```
 
 Protocol version is one semver line owned by ADR-0007; its current value is `1.0.0`.
@@ -71,10 +71,17 @@ the compaction request with the ordinary project chat block, so the wrapper MUST
 compaction hooks. `skills` means the engine answers the `skills` runtime method (issue 69); an
 engine that omits the key predates the method, and the wrapper MUST NOT call it.
 
-`hello` is **not** a runtime method (D-40): it takes no `session_id` and is not counted in
-the six.
+Issue 70 adds one capability key per `memory` tool method — `add`, `search`, `forget`, `list`,
+`profile`, `list-shards`, `migrate`, `export`, `import` — so this build advertises fourteen
+keys under fifteen methods. The key means "this build's dispatch answers this method"; it
+never means "the store has data". The gating rule wave 2 implements: a wrapper that does not
+find a key MUST NOT call that method (the engine predates it); a key that is present but whose
+runtime is degraded answers `-32001`, which the tool lane turns into its structured no-op.
 
-## 3. The six runtime methods (D-40, D-46)
+`hello` is **not** a runtime method (D-40): it takes no `session_id` and is not counted in
+the fifteen.
+
+## 3. The fifteen runtime methods (D-40, D-46)
 
 `session_id` is a **required top-level parameter of every method except `skills`**, which
 takes `project_id` and carries no session id. It is required for `health` and `shutdown`
@@ -93,6 +100,15 @@ never grants access to another session's rows.
 | `skills` | **yes** | `project_id` (req); no `session_id` | `{"skills":[{"id":string,"name":string,"path":string,"content":string,"autoinvoke":bool,"description"?:string}]}` |
 | `health` | no | `session_id` (req) | `{"ok":bool,"mode":"full"\|"degraded","degraded_reason":string\|null,"protocol":semver,"engine_version":semver,"db":{"path":string,"ready":bool},"open_guard":{"override_active":bool},"uptime_ms":int,"sessions":int}` |
 | `shutdown` | teardown only | `session_id` (req) | `{"ok":true}` |
+| `add` | **yes** | `session_id` (req), `project_id` (req), `content` (req), `type?`, `tags?` (comma string), `metadata?` (object) | `{"id":string}` |
+| `search` | **yes** | `session_id` (req), `project_id` (req), `scope` (req: `"project"\|"all-projects"`), `query` (req, non-blank), `limit?` (1..=1000) | `{"count":int,"items":[row + similarity + rank]}` |
+| `forget` | **yes** | `session_id` (req), `project_id` (req), `memoryId` (req), `scope?` (default `"project"`) | `{"deleted":int}` |
+| `list` | **yes** | `session_id` (req), `project_id` (req), `scope?` (default `"project"`), `limit?` (1..=1000) | `{"count":int,"items":[row]}` |
+| `profile` | **yes** | `session_id` (req), `project_id` (req), `content?` (absent = read, present = explicit-preference write) | read `{"profile":object\|null}`; write `{"saved":true}` |
+| `list-shards` | **yes** | `session_id` (req), `project_path` (req) | `ListShardsResult` (`storagePath`, `currentProject`, `shards`, `summary`) |
+| `migrate` | **yes** | `session_id` (req), `project_path` (req), `from_path?`, `from_hash?` (16 lowercase hex), `dry_run?`, `allow_linked_source?`; at least one of `from_path`/`from_hash` | `{"actions":[…],"dry_run":bool,"matched_by":string,"migrated_memories":int,"migrated_shards":int,"new_hash":string,"new_path":string\|null,"old_hash":string,"old_path":string\|null}` |
+| `export` | **yes** | `session_id` (req), `project_id` (req), `output_path` (req, absolute `.json`) | `{"container_tag":string,"count":int,"output_path":string,"scope_hash":string}` |
+| `import` | **yes** | `session_id` (req), `project_id` (req), `input_path` (req, absolute `.json`), `dry_run?` | `{"container_tag":string,"dry_run":bool,"imported":int,"rejected":[{"id","reason"}],"skipped":[{"id","reason"}]}` |
 
 `skills` (issue 69) returns the **enabled** skills tagged with the request's project plus the
 global ones (`container_tag IS NULL OR container_tag = <project tag>`); an unknown project is
@@ -102,6 +118,90 @@ non-empty. The order is the manager's `updated_at DESC, id ASC`; consumers MUST 
 it. `project_id` is required and is never coerced to the global tag: missing, non-string or
 whitespace-only → `-32602`. The method is session-free because registration happens at plugin
 `setup`, before any session exists.
+
+### The nine tool methods (issue 70)
+
+Seven methods take `project_id` — the immutable host directory — and resolve
+their scope through the same resolver as capture and inject: `add`, `search`,
+`forget`, `list`, `profile`, `export`, `import`. Two take `project_path` because
+that is what the store services address: `list-shards` and `migrate`. Every
+parameter is snake_case except `memoryId` on `forget`, which is kept literally as
+the tool argument's name (the one recorded exception; `recall`'s canonical shape
+already carries camelCase keys). `scope` is `"project"` or `"all-projects"`.
+`session_id` is data, never authority — only `add` persists it, and no method
+filters by it.
+
+`add` is the only write that is not a profile: content is required and must be
+non-blank **after** `strip_private_content`; a fully private message is refused
+with `-32602 {"reason":"private"}` **before** any embed or write; the sanitized
+content (and, when tags exist, `Topics: <tags joined by ", ">`) is what reaches
+the embedder; then one `BatchMode::Write` inserts the row and the
+statement-measured count, and the registry adopts it.
+
+The wire row is exactly **16 keys**: `container_tag`, `content`, `created_at`,
+`display_name`, `git_repo_url`, `id`, `is_pinned`, `memory_type`, `metadata`,
+`project_name`, `project_path`, `session_id`, `tags`, `updated_at`,
+`user_email`, `user_name`. A `search` item is those 16 plus `similarity`
+and `rank` (18). `created_at`/`updated_at` are epoch milliseconds, `tags` is
+always an array, and `metadata` is the parsed object or `null` (a malformed
+column is `null`, never an error). `search` hydrates each hit with the frozen
+`SELECT *` in the same shard — `SearchResult` alone lacks `memory_type`,
+`session_id` and `updated_at` — and a hit whose row vanished is dropped.
+
+Two total orders exist and no others: `list` sorts `created_at DESC, id ASC`;
+`search` sorts `similarity DESC, created_at DESC, id ASC` and assigns `rank`
+1..=n **after** the truncate. `similarity` is `clamp(1 - cosine_distance, 0, 1)`
+and is emitted by `serde_json`, so an exact 1 renders as `1.0` (numerically
+equal to JS `1`; consumers must not depend on the textual form). `limit` is
+1..=1000 or `-32602 {"reason":"limit"}`; `list` defaults to 20, `search` to the
+resolved `max_memories`.
+
+`forget` requires `project_id` (the id carries no tag, so without it the
+handler would have to guess a tenant) and deletes every copy of `memoryId`
+inside each concrete `(scope, hash)` tuple the registry knows — `all-projects`
+expands from the registry only, never to a wildcard and never to `""` (the seam
+rejects that as a store fault). `{"deleted":0}` means "not found", not an error.
+
+`profile` with absent `content` reads `get_active_profile(user_email)` with the
+read-only fallback identity `"unknown"`; the stored JSON is parsed, the
+`centroid`/`anchor` embeddings are stripped, and `{"profile":null}` is the
+absent answer. A stored `profile_data` that will not parse is
+`-32603 {"reason":"profile_unreadable"}`. A write runs four refusals **before
+any store write**, in order: blank (`blank`), fully private after redaction
+(`private`), no resolved `user_email` (`no_user_email`), and the fail-closed
+learning lock (`-32603 {"reason":"learning_locked","retryable":true}`). The lock
+is released on every path, including a parse failure. The write merges one
+explicit preference (`category:"explicit"`, `confidence:1.0`, `frequency:1`,
+`evidence:["manual-write"]`) into the active profile, or creates it.
+
+`list-shards` returns the ported DTO's own camelCase shape — `storagePath`,
+`currentProject`, `shards`, `summary` — with no mapping layer. `migrate` takes
+`project_path` plus at least one source selector; an absent **or empty**
+`from_path`/`from_hash` is `-32602 {"reason":"from_required"}` at the wire (the
+service's own filter would turn `from_path:""` into a resolve error). Service
+failures map to `{"reason":"migrate_source","message":…,"candidates":[…]}`,
+`{"reason":"migrate_refused","message":…}` or `-32603`. `dry_run` never takes
+the operation lock and never touches a file; a real run takes
+`.turso-operation.lock` itself, refuses a source path that still exists unless
+`allow_linked_source` is set, and rewrites `user_prompts.project_path` through
+the prompt-path adapter.
+
+`export`/`import` cross into the portability service through a bridge-owned
+factory seam implemented by the composition root (ADR-0001's allowed-edge table
+does not move). The wire enforces, before the backend runs: an **absolute**
+path ending in the exact lowercase `.json`, else `-32602 {"reason":"path"}`;
+`project_id` required; `dry_run` optional (default `false`). `import` is
+merge-only (a duplicate id aborts with zero writes; the port's overwrite mode
+stays REST-only) and `export` carries no staging tier. There is no sandbox: any
+absolute path is attempted, and the writer/reader's own rails (`0600`,
+temp+rename, symlink refusal, `create_dir_all`, the 100 MiB read cap) carry the
+load.
+
+Wave boundary: these nine are the **wire** methods only. The toolkit that maps
+them to upstream's `memory` tool is wave 2, and the portability tool modes are
+wave 3; `help` stays local to the wrapper and `recall_project_sessions` stays.
+The timeline/pair/orphan assembly is not here — it remains
+`mem-web/src/api/memories.rs`.
 
 `inject`'s `include?` accepts either the frozen `["summary","metadata"]` array or the additive options object `{"recent_count"?: int, "compaction"?: "ingest"|"restore", "query"?: string}`: `recent_count` bounds the episodic rows, `compaction` selects the session-scoped render (issue 33), and `query` carries the authored prompt (max 2000 code points; absent or blank keeps the tag-listed read). Unknown keys are ignored; no other field exists.
 
@@ -167,6 +267,48 @@ ratified degradation path.
 The wrapper maps **every** engine error to fail-open: an `inject` error yields an empty
 injection (never a host error); a `capture` error is logged and never blindly retried;
 `health` reporting `mode: "degraded"` is surfaced through `degraded_reason`.
+
+### The closed `data.reason` vocabulary (issue 70 wave 1)
+
+A `-32602` from the nine tool methods carries `error.data.reason`; a `-32603`
+may carry one where noted. The vocabulary is **closed** — every token the build
+can emit is listed here, so `<param>` is never a placeholder, and no new numeric
+code is introduced (D-44's table does not move). Session-id violations keep
+their own `{"session_id", "violation"}` shape instead of a `reason`.
+
+| token | code | meaning |
+|---|---|---|
+| `blank` | `-32602` | `profile` write content is empty after trim |
+| `private` | `-32602` | `add`/`profile` content is private in its entirety |
+| `no_user_email` | `-32602` | `profile` write without a resolved user email |
+| `learning_locked` | `-32603` | another holder has the profile learning lock (`retryable: true`) |
+| `profile_conflict` | `-32603` | the optimistic profile version was lost |
+| `profile_unreadable` | `-32603` | stored `profile_data` is not parseable JSON/object |
+| `locked` | `-32603` | a foreign live `.turso-operation.lock` blocks the `add` |
+| `project_id` | `-32602` | missing, non-string or blank `project_id` |
+| `project_path` | `-32602` | missing, non-string or blank `project_path` |
+| `scope` | `-32602` | unknown or missing `scope` where it is required |
+| `query` | `-32602` | missing or blank `query` |
+| `limit` | `-32602` | `limit` not an integer in 1..=1000 |
+| `content` | `-32602` | `add` content missing or blank after stripping |
+| `type` | `-32602` | `type` is not a string |
+| `tags` | `-32602` | `tags` is not a string |
+| `metadata` | `-32602` | `metadata` is not an object |
+| `memoryId` | `-32602` | missing, non-string or blank `memoryId` |
+| `dry_run` | `-32602` | `dry_run` is not a boolean |
+| `allow_linked_source` | `-32602` | `allow_linked_source` is not a boolean |
+| `path` | `-32602` | `output_path`/`input_path` not absolute or not `.json` |
+| `from_required` | `-32602` | neither `from_path` nor `from_hash` supplied (or empty) |
+| `migrate_source` | `-32602` | the migration source did not resolve (`message`, `candidates`) |
+| `migrate_refused` | `-32602` | the migration refused a linked source (`message`) |
+| `file_not_found` | `-32602` | the import file does not exist (`message`) |
+| `invalid_json` | `-32602` | the bundle file is not JSON (`message`) |
+| `unsupported_version` | `-32602` | the bundle's `schemaVersion` is unsupported (`version`, `message`) |
+| `invalid_bundle` | `-32602` | the bundle is structurally invalid (`message`) |
+| `too_large` | `-32602` | the bundle exceeds the 100 MiB read cap |
+| `unsafe_path` | `-32602` | the destination is a symlink (`message`) |
+| `invalid_scope` | `-32602` | the target container tag cannot be resolved (`message`) |
+| `import_aborted` | `-32602` | a duplicate id aborted the import; carries `kind` (`"memory"`/`"milestone"`), `count`, `rejected` (memory kind) and `message` |
 
 Error envelopes are canonical wire objects too:
 

@@ -1,0 +1,38 @@
+# mutant T27 (migrate-empty-from-accepted)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p mem-bridge --test wire_inventory test_migrate_requires_from_path_or_from_hash
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+warning: unused variable: `empty`
+   --> crates/mem-bridge/src/tools/inventory.rs:123:13
+    |
+123 |         let empty = |value: Option<&str>| value.map(|text| text.trim().is_empty()).unwrap_or(true);
+    |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_empty`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mem-bridge` (lib) generated 1 warning (run `cargo fix --lib -p mem-bridge` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.50s
+     Running tests/wire_inventory.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/wire_inventory-36ddc5f92bad2bd6)
+
+running 1 test
+test test_migrate_requires_from_path_or_from_hash ... FAILED
+
+failures:
+
+---- test_migrate_requires_from_path_or_from_hash stdout ----
+
+thread 'test_migrate_requires_from_path_or_from_hash' (4798) panicked at crates/mem-bridge/tests/wire_inventory.rs:131:9:
+assertion `left == right` failed: an absent or empty selector is refused at the wire, got Object {"candidates": Array [], "message": String("fromPath or fromHash is required for migrate"), "reason": String("migrate_source")}
+  left: Some("migrate_source")
+ right: Some("from_required")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_migrate_requires_from_path_or_from_hash
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `-p mem-bridge --test wire_inventory`
+
+exit=101

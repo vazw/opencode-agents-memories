@@ -1,0 +1,36 @@
+# mutant T16 (forget-empty-hash-wildcard)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p mem-bridge --test wire_methods test_forget_never_crosses_the_scope_hash
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+warning: unused variable: `scope_hash`
+   --> crates/mem-bridge/src/tools/memories.rs:469:26
+    |
+469 |         for (scope_kind, scope_hash) in tuples {
+    |                          ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_scope_hash`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mem-bridge` (lib) generated 1 warning (run `cargo fix --lib -p mem-bridge` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.04s
+     Running tests/wire_methods.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/wire_methods-96cec3be58dc2b58)
+
+running 1 test
+test test_forget_never_crosses_the_scope_hash ... FAILED
+
+failures:
+
+---- test_forget_never_crosses_the_scope_hash stdout ----
+
+thread 'test_forget_never_crosses_the_scope_hash' (25843) panicked at crates/mem-bridge/tests/wire_methods.rs:60:30:
+response carries a result
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_forget_never_crosses_the_scope_hash
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.09s
+
+error: test failed, to rerun pass `-p mem-bridge --test wire_methods`
+
+exit=101

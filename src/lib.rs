@@ -8,5 +8,12 @@
 //!
 //! The crate root holds no state and no runtime: [`web_dist`] uses `std` plus
 //! the `mem_store::serde_json` re-export the root package already depends on.
+//!
+//! Since issue 70 wave 1 the lib also carries the composition root's
+//! portability adapter ([`portability_backend`]): the bridge's
+//! `PortabilityFactory` seam can only be implemented where `mem-portability`
+//! and `mem-web` meet, and root integration tests can only link the lib
+//! target.
 
+pub mod portability_backend;
 pub mod web_dist;

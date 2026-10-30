@@ -1,0 +1,29 @@
+# mutant T09 (list-all-projects-project-only)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p mem-bridge --test wire_methods test_list_all_projects_includes_the_user_scope
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.71s
+     Running tests/wire_methods.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/wire_methods-96cec3be58dc2b58)
+
+running 1 test
+test test_list_all_projects_includes_the_user_scope ... FAILED
+
+failures:
+
+---- test_list_all_projects_includes_the_user_scope stdout ----
+
+thread 'test_list_all_projects_includes_the_user_scope' (19738) panicked at crates/mem-bridge/tests/wire_methods.rs:524:5:
+assertion `left == right` failed: the user scope is part of all-projects
+  left: Number(1)
+ right: 2
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_list_all_projects_includes_the_user_scope
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.12s
+
+error: test failed, to rerun pass `-p mem-bridge --test wire_methods`
+
+exit=101

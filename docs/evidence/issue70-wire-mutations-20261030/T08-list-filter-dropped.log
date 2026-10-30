@@ -1,0 +1,29 @@
+# mutant T08 (list-filter-dropped)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p mem-bridge --test wire_methods test_list_returns_full_rows_scoped_to_the_project
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.62s
+     Running tests/wire_methods.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/wire_methods-96cec3be58dc2b58)
+
+running 1 test
+test test_list_returns_full_rows_scoped_to_the_project ... FAILED
+
+failures:
+
+---- test_list_returns_full_rows_scoped_to_the_project stdout ----
+
+thread 'test_list_returns_full_rows_scoped_to_the_project' (19039) panicked at crates/mem-bridge/tests/wire_methods.rs:444:5:
+assertion `left == right` failed: the foreign tag's row is filtered out
+  left: Number(2)
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_list_returns_full_rows_scoped_to_the_project
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.15s
+
+error: test failed, to rerun pass `-p mem-bridge --test wire_methods`
+
+exit=101

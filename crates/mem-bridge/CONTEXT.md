@@ -5,7 +5,7 @@
 **Ubiquitous language (W5.1, ADR-0007):**
 
 - **engine** — the single Rust process that owns the storage root's databases. It
-  serves the six-method JSON-RPC surface over stdio (as the wrapper's child) and,
+  serves the fifteen-method JSON-RPC surface over stdio (as the wrapper's child) and,
   in this same process, the axum web server (`WebLauncher` seam, D-32). Lives in
   `engine.rs`; the root composition is a sync arg-parser around it (M1).
 - **launcher mode / launch mode** — `stdio` (per-request JSON-RPC over stdin/stdout,
@@ -22,6 +22,13 @@
 - **session_id** — the required top-level parameter of every runtime method
   except `skills`, which takes `project_id` instead and carries no session id
   (1..=128 chars); DATA, never authority.
+- **the nine tool methods** (issue 70 wave 1) — `add`, `search`, `forget`,
+  `list`, `profile`, `list-shards`, `migrate`, `export`, `import`. Each carries
+  `session_id` (`forget` adds `project_id` and `memoryId`; the two inventory
+  methods take `project_path`); only `add` persists the session id, no read
+  filters by it. `dispatch` answers them from `EngineRuntime.tools`; a runtime
+  without it degrades (-32001). The toolkit that maps them to upstream's
+  `memory` tool is wave 2, the portability tool modes wave 3.
 - **capture_id** — the client-minted UUIDv7-shaped, ≤64-char identifier added to
   `agent_sessions` by the v4 additive migration (recall: W5.1 has no write path
   for it; W5.3 owns the recapture/upsert policy).

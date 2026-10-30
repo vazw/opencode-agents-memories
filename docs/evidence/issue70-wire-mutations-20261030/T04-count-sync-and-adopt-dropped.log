@@ -1,0 +1,29 @@
+# mutant T04 (count-sync-and-adopt-dropped)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p mem-bridge --test wire_methods test_add_persists_the_row_and_returns_its_id
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.54s
+     Running tests/wire_methods.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/wire_methods-96cec3be58dc2b58)
+
+running 1 test
+test test_add_persists_the_row_and_returns_its_id ... FAILED
+
+failures:
+
+---- test_add_persists_the_row_and_returns_its_id stdout ----
+
+thread 'test_add_persists_the_row_and_returns_its_id' (15797) panicked at crates/mem-bridge/tests/wire_methods.rs:245:5:
+assertion `left == right` failed: the counted insert and the adopted registry count
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_add_persists_the_row_and_returns_its_id
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.07s
+
+error: test failed, to rerun pass `-p mem-bridge --test wire_methods`
+
+exit=101

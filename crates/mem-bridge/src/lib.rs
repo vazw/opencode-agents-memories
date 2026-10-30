@@ -23,5 +23,6 @@ pub mod recall;
 pub mod reembed;
 pub mod scope_resolver;
 pub mod skills;
+pub mod tools;
 pub mod vault_feeder;
 pub mod vault_source_ref;

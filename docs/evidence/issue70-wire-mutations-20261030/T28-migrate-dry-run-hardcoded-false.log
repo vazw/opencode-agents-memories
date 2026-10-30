@@ -1,0 +1,27 @@
+# mutant T28 (migrate-dry-run-hardcoded-false)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p mem-bridge --test wire_inventory test_migrate_dry_run_reports_the_actions_without_moving_files
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.38s
+     Running tests/wire_inventory.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/wire_inventory-36ddc5f92bad2bd6)
+
+running 1 test
+test test_migrate_dry_run_reports_the_actions_without_moving_files ... FAILED
+
+failures:
+
+---- test_migrate_dry_run_reports_the_actions_without_moving_files stdout ----
+
+thread 'test_migrate_dry_run_reports_the_actions_without_moving_files' (5868) panicked at crates/mem-bridge/tests/wire_inventory.rs:54:30:
+result envelope
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_migrate_dry_run_reports_the_actions_without_moving_files
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.11s
+
+error: test failed, to rerun pass `-p mem-bridge --test wire_inventory`
+
+exit=101

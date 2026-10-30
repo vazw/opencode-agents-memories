@@ -141,8 +141,8 @@ silent-corruption failure class that motivates it.
 `crates/mem-web/Cargo.toml` depends on `mem-store` (it opens the DB), so placing the web server inside the
 engine is what makes that ownership single. Upstream parity: upstream's `startWebServer` is called from inside
 the plugin's own process (`example/opencode-mem/src/index.ts:491`). Consequence: the web UI talks HTTP
-directly to the engine's axum port, so the bridge schema needs **no** web namespace and stays at the minimal
-six methods (D-40; issue 69 adds `skills`).
+directly to the engine's axum port, so the bridge schema needs **no** web namespace and stays at the fifteen
+methods D-40 owns (`skills` from issue 69; the nine tool methods from issue 70).
 
 Grounds: `crates/mem-web/Cargo.toml` carries the `mem-store` edge that makes the web server a DB opener, and
 `example/opencode-mem/src/index.ts:491` shows upstream calling `startWebServer` from the plugin's own process.
@@ -236,12 +236,12 @@ the same binary minus the stdio peer. The lock must be a distinct file from `.tu
 This section is the normative input to W5.1's blueprint: it is precise enough to blueprint from without a
 further decision.
 
-### D-40 — The runtime method set is six: `capture`, `inject`, `recall`, `skills`, `health`, `shutdown`
+### D-40 — The runtime method set is fifteen: `capture`, `inject`, `recall`, `skills`, `health`, `shutdown`, and the nine tool methods of issue 70
 
-**The runtime method set is exactly these six methods and no others** (issue 69 adds `skills`; see the
-amendment below). There is no web namespace (the web UI
+**The runtime method set is exactly these fifteen methods and no others** (issue 69 adds `skills`; issue 70
+adds the nine tool methods; see the amendments below). There is no web namespace (the web UI
 speaks HTTP to the engine's axum port — D-32), no `web.*` methods, and no administrative methods beyond
-`shutdown`. A sixth method, `hello`, exists **only** for the handshake (D-43) and is not a runtime method.
+`shutdown`. `hello` exists **only** for the handshake (D-43) and is not a runtime method.
 
 Grounds: D-32 puts the web server inside the engine, so the bridge carries no web surface; `shutdown` is the
 only administrative operation the wrapper needs because the engine's lifetime is the wrapper's to end (D-45).
@@ -253,6 +253,15 @@ session-free (registration happens at plugin `setup`, before any session exists)
 `session_id` gate exactly as `hello` does. Option A — the plugin reading `/api/skills` over HTTP — was
 rejected: the plugin has no base URL and no token for the engine's web port. `docs/bridge-schema.md` §3
 carries the row.
+
+**Issue 70 amendment (2026-10-30).** Issue 70 adds nine runtime methods — `add`, `search`, `forget`, `list`,
+`profile`, `list-shards`, `migrate`, `export`, `import` — each with a capability key of the same name in the
+handshake (fourteen keys under fifteen methods; a key means "this build's dispatch answers this method"). All
+nine carry `session_id`; `forget` additionally takes `project_id` and `memoryId`. `help` stays local to the
+wrapper and `recall_project_sessions` is unchanged, so there is no `help` runtime method. The portability pair
+crosses into `mem-portability` through a bridge-owned factory seam implemented by the composition root, so
+ADR-0001's allowed-edge table does not move. `docs/bridge-schema.md` §3 carries the rows and §4 the closed
+`data.reason` vocabulary.
 
 ### D-41 — Only `inject` blocks the host
 
@@ -342,7 +351,8 @@ prevents the unread-pipe orphan that would otherwise outlive the wrapper.
 For the two process-scoped methods it identifies the calling session and is recorded but does not scope the
 operation; the engine's own self-check uses the reserved value `"__engine__"`. **Issue 69 exception:**
 `skills` takes `project_id` and carries no `session_id` — registration happens at plugin `setup`, before
-any session exists.
+any session exists. **Issue 70 note:** the nine tool methods carry `session_id` like every other runtime
+method; `forget` additionally takes `project_id` (the host directory) and `memoryId`.
 
 | method | blocking | params | result |
 |---|---|---|---|

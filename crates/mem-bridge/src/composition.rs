@@ -20,11 +20,13 @@ use std::time::Duration;
 
 use mem_core::config::Config;
 use mem_episodic::store::EpisodicStore;
+use mem_profile::learning_lock::{LearningLock, LearningLockOptions};
 use mem_profile::profile_context::ProfileInjectPolicy;
 use mem_profile::profile_store::{ProfileConfig, ProfileStore};
 use mem_profile::prompt::UserPromptManager;
 use mem_store::connection::ConnectionManager;
 use mem_store::platform::{Platform, SystemProcessProbe};
+use mem_store::project_tags::{CoreProjectTagSource, ProjectTagSource};
 use mem_store::shard_manager::ShardManager;
 
 use crate::capture::{CaptureService, CaptureWriterDeps, DefaultTier1Writer};
@@ -61,6 +63,22 @@ pub struct ComposedRuntime {
     /// The shared project-scope resolver (capture, inject and the scheduler
     /// all derive the SAME tag/hash).
     pub scope_resolver: Arc<dyn crate::scope_resolver::ProjectScopeResolver>,
+    /// Issue 70: the storage root the inventory/migration services address
+    /// (`ShardManager` exposes `config()` but no root).
+    pub storage_root: PathBuf,
+    /// Issue 70: the derived store config, cloned before the shard manager
+    /// consumes it (the inventory services construct their own stores from
+    /// it).
+    pub store_config: mem_store::config::StoreConfig,
+    /// Issue 70: the connection manager `ShardInventory` opens shard files
+    /// with.
+    pub connections: Arc<ConnectionManager>,
+    /// Issue 70: the project-tag source the inventory/migration services
+    /// resolve paths with — the same prefix/overrides the resolver uses.
+    pub tags: Arc<dyn ProjectTagSource>,
+    /// Issue 70: the `profile` write's fail-closed lock (lazy: constructing
+    /// it creates no file).
+    pub learning_lock: Arc<LearningLock>,
     /// Whether an LLM-backed capture summarizer was wirable.
     pub summarizer_available: bool,
     /// The provider handed to the **capture** summarizer, post-wrap (D-52-4):
@@ -159,13 +177,27 @@ pub async fn build_composed_runtime(
     ));
     let shards = Arc::new(ShardManager::new(
         storage_root.to_path_buf(),
-        store_config,
-        connections,
+        // Issue 70: the manager consumes a clone so `ComposedRuntime` keeps
+        // the derived config for the inventory services.
+        store_config.clone(),
+        connections.clone(),
         probe.clone(),
         // The ONE production wiring (AC9): the identity is derived from the
         // resolved config, the same authority the store config came from.
         Some(mem_core::embedding::EmbeddingIdentity::from_config(config)),
     ));
+    // Issue 70: the inventory/migration tag source and the profile write's
+    // learning lock. Both read the SAME prefix/overrides the resolver uses,
+    // so `list-shards`/`migrate` derive byte-identical tags.
+    let tags: Arc<dyn ProjectTagSource> = Arc::new(CoreProjectTagSource {
+        container_tag_prefix: config.container_tag_prefix.clone(),
+        user_email_override: config.user_email_override.clone(),
+        user_name_override: config.user_name_override.clone(),
+    });
+    let learning_lock = Arc::new(LearningLock::new(LearningLockOptions::new(
+        storage_root.to_path_buf(),
+        store_config.clone(),
+    )));
 
     // The capture summarizer: provider-backed when a provider reaches the
     // composition root (the OpenCode host transport is composed there). With
@@ -313,6 +345,11 @@ pub async fn build_composed_runtime(
         consolidation_active,
         consolidation_runner,
         scope_resolver: resolver,
+        storage_root: storage_root.to_path_buf(),
+        store_config,
+        connections,
+        tags,
+        learning_lock,
         summarizer_available: summarizer_probe.is_some(),
         provider: capture_provider,
     })

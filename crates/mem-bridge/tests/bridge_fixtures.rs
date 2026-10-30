@@ -57,6 +57,7 @@ fn full_engine() -> Engine {
         inject: fixture.inject,
         recall: fixture.recall,
         skills: None,
+        tools: None,
     };
     // The temp dir's lifetime: the guard is dropped with the engine's test
     // run (a leaked TestDir is bounded by the test count).

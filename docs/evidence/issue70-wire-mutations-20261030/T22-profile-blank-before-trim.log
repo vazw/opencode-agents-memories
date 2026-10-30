@@ -1,0 +1,29 @@
+# mutant T22 (profile-blank-before-trim)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p mem-bridge --test wire_profile test_profile_write_rejects_blank_and_private_content
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.74s
+     Running tests/wire_profile.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/wire_profile-a0901ecf7baa2b7d)
+
+running 1 test
+test test_profile_write_rejects_blank_and_private_content ... FAILED
+
+failures:
+
+---- test_profile_write_rejects_blank_and_private_content stdout ----
+
+thread 'test_profile_write_rejects_blank_and_private_content' (32567) panicked at crates/mem-bridge/tests/wire_profile.rs:202:9:
+assertion `left == right` failed: content "   " must be refused as blank
+  left: Some("private")
+ right: Some("blank")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_profile_write_rejects_blank_and_private_content
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.05s
+
+error: test failed, to rerun pass `-p mem-bridge --test wire_profile`
+
+exit=101

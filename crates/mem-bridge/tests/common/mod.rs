@@ -448,3 +448,300 @@ pub async fn build_fixture_runtime(storage_root: &Path) -> RuntimeFixture {
         embedder,
     }
 }
+
+// ---------------------------------------------------------------------------
+// Issue 70 wave 1 — the map resolver (D-14) and the wire fixture
+// ---------------------------------------------------------------------------
+
+use std::sync::atomic::AtomicBool;
+
+use mem_bridge::engine::{Engine, EngineConfig, EngineRuntime};
+use mem_bridge::scope_resolver::ProjectScopeResolver;
+use mem_bridge::tools::ToolServices;
+use mem_bridge::tools::inventory::InventoryService;
+use mem_bridge::tools::memories::MemoriesService;
+use mem_bridge::tools::portability::PortabilityBackend;
+use mem_bridge::tools::profile::ProfileService;
+use mem_profile::learning_lock::{LearningLock, LearningLockOptions};
+use mem_profile::profile_store::{ProfileConfig, ProfileStore};
+use mem_profile::prompt::UserPromptManager;
+use mem_store::connection::ConnectionManager;
+use mem_store::project_tags::CoreProjectTagSource;
+use mem_store::shard_inventory::ShardInventory;
+use mem_store::shard_manager::{ShardInfo, ShardManager};
+use mem_store::shard_path_migration::PathMigrationService;
+use mem_store::vector::MemoryInsert;
+
+/// The D-14 map resolver: `project_id -> container_tag`, with the identity
+/// the fixture resolver cannot carry.
+///
+/// The hash is parsed from the tag with `split_container_tag` (the validated
+/// pair) — never re-derived from the path. A `user`-scope tag is refused, so
+/// a test cannot resolve a user tag as a project.
+pub struct MapScopeResolver {
+    /// `project_id -> container_tag`. The hash is never supplied separately.
+    pub entries: Vec<(String, String)>,
+    /// `Some("probe@example.com")` for the write/read oracles; `None` only
+    /// for T23.
+    pub user_email: Option<String>,
+    pub user_name: Option<String>,
+    /// The tag an unmapped, non-blank project id resolves to.
+    pub fallback_tag: String,
+}
+
+impl MapScopeResolver {
+    /// Maps the given `(project_id, container_tag)` pairs.
+    pub fn new(entries: Vec<(&str, String)>, user_email: Option<&str>) -> Self {
+        Self {
+            entries: entries
+                .into_iter()
+                .map(|(id, tag)| (id.to_string(), tag))
+                .collect(),
+            user_email: user_email.map(str::to_string),
+            user_name: None,
+            fallback_tag: "opencode_project_ffffffffffffffff".to_string(),
+        }
+    }
+
+    /// One project, one tag: the common case.
+    pub fn single(project_id: &str, tag: String, user_email: Option<&str>) -> Self {
+        Self::new(vec![(project_id, tag)], user_email)
+    }
+
+    /// The tag for a hash under the test prefix.
+    pub fn project_tag(hash: &str) -> String {
+        format!("opencode_project_{hash}")
+    }
+}
+
+impl ProjectScopeResolver for MapScopeResolver {
+    fn resolve(&self, project_id: &str) -> Result<ResolvedProjectScope, ProjectScopeError> {
+        if project_id.trim().is_empty() {
+            return Err(ProjectScopeError::BlankProjectId);
+        }
+        let tag = self
+            .entries
+            .iter()
+            .find(|(id, _)| id == project_id)
+            .map(|(_, tag)| tag.as_str())
+            .unwrap_or(&self.fallback_tag);
+        // (Scope, ScopeHash): the validated pair, in one call.
+        let (scope, hash) = mem_core::scope::split_container_tag(tag)
+            .map_err(|error| ProjectScopeError::Core(error.to_string()))?;
+        // Mismatch rejection: this seam is the PROJECT half only.
+        if scope != mem_core::scope::Scope::Project {
+            return Err(ProjectScopeError::Core(format!(
+                "resolved tag {tag:?} is not a project-scope tag"
+            )));
+        }
+        // `apply_resolved_scope` stays the validator; the identity is
+        // overwritten only AFTER it passes.
+        let mut resolved =
+            mem_bridge::project_scope::apply_resolved_scope(project_id, tag, hash.as_str())?;
+        resolved.user_email = self.user_email.clone();
+        resolved.user_name = self.user_name.clone();
+        Ok(resolved)
+    }
+}
+
+/// The engine plus the handles the oracles assert against. The `TestDir`
+/// drops last, after every service over it.
+pub struct WireFixture {
+    pub engine: Engine,
+    pub shards: Arc<ShardManager>,
+    pub embedder: Arc<FakeEmbedder>,
+    pub resolver: Arc<MapScopeResolver>,
+    pub store: Arc<EpisodicStore>,
+    pub profile: Arc<ProfileStore>,
+    pub prompts: Arc<UserPromptManager>,
+    pub learning_lock: Arc<LearningLock>,
+    _dir: TestDir,
+}
+
+impl WireFixture {
+    /// The storage root (for `list-shards`/`migrate` path arguments).
+    pub fn storage_root(&self) -> PathBuf {
+        self._dir.path().to_path_buf()
+    }
+}
+
+/// Builds the wire fixture: one real store/shard manager over a temp root,
+/// the fake embedder, the map resolver and the four composed tool services.
+pub async fn build_wire_fixture(
+    dir: TestDir,
+    resolver: Arc<MapScopeResolver>,
+    embedder: Arc<FakeEmbedder>,
+    portability: Option<Arc<dyn PortabilityBackend>>,
+) -> WireFixture {
+    let storage = dir.path().to_path_buf();
+    let config = dir.store_config();
+    let store = Arc::new(EpisodicStore::new(storage.clone(), config.clone()));
+    store.ready().await.expect("wire store ready");
+    let connections = Arc::new(ConnectionManager::new(
+        storage.clone(),
+        config.clone(),
+        Platform::current(),
+        Arc::new(turso_connect_factory()),
+    ));
+    let shards = Arc::new(ShardManager::new(
+        storage.clone(),
+        config.clone(),
+        connections.clone(),
+        Arc::new(SystemProcessProbe),
+        None,
+    ));
+    let capture = mem_bridge::capture::CaptureService::new(
+        store.clone(),
+        mem_episodic::inbox::CaptureInbox::new(store.clone()),
+        Arc::new(mem_bridge::capture::DefaultTier1Writer::new(
+            mem_bridge::capture::CaptureWriterDeps {
+                shards: shards.clone(),
+                embedder: embedder.clone(),
+            },
+        )),
+        embedder.clone(),
+        None,
+        Arc::new(FixedScopeResolver::default()),
+        131_072,
+    );
+    let inject = mem_bridge::inject::InjectService::new(
+        store.clone(),
+        shards.clone(),
+        Arc::new(FixedScopeResolver::default()),
+        Arc::new(AtomicBool::new(false)),
+        embedder.clone(),
+        Arc::new(SystemProcessProbe),
+    );
+    let recall = mem_bridge::recall::RecallService::new(store.clone(), embedder.clone());
+
+    let profile = Arc::new(ProfileStore::new(
+        storage.clone(),
+        config.clone(),
+        ProfileConfig::default(),
+    ));
+    let learning_lock = Arc::new(LearningLock::new(LearningLockOptions::new(
+        storage.clone(),
+        config.clone(),
+    )));
+    let prompts = Arc::new(UserPromptManager::new(storage.clone(), config.clone(), 3));
+    let tags = Arc::new(CoreProjectTagSource {
+        container_tag_prefix: config.container_tag_prefix.clone(),
+        user_email_override: None,
+        user_name_override: None,
+    });
+    let inventory = Arc::new(ShardInventory::new(
+        storage.clone(),
+        config.clone(),
+        connections.clone(),
+        shards.clone(),
+        tags.clone(),
+    ));
+    let migration = PathMigrationService::new(
+        storage.clone(),
+        config.clone(),
+        connections.clone(),
+        shards.clone(),
+        inventory.clone(),
+        tags.clone(),
+        Arc::new(mem_bridge::tools::inventory::PromptStorePathUpdater::new(
+            prompts.clone(),
+        )),
+        Arc::new(SystemProcessProbe),
+    );
+
+    let memories = MemoriesService::new(shards.clone(), embedder.clone(), resolver.clone(), 20, 30);
+    let profile_service =
+        ProfileService::new(profile.clone(), learning_lock.clone(), resolver.clone());
+    let inventory_service = InventoryService::new(inventory, migration);
+    let tools = ToolServices::from_parts(memories, profile_service, inventory_service, portability);
+
+    let runtime = EngineRuntime {
+        capture: Arc::new(capture),
+        inject: Arc::new(inject),
+        recall: Arc::new(recall),
+        skills: None,
+        tools: Some(Arc::new(tools)),
+    };
+    WireFixture {
+        engine: Engine::with_runtime(EngineConfig::default(), Arc::new(runtime)),
+        shards,
+        embedder,
+        resolver,
+        store,
+        profile,
+        prompts,
+        learning_lock,
+        _dir: dir,
+    }
+}
+
+/// Creates (or joins) one registered shard of `(scope, hash)`.
+pub async fn create_shard(
+    shards: &ShardManager,
+    scope: mem_core::scope::Scope,
+    hash: &str,
+    index: u32,
+) -> ShardInfo {
+    shards
+        .create_shard(scope, hash, index)
+        .await
+        .expect("create shard")
+}
+
+/// Inserts one seeded row into an already-created shard.
+pub async fn insert_row(shards: &ShardManager, shard: &ShardInfo, insert: &MemoryInsert) {
+    let db = shards.open_shard(&shard.db_path).await.expect("open shard");
+    mem_store::vector::insert_vector(db.as_ref(), insert)
+        .await
+        .expect("insert seeded row");
+}
+
+/// A seeded row with every optional column at its default.
+pub fn new_insert(id: &str, content: &str, container_tag: &str) -> MemoryInsert {
+    MemoryInsert {
+        id: id.to_string(),
+        content: content.to_string(),
+        vector: unit_vector(0),
+        tags_vector: None,
+        container_tag: container_tag.to_string(),
+        tags: None,
+        memory_type: None,
+        created_at: 0,
+        updated_at: 0,
+        metadata: None,
+        session_id: None,
+        display_name: None,
+        user_name: None,
+        user_email: None,
+        project_path: None,
+        project_name: None,
+        git_repo_url: None,
+    }
+}
+
+/// Reads one row back from a shard file.
+pub async fn read_row(
+    shards: &ShardManager,
+    shard: &ShardInfo,
+    id: &str,
+) -> Option<mem_store::db::Row> {
+    let db = shards.open_shard(&shard.db_path).await.expect("open shard");
+    mem_store::vector::get_memory_by_id(db.as_ref(), id)
+        .await
+        .expect("read row")
+}
+
+/// The engine lock's exclusivity proof over a test root (the claimed
+/// mutation paths — `migrate` — require it).
+pub fn exclusive_root(storage_root: &Path) -> Arc<mem_store::delete_guard::ExclusiveRoot> {
+    let outcome =
+        mem_store::engine_lock::acquire_engine_lock(storage_root, Arc::new(SystemProcessProbe))
+            .expect("acquire the engine lock for a test root");
+    let lock = match outcome {
+        mem_store::engine_lock::EngineLockOutcome::Acquired(lock) => lock,
+        mem_store::engine_lock::EngineLockOutcome::Lost { holder_pid } => {
+            panic!("test root already locked by pid {holder_pid}")
+        }
+    };
+    Arc::new(mem_store::delete_guard::ExclusiveRoot::new(lock))
+}

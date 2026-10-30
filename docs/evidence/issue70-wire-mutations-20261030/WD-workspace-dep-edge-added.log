@@ -1,0 +1,26 @@
+# mutant WD (workspace-dep-edge-added)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test --test workspace_deps test_workspace_crate_dependencies_stay_within_allowed_edges
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.27s
+     Running tests/workspace_deps.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/workspace_deps-ce58dc230b20aa79)
+
+running 1 test
+test test_workspace_crate_dependencies_stay_within_allowed_edges ... FAILED
+
+failures:
+
+---- test_workspace_crate_dependencies_stay_within_allowed_edges stdout ----
+
+thread 'test_workspace_crate_dependencies_stay_within_allowed_edges' (17042) panicked at tests/workspace_deps.rs:125:9:
+mem-bridge contains mem-* dependencies outside its allowed set ["mem-core", "mem-store", "mem-embed", "mem-ai", "mem-profile", "mem-episodic", "mem-facts", "mem-vault", "mem-skills"]: ["mem-portability"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_workspace_crate_dependencies_stay_within_allowed_edges
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.09s
+
+error: test failed, to rerun pass `--test workspace_deps`
+
+exit=101

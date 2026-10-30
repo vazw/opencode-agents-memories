@@ -1,0 +1,42 @@
+# mutant T38 (runtime-for-tools-none)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p mem-bridge --test wire_production test_engine_from_composed_wires_every_service_and_calls_the_factory
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+warning: unused variable: `core`
+   --> crates/mem-bridge/src/engine.rs:752:5
+    |
+752 |     core: &mem_core::config::Config,
+    |     ^^^^ help: if this is intentional, prefix it with an underscore: `_core`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `portability`
+   --> crates/mem-bridge/src/engine.rs:753:5
+    |
+753 |     portability: Option<Arc<dyn crate::tools::portability::PortabilityBackend>>,
+    |     ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_portability`
+
+warning: `mem-bridge` (lib) generated 2 warnings (run `cargo fix --lib -p mem-bridge` to apply 2 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.61s
+     Running tests/wire_production.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/wire_production-de411743a4e4a082)
+
+running 1 test
+test test_engine_from_composed_wires_every_service_and_calls_the_factory ... FAILED
+
+failures:
+
+---- test_engine_from_composed_wires_every_service_and_calls_the_factory stdout ----
+
+thread 'test_engine_from_composed_wires_every_service_and_calls_the_factory' (14435) panicked at crates/mem-bridge/tests/wire_production.rs:117:30:
+result envelope
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_engine_from_composed_wires_every_service_and_calls_the_factory
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+error: test failed, to rerun pass `-p mem-bridge --test wire_production`
+
+exit=101

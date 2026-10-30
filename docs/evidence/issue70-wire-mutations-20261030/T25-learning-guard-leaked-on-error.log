@@ -1,0 +1,27 @@
+# mutant T25 (learning-guard-leaked-on-error)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p mem-bridge --test wire_profile test_profile_write_releases_the_learning_lock_on_a_failed_write
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.44s
+     Running tests/wire_profile.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/wire_profile-a0901ecf7baa2b7d)
+
+running 1 test
+test test_profile_write_releases_the_learning_lock_on_a_failed_write ... FAILED
+
+failures:
+
+---- test_profile_write_releases_the_learning_lock_on_a_failed_write stdout ----
+
+thread 'test_profile_write_releases_the_learning_lock_on_a_failed_write' (2957) panicked at crates/mem-bridge/tests/wire_profile.rs:344:5:
+the guard must be released on the failed-write path
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_profile_write_releases_the_learning_lock_on_a_failed_write
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.08s
+
+error: test failed, to rerun pass `-p mem-bridge --test wire_profile`
+
+exit=101

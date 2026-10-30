@@ -1,0 +1,29 @@
+# mutant T29 (noop-prompt-updater-kept)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p mem-bridge --test wire_inventory test_migrate_moves_the_orphaned_shard_and_rewrites_the_prompt_path
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.80s
+     Running tests/wire_inventory.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/wire_inventory-36ddc5f92bad2bd6)
+
+running 1 test
+test test_migrate_moves_the_orphaned_shard_and_rewrites_the_prompt_path ... FAILED
+
+failures:
+
+---- test_migrate_moves_the_orphaned_shard_and_rewrites_the_prompt_path stdout ----
+
+thread 'test_migrate_moves_the_orphaned_shard_and_rewrites_the_prompt_path' (7023) panicked at crates/mem-bridge/tests/wire_inventory.rs:281:5:
+assertion `left == right` failed: the prompt row follows the project path
+  left: Some("/definitely/not/a/real/project/path")
+ right: Some("/tmp/mem-bridge-w53-wire-migrate-move-6988-0-411313751/probe-project")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_migrate_moves_the_orphaned_shard_and_rewrites_the_prompt_path
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.25s
+
+error: test failed, to rerun pass `-p mem-bridge --test wire_inventory`
+
+exit=101

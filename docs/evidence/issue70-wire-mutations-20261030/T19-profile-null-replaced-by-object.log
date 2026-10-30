@@ -1,0 +1,29 @@
+# mutant T19 (profile-null-replaced-by-object)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p mem-bridge --test wire_profile test_profile_read_returns_null_when_absent
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.90s
+     Running tests/wire_profile.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/wire_profile-a0901ecf7baa2b7d)
+
+running 1 test
+test test_profile_read_returns_null_when_absent ... FAILED
+
+failures:
+
+---- test_profile_read_returns_null_when_absent stdout ----
+
+thread 'test_profile_read_returns_null_when_absent' (30170) panicked at crates/mem-bridge/tests/wire_profile.rs:81:5:
+assertion `left == right` failed
+  left: Object {"profile": Object {}}
+ right: Object {"profile": Null}
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_profile_read_returns_null_when_absent
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.06s
+
+error: test failed, to rerun pass `-p mem-bridge --test wire_profile`
+
+exit=101

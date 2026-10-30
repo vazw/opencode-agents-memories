@@ -1,0 +1,27 @@
+# mutant T11 (search-similarity-constant)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p mem-bridge --test wire_methods test_search_returns_full_ranked_rows
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.64s
+     Running tests/wire_methods.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/wire_methods-96cec3be58dc2b58)
+
+running 1 test
+test test_search_returns_full_ranked_rows ... FAILED
+
+failures:
+
+---- test_search_returns_full_ranked_rows stdout ----
+
+thread 'test_search_returns_full_ranked_rows' (21725) panicked at crates/mem-bridge/tests/wire_methods.rs:641:5:
+the orthogonal row scores 0.0, got 1.0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_search_returns_full_ranked_rows
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.07s
+
+error: test failed, to rerun pass `-p mem-bridge --test wire_methods`
+
+exit=101

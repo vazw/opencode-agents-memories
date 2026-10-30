@@ -1,0 +1,30 @@
+# mutant T36 (container-tag-prefix-omitted)
+$ sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scripts/cargo-serialized.sh cargo test -p opencode-agents-memory --test portability_backend test_production_backend_round_trips_an_export_and_an_import
+
+   Compiling mem-bridge v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods/crates/mem-bridge)
+   Compiling opencode-agents-memory v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-wire-methods)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.94s
+     Running tests/portability_backend.rs (/home/vaz/Code/Personal/Rust/opencode-agents-memory/target/debug/deps/portability_backend-62df4f4c6d914137)
+
+running 1 test
+test test_production_backend_round_trips_an_export_and_an_import ... FAILED
+
+failures:
+
+---- test_production_backend_round_trips_an_export_and_an_import stdout ----
+
+thread 'test_production_backend_round_trips_an_export_and_an_import' (13174) panicked at tests/portability_backend.rs:244:5:
+assertion `left == right` failed
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_production_backend_round_trips_an_export_and_an_import
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.16s
+
+error: test failed, to rerun pass `-p opencode-agents-memory --test portability_backend`
+
+exit=101
