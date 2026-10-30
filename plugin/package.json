@@ -33,11 +33,12 @@
     "local",
     "standalone"
   ],
-  "author": "opencode-agents-memory",
+  "author": "Jakkaphat Jaisen <vaz@siamstr.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tickernelz/opencode-mem.git"
+    "url": "git+https://github.com/vazw/opencode-agents-memories.git",
+    "directory": "plugin"
   },
   "opencode": {
     "type": "plugin",
