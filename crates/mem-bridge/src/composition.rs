@@ -54,6 +54,11 @@ pub struct ComposedRuntime {
     /// `skills` creates no file.
     pub skills: Arc<mem_skills::SkillsManager>,
     pub embedder: Arc<dyn mem_embed::embedder::Embedder>,
+    /// W6.6: the `facts.db` store the web milestone projection joins, or
+    /// `None` when the promotion pipeline is off (the flag-off composition
+    /// creates no `facts.db`). It is the SAME handle the cross-tier task
+    /// writes through.
+    pub facts: Option<Arc<mem_facts::store::FactsStore>>,
     pub episodic_config: mem_core::config::Episodic,
     /// The shared in-flight consolidation gate (set by the scheduler's RAII
     /// guard; read by the injector to skip only the tier-1 leg).
@@ -152,6 +157,10 @@ pub async fn build_composed_runtime(
         } else {
             None
         };
+    // W6.6: the same store the cross-tier task writes through is cloned here
+    // BEFORE the move, so the web milestone projection reads the facts its
+    // own composition produced (one file, two readers).
+    let facts = facts_store.clone();
     let cross_tier = crate::cross_tier::cross_tier_task(
         config.feature_flags.promotion_pipeline,
         facts_store,
@@ -340,6 +349,7 @@ pub async fn build_composed_runtime(
         prompts,
         profile,
         skills,
+        facts,
         embedder,
         episodic_config: config.episodic,
         consolidation_active,

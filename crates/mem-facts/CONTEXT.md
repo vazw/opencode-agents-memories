@@ -13,7 +13,12 @@ per-session provenance, and the explicit owner-initiated erasure path.
   supplies one. The unique constraint is
   `(project_id, tier, key_normalized)`: dedup is per project and per tier.
 - **Source ref** — the milestone id whose consolidation produced the fact.
-  It is authoritative and the reason a fact can be purged by milestone.
+  It is authoritative and the reason a fact can be purged by milestone, and
+  it is the milestone projection's only join key (`LIST_FACTS_BY_MILESTONE`).
+  Provenance is not a substitute: a `fact_provenance` row is per contributing
+  session and is written `INSERT … ON CONFLICT DO NOTHING`, so it names the
+  FIRST promoting milestone, while `facts.source_ref` names the run that
+  produced the current content.
 - **Provenance** — `fact_provenance(fact_id, project_id, session_id,
   agent_id, milestone_id)`: one row per contributing session. A fact that
   came from two sessions has two rows, and purging either session deletes

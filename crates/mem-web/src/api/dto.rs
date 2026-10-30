@@ -5,6 +5,7 @@
 //! absent (`undefined` in upstream `JSON.stringify`), except `containerTag`
 //! on a skill and `projectPath` on a prompt, where upstream emits `null`.
 
+use mem_episodic::milestone::Milestone;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -593,3 +594,28 @@ impl From<super::ports::DedupReport> for DedupDto {
 
 /// The session list payload (W6.3 owns the shape; the stub never produces it).
 pub type SessionListDto = Vec<Value>;
+
+/// One `GET /api/projects/{project_id}/milestones` row (W6.6): the milestone's
+/// own camelCase projection — `Milestone` is already `camelCase` on the wire
+/// and never serializes its write-only `embedding` — plus the durable facts it
+/// promoted.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MilestoneItemDto {
+    #[serde(flatten)]
+    pub milestone: Milestone,
+    pub promoted_facts: Vec<PromotedFactDto>,
+}
+
+/// One durable fact promoted by a milestone.
+///
+/// No `memoryType`: durable facts carry a `tier`, and the upstream memory-type
+/// vocabulary is a different concept. Promoted facts are agent-anonymous by
+/// construction — their attribution is the milestone that carries them.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PromotedFactDto {
+    pub id: String,
+    pub content: String,
+    pub created_at: i64,
+}

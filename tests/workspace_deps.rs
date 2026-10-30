@@ -41,6 +41,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "mem-ai",
             "mem-profile",
             "mem-episodic",
+            "mem-facts",
             "mem-skills",
             "mem-portability",
         ],

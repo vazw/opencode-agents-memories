@@ -923,6 +923,11 @@ pub struct WebStoreDeps {
     /// same store capture and inject write through. The root crate wraps it in
     /// `episodic_session_port(..)` for `.with_sessions(..)`.
     pub episodic: Arc<EpisodicStore>,
+    /// W6.6: the composed `facts.db` store (the same handle the cross-tier
+    /// task writes through), or `None` when the promotion pipeline is off.
+    /// The root crate passes it to `episodic_milestone_port(..)` for
+    /// `.with_milestones(..)`.
+    pub facts: Option<Arc<mem_facts::store::FactsStore>>,
     /// The engine's embedder, wrapped by the root into the mem-web embed port.
     pub embedder: Arc<dyn mem_embed::embedder::Embedder>,
 }
@@ -1271,6 +1276,7 @@ pub async fn run_in_runtime(
         prompts: runtime.prompts.clone(),
         profile: runtime.profile.clone(),
         episodic: runtime.store.clone(),
+        facts: runtime.facts.clone(),
         embedder: runtime.embedder.clone(),
     });
     let web = match launcher

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-//! In-memory fakes for the seven W6.2 port seams.
+//! In-memory fakes for the eight W6.2 port seams.
 //!
 //! One [`FakeBackend`] implements every port; [`fake_services`] wraps it in
 //! [`ApiServices`]. Every mutating call is recorded in [`FakeBackend::calls`]
@@ -22,14 +22,16 @@ use mem_core::tags::migration::{
     BatchOutcome, MemoryRecord, MigrationProgress, MigrationSink, TagGeneration, TagMigrator,
 };
 use mem_embed::embedder::EmbedTask;
+use mem_episodic::milestone::{Contributor, Milestone};
 use serde_json::{Value, json};
 
+use mem_web::api::dto::MilestoneItemDto;
 use mem_web::api::ports::{
     ApiServices, CatalogEntry, CleanupApplied, CleanupPreview, DedupReport, EmbedPort,
     MaintenancePort, MemoryPort, MemoryRow, MemoryUpdate, MigrationReport, MigrationRunReport,
-    NewMemory, NewSkill, PortError, ProfileChangelog, ProfileErasure, ProfilePort, ProfileRecord,
-    PromptPort, PromptRow, SearchHit, SessionPort, ShardRef, Skill, SkillPatch, SkillPort,
-    TagMigrationReport, TagRow,
+    MilestonePort, NewMemory, NewSkill, PortError, ProfileChangelog, ProfileErasure, ProfilePort,
+    ProfileRecord, PromptPort, PromptRow, SearchHit, SessionPort, ShardRef, Skill, SkillPatch,
+    SkillPort, TagMigrationReport, TagRow,
 };
 
 /// The seeded project scope hash (16 lowercase hex).
@@ -420,7 +422,36 @@ impl Default for FakeBackend {
     }
 }
 
-/// Wraps a fresh backend in the seven-port bundle.
+/// The seeded milestone row: one contributor, no promoted facts (the fake
+/// serves the roster only; the `facts.db` join is exercised over the real
+/// stores in `api_milestones.rs`).
+pub fn seeded_milestone() -> MilestoneItemDto {
+    MilestoneItemDto {
+        milestone: Milestone {
+            id: "ms_probe_1".to_string(),
+            project_id: "probe-project".to_string(),
+            agent_id: "agent-alpha".to_string(),
+            summary: "probe milestone".to_string(),
+            contributors: vec![Contributor {
+                session_row_id: "row_probe_1".to_string(),
+                session_id: "session-probe-1".to_string(),
+                parent_session_id: None,
+                agent_id: "agent-alpha".to_string(),
+                agent_name: "Alpha".to_string(),
+                created_at: NOW,
+                summary: "probe contribution".to_string(),
+            }],
+            source_count: 1,
+            window_start: NOW,
+            window_end: NOW,
+            embedding: Vec::new(),
+            created_at: NOW,
+        },
+        promoted_facts: Vec::new(),
+    }
+}
+
+/// Wraps a fresh backend in the eight-port bundle.
 pub fn fake_services() -> (Arc<FakeBackend>, ApiServices) {
     let backend = Arc::new(FakeBackend::new());
     let services = ApiServices {
@@ -431,6 +462,7 @@ pub fn fake_services() -> (Arc<FakeBackend>, ApiServices) {
         embed: backend.clone(),
         maintenance: backend.clone(),
         sessions: backend.clone(),
+        milestones: backend.clone(),
     };
     (backend, services)
 }
@@ -1186,6 +1218,22 @@ impl SessionPort for FakeBackend {
 
     async fn delete_session(&self, _project_id: &str, _session_id: &str) -> Result<(), PortError> {
         Err(PortError::Unavailable)
+    }
+}
+
+#[async_trait]
+impl MilestonePort for FakeBackend {
+    async fn list_milestones(
+        &self,
+        project_id: &str,
+        _limit: usize,
+    ) -> Result<Vec<MilestoneItemDto>, PortError> {
+        self.record(format!("list_milestones:{project_id}"));
+        if project_id == "probe-project" {
+            Ok(vec![seeded_milestone()])
+        } else {
+            Ok(Vec::new())
+        }
     }
 }
 

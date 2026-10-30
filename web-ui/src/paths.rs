@@ -2,9 +2,10 @@
 //!
 //! Transcribed from `example/opencode-mem/src/services/web-server.ts` (the
 //! routing table) plus the paths the upstream Svelte client actually calls,
-//! plus the two W6.3 port additions (roadmap §W6.3). Every entry is a
-//! `(method, template)` pair; `{id}` (and the W6.3 `{project_id}` /
-//! `{session_id}`) is a percent-encoded path parameter.
+//! plus the port's three additions (the two W6.3 session rows and the W6.6
+//! milestone row) (roadmap §W6.3, §W6.6). Every entry is a `(method, template)`
+//! pair; `{id}` (and the W6.3 `{project_id}` / `{session_id}`) is a
+//! percent-encoded path parameter.
 //!
 //! The UI adds no endpoint, no scope parameter and no second API surface:
 //! this table is the whole contract.
@@ -48,6 +49,7 @@ pub enum EndpointId {
     DeleteSkill,
     ListProjectSessions,
     DeleteProjectSession,
+    ListProjectMilestones,
 }
 
 /// One pinned endpoint: its identity, its HTTP method and its path template.
@@ -230,6 +232,11 @@ pub const ENDPOINTS: &[EndpointSpec] = &[
         method: "DELETE",
         template: "/api/projects/{project_id}/sessions/{session_id}",
     },
+    EndpointSpec {
+        id: EndpointId::ListProjectMilestones,
+        method: "GET",
+        template: "/api/projects/{project_id}/milestones",
+    },
 ];
 
 /// Compile-time totality: one row per `EndpointId`, in declaration order.
@@ -274,9 +281,10 @@ const _: () = {
         | EndpointId::UpdateSkill
         | EndpointId::DeleteSkill
         | EndpointId::ListProjectSessions
-        | EndpointId::DeleteProjectSession => {}
+        | EndpointId::DeleteProjectSession
+        | EndpointId::ListProjectMilestones => {}
     }
-    assert!(ENDPOINTS.len() == EndpointId::DeleteProjectSession as usize + 1);
+    assert!(ENDPOINTS.len() == EndpointId::ListProjectMilestones as usize + 1);
     let mut i: usize = 0;
     while i < ENDPOINTS.len() {
         assert!(ENDPOINTS[i].id as usize == i);
@@ -346,12 +354,12 @@ const SESSION_PATHS: &[&str] = &[
 
 const STATS_PATHS: &[&str] = &["/api/stats"];
 
+const AGENT_PATHS: &[&str] = &["/api/projects/{project_id}/milestones"];
+
 /// The path templates a screen consumes, in a stable order.
 ///
-/// `Home` and `Agents` consume no endpoint: `Home` is the shell's own landing
-/// screen, and the `Agents` milestone route is deferred to the `mem-web` wave
-/// (which grows `mem-web`'s `ROUTE_TABLE` from 37 to 38 there, not here), so
-/// `Agents` renders its documented unavailable state without issuing a request.
+/// `Home` consumes no endpoint (the shell's own landing screen). `Agents`
+/// consumes the milestone template: the panel issues its one fetch on mount.
 pub fn endpoints_for(route: RouteId) -> &'static [&'static str] {
     match route {
         RouteId::Home => &[],
@@ -362,7 +370,7 @@ pub fn endpoints_for(route: RouteId) -> &'static [&'static str] {
         RouteId::ExportImport => EXPORT_IMPORT_PATHS,
         RouteId::SkillLibrary => SKILL_PATHS,
         RouteId::SessionHistory => SESSION_PATHS,
-        RouteId::Agents => &[],
+        RouteId::Agents => AGENT_PATHS,
         RouteId::Stats => STATS_PATHS,
     }
 }
@@ -396,6 +404,18 @@ impl std::fmt::Display for PathTemplate {
 /// segment (so `/` becomes `%2F` and a space becomes `%20`).
 pub fn fill(template: &str, id: &str) -> String {
     template.replace("{id}", &encode_component(id))
+}
+
+/// Fill the `{project_id}` parameter of a pinned template, percent-encoding
+/// the value as a single path segment.
+///
+/// `fill` only knows `{id}`; the project-scoped templates (the W6.3 session
+/// rows and the W6.6 milestone row) go through here, so a project id can never
+/// become a path or an authority.
+pub fn project_path(endpoint_id: EndpointId, project_id: &str) -> String {
+    endpoint(endpoint_id)
+        .template
+        .replace("{project_id}", &encode_component(project_id))
 }
 
 /// Percent-encode an RFC 3986 component using the unreserved set only.

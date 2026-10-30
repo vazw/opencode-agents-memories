@@ -33,14 +33,16 @@ use std::time::{Duration, Instant};
 use mem_core::config::{Config, ConfigPaths};
 use mem_core::env::ProcessEnv;
 use mem_core::scope::Scope;
+use mem_core::tier::MemoryTier;
 use mem_embed::embedder::{BoxFuture, Embedder};
 use mem_embed::error::EmbedError;
 use mem_episodic::record::NewAgentSession;
 use mem_episodic::store::EpisodicStore;
 use mem_episodic::timeline::TimelineFilter;
+use mem_facts::store::{FactInput, FactSource, FactsStore};
 use mem_store::config::StoreConfig;
 use mem_store::connection::ConnectionManager;
-use mem_store::db::TursoConnectFactory;
+use mem_store::db::{Statement, TursoConnectFactory, Value};
 use mem_store::platform::{Platform, SystemProcessProbe};
 use mem_store::serde_json;
 use mem_store::shard_manager::ShardManager;
@@ -59,6 +61,14 @@ const MEMORY_CONTENT: &str = "W6.7 composition-root wiring probe";
 /// session timeline's project filter selected beta's own rows rather than
 /// hiding every foreign row.
 const FOREIGN_PROJECT_SUMMARY: &str = "AC2-FOREIGN-PROJECT-SESSION";
+/// The W6.6 fixture project (the milestone route is project-scoped).
+const MILESTONE_PROJECT: &str = "project-alpha";
+/// The W6.6 milestone id asserted on the wire.
+const MILESTONE_ID: &str = "ms_w66_wiring_probe";
+/// The W6.6 promoted fact's content asserted on the wire.
+const MILESTONE_FACT_CONTENT: &str = "W6.6 composition-root wiring probe";
+/// The seeded milestone's contributor (one source session, one agent).
+const MILESTONE_CONTRIBUTORS: &str = r#"[{"sessionRowId":"row-w66","sessionId":"session-w66","agentId":"agent-w66","agentName":"Agent W66","createdAt":1800000000000,"summary":"wiring contribution"}]"#;
 /// The older of two byte-identical rows (inserted with `created_at` 2_000).
 const DEDUP_OLD_ID: &str = "mem_54_dedup_old";
 /// The newer of two byte-identical rows (inserted with `created_at` 3_000): the
@@ -456,6 +466,87 @@ fn seed_sessions(storage: &Path, store_config: &StoreConfig) -> SeededSessions {
         SeededSessions {
             project_a: vec![ids[0].clone(), ids[1].clone()],
             project_b: ids[2].clone(),
+        }
+    })
+}
+
+/// The W6.6 fixture: one milestone (`episodic.db`) plus one fact promoted by
+/// it (`facts.db`), written through the REAL store paths and read back as a
+/// precondition.
+struct SeededMilestone {
+    milestone_id: String,
+    fact_id: String,
+    fact_content: String,
+}
+
+fn seed_milestone_and_fact(storage: &Path, store_config: &StoreConfig) -> SeededMilestone {
+    let runtime = mem_store::tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("the seed's own current_thread runtime builds");
+    runtime.block_on(async {
+        let store = EpisodicStore::new(storage.to_path_buf(), store_config.clone());
+        store.ready().await.expect("the episodic store opens");
+        let embedding = mem_store::vector::vector_to_text(&vec![
+            0.5_f32;
+            store_config.embedding_dimensions as usize
+        ])
+        .expect("the vector serializes");
+        store
+            .write_batch(vec![Statement::new(
+                "INSERT INTO episodic_milestones (id, project_id, agent_id, summary, contributors, source_count, window_start, window_end, embedding, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, vector32(?), ?)",
+                vec![
+                    Value::Text(MILESTONE_ID.to_string()),
+                    Value::Text(MILESTONE_PROJECT.to_string()),
+                    Value::Text("agent-w66".to_string()),
+                    Value::Text("wiring milestone".to_string()),
+                    Value::Text(MILESTONE_CONTRIBUTORS.to_string()),
+                    Value::Integer(1),
+                    Value::Integer(1_800_000_000_000),
+                    Value::Integer(1_800_000_000_000),
+                    Value::Text(embedding),
+                    Value::Integer(1_800_000_000_000),
+                ],
+            )])
+            .await
+            .expect("insert the milestone");
+        let milestones = store
+            .list_milestones(MILESTONE_PROJECT, 10)
+            .await
+            .expect("the seeded milestone reads back");
+        assert_eq!(milestones.len(), 1, "the fixture seeded one milestone");
+        assert_eq!(milestones[0].id, MILESTONE_ID);
+
+        let facts = FactsStore::new(store_config.clone());
+        facts
+            .insert(FactInput {
+                project_id: MILESTONE_PROJECT.to_string(),
+                tier: MemoryTier::Semantic,
+                content: MILESTONE_FACT_CONTENT.to_string(),
+                key: None,
+                source_ref: Some(MILESTONE_ID.to_string()),
+                confidence: None,
+                metadata: None,
+                embedding: None,
+                model_id: None,
+                sources: vec![FactSource {
+                    project_id: MILESTONE_PROJECT.to_string(),
+                    session_id: "session-w66".to_string(),
+                    agent_id: "agent-w66".to_string(),
+                    milestone_id: MILESTONE_ID.to_string(),
+                }],
+            })
+            .await
+            .expect("insert the promoted fact");
+
+        SeededMilestone {
+            milestone_id: MILESTONE_ID.to_string(),
+            fact_id: mem_facts::schema::fact_id(
+                MILESTONE_PROJECT,
+                MemoryTier::Semantic,
+                MILESTONE_FACT_CONTENT,
+            ),
+            fact_content: MILESTONE_FACT_CONTENT.to_string(),
         }
     })
 }
@@ -1108,6 +1199,98 @@ fn test_production_wiring_session_delete_is_project_scoped() {
     assert!(
         raw.contains(FOREIGN_PROJECT_SUMMARY),
         "the foreign row's marker survives the cross-project delete: {raw}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// W6.6 — the composition-root milestone-projection oracle
+// ---------------------------------------------------------------------------
+
+/// W6.6 / AC30 — the binary's own composition root attaches the milestone
+/// projection over the SAME stores it composed, and the promoted-facts join
+/// reads the seeded `facts.db`.
+///
+/// `ComposedRuntime.facts` is `Some(..)` only when `featureFlags
+/// .promotionPipeline` is true (the default is `false`), and the child resolves
+/// that flag from the sandbox `HOME`, so the fixture writes it and asserts the
+/// resolved value before spawning (a config-key typo fails loudly here rather
+/// than as a mystery `[]`).
+///
+/// Wrong implementations it kills, with the bytes that differ:
+/// - no `.with_milestones(..)` in `src/main.rs` → `501`
+///   `{"success":false,"error":"the endpoint is not available in this build"}`
+///   instead of the milestone row;
+/// - the flag false / `WebStoreDeps.facts` unplumbed → `200` with an empty
+///   `promotedFacts` instead of the seeded fact (a fact-less 200 is the
+///   mutant);
+/// - a milestone projection over a different storage root → `200 []`.
+#[test]
+fn test_production_wiring_serves_the_seeded_milestones() {
+    let _lock = serial();
+    let root = scratch_dir("milestones-live");
+    let home = root.join("home");
+    let storage = root.join("storage");
+    let dist = root.join("dist");
+    std::fs::create_dir_all(&home).expect("create the sandbox home");
+    std::fs::create_dir_all(&storage).expect("create storage root");
+    write_shell(&dist);
+    write_config(&home, "{\"featureFlags\":{\"promotionPipeline\":true}}");
+
+    let config = resolve_sandbox_config(&home);
+    assert!(
+        config.feature_flags.promotion_pipeline,
+        "the sandbox config's promotionPipeline flag resolved (a key typo fails here)"
+    );
+    let mut store_config = mem_store::config::from_core(&config);
+    store_config.storage_path = storage.clone();
+    let seeded = seed_milestone_and_fact(&storage, &store_config);
+
+    let port = free_port();
+    let stderr_path = root.join("engine.err");
+    let _child = spawn_engine_with_home(&storage, port, &dist, &stderr_path, &home);
+    wait_for_port(port);
+
+    // Decision 4: the token is minted by the first token-less request.
+    let (status, raw) = http_get(port, "/api/memories", None);
+    assert_eq!(
+        status, 401,
+        "a token-less /api/memories request must answer 401 (and write the token): {raw}"
+    );
+    let token = wait_for_token(&storage.join(".auth-token"));
+
+    let (status, raw) = http_get(
+        port,
+        &format!("/api/projects/{MILESTONE_PROJECT}/milestones"),
+        Some(&token),
+    );
+    assert_eq!(
+        status, 200,
+        "the binary's own composition root must attach the milestone projection, \
+         not the 501 — body: {raw}"
+    );
+    let body: serde_json::Value =
+        serde_json::from_str(response_body(&raw)).expect("the milestone list answers JSON");
+    assert_eq!(body["success"], serde_json::Value::Bool(true), "{body}");
+    let rows = body["data"]
+        .as_array()
+        .expect("the milestone list carries a data array");
+    assert_eq!(rows.len(), 1, "exactly the seeded milestone: {body}");
+    assert_eq!(rows[0]["id"], seeded.milestone_id, "{body}");
+    assert_eq!(
+        rows[0]["projectId"], MILESTONE_PROJECT,
+        "the row is project-scoped: {body}"
+    );
+    let facts = rows[0]["promotedFacts"]
+        .as_array()
+        .expect("the milestone carries promotedFacts");
+    assert_eq!(facts.len(), 1, "the seeded fact is joined: {body}");
+    assert_eq!(
+        facts[0]["id"], seeded.fact_id,
+        "the join carries the fact id: {body}"
+    );
+    assert_eq!(
+        facts[0]["content"], seeded.fact_content,
+        "the join carries the fact content: {body}"
     );
 }
 

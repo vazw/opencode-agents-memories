@@ -1,11 +1,11 @@
-//! The seven port seams behind the REST surface.
+//! The eight port seams behind the REST surface.
 //!
 //! Upstream `api-handlers.ts` reaches the process-wide singletons
 //! (`tursoShardManager`, `tursoConnectionManager`, `tursoVectorSearch`,
 //! `embeddingService`, `userPromptManager`, `userProfileManager`,
 //! `skillsManager`, the cleanup/deduplication/migration services). The port
 //! keeps the same boundaries but makes them injectable: every handler talks to
-//! one of the seven object-safe traits below, never to a store type. The
+//! one of the eight object-safe traits below, never to a store type. The
 //! production adapters live in [`super::store_adapter`]; the tests inject
 //! in-memory fakes.
 //!
@@ -23,6 +23,8 @@ use mem_core::scope::Scope;
 use mem_embed::embedder::EmbedTask;
 use mem_store::error::ShardModelMismatch;
 use serde_json::Value;
+
+use super::dto::MilestoneItemDto;
 
 /// A resolved shard (upstream `ShardInfo`, minus the registry bookkeeping the
 /// handlers do not read).
@@ -613,7 +615,23 @@ pub trait SessionPort: Send + Sync {
     async fn delete_session(&self, project_id: &str, session_id: &str) -> Result<(), PortError>;
 }
 
-/// The seven ports bundled into the shared state.
+/// The W6.6 milestone-projection seam.
+///
+/// The production adapter is `EpisodicMilestonePort`: `EpisodicStore`'s
+/// milestone rows plus the `facts.db` promoted-facts join. The handler sees
+/// only the DTO, never a store type.
+#[async_trait]
+pub trait MilestonePort: Send + Sync {
+    /// The project's milestones, newest first, bounded by `limit`; each
+    /// carries the durable facts it promoted.
+    async fn list_milestones(
+        &self,
+        project_id: &str,
+        limit: usize,
+    ) -> Result<Vec<MilestoneItemDto>, PortError>;
+}
+
+/// The eight ports bundled into the shared state.
 #[derive(Clone)]
 pub struct ApiServices {
     pub memory: Arc<dyn MemoryPort>,
@@ -623,6 +641,7 @@ pub struct ApiServices {
     pub embed: Arc<dyn EmbedPort>,
     pub maintenance: Arc<dyn MaintenancePort>,
     pub sessions: Arc<dyn SessionPort>,
+    pub milestones: Arc<dyn MilestonePort>,
 }
 
 impl ApiServices {
@@ -636,7 +655,8 @@ impl ApiServices {
             skills: unavailable.clone(),
             embed: unavailable.clone(),
             maintenance: unavailable.clone(),
-            sessions: unavailable,
+            sessions: unavailable.clone(),
+            milestones: unavailable,
         }
     }
 
@@ -663,6 +683,7 @@ impl ApiServices {
             embed: deps.embed,
             maintenance: Arc::new(UnavailablePort),
             sessions: Arc::new(UnavailablePort),
+            milestones: Arc::new(UnavailablePort),
         }
     }
 
@@ -675,6 +696,12 @@ impl ApiServices {
     /// W6.3 injects the episodic session store.
     pub fn with_sessions(mut self, sessions: Arc<dyn SessionPort>) -> Self {
         self.sessions = sessions;
+        self
+    }
+
+    /// W6.6 injects the episodic milestone projection.
+    pub fn with_milestones(mut self, milestones: Arc<dyn MilestonePort>) -> Self {
+        self.milestones = milestones;
         self
     }
 
@@ -970,6 +997,17 @@ impl SessionPort for UnavailablePort {
     }
 
     async fn delete_session(&self, _project_id: &str, _session_id: &str) -> Result<(), PortError> {
+        Err(PortError::Unavailable)
+    }
+}
+
+#[async_trait]
+impl MilestonePort for UnavailablePort {
+    async fn list_milestones(
+        &self,
+        _project_id: &str,
+        _limit: usize,
+    ) -> Result<Vec<MilestoneItemDto>, PortError> {
         Err(PortError::Unavailable)
     }
 }

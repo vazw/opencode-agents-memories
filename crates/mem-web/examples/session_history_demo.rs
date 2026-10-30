@@ -1,8 +1,10 @@
-//! The W6.3 dev harness: a real `EpisodicStore` behind the shipped router.
+//! The W6.3/W6.6 dev harness: a real `EpisodicStore` + `FactsStore` behind the
+//! shipped router.
 //!
 //! What it proves end to end: the two session routes, the `EpisodicSessionPort`
-//! adapter, the orphan flag, and the W6.5 session-history screen — served from
-//! the same gate layer as production.
+//! adapter, the orphan flag, the W6.5 session-history screen, and (W6.6) the
+//! project-scoped milestone projection with its promoted-facts join and the
+//! `Agents` screen — served from the same gate layer as production.
 //!
 //! ```text
 //! cd web-ui && trunk build          # produces web-ui/dist
@@ -27,14 +29,18 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use mem_core::tier::MemoryTier;
 use mem_embed::embedder::{BoxFuture, Embedder};
 use mem_embed::error::EmbedError;
 use mem_episodic::record::NewAgentSession;
 use mem_episodic::store::EpisodicStore;
+use mem_facts::store::{FactInput, FactSource, FactsStore};
 use mem_store::config::StoreConfig;
+use mem_store::db::{Statement, Value};
+use mem_store::vector::vector_to_text;
 use mem_web::WebServerSettings;
 use mem_web::api::ports::ApiServices;
-use mem_web::api::store_adapter::episodic_session_port;
+use mem_web::api::store_adapter::{episodic_milestone_port, episodic_session_port};
 use mem_web::api_auth::LocalTokenSource;
 use mem_web::host_allowlist::HostAllowlist;
 use mem_web::server::{AppState, start};
@@ -48,6 +54,42 @@ const SESSION_ID: &str = "demo-session";
 const DIMENSIONS: u32 = 8;
 /// The **demo-only** local token (see the module doc).
 const DEMO_TOKEN: &str = "demo-token";
+/// The first seeded milestone (the parent agent and the child agent).
+const MILESTONE_ONE: &str = "demo-milestone-1";
+/// The second seeded milestone (the parent agent again): the roster's distinct
+/// milestone count is visibly 2.
+const MILESTONE_TWO: &str = "demo-milestone-2";
+/// The first milestone's contributor array (two agents).
+const MILESTONE_ONE_CONTRIBUTORS: &str = r#"[{"sessionRowId":"row-1","sessionId":"demo-session","agentId":"agent-parent","agentName":"Planner","createdAt":1800000000000,"summary":"scaffolded the explorer demo"},{"sessionRowId":"row-2","sessionId":"demo-session","agentId":"agent-child","agentName":"Implementer","createdAt":1800000001000,"summary":"wired the session-history endpoints"}]"#;
+/// The second milestone's contributor array (the parent agent again).
+const MILESTONE_TWO_CONTRIBUTORS: &str = r#"[{"sessionRowId":"row-3","sessionId":"demo-session","agentId":"agent-parent","agentName":"Planner","createdAt":1800000002000,"summary":"reviewed the milestone projection"}]"#;
+
+/// One raw `episodic_milestones` insert (the consolidation output shape).
+fn milestone_statement(
+    id: &str,
+    contributors: &str,
+    source_count: i64,
+    window_start: i64,
+    window_end: i64,
+) -> Statement {
+    Statement::new(
+        "INSERT INTO episodic_milestones (id, project_id, agent_id, summary, contributors, source_count, window_start, window_end, embedding, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, vector32(?), ?)",
+        vec![
+            Value::Text(id.to_string()),
+            Value::Text(PROJECT_ID.to_string()),
+            Value::Text("agent-parent".to_string()),
+            Value::Text(format!("Milestone {id}: consolidated demo work")),
+            Value::Text(contributors.to_string()),
+            Value::Integer(source_count),
+            Value::Integer(window_start),
+            Value::Integer(window_end),
+            Value::Text(
+                vector_to_text(&[0.5_f32; DIMENSIONS as usize]).expect("vector serializes"),
+            ),
+            Value::Integer(window_end),
+        ],
+    )
+}
 
 /// The fixed-vector embedder `insert_session` requires (no provider here).
 struct DemoEmbedder;
@@ -138,6 +180,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
 
+    // W6.6: two milestones whose contributors fold to two agents with distinct
+    // milestone counts (the parent agent appears in both).
+    store
+        .write_batch(vec![
+            milestone_statement(
+                MILESTONE_ONE,
+                MILESTONE_ONE_CONTRIBUTORS,
+                2,
+                1_800_000_000_000,
+                1_800_000_001_000,
+            ),
+            milestone_statement(
+                MILESTONE_TWO,
+                MILESTONE_TWO_CONTRIBUTORS,
+                1,
+                1_800_000_002_000,
+                1_800_000_002_000,
+            ),
+        ])
+        .await?;
+
+    // W6.6: the durable facts the milestones promoted (`source_ref` is the
+    // join key the projection reads).
+    let facts = Arc::new(FactsStore::new(demo_config(storage.clone())));
+    for (tier, content, milestone, agent) in [
+        (
+            MemoryTier::Semantic,
+            "The explorer ships a project-scoped milestone route.",
+            MILESTONE_ONE,
+            "agent-parent",
+        ),
+        (
+            MemoryTier::Procedural,
+            "Run the demo with cargo run --example session_history_demo.",
+            MILESTONE_TWO,
+            "agent-child",
+        ),
+    ] {
+        facts
+            .insert(FactInput {
+                project_id: PROJECT_ID.to_string(),
+                tier,
+                content: content.to_string(),
+                key: None,
+                source_ref: Some(milestone.to_string()),
+                confidence: None,
+                metadata: None,
+                embedding: None,
+                model_id: None,
+                sources: vec![FactSource {
+                    project_id: PROJECT_ID.to_string(),
+                    session_id: SESSION_ID.to_string(),
+                    agent_id: agent.to_string(),
+                    milestone_id: milestone.to_string(),
+                }],
+            })
+            .await?;
+    }
+
     let dist_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../web-ui/dist");
 
     let state = AppState {
@@ -152,7 +253,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // `start` re-derives this from the bound host; set for direct readers.
         host_allowlist: HostAllowlist::for_bind_host("127.0.0.1"),
         api: Arc::new(
-            ApiServices::unavailable().with_sessions(episodic_session_port(Arc::clone(&store))),
+            ApiServices::unavailable()
+                .with_sessions(episodic_session_port(Arc::clone(&store)))
+                .with_milestones(episodic_milestone_port(
+                    Arc::clone(&store),
+                    Some(Arc::clone(&facts)),
+                )),
         ),
         user_id: "demo@example.com".to_string(),
         bind_host: "127.0.0.1".to_string(),
@@ -174,8 +280,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("the demo settings enable the server");
     let address = handle.local_addr();
 
-    println!("OpenCode Memory Explorer — W6.3 session-history demo");
+    println!("OpenCode Memory Explorer — W6.3/W6.6 demo");
     println!("  UI:            http://{address}/sessions");
+    println!("  UI (agents):   http://{address}/agents?project={PROJECT_ID}");
     println!("  project id:    {PROJECT_ID}");
     println!("  parent id:     {parent}");
     println!("  child id:      {child}");
@@ -192,6 +299,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  API delete:    curl -X DELETE -H 'x-opencode-mem-token: {DEMO_TOKEN}' \
          http://{address}/api/projects/{PROJECT_ID}/sessions/<session-row-id>"
     );
+    println!(
+        "  API milestones: curl -H 'x-opencode-mem-token: {DEMO_TOKEN}' \
+         http://{address}/api/projects/{PROJECT_ID}/milestones"
+    );
     println!("  static dist:   {}", dist_dir.display());
     if !dist_dir.join("index.html").is_file() {
         println!(
@@ -200,6 +311,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     println!("  episodic db:   {}", store.db_path().display());
+    println!("  facts db:      {}", facts.db_path().display());
     println!("Press Ctrl-C to stop.");
 
     // Keep alive without `tokio::signal` (the crate's `signal` feature is not

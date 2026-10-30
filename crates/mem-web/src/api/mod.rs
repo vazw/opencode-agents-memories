@@ -1,12 +1,13 @@
 //! The REST surface: the pinned route table and the router that registers it.
 //!
-//! Upstream `web-server.ts` dispatches 33 API method+path entries, 2 OpenCode
-//! catalog paths and (new in the port) the 2 W6.3 session stubs — **38 rows**
-//! in [`ROUTE_TABLE`]. `/api/health` is row 1 and stays registered by
-//! [`crate::server::build_router`] (W6.1 shipped it); [`api_router`] registers
-//! the other 36 paths, plus the two route-layer `DELETE` handlers on the
-//! static `bulk-delete` paths (upstream's `"Invalid ID"` branch — see the
-//! static-shadowing note below), for 39 method registrations.
+//! Upstream `web-server.ts` dispatches 33 API method+path entries; the pinned
+//! table holds **39 rows** (37 of them `/api/*`, 2 OpenCode catalog paths).
+//! `/api/health` is row 1 and is registered by
+//! [`crate::server::build_router`] (W6.1 shipped it); [`api_router`] makes 31
+//! `.route(…)` calls in this file (`grep -c '^\s*\.route('
+//! crates/mem-web/src/api/mod.rs` = 31), plus the two route-layer `DELETE`
+//! branches on the static `bulk-delete` paths (upstream's `"Invalid ID"`
+//! branch — see the static-shadowing note below).
 //!
 //! **axum 0.8 syntax:** every parameter is `{name}`, never `:name` —
 //! `Router::route` panics on a `:`-prefixed segment (`validate_v07_paths`), so
@@ -32,6 +33,7 @@ pub mod envelope;
 pub mod guard;
 pub mod maintenance;
 pub mod memories;
+pub mod milestones;
 pub mod ports;
 pub mod profile;
 pub mod prompts;
@@ -85,10 +87,11 @@ pub struct RouteSpec {
     pub expectation: RouteExpectation,
 }
 
-/// The single source of truth for the upstream surface (38 rows).
+/// The pinned REST surface (39 rows): upstream's rows plus the port's own
+/// additions.
 ///
 /// Both the contract test and the auth walk iterate this constant.
-pub const ROUTE_TABLE: [RouteSpec; 38] = [
+pub const ROUTE_TABLE: [RouteSpec; 39] = [
     RouteSpec {
         method: "GET",
         path: "/api/health",
@@ -353,6 +356,13 @@ pub const ROUTE_TABLE: [RouteSpec; 38] = [
         module: "api/sessions.rs",
         expectation: RouteExpectation::Stub,
     },
+    RouteSpec {
+        method: "GET",
+        path: "/api/projects/{project_id}/milestones",
+        upstream_line: "— (new, W6.6)",
+        module: "api/milestones.rs",
+        expectation: RouteExpectation::Success,
+    },
     // Issue 48.14 — port-only (47.1-B2′): no upstream counterpart. Appended
     // LAST so the shared-router envelope walk is not perturbed by the fake
     // profile being deleted before the other profile rows are probed.
@@ -370,7 +380,7 @@ pub fn is_catalog_path(path: &str) -> bool {
     path == "/skills/index.json" || (path.starts_with("/skills/") && path.ends_with(".md"))
 }
 
-/// Builds the API router (the 36 non-health table paths + the two static
+/// Builds the API router (the 38 non-health table paths + the two static
 /// `DELETE` route-layer branches).
 ///
 /// The 1 MiB body cap is layered here, so it applies to every API method and
@@ -459,6 +469,10 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route(
             "/api/projects/{project_id}/sessions/{session_id}",
             delete(sessions::delete_session),
+        )
+        .route(
+            "/api/projects/{project_id}/milestones",
+            get(milestones::list_milestones),
         )
         .layer(DefaultBodyLimit::max(MAX_API_BODY_BYTES))
 }

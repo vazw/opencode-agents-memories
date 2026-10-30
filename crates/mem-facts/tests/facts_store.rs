@@ -14,7 +14,7 @@ use mem_facts::FactsError;
 use mem_facts::schema::fact_id;
 use mem_facts::store::{FactInput, FactSource, FactWrite, FactsStore};
 use mem_store::config::StoreConfig;
-use mem_store::db::query_one;
+use mem_store::db::{Value, query_one};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -338,4 +338,84 @@ async fn test_provenance_records_one_row_per_contributing_session() {
     .expect("count")
     .expect("row");
     assert_eq!(fact_count.i64("count"), Some(1));
+}
+
+/// The milestone projection joins on `facts.source_ref`: live rows of the
+/// named project and milestone only. A soft-deleted row, a foreign-project
+/// row and a same-project row from another milestone are all absent.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_list_by_milestone_returns_only_live_facts_of_that_milestone() {
+    let store = store();
+    store
+        .insert(input("project-a", MemoryTier::Semantic, "live fact"))
+        .await
+        .expect("insert live");
+    let live_id = fact_id("project-a", MemoryTier::Semantic, "live fact");
+
+    let deleted_id = {
+        let mut deleted = input("project-a", MemoryTier::Procedural, "deleted fact");
+        deleted.sources = vec![source("project-a", "session-b", "agent-a", "milestone-1")];
+        store.insert(deleted).await.expect("insert deleted");
+        fact_id("project-a", MemoryTier::Procedural, "deleted fact")
+    };
+    assert!(store.soft_delete(&deleted_id).await.expect("soft delete"));
+
+    let mut foreign = input("project-b", MemoryTier::Semantic, "foreign fact");
+    foreign.sources = vec![source("project-b", "session-c", "agent-b", "milestone-1")];
+    store.insert(foreign).await.expect("insert foreign");
+
+    let mut other_milestone = input("project-a", MemoryTier::Semantic, "other milestone fact");
+    other_milestone.source_ref = Some("milestone-2".to_string());
+    other_milestone.sources = vec![source("project-a", "session-d", "agent-c", "milestone-2")];
+    store
+        .insert(other_milestone)
+        .await
+        .expect("insert other milestone");
+
+    let facts = store
+        .list_by_milestone("project-a", "milestone-1", 500)
+        .await
+        .expect("list by milestone");
+    assert_eq!(facts.len(), 1, "{facts:?}");
+    assert_eq!(facts[0].id, live_id);
+    assert_eq!(facts[0].content, "live fact");
+    assert_eq!(facts[0].source_ref.as_deref(), Some("milestone-1"));
+    assert!(!facts[0].is_deleted());
+}
+
+/// Newest first, bounded by `limit`; `created_at` is written raw because
+/// [`FactsStore::insert`] stamps `now_millis()`.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_list_by_milestone_is_newest_first_and_bounded() {
+    let store = store();
+    let rows = [
+        (MemoryTier::Semantic, "oldest fact", 100_i64),
+        (MemoryTier::Procedural, "newest fact", 300_i64),
+        (MemoryTier::Resource, "middle fact", 200_i64),
+    ];
+    for (tier, content, _) in rows {
+        store
+            .insert(input("project-a", tier, content))
+            .await
+            .expect("insert");
+    }
+    let db = store.ready().await.expect("ready");
+    for (tier, content, created_at) in rows {
+        db.execute(
+            "UPDATE facts SET created_at = ? WHERE id = ?",
+            vec![
+                Value::Integer(created_at),
+                Value::Text(fact_id("project-a", tier, content)),
+            ],
+        )
+        .await
+        .expect("set created_at");
+    }
+
+    let facts = store
+        .list_by_milestone("project-a", "milestone-1", 2)
+        .await
+        .expect("list by milestone");
+    let contents: Vec<&str> = facts.iter().map(|fact| fact.content.as_str()).collect();
+    assert_eq!(contents, vec!["newest fact", "middle fact"]);
 }

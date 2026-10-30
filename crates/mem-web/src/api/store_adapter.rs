@@ -1,7 +1,7 @@
 //! The production port adapters over `mem-store` / `mem-profile` /
 //! `mem-embed`.
 //!
-//! This is the other side of the seven trait seams: the handlers only ever
+//! This is the other side of the eight trait seams: the handlers only ever
 //! see [`super::ports`], and this module maps those seams onto the real store
 //! kernel — [`ShardManager`] (scope write lock, write shard, vector count),
 //! the [`mem_store::vector`] primitives, [`ProfileStore`],
@@ -43,6 +43,8 @@ use mem_embed::service::EmbeddingService;
 use mem_episodic::EpisodicError;
 use mem_episodic::store::EpisodicStore;
 use mem_episodic::timeline::{SessionSummary, TimelineFilter};
+use mem_episodic::validation::{MAX_ID_LEN, check_id};
+use mem_facts::store::FactsStore;
 use mem_portability::PortabilityError;
 use mem_portability::bundle::ExportedMemory;
 use mem_portability::facts::FactStore;
@@ -64,11 +66,12 @@ use mem_store::shard_manager::ShardManager;
 use mem_store::vector::{self, MemoryInsert, SearchResult};
 use serde_json::{Value as JsonValue, json};
 
+use super::dto::{MilestoneItemDto, PromotedFactDto};
 use super::ports::{
     CatalogEntry, CleanupApplied, CleanupPreview, EmbedPort, MemoryPort, MemoryRow, MemoryUpdate,
-    NewMemory, NewSkill, PortError, ProfileChangelog as ChangelogDto, ProfileErasure, ProfilePort,
-    ProfileRecord, PromptPort, PromptRow, SearchHit, SessionPort, ShardRef, Skill, SkillPatch,
-    TagRow,
+    MilestonePort, NewMemory, NewSkill, PortError, ProfileChangelog as ChangelogDto,
+    ProfileErasure, ProfilePort, ProfileRecord, PromptPort, PromptRow, SearchHit, SessionPort,
+    ShardRef, Skill, SkillPatch, TagRow,
 };
 
 /// The dependencies the production wiring needs (the W5.x composition root
@@ -903,23 +906,23 @@ impl EpisodicSessionPort {
     pub fn new(store: Arc<EpisodicStore>) -> Self {
         Self { store }
     }
+}
 
-    /// Rejects an empty path parameter before the store sees it.
-    ///
-    /// `matchit` 0.8.4 matches an **empty** segment as a `{project_id}` /
-    /// `{session_id}` value, so `/api/projects//sessions` reaches the handler
-    /// with `""` instead of falling through to the router's 404. The blueprint
-    /// pins that shape to `404` ("the request addresses no project"), not to a
-    /// `400` validation answer, so an empty id is mapped to
-    /// [`PortError::NotFound`]. Every *non-empty* malformed id (outer
-    /// whitespace, NUL, oversize) still goes through the store's
-    /// reject-never-coerce `check_id` and answers the `400`.
-    fn empty_id(param: &str) -> Result<(), PortError> {
-        if param.is_empty() {
-            Err(PortError::NotFound)
-        } else {
-            Ok(())
-        }
+/// Rejects an empty path parameter before the store sees it.
+///
+/// `matchit` 0.8.4 matches an **empty** segment as a `{project_id}` /
+/// `{session_id}` value, so `/api/projects//sessions` (and
+/// `/api/projects//milestones`) reaches the handler with `""` instead of
+/// falling through to the router's 404. The projection pins that shape to
+/// `404` ("the request addresses no project"), not to a `400` validation
+/// answer, so an empty id is mapped to [`PortError::NotFound`]. Every
+/// *non-empty* malformed id (outer whitespace, NUL, oversize) still goes
+/// through the store's reject-never-coerce `check_id` and answers the `400`.
+fn reject_empty_id(param: &str) -> Result<(), PortError> {
+    if param.is_empty() {
+        Err(PortError::NotFound)
+    } else {
+        Ok(())
     }
 }
 
@@ -942,7 +945,7 @@ fn session_summary_json(summary: &SessionSummary) -> Result<JsonValue, PortError
 #[async_trait]
 impl SessionPort for EpisodicSessionPort {
     async fn list_sessions(&self, project_id: &str) -> Result<Vec<JsonValue>, PortError> {
-        Self::empty_id(project_id)?;
+        reject_empty_id(project_id)?;
         let summaries = self
             .store
             .timeline(project_id, &TimelineFilter::default())
@@ -952,8 +955,8 @@ impl SessionPort for EpisodicSessionPort {
     }
 
     async fn delete_session(&self, project_id: &str, session_id: &str) -> Result<(), PortError> {
-        Self::empty_id(project_id)?;
-        Self::empty_id(session_id)?;
+        reject_empty_id(project_id)?;
+        reject_empty_id(session_id)?;
         match self
             .store
             .soft_delete_session(project_id, session_id)
@@ -965,6 +968,112 @@ impl SessionPort for EpisodicSessionPort {
             // handler's fixed `404 "Session not found"` (no existence leak).
             false => Err(PortError::NotFound),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MilestonePort — the W6.6 agent-contribution projection
+// ---------------------------------------------------------------------------
+
+/// The per-milestone promoted-fact bound: the projection never answers an
+/// unbounded fact list.
+pub const MAX_PROMOTED_FACTS_PER_MILESTONE: usize = 500;
+
+/// The production milestone projection over the W4.2 [`EpisodicStore`] plus
+/// the durable `facts.db` (W6.6).
+///
+/// The milestone OWNER is the episodic tier; the facts it promoted live in
+/// `facts.db`. The join key is `facts.source_ref` — authoritative, and the
+/// reason `fact_provenance` is not used (its `ON CONFLICT DO NOTHING` rows
+/// name only the FIRST promoting milestone). The store owns project scoping
+/// and the newest-first order; the adapter translates and joins.
+///
+/// **N+1, stated:** one indexed `list_by_milestone` query per returned
+/// milestone (`1 + min(limit, MAX_PROMOTED_FACTS_PER_MILESTONE)` at most; 201
+/// for the default page). No batched join exists — that is the accepted cost
+/// of keeping `mem-facts`' public surface to one new method.
+pub struct EpisodicMilestonePort {
+    store: Arc<EpisodicStore>,
+    facts: Option<Arc<FactsStore>>,
+}
+
+impl EpisodicMilestonePort {
+    /// Wraps one episodic store and the optional `facts.db` join.
+    pub fn new(store: Arc<EpisodicStore>, facts: Option<Arc<FactsStore>>) -> Self {
+        Self { store, facts }
+    }
+}
+
+/// Builds the production milestone projection over `store` (the composition
+/// root's `.with_milestones(...)` argument).
+pub fn episodic_milestone_port(
+    store: Arc<EpisodicStore>,
+    facts: Option<Arc<FactsStore>>,
+) -> Arc<dyn MilestonePort> {
+    Arc::new(EpisodicMilestonePort::new(store, facts))
+}
+
+#[async_trait]
+impl MilestonePort for EpisodicMilestonePort {
+    async fn list_milestones(
+        &self,
+        project_id: &str,
+        limit: usize,
+    ) -> Result<Vec<MilestoneItemDto>, PortError> {
+        reject_empty_id(project_id)?;
+        // Every non-empty id is checked, never coerced. `check_id`'s Display
+        // is "invalid {field}: {message}" with no value echoed.
+        check_id("project_id", project_id, MAX_ID_LEN).map_err(episodic_failure)?;
+        let milestones = self
+            .store
+            .list_milestones(project_id, limit)
+            .await
+            .map_err(episodic_failure)?;
+        // Checked once per request and BEFORE `ready()`: `ready()` applies
+        // migrations and would CREATE the file, so a GET must test existence
+        // first and then treat the absent store as "no promoted facts".
+        let facts_exists = self
+            .facts
+            .as_ref()
+            .is_some_and(|facts| facts.db_path().exists());
+        let mut rows = Vec::with_capacity(milestones.len());
+        for milestone in milestones {
+            let promoted_facts = match (&self.facts, facts_exists) {
+                (Some(facts), true) => {
+                    let facts_rows = facts
+                        .list_by_milestone(
+                            project_id,
+                            &milestone.id,
+                            MAX_PROMOTED_FACTS_PER_MILESTONE,
+                        )
+                        .await
+                        // Fail closed: a broken facts read is never an empty
+                        // success (the handler answers the D-9 fixed 500).
+                        .map_err(|error| PortError::Store(error.to_string()))?;
+                    if facts_rows.len() == MAX_PROMOTED_FACTS_PER_MILESTONE {
+                        tracing::warn!(
+                            milestone_id = milestone.id.as_str(),
+                            limit = MAX_PROMOTED_FACTS_PER_MILESTONE,
+                            "milestone fact list reached the bound"
+                        );
+                    }
+                    facts_rows
+                        .into_iter()
+                        .map(|fact| PromotedFactDto {
+                            id: fact.id,
+                            content: fact.content,
+                            created_at: fact.created_at,
+                        })
+                        .collect()
+                }
+                _ => Vec::new(),
+            };
+            rows.push(MilestoneItemDto {
+                milestone,
+                promoted_facts,
+            });
+        }
+        Ok(rows)
     }
 }
 

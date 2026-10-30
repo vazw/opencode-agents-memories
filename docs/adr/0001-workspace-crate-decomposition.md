@@ -43,7 +43,7 @@ The table is a **ceiling**: a crate's actual `mem-*` dependencies (direct) must 
 | `mem-vault` | `mem-core`, `mem-store` |
 | `mem-skills` | `mem-core`, `mem-store` |
 | `mem-portability` | `mem-core`, `mem-store`, `mem-embed`, `mem-profile`, `mem-episodic` |
-| `mem-web` | `mem-core`, `mem-store`, `mem-embed`, `mem-ai`, `mem-profile`, `mem-episodic`, `mem-skills`, `mem-portability` |
+| `mem-web` | `mem-core`, `mem-store`, `mem-embed`, `mem-ai`, `mem-profile`, `mem-episodic`, `mem-facts`, `mem-skills`, `mem-portability` |
 | `mem-bridge` | `mem-core`, `mem-store`, `mem-embed`, `mem-ai`, `mem-profile`, `mem-episodic`, `mem-facts`, `mem-vault`, `mem-skills` |
 
 **Sibling rule:** `mem-web` and `mem-bridge` must **not** depend on each other — they are independent integration surfaces (HTTP explorer vs. OpenCode host plugin) composed only by the root binary. Reopening this rule requires amending this ADR.
@@ -52,6 +52,8 @@ The table is a **ceiling**: a crate's actual `mem-*` dependencies (direct) must 
 
 - `mem-web → mem-skills`: the REST surface's `SkillPort` is implemented by the production adapter over `mem-skills`' manager. The `mem-web → mem-portability` edge exists for the same reason — the `mem_portability::facts::FactStore` implementation (`ProductionFacts`) lives in `mem-web`'s `store_adapter`, because the durable-fact reads and writes need the shard manager and the vector primitives.
 - `mem-portability` never depends on `mem-web`; the edge is one-way. The `FactStore` seam is defined in `mem-portability` precisely so the dependency does not have to point the other way.
+
+**W6.6 amendment (one crate, one edge).** The agent-contribution view joins `facts.db` into the milestone projection, so `mem-web` declares one new edge: `mem-web → mem-facts`. The adapter (`EpisodicMilestonePort`) reads each milestone's promoted facts through `FactsStore::list_by_milestone` — a bounded, indexed `source_ref` lookup owned by `mem-facts`; the REST surface still sees only its port, and the edge is one-way. The row above and `tests/workspace_deps.rs::ALLOWED` change together, per the W7.1 rule.
 
 **W7.1 amendment (one crate, one edge).** `mem-facts` owns the durable five-tier facts DB (`facts.db`), and the bridge's production cross-tier task plus the purge orchestrator both live in `mem-bridge`, so one new edge follows: `mem-bridge → mem-facts`. The rule for future phases is normative here: **a row lists only an edge the crate declares today; a ceiling for a future phase is recorded in prose here and becomes a row in the phase that first declares it** — the `mem-facts → mem-embed` ceiling (Phase 2 fact embeddings) is prose, not a row. `mem-vault` and its per-project key scheme landed in W7.2 (see the W7.2 amendment below).
 

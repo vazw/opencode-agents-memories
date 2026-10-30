@@ -1,37 +1,41 @@
 //! The Agents view: who contributed to this project's durable memory.
 //!
-//! Four pure functions carry the whole view: [`roster`] folds the deferred
-//! milestone projection into one row per contributing agent (distinct milestone
-//! count, latest source stamp, the display name from the latest source),
+//! Four pure functions carry the whole view: [`roster`] folds the milestone
+//! projection into one row per contributing agent (distinct milestone count,
+//! latest source stamp, the display name from the latest source),
 //! [`agents_view`] maps an optional outcome onto the five render states,
 //! [`format_window`] formats a milestone's time window, and [`agent_detail`]
 //! produces the per-agent drill-down (milestones newest first, each carrying its
 //! server-reported source count and the facts it promoted, deduped by fact id).
 //!
-//! The panel issues **no** request in this build: there is no milestone route
-//! at the REST surface (`mem-web`'s `ROUTE_TABLE` has 37 rows and
-//! [`crate::paths::ENDPOINTS`] has 34), so it renders the documented
-//! unavailable state; the deferred `mem-web` wave wires the fetch without
-//! touching the view functions.
+//! The panel issues its one request on mount (`?project=` seeds the id):
+//! `GET /api/projects/{project_id}/milestones`, the W6.6 route on `mem-web`'s
+//! `ROUTE_TABLE` (39 rows), pinned here as the 35th
+//! [`crate::paths::ENDPOINTS`] row. It renders the documented `Unavailable`
+//! state only for the `501` absent-service answer (D-38), never for a real
+//! failure.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use leptos::prelude::*;
 use serde::Deserialize;
 
-use crate::screens::format_created_at;
+use crate::api::auth::{AuthContext, read_marker_token};
+use crate::api::envelope::ApiError;
+use crate::api_request::{self, RequestSpec};
+use crate::paths::{self, EndpointId};
+use crate::screens::{format_created_at, initial_project};
 
-/// One milestone exactly as the deferred `mem-web` projection will send it.
+/// One milestone exactly as the `mem-web` projection sends it.
 ///
 /// Mirrors `mem_episodic::Milestone` (`crates/mem-episodic/src/milestone.rs`):
 /// camelCase, unknown keys ignored, and every field defaultable except `id`.
 ///
-/// `promotedFacts` is **not** a field of `Milestone`: it is the join over
-/// `fact_provenance(milestone_id)` that the deferred `mem-web` projection must
-/// perform, whose fact-id query is
-/// `SELECT_PROVENANCE_FACT_IDS_FOR_MILESTONE` in
-/// `crates/mem-facts/src/schema.rs`. This build decodes the field and never
-/// receives it.
+/// `promotedFacts` is **not** a field of `Milestone`: it is the projection's
+/// join over `facts.source_ref` (the authoritative link — not
+/// `fact_provenance`, whose `INSERT … ON CONFLICT DO NOTHING` rows name only
+/// the FIRST promoting milestone), read through
+/// `LIST_FACTS_BY_MILESTONE` in `crates/mem-facts/src/schema.rs`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MilestoneDto {
@@ -62,7 +66,7 @@ pub struct MilestoneDto {
     /// Creation stamp (unix millis).
     #[serde(default)]
     pub created_at: i64,
-    /// Facts this milestone promoted (joined by the deferred projection).
+    /// Facts this milestone promoted (joined by the milestone projection).
     #[serde(default)]
     pub promoted_facts: Vec<PromotedFactDto>,
 }
@@ -93,7 +97,7 @@ pub struct ContributorDto {
     pub summary: String,
 }
 
-/// One fact a milestone promoted, joined by the deferred projection.
+/// One fact a milestone promoted, joined by the milestone projection.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PromotedFactDto {
@@ -219,10 +223,10 @@ fn display_name_for(agent_id: &str, milestones: &[MilestoneDto]) -> String {
 // The view oracle
 // ---------------------------------------------------------------------------
 
-/// What the deferred milestone fetch hands the panel.
+/// What the milestone fetch hands the panel.
 ///
-/// `Unavailable` is the documented degraded state (this build has no milestone
-/// route), not an error; only `Failed` means the request itself failed.
+/// `Unavailable` is the documented 501 absent-service degrade (D-38), not an
+/// error; only `Failed` means the request itself failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentsOutcome {
     /// Data arrived.
@@ -271,9 +275,10 @@ pub fn agents_view(outcome: Option<&AgentsOutcome>) -> AgentsView {
 
 /// The fixed copy of the documented degraded state.
 ///
-/// A `'static` constant, never a server body: no response byte reaches the DOM
-/// while the data path is deferred, and the copy cannot drift from the test
-/// that pins it.
+/// A `'static` constant, never a server body: the unavailable state renders
+/// this fixed copy when the answer is the 501 degrade, so no response byte
+/// reaches the DOM through it and the copy cannot drift from the test that
+/// pins it.
 pub const AGENTS_UNAVAILABLE_MESSAGE: &str = "Agent attribution is not available in this build.";
 
 /// The empty-scope copy: an empty scope is the empty state, not an error.
@@ -332,21 +337,6 @@ pub const AGENTS_FACT_CLASS: &str = "agents-fact";
 
 /// The class of one roster row button.
 pub const AGENTS_ROW_CLASS: &str = "agents-row";
-
-/// The outcome the panel starts from in this build: `Unavailable`.
-///
-/// There is no milestone route at the REST surface yet (`mem-web`'s
-/// `ROUTE_TABLE` is 37 rows; the deferred `mem-web` wave adds the 38th), so the
-/// panel cannot fetch and must not pretend to. `Unavailable` is the documented
-/// degraded state, rendered like the Maintenance section's `501` — not an
-/// error.
-///
-/// The deferred wave replaces this body with the single fetch (`Loading` ->
-/// `Loaded`/`Failed` derived from [`AgentsOutcome`]); this is the single place
-/// to wire it, and no view function changes. No fetch exists in this build.
-pub fn initial_outcome() -> AgentsOutcome {
-    AgentsOutcome::Unavailable
-}
 
 // ---------------------------------------------------------------------------
 // The drill-down
@@ -479,30 +469,117 @@ pub fn agent_detail(agent_id: &str, milestones: &[MilestoneDto]) -> AgentDetailV
 }
 
 // ---------------------------------------------------------------------------
+// The one fetch
+// ---------------------------------------------------------------------------
+
+/// The `GET /api/projects/{project_id}/milestones` request: the panel's one
+/// request.
+pub fn list_milestones_spec(project_id: &str) -> RequestSpec {
+    RequestSpec::get(paths::project_path(
+        EndpointId::ListProjectMilestones,
+        project_id,
+    ))
+}
+
+/// Map an [`ApiError`] onto the panel's outcome.
+///
+/// Only the `501` absent-service answer is the documented D-38 degrade
+/// ([`AgentsOutcome::Unavailable`]); a `500`, a transport failure and a
+/// malformed body are real failures carrying the bounded Display.
+pub fn outcome_for_error(error: ApiError) -> AgentsOutcome {
+    match error {
+        ApiError::Server { status: 501, .. } => AgentsOutcome::Unavailable,
+        other => AgentsOutcome::Failed(other.to_string()),
+    }
+}
+
+/// Load the project's milestone projection (the panel's one request).
+pub async fn load_outcome(project_id: &str, auth: &AuthContext) -> AgentsOutcome {
+    let spec = list_milestones_spec(project_id);
+    match api_request::request::<Vec<MilestoneDto>>(&spec, auth).await {
+        Ok(milestones) => AgentsOutcome::Loaded(milestones),
+        Err(error) => outcome_for_error(error),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The panel
 // ---------------------------------------------------------------------------
 
 /// The W6.6 Agents panel.
 ///
-/// It holds the outcome signal (seeded from [`initial_outcome`]) and the
-/// selected agent id, renders [`agents_view`], and — once the deferred fetch
-/// yields `Loaded` — renders [`agent_detail`] for the selected agent beneath
-/// the roster.
+/// The shell has no project context, so the screen takes the project id from
+/// its own input (the demo harness prints the seeded id next to the URL) and
+/// seeds it from `?project=` when present. One `Effect` on mount fetches the
+/// project-scoped milestone projection once; the Load button re-runs it.
 ///
-/// **No reactive effect, no fetch, no `AuthContext`**: this build has no
-/// milestone route, so the panel sends no request and no response byte can
-/// reach the screen (D-3). The unavailable state is the documented degraded
-/// state, not an error.
+/// The outcome starts `None` (= `Loading`); the documented `Unavailable` state
+/// now renders a real `501` absent-service answer (the D-38 degraded
+/// composition), never a deferred data path. The selected agent id renders
+/// [`agent_detail`] beneath the roster once `Loaded` arrives.
 #[component]
 pub fn AgentsPanel() -> impl IntoView {
-    let outcome = RwSignal::new(initial_outcome());
+    let project_id = RwSignal::new(String::new());
+    let outcome = RwSignal::new(None::<AgentsOutcome>);
     let selected = RwSignal::new(None::<String>);
+    let auth = AuthContext {
+        local_token: read_marker_token(),
+        basic: None,
+    };
+
+    let reload = Callback::new({
+        let auth = auth.clone();
+        move |_: ()| {
+            let project = project_id.get_untracked();
+            if project.is_empty() {
+                outcome.set(Some(AgentsOutcome::Failed(
+                    "Enter a project id to load the agent roster".to_string(),
+                )));
+                return;
+            }
+            let auth = auth.clone();
+            leptos::task::spawn_local(async move {
+                outcome.set(Some(load_outcome(&project, &auth).await));
+            });
+        }
+    });
+
+    Effect::new(move |_| {
+        if let Some(id) = initial_project(
+            &web_sys::window()
+                .and_then(|w| w.location().search().ok())
+                .unwrap_or_default(),
+        ) {
+            project_id.set(id);
+            reload.run(());
+        }
+    });
 
     view! {
         <section class="agents-panel" data-testid="agents-panel">
             <h2>"Agents"</h2>
             <p class="agents-hint">"Who contributed to this project's durable memory."</p>
-            {move || match agents_view(Some(&outcome.get())) {
+            <div class="agents-controls">
+                <input
+                    id="agents-project-id"
+                    name="projectId"
+                    type="text"
+                    class="project-input"
+                    data-testid="agents-project-input"
+                    placeholder="demo-project"
+                    prop:value=move || project_id.get()
+                    on:input=move |event| project_id.set(event_target_value(&event))
+                />
+                <button
+                    type="button"
+                    class="load-agents"
+                    data-testid="load-agents"
+                    on:click=move |_| reload.run(())
+                >
+                    "Load roster"
+                </button>
+            </div>
+            {move || match agents_view(outcome.get().as_ref()) {
                 AgentsView::Loading => view! {
                     <p class=AGENTS_LOADING_CLASS data-testid=AGENTS_LOADING_TESTID>
                         "Loading agents…"
@@ -558,7 +635,7 @@ pub fn AgentsPanel() -> impl IntoView {
                 let selected_id = selected.get();
                 let outcome = outcome.get();
                 match (selected_id, &outcome) {
-                    (Some(agent_id), AgentsOutcome::Loaded(rows)) => {
+                    (Some(agent_id), Some(AgentsOutcome::Loaded(rows))) => {
                         Some(detail_view(agent_detail(&agent_id, rows)))
                     }
                     _ => None,

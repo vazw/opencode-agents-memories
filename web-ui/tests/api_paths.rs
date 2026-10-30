@@ -1,5 +1,6 @@
-//! The pinned REST path table: the upstream contract plus the two W6.3
-//! additions. This is a compatibility table, not a suggestion: the set is
+//! The pinned REST path table: the upstream contract plus the port's three
+//! additions (the two W6.3 session rows and the W6.6 milestone row). This is a
+//! compatibility table, not a suggestion: the set is
 //! asserted exactly, so an omission, an invention or a method swap fails.
 #![cfg(target_arch = "wasm32")]
 
@@ -10,10 +11,10 @@ use web_ui::paths::{ENDPOINTS, endpoint, endpoints_for, fill};
 use web_ui::routes::RouteId;
 
 #[wasm_bindgen_test]
-fn test_pinned_endpoints_are_all_upstream_rest_paths() {
+fn test_pinned_endpoints_are_the_exact_rest_set() {
     // Transcribed from `example/opencode-mem/src/services/web-server.ts` (the
-    // routing table) plus the paths the upstream client calls, plus the two
-    // W6.3 port additions (roadmap §W6.3).
+    // routing table) plus the paths the upstream client calls, plus the port's
+    // three additions (two W6.3 session rows, one W6.6 milestone row).
     let expected: BTreeSet<(&str, &str)> = [
         ("GET", "/api/health"),
         ("GET", "/api/tags"),
@@ -49,6 +50,7 @@ fn test_pinned_endpoints_are_all_upstream_rest_paths() {
         ("DELETE", "/api/skills/{id}"),
         ("GET", "/api/projects/{project_id}/sessions"),
         ("DELETE", "/api/projects/{project_id}/sessions/{session_id}"),
+        ("GET", "/api/projects/{project_id}/milestones"),
     ]
     .into_iter()
     .collect();
@@ -89,12 +91,17 @@ fn test_endpoint_accessor_round_trips_every_table_row() {
 }
 
 #[wasm_bindgen_test]
-fn test_agents_route_adds_no_rest_endpoint() {
-    // The milestone REST route is deferred to the mem-web wave; the client
-    // route table grew by one, the pinned REST table must not have.
-    assert_eq!(ENDPOINTS.len(), 34, "the pinned REST table did not grow");
-    assert!(
-        endpoints_for(RouteId::Agents).is_empty(),
-        "the milestone route is deferred: Agents consumes no endpoint"
+fn test_agents_route_consumes_the_milestone_endpoint() {
+    // W6.6: the panel's one fetch is the project-scoped milestone projection.
+    assert_eq!(
+        ENDPOINTS.len(),
+        35,
+        "the pinned REST table grew by the milestone row"
+    );
+    let expected: &[&str] = &["/api/projects/{project_id}/milestones"];
+    assert_eq!(
+        endpoints_for(RouteId::Agents),
+        expected,
+        "Agents consumes the milestone endpoint"
     );
 }

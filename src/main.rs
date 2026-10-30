@@ -47,7 +47,8 @@ use mem_web::CRATE_NAME as MEM_WEB;
 use mem_web::api::deduplication::production_deduplication_port_with_cancel;
 use mem_web::api::ports::ApiServices;
 use mem_web::api::store_adapter::{
-    ProductionDeps, ProductionEmbed, episodic_session_port, production_skill_port,
+    ProductionDeps, ProductionEmbed, episodic_milestone_port, episodic_session_port,
+    production_skill_port,
 };
 use opencode_agents_memory::portability_backend::ProductionPortabilityFactory;
 use opencode_agents_memory::web_dist::{self, ResolvedDist};
@@ -175,6 +176,13 @@ impl WebLauncher for RootWebLauncher {
                         })
                         .with_skills(skills_port)
                         .with_sessions(episodic_session_port(deps.episodic.clone()))
+                        // W6.6: the milestone projection joins the same
+                        // `facts.db` the cross-tier task writes through;
+                        // `None` when the promotion pipeline is off.
+                        .with_milestones(episodic_milestone_port(
+                            deps.episodic.clone(),
+                            deps.facts.clone(),
+                        ))
                         .with_maintenance(
                             production_deduplication_port_with_cancel(
                                 deps.shards.clone(),

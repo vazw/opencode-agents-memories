@@ -18,12 +18,10 @@ pub enum ScreenState {
         owner: Owner,
         endpoints: &'static [&'static str],
     },
-    /// A screen whose owning wave has landed: it renders its own panel.
-    ///
-    /// A screen with a live endpoint fetches on mount and renders the real
-    /// data. A landed screen whose data path is still deferred — `Agents`
-    /// (W6.6) in this build — renders its documented unavailable state and
-    /// consumes no endpoint (`endpoints` is empty).
+    /// A screen whose owning wave has landed: it renders its own panel and,
+    /// when it declares endpoints, fetches them on mount. `Agents` (W6.6) is
+    /// the milestone-roster example; its documented `Unavailable` state is the
+    /// rendered 501 degrade, not a deferred data path.
     Live {
         owner: Owner,
         endpoints: &'static [&'static str],

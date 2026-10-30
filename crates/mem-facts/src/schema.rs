@@ -117,6 +117,13 @@ pub const SELECT_FACT_BY_ID: &str = "SELECT id, project_id, tier, content, key_n
 /// Live listing, newest first.
 pub const LIST_FACTS: &str = "SELECT id, project_id, tier, content, key_normalized, model_id, stale, generated_at, source_ref, confidence, version, metadata, created_at, updated_at, deleted_at FROM facts WHERE project_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC, id DESC LIMIT ?";
 
+/// Live facts promoted by one milestone in one project, newest first.
+///
+/// The join key is `source_ref` (authoritative; see
+/// `crates/mem-facts/CONTEXT.md`), not `fact_provenance`, whose
+/// `ON CONFLICT DO NOTHING` rows name only the FIRST promoting milestone.
+pub const LIST_FACTS_BY_MILESTONE: &str = "SELECT id, project_id, tier, content, key_normalized, model_id, stale, generated_at, source_ref, confidence, version, metadata, created_at, updated_at, deleted_at FROM facts WHERE project_id = ? AND source_ref = ? AND deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ?";
+
 /// Live count per project.
 pub const COUNT_FACTS: &str =
     "SELECT COUNT(*) AS count FROM facts WHERE project_id = ? AND deleted_at IS NULL";

@@ -27,7 +27,7 @@ use crate::api_request::{self, RequestSpec};
 use crate::core_screens::{MemoriesPanel, ProfilePanel, SettingsPanel, StatsPanel, TagsPanel};
 use crate::export_import::ExportImportPanel;
 use crate::nav::ScreenState;
-use crate::paths::{EndpointId, encode_component, endpoint};
+use crate::paths::{EndpointId, encode_component, project_path};
 use crate::routes::{Owner, RouteId};
 use crate::skill_library::SkillLibraryPanel;
 
@@ -130,14 +130,13 @@ pub struct SessionRow {
 /// Fill `{project_id}` (and, when given, `{session_id}`) of a pinned template
 /// with percent-encoded components.
 ///
-/// [`crate::paths::fill`] only knows `{id}`, so the two W6.3 templates get
-/// their own filler — the values still go through [`encode_component`], the
-/// same RFC 3986 encoder the single-parameter templates use.
+/// [`crate::paths::fill`] only knows `{id}`; the project-scoped templates are
+/// filled by [`crate::paths::project_path`], which `session_path` delegates
+/// to — the values still go through [`encode_component`], the same RFC 3986
+/// encoder the single-parameter templates use. The session id, when present,
+/// is this screen's own parameter and is appended here.
 pub fn session_path(endpoint_id: EndpointId, project_id: &str, session_id: Option<&str>) -> String {
-    let spec = endpoint(endpoint_id);
-    let mut path = spec
-        .template
-        .replace("{project_id}", &encode_component(project_id));
+    let mut path = project_path(endpoint_id, project_id);
     if let Some(session_id) = session_id {
         path = path.replace("{session_id}", &encode_component(session_id));
     }

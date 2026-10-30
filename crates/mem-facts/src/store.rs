@@ -391,6 +391,33 @@ impl FactsStore {
         rows.iter().map(row_to_fact).collect()
     }
 
+    /// Live facts whose `source_ref` names `milestone_id`, `created_at DESC,
+    /// id DESC`, bounded by `limit`. The join key is `source_ref`, the
+    /// authoritative link (not `fact_provenance`, which names only the first
+    /// promoting milestone because its rows are `ON CONFLICT DO NOTHING`).
+    pub async fn list_by_milestone(
+        &self,
+        project_id: &str,
+        milestone_id: &str,
+        limit: usize,
+    ) -> Result<Vec<Fact>, FactsError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let db = self.ready().await?;
+        let rows = db
+            .query(
+                sql::LIST_FACTS_BY_MILESTONE,
+                vec![
+                    Value::Text(project_id.to_string()),
+                    Value::Text(milestone_id.to_string()),
+                    Value::Integer(i64::try_from(limit).unwrap_or(i64::MAX)),
+                ],
+            )
+            .await?;
+        rows.iter().map(row_to_fact).collect()
+    }
+
     /// The live fact count of a project.
     pub async fn count(&self, project_id: &str) -> Result<u64, FactsError> {
         let db = self.ready().await?;

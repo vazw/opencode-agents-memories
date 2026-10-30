@@ -29,7 +29,7 @@ fn router_with_fakes() -> (std::sync::Arc<common::fakes::FakeBackend>, axum::Rou
 
 #[tokio::test]
 async fn test_the_pinned_route_table_lists_every_upstream_endpoint() {
-    assert_eq!(ROUTE_TABLE.len(), 38, "the pinned table is 38 rows");
+    assert_eq!(ROUTE_TABLE.len(), 39, "the pinned table is 39 rows");
 
     let mut keys: Vec<(&str, &str)> = ROUTE_TABLE
         .iter()
@@ -48,8 +48,8 @@ async fn test_the_pinned_route_table_lists_every_upstream_endpoint() {
         .filter(|row| row.path.starts_with("/api/"))
         .count();
     assert_eq!(
-        api_rows, 36,
-        "33 upstream API entries + 2 session stubs + 1 port-only row"
+        api_rows, 37,
+        "33 upstream API entries + 2 session stubs + 1 port-only row + the W6.6 milestone row"
     );
 
     let catalog_rows = ROUTE_TABLE
@@ -89,6 +89,19 @@ async fn test_the_pinned_route_table_lists_every_upstream_endpoint() {
             .any(|row| row.method == "PUT" && row.path == "/api/memories/bulk-delete"),
         "the synthetic PUT /api/memories/bulk-delete row is pinned"
     );
+}
+
+/// W6.6's milestone row is pinned: a `Success` GET in `api/milestones.rs`,
+/// project-scoped, with no upstream counterpart.
+#[test]
+fn test_the_milestone_route_row_is_pinned() {
+    let row = ROUTE_TABLE
+        .iter()
+        .find(|row| row.path == "/api/projects/{project_id}/milestones")
+        .expect("the W6.6 milestone route is in the pinned table");
+    assert_eq!(row.method, "GET");
+    assert_eq!(row.expectation, RouteExpectation::Success);
+    assert_eq!(row.module, "api/milestones.rs");
 }
 
 #[tokio::test]

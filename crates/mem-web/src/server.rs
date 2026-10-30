@@ -37,7 +37,7 @@ pub struct AppState {
     pub log_dir: PathBuf,
     /// The D-8 Host allowlist — derived from the bound host by `start`.
     pub host_allowlist: HostAllowlist,
-    /// The seven port seams behind the REST surface (W6.2).
+    /// The eight port seams behind the REST surface (W6.2).
     pub api: Arc<crate::api::ports::ApiServices>,
     /// The resolved user identity for the profile endpoints (upstream
     /// `getTags(process.cwd()).user.userEmail || "unknown"`).

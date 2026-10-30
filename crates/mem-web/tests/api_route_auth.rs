@@ -9,10 +9,10 @@
 //! loopback bind** — OpenCode's skill-catalog fetch sends no
 //! `x-opencode-mem-token` — and **require the token on any other bind**.
 //!
-//! **Walks.** The token walk covers the **35 `/api/*` rows** only
+//! **Walks.** The token walk covers the **36 `/api/*` rows** only
 //! (`/api/health` is token-exempt, the two catalog rows are public on a
 //! loopback bind and keep their dedicated D-11 cases). The Host, Basic-auth,
-//! reachability and credential walks cover the other **37** rows. Every row
+//! reachability and credential walks cover the other **38** rows. Every row
 //! gets a **freshly built router and a freshly seeded fake** — the walk's
 //! destructive rows (`DELETE /api/memories/mem_probe_1`,
 //! `DELETE /api/skills/ship-it`) therefore cannot consume the rows that later
@@ -180,6 +180,11 @@ fn canonical(row: &RouteSpec) -> Canonical {
                 "/api/projects/probe-project/sessions".to_string(),
                 None,
             ),
+            ("GET", "/api/projects/{project_id}/milestones") => (
+                "GET",
+                "/api/projects/probe-project/milestones".to_string(),
+                None,
+            ),
             ("DELETE", "/api/projects/{project_id}/sessions/{session_id}") => (
                 "DELETE",
                 "/api/projects/probe-project/sessions/probe-session".to_string(),
@@ -336,8 +341,8 @@ async fn test_every_new_route_requires_the_api_token() {
         );
         assert_no_credentials(&format!("{} {}", row.method, row.path), &response);
     }
-    // 38 rows − `/api/health` − the 2 catalog rows = 35 token-gated rows.
-    assert_eq!(walked, 35, "the token walk covers every /api/* row");
+    // 39 rows − `/api/health` − the 2 catalog rows = 36 token-gated rows.
+    assert_eq!(walked, 36, "the token walk covers every /api/* row");
 }
 
 #[tokio::test]
@@ -365,7 +370,7 @@ async fn test_every_new_route_is_refused_for_a_foreign_host_header() {
         );
         assert_no_credentials(&format!("{} {}", row.method, row.path), &response);
     }
-    assert_eq!(walked, 37, "the Host walk covers every non-health row");
+    assert_eq!(walked, 38, "the Host walk covers every non-health row");
 }
 
 #[tokio::test]
@@ -400,7 +405,7 @@ async fn test_every_new_route_is_gated_by_basic_auth() {
         );
         assert_no_credentials(&format!("{} {}", row.method, row.path), &response);
     }
-    assert_eq!(walked, 37, "the Basic walk covers every non-health row");
+    assert_eq!(walked, 38, "the Basic walk covers every non-health row");
 }
 
 #[tokio::test]
@@ -424,7 +429,7 @@ async fn test_every_new_route_answers_a_reachable_response() {
         assert_no_credentials(&format!("{} {}", row.method, row.path), &response);
     }
     assert_eq!(
-        walked, 37,
+        walked, 38,
         "the reachability walk covers every non-health row"
     );
 }

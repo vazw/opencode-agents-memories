@@ -1,6 +1,6 @@
 //! The Agents view's pure seam: the milestone DTO, the roster fold, the five-arm
-//! state oracle and the milestone drill-down. Every test drives the public
-//! `web_ui::agents` module.
+//! state oracle, the milestone drill-down, the error mapping and the one
+//! request spec. Every test drives the public `web_ui::agents` module.
 #![cfg(target_arch = "wasm32")]
 
 use wasm_bindgen_test::wasm_bindgen_test;
@@ -11,10 +11,9 @@ use web_ui::agents::{
     AGENTS_ROSTER_CLASS, AGENTS_ROSTER_TESTID, AGENTS_ROW_CLASS, AGENTS_ROW_TESTID,
     AGENTS_UNAVAILABLE_CLASS, AGENTS_UNAVAILABLE_MESSAGE, AGENTS_UNAVAILABLE_TESTID, AgentSummary,
     AgentsOutcome, AgentsView, ContributorDto, MilestoneDto, PromotedFactDto, agent_detail,
-    agents_view, format_window, initial_outcome, roster,
+    agents_view, format_window, list_milestones_spec, outcome_for_error, roster,
 };
-use web_ui::paths;
-use web_ui::routes::RouteId;
+use web_ui::api::envelope::ApiError;
 
 fn contributor(agent_id: &str, agent_name: &str, created_at: i64) -> ContributorDto {
     ContributorDto {
@@ -357,14 +356,42 @@ fn test_agents_view_failure_keeps_the_message() {
     assert_ne!(view, AgentsView::Empty, "a failure is not an empty scope");
 }
 
+/// The documented D-38 degrade: only the `501` absent-service answer is the
+/// `Unavailable` state; every other failure — 500, transport, malformed — is a
+/// real `Failed` carrying the bounded Display.
 #[wasm_bindgen_test]
-fn test_initial_outcome_is_unavailable_and_consumes_no_endpoint() {
-    assert_eq!(initial_outcome(), AgentsOutcome::Unavailable);
+fn test_outcome_for_error_maps_the_501_degrade_to_unavailable_not_failed() {
     assert_eq!(
-        agents_view(Some(&initial_outcome())),
-        AgentsView::Unavailable(AGENTS_UNAVAILABLE_MESSAGE)
+        outcome_for_error(ApiError::server(
+            501,
+            "the endpoint is not available in this build"
+        )),
+        AgentsOutcome::Unavailable,
+        "the absent-service class is the documented degrade"
     );
-    assert!(paths::endpoints_for(RouteId::Agents).is_empty());
+    for error in [
+        ApiError::server(500, "Internal Server Error"),
+        ApiError::Transport,
+        ApiError::Malformed,
+    ] {
+        let message = error.to_string();
+        assert_eq!(
+            outcome_for_error(error),
+            AgentsOutcome::Failed(message),
+            "a real failure is never the unavailable state"
+        );
+    }
+}
+
+/// The panel's one request: the pinned project-scoped milestone template with
+/// the id percent-encoded as a single segment, no query and no body.
+#[wasm_bindgen_test]
+fn test_list_milestones_spec_builds_the_project_milestone_path() {
+    let spec = list_milestones_spec("a b/c");
+    assert_eq!(spec.method, "GET");
+    assert_eq!(spec.path, "/api/projects/a%20b%2Fc/milestones");
+    assert!(spec.query.is_empty(), "no query");
+    assert!(spec.body.is_none(), "no body");
 }
 
 // ---------------------------------------------------------------------------
