@@ -1,0 +1,47 @@
+# M04 — forget-scope-dropped
+# oracle: test_memory_tool_routes_forget_with_the_scope_rule
+# files: plugin/src/tools.js
+# command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w2-memory-tool/plugin && node --test --test-name-pattern=test_memory_tool_routes_forget_with_the_scope_rule tests/memory-tools.test.mjs
+# exit: 1
+# expected: non-zero (a zero exit is a vacuous guard)
+
+--- output ---
+✖ test_memory_tool_routes_forget_with_the_scope_rule (3.905546ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 96.30942
+
+✖ failing tests:
+
+test at tests/memory-tools.test.mjs:539:1
+✖ test_memory_tool_routes_forget_with_the_scope_rule (3.905546ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+      method: 'forget',
+      params: {
+        memoryId: 'm',
+        project_id: '/w/p',
+  -     scope: 'all-projects',
+        session_id: 'ses-1'
+      }
+    }
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w2-memory-tool/plugin/tests/memory-tools.test.mjs:547:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { method: 'forget', params: { session_id: 'ses-1', project_id: '/w/p', memoryId: 'm' } },
+    expected: { method: 'forget', params: { session_id: 'ses-1', project_id: '/w/p', memoryId: 'm', scope: 'all-projects' } },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+--- end ---

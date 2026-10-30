@@ -5,7 +5,8 @@
 // `wrapper-toast.test.mjs` (`mode: "v1"`), `compaction-hook.test.mjs`
 // (`mode: "v1-compaction"`), `compaction-capability.test.mjs`
 // (`mode: "v1-compaction"`, the capability gate), `memory-tools.test.mjs`
-// (`mode: "v2-tool"`), `skills-bridge.test.mjs` (`mode: "v2-skills"`) and
+// (`mode: "v2-tool"` for the recall case and `mode: "v2-memory-tool"` for the
+// issue-70 wave-2 cases), `skills-bridge.test.mjs` (`mode: "v2-skills"`) and
 // `v2-compaction-hook.test.mjs` (`mode: "v2-compaction"`).
 //
 // Why a subprocess and not an import: `plugin/src/plugin.js` spawns the engine
@@ -73,11 +74,14 @@ export function stageStubEngine(pkgDir, {
   capabilities = DEFAULT_STUB_CAPABILITIES,
   skills = [],
   skillsPath = null, // when set, re-read per `skills` request (the re-register case)
+  // method → {code, message, data}: answers that method with a JSON-RPC error
+  // whose `data` survives to the wrapper (the issue-70 wave-2 T22 knob).
+  wireErrors = {},
 }) {
   const dir = path.join(pkgDir, "engine", `${process.platform}-${process.arch}`);
   fs.mkdirSync(dir, { recursive: true });
   const binPath = path.join(dir, "opencode-agents-memory");
-  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath }), {
+  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, wireErrors }), {
     mode: 0o755,
   });
   fs.chmodSync(binPath, 0o755);
@@ -87,8 +91,8 @@ export function stageStubEngine(pkgDir, {
 // Static body (no template interpolation inside the script beyond CONFIG):
 // answers the canned protocol-1.0.0 results, records its own pid, exits on
 // SIGTERM or stdin EOF.
-function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath }) {
-  const config = JSON.stringify({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath });
+function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, wireErrors }) {
+  const config = JSON.stringify({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, wireErrors });
   const blocks = JSON.stringify({
     restore:
       "## Restored Session Memory\n\n### Memory 1\nRetries are capped at three\n\nTags: project, opencode-mem\n\n### Memory 2\nDeploys go through the staging gate first\n\nTags: project, opencode-mem\n\n",
@@ -101,12 +105,17 @@ function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabiliti
 const CONFIG = ${config};
 const BLOCKS = ${blocks};
 import fs from "node:fs";
-const { injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath } = CONFIG;
+const { injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, wireErrors } = CONFIG;
+// Issue 70 wave 1's nine wire methods; appended to the hello's advertised set
+// only when the capability object advertises the same key.
+const TOOL_METHODS = ["add", "search", "forget", "list", "profile", "list-shards", "migrate", "export", "import"];
 function logLine(object) {
   try { fs.appendFileSync(requestLogPath, JSON.stringify(object) + "\\n"); } catch {}
 }
 try {
-  fs.writeFileSync(manifestPath, JSON.stringify({ pid: process.pid, argv: process.argv, env: process.env }, null, 2) + "\\n");
+  // The capability record is part of the manifest so a case can prove what
+  // this stub actually ADVERTISED (the wire log holds requests, not answers).
+  fs.writeFileSync(manifestPath, JSON.stringify({ pid: process.pid, argv: process.argv, env: process.env, capabilities }, null, 2) + "\\n");
 } catch {}
 process.on("SIGTERM", () => process.exit(0));
 let buffer = "";
@@ -130,6 +139,11 @@ process.stdin.on("end", () => process.exit(0));
 function respond(parsed) {
   const id = parsed && parsed.id !== undefined ? parsed.id : null;
   const method = parsed && parsed.method;
+  // The T22 knob: an error reply whose data must survive to the wrapper.
+  const wireError = wireErrors[method];
+  if (wireError) {
+    return { id, jsonrpc: "2.0", error: { code: wireError.code, message: wireError.message, data: wireError.data } };
+  }
   if (method === "inject" && injectMode === "error") {
     return { id, jsonrpc: "2.0", error: { code: -32001, message: "degraded" } };
   }
@@ -143,10 +157,15 @@ function respond(parsed) {
       // undefined key is dropped by JSON.stringify — the pre-D-43 shape.
       capabilities: capabilities === null ? undefined : capabilities,
       engine_version: "0.1.0",
-      // The advertised set moves with the capability: a pre-69 stub shows five.
-      methods: capabilities?.skills === true
-        ? ["capture", "inject", "recall", "skills", "health", "shutdown"]
-        : ["capture", "inject", "recall", "health", "shutdown"],
+      // The base five stay, \`skills\` follows its own key, and the nine issue-70
+      // tool methods are APPENDED when their key is true — never rebuild the
+      // list from the keys alone, which would drop the base five.
+      methods: [
+        ...(capabilities?.skills === true
+          ? ["capture", "inject", "recall", "skills", "health", "shutdown"]
+          : ["capture", "inject", "recall", "health", "shutdown"]),
+        ...TOOL_METHODS.filter((name) => capabilities?.[name] === true),
+      ],
       protocol: "1.0.0",
     };
   } else if (method === "skills") {
@@ -159,6 +178,20 @@ function respond(parsed) {
     result = { accepted: true };
   } else if (method === "recall") {
     result = { items: [], count: 0 };
+  } else if (method === "add") {
+    result = { id: "mem-stub-1" };
+  } else if (method === "search") {
+    result = { count: 1, items: [{ id: "mem-stub-1", content: "stub row", similarity: 0.9, rank: 1 }] };
+  } else if (method === "list") {
+    result = { count: 0, items: [] };
+  } else if (method === "forget") {
+    result = { deleted: 1 };
+  } else if (method === "profile") {
+    const params = (parsed && parsed.params) || {};
+    // Presence, not truthiness: the wrapper's empty-string write is a write.
+    result = Object.prototype.hasOwnProperty.call(params, "content")
+      ? { saved: true }
+      : { profile: null };
   } else if (method === "inject") {
     if (injectMode === "compaction") {
       const params = (parsed && parsed.params) || {};
@@ -203,7 +236,7 @@ function respond(parsed) {
 
 /**
  * The driver script, written into the case's temp dir by its consumer. One
- * source, six modes (`DRIVER_MODE`), each reading its fixture from the JSON
+ * source, seven modes (`DRIVER_MODE`), each reading its fixture from the JSON
  * file whose path the parent passes as argv[3]:
  *
  *   "v1" — imports the staged `dist/plugin.js`, builds `server()` from the
@@ -223,6 +256,10 @@ function respond(parsed) {
  *          an async fake tool surface, invokes the registered
  *          `recall_project_sessions` tool and writes
  *          `{ names, payloadText, wire }`.
+ *   "v2-memory-tool" — imports the staged `dist/plugin.js`, calls `setup(ctx)`
+ *          against an async fake tool surface, invokes the registered `memory`
+ *          tool once per fixture call (in order, with the fixture's
+ *          `toolContext`) and writes `{ names, payloads, wire }`.
  *   "v2-skills" — imports the staged `dist/v2/plugin.js`, calls `setup(ctx)`
  *          against an incremental fake `skill.transform` (the callback runs at
  *          registration), releases the recorded event stream afterwards (both
@@ -651,6 +688,43 @@ if (mode === "v2-tool") {
   const wire = readWire();
   await cleanup();
   writeRecord({ names: added.map((entry) => entry.name), payloadText: result.content, wire });
+  process.exit(0);
+}
+
+if (mode === "v2-memory-tool") {
+  const mod = await import(pathToFileURL(path.join(pkgDir, "dist", "plugin.js")));
+  const added = [];
+  const ctx = {
+    location: { directory: fixture.directory, project: { directory: fixture.directory } },
+    session: { hook: async () => {} },
+    event: {
+      // Same shape as "v2-tool": the body MUST resolve on abort, or the
+      // parent only sees runDriver's SIGKILL.
+      subscribe: async function* ({ signal }) {
+        if (signal.aborted) return;
+        await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+      },
+    },
+    tool: {
+      transform: async (callback) => {
+        await callback({ add: (tool) => added.push(tool) });
+        return { dispose: async () => {} };
+      },
+    },
+  };
+  const cleanup = await mod.setup(ctx);
+  const tool = added.find((entry) => entry.name === "memory");
+  if (tool === undefined) throw new Error("the memory tool was not registered");
+  const payloads = [];
+  for (const call of fixture.calls ?? []) {
+    // No coercion: an omitted toolContext stays omitted, which is the
+    // session-less case the tool must refuse.
+    const result = await tool.execute(call.args ?? {}, call.toolContext);
+    payloads.push(JSON.parse(result.content));
+  }
+  const wire = readWire();
+  await cleanup();
+  writeRecord({ names: added.map((entry) => entry.name), payloads, wire });
   process.exit(0);
 }
 

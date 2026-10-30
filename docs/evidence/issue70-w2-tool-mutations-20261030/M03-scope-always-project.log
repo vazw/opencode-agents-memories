@@ -1,0 +1,46 @@
+# M03 — scope-always-project
+# oracle: test_memory_tool_routes_search_with_the_resolved_scope
+# files: plugin/src/tools.js
+# command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w2-memory-tool/plugin && node --test --test-name-pattern=test_memory_tool_routes_search_with_the_resolved_scope tests/memory-tools.test.mjs
+# exit: 1
+# expected: non-zero (a zero exit is a vacuous guard)
+
+--- output ---
+✖ test_memory_tool_routes_search_with_the_resolved_scope (3.853849ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 103.849243
+
+✖ failing tests:
+
+test at tests/memory-tools.test.mjs:462:1
+✖ test_memory_tool_routes_search_with_the_resolved_scope (3.853849ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+      limit: 25,
+      project_id: '/w/p',
+      query: 'q',
+  +   scope: 'project',
+  -   scope: 'all-projects',
+      session_id: 'ses-1'
+    }
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w2-memory-tool/plugin/tests/memory-tools.test.mjs:493:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { session_id: 'ses-1', project_id: '/w/p', scope: 'project', query: 'q', limit: 25 },
+    expected: { session_id: 'ses-1', project_id: '/w/p', scope: 'all-projects', query: 'q', limit: 25 },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+--- end ---

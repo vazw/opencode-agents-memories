@@ -1,0 +1,44 @@
+# M19 — wire-data-dropped
+# oracle: test_memory_tool_surfaces_the_wire_reason_over_the_bridge
+# files: plugin/src/plugin.js, plugin/dist/plugin.js
+# command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w2-memory-tool/plugin && node --test --test-name-pattern=test_memory_tool_surfaces_the_wire_reason_over_the_bridge tests/memory-tools.test.mjs
+# exit: 1
+# expected: non-zero (a zero exit is a vacuous guard)
+
+--- output ---
+✖ test_memory_tool_surfaces_the_wire_reason_over_the_bridge (115.172494ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 218.215165
+
+✖ failing tests:
+
+test at tests/memory-tools.test.mjs:1110:1
+✖ test_memory_tool_surfaces_the_wire_reason_over_the_bridge (115.172494ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   error: 'engine_unavailable',
+  -   error: 'learning_locked',
+      success: false
+    }
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w2-memory-tool/plugin/tests/memory-tools.test.mjs:1170:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { success: false, error: 'engine_unavailable' },
+    expected: { success: false, error: 'learning_locked' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+--- end ---

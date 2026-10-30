@@ -197,11 +197,13 @@ absolute path is attempted, and the writer/reader's own rails (`0600`,
 temp+rename, symlink refusal, `create_dir_all`, the 100 MiB read cap) carry the
 load.
 
-Wave boundary: these nine are the **wire** methods only. The toolkit that maps
-them to upstream's `memory` tool is wave 2, and the portability tool modes are
-wave 3; `help` stays local to the wrapper and `recall_project_sessions` stays.
-The timeline/pair/orphan assembly is not here — it remains
-`mem-web/src/api/memories.rs`.
+Wave boundary: these nine are the **wire** methods only. Wave 2 ships the
+toolkit's six non-portability modes (`add`, `search`, `profile`, `list`,
+`forget`, `help`) in `plugin/src/tools.js`; the portability modes (`migrate`,
+`list-shards`, `export`, `import`) are wave 3 and answer a structured capability
+no-op in wave 2 even when the engine advertises the key. `help` stays local to
+the wrapper and `recall_project_sessions` stays. The timeline/pair/orphan
+assembly is not here — it remains `mem-web/src/api/memories.rs`.
 
 `inject`'s `include?` accepts either the frozen `["summary","metadata"]` array or the additive options object `{"recent_count"?: int, "compaction"?: "ingest"|"restore", "query"?: string}`: `recent_count` bounds the episodic rows, `compaction` selects the session-scoped render (issue 33), and `query` carries the authored prompt (max 2000 code points; absent or blank keeps the tag-listed read). Unknown keys are ignored; no other field exists.
 

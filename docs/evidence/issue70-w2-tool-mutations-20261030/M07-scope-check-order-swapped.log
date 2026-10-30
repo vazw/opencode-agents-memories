@@ -1,0 +1,34 @@
+# M07 — scope-check-order-swapped
+# oracle: test_memory_tool_fails_closed_without_a_host_project
+# files: plugin/src/tools.js
+# command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w2-memory-tool/plugin && node --test --test-name-pattern=test_memory_tool_fails_closed_without_a_host_project tests/memory-tools.test.mjs
+# exit: 1
+# expected: non-zero (a zero exit is a vacuous guard)
+
+--- output ---
+✖ test_memory_tool_fails_closed_without_a_host_project (2.358454ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 116.35349
+
+✖ failing tests:
+
+test at tests/memory-tools.test.mjs:379:1
+✖ test_memory_tool_fails_closed_without_a_host_project (2.358454ms)
+  TypeError [ERR_INVALID_ARG_TYPE]: The "paths[0]" argument must be of type string. Received null
+      at Object.resolve (node:path:1257:7)
+      at Object.execute (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w2-memory-tool/plugin/src/tools.js:262:49)
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w2-memory-tool/plugin/tests/memory-tools.test.mjs:387:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    code: 'ERR_INVALID_ARG_TYPE'
+  }
+
+--- end ---

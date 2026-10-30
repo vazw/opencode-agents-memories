@@ -1,0 +1,44 @@
+# M12 — handshake-gate-dropped
+# oracle: test_tool_request_gates_on_the_handshake_before_the_capability
+# files: plugin/src/tools.js
+# command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w2-memory-tool/plugin && node --test --test-name-pattern=test_tool_request_gates_on_the_handshake_before_the_capability tests/memory-tools.test.mjs
+# exit: 1
+# expected: non-zero (a zero exit is a vacuous guard)
+
+--- output ---
+✖ test_tool_request_gates_on_the_handshake_before_the_capability (3.408333ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 108.470652
+
+✖ failing tests:
+
+test at tests/memory-tools.test.mjs:787:1
+✖ test_tool_request_gates_on_the_handshake_before_the_capability (3.408333ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   ok: true,
+  +   result: {}
+  -   error: 'engine_unavailable',
+  -   ok: false
+    }
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w2-memory-tool/plugin/tests/memory-tools.test.mjs:802:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { ok: true, result: {} },
+    expected: { ok: false, error: 'engine_unavailable' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+--- end ---

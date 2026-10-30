@@ -1,0 +1,94 @@
+# M18 — unknown-mode-falls-through
+# oracle: test_memory_tool_rejects_an_unknown_mode
+# files: plugin/src/tools.js
+# command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w2-memory-tool/plugin && node --test --test-name-pattern=test_memory_tool_rejects_an_unknown_mode tests/memory-tools.test.mjs
+# exit: 1
+# expected: non-zero (a zero exit is a vacuous guard)
+
+--- output ---
+✖ test_memory_tool_rejects_an_unknown_mode (4.241797ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 99.570978
+
+✖ failing tests:
+
+test at tests/memory-tools.test.mjs:507:1
+✖ test_memory_tool_rejects_an_unknown_mode (4.241797ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   commands: [
+  +     {
+  +       args: [
+  +         'content',
+  +         'type?',
+  +         'tags?'
+  +       ],
+  +       command: 'add',
+  +       description: 'Store new memory'
+  +     },
+  +     {
+  +       args: [
+  +         'query',
+  +         'scope?',
+  +         'limit?'
+  +       ],
+  +       command: 'search',
+  +       description: 'Search memories via keywords'
+  +     },
+  +     {
+  +       args: [
+  +         'content?'
+  +       ],
+  +       command: 'profile',
+  +       description: 'View the user profile or save an explicit preference (provide content to write)'
+  +     },
+  +     {
+  +       args: [
+  +         'scope?',
+  +         'limit?'
+  +       ],
+  +       command: 'list',
+  +       description: 'List recent memories'
+  +     },
+  +     {
+  +       args: [
+  +         'memoryId',
+  +         'scope?'
+  +       ],
+  +       command: 'forget',
+  +       description: 'Remove one memory by id'
+  +     }
+  +   ],
+  +   message: 'Memory System Usage Guide',
+  +   success: true,
+  +   tagGuidance: 'Use technical keywords for search. Tags rank highest.',
+  +   unavailable: [
+  +     'export',
+  +     'import',
+  +     'list-shards',
+  +     'migrate'
+  +   ]
+  -   error: 'unknown_mode',
+  -   success: false
+    }
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w2-memory-tool/plugin/tests/memory-tools.test.mjs:512:12)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { success: true, message: 'Memory System Usage Guide', commands: [ [Object], [Object], [Object], [Object], [Object] ], unavailable: [ 'export', 'import', 'list-shards', 'migrate' ], tagGuidance: 'Use technical keywords for search. Tags rank highest.' },
+    expected: { success: false, error: 'unknown_mode' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+--- end ---

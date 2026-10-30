@@ -30,7 +30,7 @@ import {
   resolveSessionModel,
   restorePromptBody,
 } from "./compaction.js";
-import { registerMemoryTools } from "./tools.js";
+import { registerMemoryTools, createToolRequest } from "./tools.js";
 
 const PROTOCOL = "1.0.0";
 const MIN_PROTOCOL = "1.0.0";
@@ -51,6 +51,12 @@ const COMPACTION_REQUEST_TIMEOUT_MS = 2000;
 // Issue 69: the catalogue read is on the host's awaited `setup` path. With the
 // 5 s hello bound, a wedged engine can delay `setup` by up to ~8 s.
 const SKILLS_REQUEST_TIMEOUT_MS = 3000;
+// Issue 70 wave 2: the agent-facing `memory` tool lane. `add`/`search` pay an
+// embedding warm-up on a cold engine, and the hook path's 15 s default was
+// chosen for `inject`, so this lane gets its own bound. A timeout still maps to
+// `engine_unavailable`; the engine may complete the write afterwards (a
+// recorded limitation, not a longer wait to paper over it).
+const MEMORY_TOOL_REQUEST_TIMEOUT_MS = 30000;
 // Issue 50 (D-26-11): the authored-text cap, in CODE POINTS — the same unit the
 // engine's `chars().take(2000)` cap counts (never UTF-16 units or bytes).
 const MAX_QUERY_CHARS = 2000;
@@ -339,15 +345,20 @@ function engineCapability(name) {
 async function compactionCapability() {
   if (!(await ensureStarted())) return false;
   if (engineCapability("compaction")) return true;
-  if (!CAPABILITY_GAPS_LOGGED.has("compaction")) {
-    CAPABILITY_GAPS_LOGGED.add("compaction");
-    logWarn("engine.capability_missing", {
-      capability: "compaction",
-      engine_protocol: engineProtocolLine ?? "unknown",
-      min_protocol: MIN_PROTOCOL,
-    });
-  }
+  logCapabilityGap("compaction");
   return false;
+}
+
+// One fixed-field line per capability per process: `capability_missing` is
+// diagnostic, never a per-call log, and it carries no memory content.
+function logCapabilityGap(capability) {
+  if (CAPABILITY_GAPS_LOGGED.has(capability)) return;
+  CAPABILITY_GAPS_LOGGED.add(capability);
+  logWarn("engine.capability_missing", {
+    capability,
+    engine_protocol: engineProtocolLine ?? "unknown",
+    min_protocol: MIN_PROTOCOL,
+  });
 }
 
 function handleWireLine(rawLine) {
@@ -370,7 +381,16 @@ function handleWireLine(rawLine) {
   clearTimeout(entry.timer);
   pendingResponses.delete(message.id);
   if (message.error) {
-    entry.reject(Object.assign(new Error(message.error.message || "engine error"), { code: message.error.code }));
+    // The nine tool methods put their refusal in `error.data.reason` (§4); a
+    // code-only reject would drop the wrapper's own answer and turn a real
+    // refusal into `engine_unavailable`. `data` is advisory and inert for every
+    // caller that does not read it.
+    entry.reject(
+      Object.assign(new Error(message.error.message || "engine error"), {
+        code: message.error.code,
+        data: message.error.data,
+      })
+    );
   } else {
     entry.resolve(message.result);
   }
@@ -1082,12 +1102,23 @@ const id = pkg.name;
 export async function setup(ctx) {
   const mod = await import("./v2/plugin.js");
   const adapterCleanup = await mod.setup(ctx);
-  // Issue 22: the one agent-facing memory tool rides the V2 `setup` path's
-  // `ctx.tool.transform` door (the only registration surface the live host
-  // exposes). Registration is fail-open: a host without it keeps capture and
-  // injection.
+  // Issue 22/70: the two agent-facing tools (`recall_project_sessions` and the
+  // ten-mode `memory` toolkit) ride the V2 `setup` path's `ctx.tool.transform`
+  // door (the only registration surface the live host exposes). The memory
+  // tool's whole failure law lives in `createToolRequest`: the handshake, then
+  // the advertised capability, then the send. Registration is fail-open: a
+  // host without the door keeps capture and injection.
   const toolCleanup = await registerMemoryTools(ctx, {
     sendRecall: (params) => sendRequest("recall", params, REQUEST_TIMEOUT_MS),
+    request: createToolRequest({
+      ensureStarted,
+      capability: (method) => {
+        if (engineCapability(method)) return true;
+        logCapabilityGap(method);
+        return false;
+      },
+      send: (method, params) => sendRequest(method, params, MEMORY_TOOL_REQUEST_TIMEOUT_MS),
+    }),
   });
   return async () => {
     await toolCleanup();
