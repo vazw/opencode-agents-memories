@@ -13,7 +13,7 @@ W7 landed **2026-10-30** at `43d9954` — retired-shard reaping, 12 commits from
 `reap_cli` 6/0, workspace 2094/0/22; ADR-0023 landed and **Accepted** (owner, 2026-10-30); ADR-0019
 A14 amended.
 W5 landed **2026-10-30** at `e9c2da3` (prompts v2: 14 files, +1054/−143; review approved; `mem-store`
-401/0/12, `mem-profile` 250/0/4, workspace 2103/0/22; ADR-0020 and ADR-0021 both **Accepted** (owner, 2026-10-30). **53 O3** landed its repo half at `7c24329` (owner applies the drafted wiki paragraph).
+401/0/12, `mem-profile` 250/0/4, workspace 2103/0/22; ADR-0020 and ADR-0021 both **Accepted** (owner, 2026-10-30). **53 O3** landed its repo half at `7c24329` (owner applies the drafted wiki paragraph). **W8 is measured 2026-10-30 at `26d5f00492d8c5fec8e6061a28a1966ddbbf2506`** — the 100 ms p95 budget fails at 10× and 100×, the 12,500 cap does not help, and the narrow layout does not pay at 100×: decision **D4 (NEW-ADR)**, no code, ADR-0024 Proposed; `mem-store` 411/0/16, workspace 2113/0/26 (evidence `docs/evidence/issue-43-w8-benchmark-20261030/`).
 Next: owner picks **70** (wire method set), **28** (live swap), or the **zstd advisories** re-derivation.
 The **ADR-0019 text** landed `Accepted` at `b36920e`, and **issue 72** consumed `delete_memories` at `6d2c1f4`.
 **Blocks issue 39 (retention cleanup) and issue 41 (scheduler).**
@@ -820,3 +820,37 @@ a fixture if that becomes load-bearing); the handoff's fmt-scope sentence and on
 are evidence-administration notes; the Step 2–5 ledger stamps are estimates rather than `date -u`
 (the `mem_1792317820721_85ljkv5hf` recurrence; no gate depends on them).
 The owner accepted **ADR-0020** and **ADR-0021** on 2026-10-30 (both `Accepted` in their headers).
+
+---
+
+## W8 MEASURED 2026-10-30 (base `26d5f00492d8c5fec8e6061a28a1966ddbbf2506`)
+
+Decision **D4 — NEW-ADR**: the 100 ms p95 budget fails at 10× and 100×; `max_vectors_per_shard`
+12,500 does not help (cold p95 12,655,531 µs vs 8,996,590 µs, 1.407× the 50,000 cap at the inline 100×
+pair); the narrow companion layout does not pay at 100× (−14.1 % cold at 10×, +64.8 % cold at 100×,
+31.9 % hydrate share). **No code ships**; the cap stays 50,000; Step 10 is skipped because the decision is
+not CAP-CHANGE.
+
+Measured baseline at run time (`raw/baseline.tsv`, `raw/baseline_metrics.tsv`): **3,030 rows over 22
+shards** (dims 768; tags 2,968; metadata 1,409 global and 407/885 in the largest shard; content p50 607 /
+p95 2,125 / max 6,603 / sum 2,530,896; payload 7,027 B/row; disk 8,661 B/row; `metadata.db`
+`user_version = 1`). The issue's 2 341 rows over 19 shards is stale by comparison.
+
+Cells (rows = multiplier × B, B = 3,030; 20 cold + 20 warm samples each, nearest-rank p95; all
+`cold_verified`, all registry counts = `shard_count(rows, cap)`):
+
+- `x1-inline-cap50k` 3,030 / 1: cold p95 76,941 µs, warm p95 59,938 µs
+- `x10-inline-cap50k` 30,300 / 1: cold p95 723,554 µs, warm p95 608,121 µs
+- `x10-inline-cap12k5` 30,300 / 3: cold p95 1,023,328 µs, warm p95 601,684 µs
+- `x10-narrow-cap50k` 30,300 / 1: cold p95 621,558 µs, warm p95 497,887 µs
+- `x10-narrow-cap12k5` 30,300 / 3: cold p95 611,597 µs, warm p95 497,882 µs
+- `x100-inline-cap50k` 303,000 / 7: cold p95 8,996,590 µs, warm p95 8,424,591 µs
+- `x100-inline-cap12k5` 303,000 / 25: cold p95 12,655,531 µs, warm p95 7,187,047 µs
+- `x100-narrow-cap50k` 303,000 / 7: cold p95 14,826,436 µs, warm p95 5,519,195 µs
+- `x100-narrow-cap12k5` 303,000 / 25: cold p95 12,299,643 µs, warm p95 11,130,862 µs
+
+Counts: `mem-store` **411/0/16**, `mem-core` **234/0/2**, workspace **2113/0/26**. Evidence:
+`docs/evidence/issue-43-w8-benchmark-20261030/` (`README.md`, `raw/baseline.tsv`,
+`raw/baseline_metrics.tsv`, `machine.txt`, 9 × `raw/<cell>.jsonl` + `.summary.json`, `raw/driver.log`);
+ADR-0024 (`docs/adr/0024-brute-force-scan-cost-measured.md`) **Proposed**. The merge commit SHA is added
+by the orchestrator at ff-merge.

@@ -1,0 +1,1912 @@
+2026-10-30T07:26:32Z W8 START stamp=2026-10-30T07:26:32Z baseline_B=3030 out=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw
+warning: fields `rows`, `shards`, `shard_bytes`, `open_us`, and `facts_us` are never read
+  --> crates/mem-store/tests/search_cost_bench.rs:34:5
+   |
+31 | struct Sample {
+   |        ------ fields in this struct
+...
+34 |     rows: u64,
+   |     ^^^^
+35 |     shards: u64,
+   |     ^^^^^^
+36 |     shard_bytes: u64,
+   |     ^^^^^^^^^^^
+37 |     open_us: f64,
+   |     ^^^^^^^
+38 |     facts_us: f64,
+   |     ^^^^^^^^
+   |
+   = note: `Sample` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mem-store` (test "search_cost_bench") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.19s
+  Executable tests/search_cost_bench.rs (target/release/deps/search_cost_bench-805a6de85d3a5ed5)
+2026-10-30T07:26:32Z measurement binary: target/release/deps/search_cost_bench-805a6de85d3a5ed5
+2026-10-30T07:26:32Z cell x1-inline-cap50k start rows=3030 cap=50000 layout=inline cold=20 reps=20
+2026-10-30T07:26:32Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_seed_cell --test-threads=1
+
+running 1 test
+test w8_seed_cell ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.61s
+
+2026-10-30T07:26:32Z EXIT 0
+2026-10-30T07:26:32Z registry ok for x1-inline-cap50k: shards=1 sum=3030 min=3030
+2026-10-30T07:26:32Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:32Z EXIT 0
+2026-10-30T07:26:32Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:33Z EXIT 0
+2026-10-30T07:26:33Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:33Z EXIT 0
+2026-10-30T07:26:33Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:33Z EXIT 0
+2026-10-30T07:26:33Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:33Z EXIT 0
+2026-10-30T07:26:33Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:33Z EXIT 0
+2026-10-30T07:26:33Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:33Z EXIT 0
+2026-10-30T07:26:33Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:33Z EXIT 0
+2026-10-30T07:26:33Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.07s
+
+2026-10-30T07:26:33Z EXIT 0
+2026-10-30T07:26:33Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:33Z EXIT 0
+2026-10-30T07:26:33Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:33Z EXIT 0
+2026-10-30T07:26:33Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:33Z EXIT 0
+2026-10-30T07:26:33Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:34Z EXIT 0
+2026-10-30T07:26:34Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:34Z EXIT 0
+2026-10-30T07:26:34Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:34Z EXIT 0
+2026-10-30T07:26:34Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:34Z EXIT 0
+2026-10-30T07:26:34Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:34Z EXIT 0
+2026-10-30T07:26:34Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:34Z EXIT 0
+2026-10-30T07:26:34Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.07s
+
+2026-10-30T07:26:34Z EXIT 0
+2026-10-30T07:26:34Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.08s
+
+2026-10-30T07:26:34Z EXIT 0
+2026-10-30T07:26:34Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_warm_series --test-threads=1
+
+running 1 test
+test w8_warm_series ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 1.94s
+
+2026-10-30T07:26:36Z EXIT 0
+2026-10-30T07:26:36Z EXEC env W8_CELL=x1-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x1-inline-cap50k W8_ROWS=3030 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_aggregate --test-threads=1
+
+running 1 test
+test w8_aggregate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+2026-10-30T07:26:36Z EXIT 0
+2026-10-30T07:26:36Z cell x1-inline-cap50k done
+2026-10-30T07:26:36Z cell x10-inline-cap50k start rows=30300 cap=50000 layout=inline cold=20 reps=20
+2026-10-30T07:26:36Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_seed_cell --test-threads=1
+
+running 1 test
+test w8_seed_cell ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 5.59s
+
+2026-10-30T07:26:42Z EXIT 0
+2026-10-30T07:26:42Z registry ok for x10-inline-cap50k: shards=1 sum=30300 min=30300
+2026-10-30T07:26:42Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.67s
+
+2026-10-30T07:26:42Z EXIT 0
+2026-10-30T07:26:42Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.66s
+
+2026-10-30T07:26:43Z EXIT 0
+2026-10-30T07:26:43Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.66s
+
+2026-10-30T07:26:44Z EXIT 0
+2026-10-30T07:26:44Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.66s
+
+2026-10-30T07:26:44Z EXIT 0
+2026-10-30T07:26:44Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.66s
+
+2026-10-30T07:26:45Z EXIT 0
+2026-10-30T07:26:45Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.65s
+
+2026-10-30T07:26:46Z EXIT 0
+2026-10-30T07:26:46Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.67s
+
+2026-10-30T07:26:46Z EXIT 0
+2026-10-30T07:26:46Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.66s
+
+2026-10-30T07:26:47Z EXIT 0
+2026-10-30T07:26:47Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.67s
+
+2026-10-30T07:26:48Z EXIT 0
+2026-10-30T07:26:48Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.67s
+
+2026-10-30T07:26:49Z EXIT 0
+2026-10-30T07:26:49Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.68s
+
+2026-10-30T07:26:49Z EXIT 0
+2026-10-30T07:26:49Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 1.07s
+
+2026-10-30T07:26:50Z EXIT 0
+2026-10-30T07:26:50Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.73s
+
+2026-10-30T07:26:51Z EXIT 0
+2026-10-30T07:26:51Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.66s
+
+2026-10-30T07:26:52Z EXIT 0
+2026-10-30T07:26:52Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.68s
+
+2026-10-30T07:26:52Z EXIT 0
+2026-10-30T07:26:52Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.67s
+
+2026-10-30T07:26:53Z EXIT 0
+2026-10-30T07:26:53Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.70s
+
+2026-10-30T07:26:54Z EXIT 0
+2026-10-30T07:26:54Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.67s
+
+2026-10-30T07:26:54Z EXIT 0
+2026-10-30T07:26:54Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.67s
+
+2026-10-30T07:26:55Z EXIT 0
+2026-10-30T07:26:55Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.66s
+
+2026-10-30T07:26:56Z EXIT 0
+2026-10-30T07:26:56Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_warm_series --test-threads=1
+
+running 1 test
+test w8_warm_series ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 20.34s
+
+2026-10-30T07:27:16Z EXIT 0
+2026-10-30T07:27:16Z EXEC env W8_CELL=x10-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_aggregate --test-threads=1
+
+running 1 test
+test w8_aggregate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+2026-10-30T07:27:16Z EXIT 0
+2026-10-30T07:27:16Z cell x10-inline-cap50k done
+2026-10-30T07:27:16Z loadavg 2.47 >= 2, waiting before cell start (attempt 1)
+2026-10-30T07:27:21Z loadavg 2.36 >= 2, waiting before cell start (attempt 2)
+2026-10-30T07:27:26Z loadavg 2.41 >= 2, waiting before cell start (attempt 3)
+2026-10-30T07:27:31Z loadavg 2.46 >= 2, waiting before cell start (attempt 4)
+2026-10-30T07:27:36Z loadavg 2.42 >= 2, waiting before cell start (attempt 5)
+2026-10-30T07:27:41Z loadavg 2.31 >= 2, waiting before cell start (attempt 6)
+2026-10-30T07:27:46Z loadavg 2.36 >= 2, waiting before cell start (attempt 7)
+2026-10-30T07:27:51Z loadavg 2.25 >= 2, waiting before cell start (attempt 8)
+2026-10-30T07:27:56Z loadavg 2.23 >= 2, waiting before cell start (attempt 9)
+2026-10-30T07:28:01Z loadavg 2.13 >= 2, waiting before cell start (attempt 10)
+2026-10-30T07:28:06Z loadavg 2.04 >= 2, waiting before cell start (attempt 11)
+2026-10-30T07:28:11Z loadavg 2.28 >= 2, waiting before cell start (attempt 12)
+2026-10-30T07:28:16Z loadavg 2.42 >= 2, waiting before cell start (attempt 13)
+2026-10-30T07:28:21Z loadavg 2.38 >= 2, waiting before cell start (attempt 14)
+2026-10-30T07:28:26Z loadavg 2.35 >= 2, waiting before cell start (attempt 15)
+2026-10-30T07:28:31Z loadavg 2.57 >= 2, waiting before cell start (attempt 16)
+2026-10-30T07:28:36Z loadavg 2.68 >= 2, waiting before cell start (attempt 17)
+2026-10-30T07:28:41Z loadavg 2.55 >= 2, waiting before cell start (attempt 18)
+2026-10-30T07:28:46Z loadavg 2.58 >= 2, waiting before cell start (attempt 19)
+2026-10-30T07:28:51Z loadavg 2.46 >= 2, waiting before cell start (attempt 20)
+2026-10-30T07:28:56Z loadavg 2.58 >= 2, waiting before cell start (attempt 21)
+2026-10-30T07:29:01Z loadavg 2.69 >= 2, waiting before cell start (attempt 22)
+2026-10-30T07:29:06Z loadavg 2.56 >= 2, waiting before cell start (attempt 23)
+2026-10-30T07:29:11Z loadavg 2.51 >= 2, waiting before cell start (attempt 24)
+2026-10-30T07:29:16Z loadavg 2.47 >= 2, waiting before cell start (attempt 25)
+2026-10-30T07:29:21Z loadavg 2.51 >= 2, waiting before cell start (attempt 26)
+2026-10-30T07:29:26Z loadavg 2.55 >= 2, waiting before cell start (attempt 27)
+2026-10-30T07:29:31Z loadavg 2.83 >= 2, waiting before cell start (attempt 28)
+2026-10-30T07:29:36Z loadavg 2.92 >= 2, waiting before cell start (attempt 29)
+2026-10-30T07:29:42Z loadavg 2.85 >= 2, waiting before cell start (attempt 30)
+2026-10-30T07:29:47Z loadavg 2.70 >= 2, waiting before cell start (attempt 31)
+2026-10-30T07:29:52Z loadavg 2.56 >= 2, waiting before cell start (attempt 32)
+2026-10-30T07:29:57Z loadavg 2.52 >= 2, waiting before cell start (attempt 33)
+2026-10-30T07:30:02Z loadavg 2.56 >= 2, waiting before cell start (attempt 34)
+2026-10-30T07:30:07Z loadavg 2.51 >= 2, waiting before cell start (attempt 35)
+2026-10-30T07:30:12Z loadavg 2.55 >= 2, waiting before cell start (attempt 36)
+2026-10-30T07:30:17Z loadavg 2.43 >= 2, waiting before cell start (attempt 37)
+2026-10-30T07:30:22Z loadavg 2.23 >= 2, waiting before cell start (attempt 38)
+2026-10-30T07:30:27Z loadavg 2.29 >= 2, waiting before cell start (attempt 39)
+2026-10-30T07:30:32Z loadavg 2.11 >= 2, waiting before cell start (attempt 40)
+2026-10-30T07:30:37Z loadavg 2.02 >= 2, waiting before cell start (attempt 41)
+2026-10-30T07:30:42Z loadavg 2.02 >= 2, waiting before cell start (attempt 42)
+2026-10-30T07:30:47Z cell x10-inline-cap12k5 start rows=30300 cap=12500 layout=inline cold=20 reps=20
+2026-10-30T07:30:47Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_seed_cell --test-threads=1
+
+running 1 test
+test w8_seed_cell ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 5.71s
+
+2026-10-30T07:30:52Z EXIT 0
+2026-10-30T07:30:52Z registry ok for x10-inline-cap12k5: shards=3 sum=30300 min=5300
+2026-10-30T07:30:52Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.89s
+
+2026-10-30T07:30:53Z EXIT 0
+2026-10-30T07:30:53Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.97s
+
+2026-10-30T07:30:54Z EXIT 0
+2026-10-30T07:30:54Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 1.12s
+
+2026-10-30T07:30:55Z EXIT 0
+2026-10-30T07:30:55Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 1.05s
+
+2026-10-30T07:30:56Z EXIT 0
+2026-10-30T07:30:56Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.90s
+
+2026-10-30T07:30:57Z EXIT 0
+2026-10-30T07:30:57Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.69s
+
+2026-10-30T07:30:58Z EXIT 0
+2026-10-30T07:30:58Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.71s
+
+2026-10-30T07:30:59Z EXIT 0
+2026-10-30T07:30:59Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.67s
+
+2026-10-30T07:30:59Z EXIT 0
+2026-10-30T07:30:59Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.69s
+
+2026-10-30T07:31:00Z EXIT 0
+2026-10-30T07:31:00Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.68s
+
+2026-10-30T07:31:01Z EXIT 0
+2026-10-30T07:31:01Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.68s
+
+2026-10-30T07:31:02Z EXIT 0
+2026-10-30T07:31:02Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.68s
+
+2026-10-30T07:31:02Z EXIT 0
+2026-10-30T07:31:02Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.66s
+
+2026-10-30T07:31:03Z EXIT 0
+2026-10-30T07:31:03Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.67s
+
+2026-10-30T07:31:04Z EXIT 0
+2026-10-30T07:31:04Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.69s
+
+2026-10-30T07:31:04Z EXIT 0
+2026-10-30T07:31:04Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.67s
+
+2026-10-30T07:31:05Z EXIT 0
+2026-10-30T07:31:05Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.67s
+
+2026-10-30T07:31:06Z EXIT 0
+2026-10-30T07:31:06Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.67s
+
+2026-10-30T07:31:06Z EXIT 0
+2026-10-30T07:31:06Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.67s
+
+2026-10-30T07:31:07Z EXIT 0
+2026-10-30T07:31:07Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.68s
+
+2026-10-30T07:31:08Z EXIT 0
+2026-10-30T07:31:08Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_warm_series --test-threads=1
+
+running 1 test
+test w8_warm_series ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 20.04s
+
+2026-10-30T07:31:28Z EXIT 0
+2026-10-30T07:31:28Z EXEC env W8_CELL=x10-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-inline-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_aggregate --test-threads=1
+
+running 1 test
+test w8_aggregate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+2026-10-30T07:31:28Z EXIT 0
+2026-10-30T07:31:28Z cell x10-inline-cap12k5 done
+2026-10-30T07:31:28Z loadavg 3.26 >= 2, waiting before cell start (attempt 1)
+2026-10-30T07:31:33Z loadavg 3.16 >= 2, waiting before cell start (attempt 2)
+2026-10-30T07:31:38Z loadavg 3.06 >= 2, waiting before cell start (attempt 3)
+2026-10-30T07:31:43Z loadavg 2.90 >= 2, waiting before cell start (attempt 4)
+2026-10-30T07:31:48Z loadavg 2.83 >= 2, waiting before cell start (attempt 5)
+2026-10-30T07:31:53Z loadavg 2.68 >= 2, waiting before cell start (attempt 6)
+2026-10-30T07:31:58Z loadavg 2.78 >= 2, waiting before cell start (attempt 7)
+2026-10-30T07:32:03Z loadavg 2.72 >= 2, waiting before cell start (attempt 8)
+2026-10-30T07:32:08Z loadavg 2.66 >= 2, waiting before cell start (attempt 9)
+2026-10-30T07:32:13Z loadavg 2.53 >= 2, waiting before cell start (attempt 10)
+2026-10-30T07:32:18Z loadavg 2.41 >= 2, waiting before cell start (attempt 11)
+2026-10-30T07:32:23Z loadavg 2.46 >= 2, waiting before cell start (attempt 12)
+2026-10-30T07:32:28Z loadavg 2.42 >= 2, waiting before cell start (attempt 13)
+2026-10-30T07:32:33Z loadavg 2.47 >= 2, waiting before cell start (attempt 14)
+2026-10-30T07:32:38Z loadavg 2.67 >= 2, waiting before cell start (attempt 15)
+2026-10-30T07:32:43Z loadavg 2.62 >= 2, waiting before cell start (attempt 16)
+2026-10-30T07:32:48Z loadavg 2.49 >= 2, waiting before cell start (attempt 17)
+2026-10-30T07:32:53Z loadavg 2.53 >= 2, waiting before cell start (attempt 18)
+2026-10-30T07:32:58Z loadavg 2.40 >= 2, waiting before cell start (attempt 19)
+2026-10-30T07:33:03Z loadavg 2.53 >= 2, waiting before cell start (attempt 20)
+2026-10-30T07:33:08Z loadavg 2.49 >= 2, waiting before cell start (attempt 21)
+2026-10-30T07:33:13Z loadavg 2.37 >= 2, waiting before cell start (attempt 22)
+2026-10-30T07:33:18Z loadavg 2.50 >= 2, waiting before cell start (attempt 23)
+2026-10-30T07:33:23Z loadavg 2.30 >= 2, waiting before cell start (attempt 24)
+2026-10-30T07:33:28Z loadavg 2.36 >= 2, waiting before cell start (attempt 25)
+2026-10-30T07:33:33Z loadavg 2.25 >= 2, waiting before cell start (attempt 26)
+2026-10-30T07:33:38Z loadavg 2.07 >= 2, waiting before cell start (attempt 27)
+2026-10-30T07:33:43Z loadavg 2.06 >= 2, waiting before cell start (attempt 28)
+2026-10-30T07:33:48Z loadavg 2.14 >= 2, waiting before cell start (attempt 29)
+2026-10-30T07:33:53Z loadavg 2.05 >= 2, waiting before cell start (attempt 30)
+2026-10-30T07:33:58Z loadavg 2.04 >= 2, waiting before cell start (attempt 31)
+2026-10-30T07:34:03Z loadavg 2.04 >= 2, waiting before cell start (attempt 32)
+2026-10-30T07:34:08Z cell x10-narrow-cap50k start rows=30300 cap=50000 layout=narrow cold=20 reps=20
+2026-10-30T07:34:08Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_seed_cell --test-threads=1
+
+running 1 test
+test w8_seed_cell ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 6.48s
+
+2026-10-30T07:34:15Z EXIT 0
+2026-10-30T07:34:15Z registry ok for x10-narrow-cap50k: shards=1 sum=30300 min=30300
+2026-10-30T07:34:15Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.69s
+
+2026-10-30T07:34:15Z EXIT 0
+2026-10-30T07:34:15Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.62s
+
+2026-10-30T07:34:16Z EXIT 0
+2026-10-30T07:34:16Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.62s
+
+2026-10-30T07:34:17Z EXIT 0
+2026-10-30T07:34:17Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:34:17Z EXIT 0
+2026-10-30T07:34:17Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:34:18Z EXIT 0
+2026-10-30T07:34:18Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:34:18Z EXIT 0
+2026-10-30T07:34:18Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:34:19Z EXIT 0
+2026-10-30T07:34:19Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.59s
+
+2026-10-30T07:34:20Z EXIT 0
+2026-10-30T07:34:20Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.61s
+
+2026-10-30T07:34:20Z EXIT 0
+2026-10-30T07:34:20Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.61s
+
+2026-10-30T07:34:21Z EXIT 0
+2026-10-30T07:34:21Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.63s
+
+2026-10-30T07:34:22Z EXIT 0
+2026-10-30T07:34:22Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.61s
+
+2026-10-30T07:34:22Z EXIT 0
+2026-10-30T07:34:22Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:34:23Z EXIT 0
+2026-10-30T07:34:23Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:34:23Z EXIT 0
+2026-10-30T07:34:23Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.61s
+
+2026-10-30T07:34:24Z EXIT 0
+2026-10-30T07:34:24Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:34:25Z EXIT 0
+2026-10-30T07:34:25Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.62s
+
+2026-10-30T07:34:25Z EXIT 0
+2026-10-30T07:34:25Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.59s
+
+2026-10-30T07:34:26Z EXIT 0
+2026-10-30T07:34:26Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.63s
+
+2026-10-30T07:34:27Z EXIT 0
+2026-10-30T07:34:27Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.62s
+
+2026-10-30T07:34:27Z EXIT 0
+2026-10-30T07:34:27Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_warm_series --test-threads=1
+
+running 1 test
+test w8_warm_series ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 15.84s
+
+2026-10-30T07:34:43Z EXIT 0
+2026-10-30T07:34:43Z EXEC env W8_CELL=x10-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap50k W8_ROWS=30300 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_aggregate --test-threads=1
+
+running 1 test
+test w8_aggregate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+2026-10-30T07:34:43Z EXIT 0
+2026-10-30T07:34:43Z cell x10-narrow-cap50k done
+2026-10-30T07:34:43Z loadavg 2.72 >= 2, waiting before cell start (attempt 1)
+2026-10-30T07:34:48Z loadavg 2.58 >= 2, waiting before cell start (attempt 2)
+2026-10-30T07:34:53Z loadavg 2.70 >= 2, waiting before cell start (attempt 3)
+2026-10-30T07:34:58Z loadavg 2.72 >= 2, waiting before cell start (attempt 4)
+2026-10-30T07:35:03Z loadavg 2.58 >= 2, waiting before cell start (attempt 5)
+2026-10-30T07:35:08Z loadavg 2.54 >= 2, waiting before cell start (attempt 6)
+2026-10-30T07:35:13Z loadavg 2.41 >= 2, waiting before cell start (attempt 7)
+2026-10-30T07:35:18Z loadavg 2.22 >= 2, waiting before cell start (attempt 8)
+2026-10-30T07:35:23Z loadavg 2.12 >= 2, waiting before cell start (attempt 9)
+2026-10-30T07:35:28Z loadavg 2.11 >= 2, waiting before cell start (attempt 10)
+2026-10-30T07:35:33Z loadavg 2.26 >= 2, waiting before cell start (attempt 11)
+2026-10-30T07:35:38Z loadavg 2.08 >= 2, waiting before cell start (attempt 12)
+2026-10-30T07:35:43Z cell x10-narrow-cap12k5 start rows=30300 cap=12500 layout=narrow cold=20 reps=20
+2026-10-30T07:35:43Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_seed_cell --test-threads=1
+
+running 1 test
+test w8_seed_cell ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 6.30s
+
+2026-10-30T07:35:49Z EXIT 0
+2026-10-30T07:35:49Z registry ok for x10-narrow-cap12k5: shards=3 sum=30300 min=5300
+2026-10-30T07:35:50Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:35:50Z EXIT 0
+2026-10-30T07:35:50Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:35:51Z EXIT 0
+2026-10-30T07:35:51Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:35:51Z EXIT 0
+2026-10-30T07:35:51Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.62s
+
+2026-10-30T07:35:52Z EXIT 0
+2026-10-30T07:35:52Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.64s
+
+2026-10-30T07:35:53Z EXIT 0
+2026-10-30T07:35:53Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.61s
+
+2026-10-30T07:35:53Z EXIT 0
+2026-10-30T07:35:53Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:35:54Z EXIT 0
+2026-10-30T07:35:54Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.61s
+
+2026-10-30T07:35:54Z EXIT 0
+2026-10-30T07:35:54Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.61s
+
+2026-10-30T07:35:55Z EXIT 0
+2026-10-30T07:35:55Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:35:56Z EXIT 0
+2026-10-30T07:35:56Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.62s
+
+2026-10-30T07:35:56Z EXIT 0
+2026-10-30T07:35:56Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:35:57Z EXIT 0
+2026-10-30T07:35:57Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:35:58Z EXIT 0
+2026-10-30T07:35:58Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:35:58Z EXIT 0
+2026-10-30T07:35:58Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:35:59Z EXIT 0
+2026-10-30T07:35:59Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:35:59Z EXIT 0
+2026-10-30T07:35:59Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.60s
+
+2026-10-30T07:36:00Z EXIT 0
+2026-10-30T07:36:00Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.61s
+
+2026-10-30T07:36:01Z EXIT 0
+2026-10-30T07:36:01Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.61s
+
+2026-10-30T07:36:01Z EXIT 0
+2026-10-30T07:36:01Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.61s
+
+2026-10-30T07:36:02Z EXIT 0
+2026-10-30T07:36:02Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_warm_series --test-threads=1
+
+running 1 test
+test w8_warm_series ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 15.67s
+
+2026-10-30T07:36:18Z EXIT 0
+2026-10-30T07:36:18Z EXEC env W8_CELL=x10-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x10-narrow-cap12k5 W8_ROWS=30300 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_aggregate --test-threads=1
+
+running 1 test
+test w8_aggregate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+2026-10-30T07:36:18Z EXIT 0
+2026-10-30T07:36:18Z cell x10-narrow-cap12k5 done
+2026-10-30T07:36:18Z loadavg 2.43 >= 2, waiting before cell start (attempt 1)
+2026-10-30T07:36:23Z loadavg 2.40 >= 2, waiting before cell start (attempt 2)
+2026-10-30T07:36:28Z loadavg 2.45 >= 2, waiting before cell start (attempt 3)
+2026-10-30T07:36:33Z loadavg 2.57 >= 2, waiting before cell start (attempt 4)
+2026-10-30T07:36:38Z loadavg 2.44 >= 2, waiting before cell start (attempt 5)
+2026-10-30T07:36:43Z loadavg 2.41 >= 2, waiting before cell start (attempt 6)
+2026-10-30T07:36:48Z loadavg 2.62 >= 2, waiting before cell start (attempt 7)
+2026-10-30T07:36:53Z loadavg 2.41 >= 2, waiting before cell start (attempt 8)
+2026-10-30T07:36:58Z loadavg 2.29 >= 2, waiting before cell start (attempt 9)
+2026-10-30T07:37:03Z loadavg 2.27 >= 2, waiting before cell start (attempt 10)
+2026-10-30T07:37:08Z loadavg 2.17 >= 2, waiting before cell start (attempt 11)
+2026-10-30T07:37:13Z loadavg 2.07 >= 2, waiting before cell start (attempt 12)
+2026-10-30T07:37:18Z cell x100-inline-cap50k start rows=303000 cap=50000 layout=inline cold=20 reps=20
+2026-10-30T07:37:18Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_seed_cell --test-threads=1
+
+running 1 test
+test w8_seed_cell ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 73.04s
+
+2026-10-30T07:38:31Z EXIT 0
+2026-10-30T07:38:31Z registry ok for x100-inline-cap50k: shards=7 sum=303000 min=3000
+2026-10-30T07:38:31Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.46s
+
+2026-10-30T07:38:38Z EXIT 0
+2026-10-30T07:38:38Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 11.06s
+
+2026-10-30T07:38:49Z EXIT 0
+2026-10-30T07:38:49Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.78s
+
+2026-10-30T07:38:58Z EXIT 0
+2026-10-30T07:38:58Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.56s
+
+2026-10-30T07:39:07Z EXIT 0
+2026-10-30T07:39:07Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 9.29s
+
+2026-10-30T07:39:16Z EXIT 0
+2026-10-30T07:39:16Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.81s
+
+2026-10-30T07:39:24Z EXIT 0
+2026-10-30T07:39:24Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 9.05s
+
+2026-10-30T07:39:33Z EXIT 0
+2026-10-30T07:39:33Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.05s
+
+2026-10-30T07:39:40Z EXIT 0
+2026-10-30T07:39:40Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.35s
+
+2026-10-30T07:39:48Z EXIT 0
+2026-10-30T07:39:48Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.18s
+
+2026-10-30T07:39:55Z EXIT 0
+2026-10-30T07:39:55Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.30s
+
+2026-10-30T07:40:02Z EXIT 0
+2026-10-30T07:40:02Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 6.77s
+
+2026-10-30T07:40:09Z EXIT 0
+2026-10-30T07:40:09Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.14s
+
+2026-10-30T07:40:16Z EXIT 0
+2026-10-30T07:40:16Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 6.96s
+
+2026-10-30T07:40:23Z EXIT 0
+2026-10-30T07:40:23Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.66s
+
+2026-10-30T07:40:31Z EXIT 0
+2026-10-30T07:40:31Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.46s
+
+2026-10-30T07:40:39Z EXIT 0
+2026-10-30T07:40:39Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.73s
+
+2026-10-30T07:40:47Z EXIT 0
+2026-10-30T07:40:47Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.16s
+
+2026-10-30T07:40:54Z EXIT 0
+2026-10-30T07:40:54Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.09s
+
+2026-10-30T07:41:01Z EXIT 0
+2026-10-30T07:41:01Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 6.82s
+
+2026-10-30T07:41:08Z EXIT 0
+2026-10-30T07:41:08Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_warm_series --test-threads=1
+
+running 1 test
+test w8_warm_series ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 220.32s
+
+2026-10-30T07:44:48Z EXIT 0
+2026-10-30T07:44:48Z EXEC env W8_CELL=x100-inline-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_aggregate --test-threads=1
+
+running 1 test
+test w8_aggregate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+2026-10-30T07:44:48Z EXIT 0
+2026-10-30T07:44:48Z cell x100-inline-cap50k done
+2026-10-30T07:44:48Z loadavg 3.71 >= 2, waiting before cell start (attempt 1)
+2026-10-30T07:44:53Z loadavg 3.57 >= 2, waiting before cell start (attempt 2)
+2026-10-30T07:44:58Z loadavg 3.52 >= 2, waiting before cell start (attempt 3)
+2026-10-30T07:45:04Z loadavg 3.32 >= 2, waiting before cell start (attempt 4)
+2026-10-30T07:45:09Z loadavg 3.22 >= 2, waiting before cell start (attempt 5)
+2026-10-30T07:45:14Z loadavg 3.36 >= 2, waiting before cell start (attempt 6)
+2026-10-30T07:45:19Z loadavg 3.25 >= 2, waiting before cell start (attempt 7)
+2026-10-30T07:45:24Z loadavg 3.15 >= 2, waiting before cell start (attempt 8)
+2026-10-30T07:45:29Z loadavg 2.90 >= 2, waiting before cell start (attempt 9)
+2026-10-30T07:45:34Z loadavg 2.99 >= 2, waiting before cell start (attempt 10)
+2026-10-30T07:45:39Z loadavg 3.07 >= 2, waiting before cell start (attempt 11)
+2026-10-30T07:45:44Z loadavg 2.90 >= 2, waiting before cell start (attempt 12)
+2026-10-30T07:45:49Z loadavg 2.75 >= 2, waiting before cell start (attempt 13)
+2026-10-30T07:45:54Z loadavg 2.69 >= 2, waiting before cell start (attempt 14)
+2026-10-30T07:45:59Z loadavg 2.47 >= 2, waiting before cell start (attempt 15)
+2026-10-30T07:46:04Z loadavg 2.44 >= 2, waiting before cell start (attempt 16)
+2026-10-30T07:46:09Z loadavg 2.24 >= 2, waiting before cell start (attempt 17)
+2026-10-30T07:46:14Z loadavg 2.14 >= 2, waiting before cell start (attempt 18)
+2026-10-30T07:46:19Z loadavg 2.13 >= 2, waiting before cell start (attempt 19)
+2026-10-30T07:46:24Z loadavg 2.04 >= 2, waiting before cell start (attempt 20)
+2026-10-30T07:46:29Z cell x100-inline-cap12k5 start rows=303000 cap=12500 layout=inline cold=20 reps=20
+2026-10-30T07:46:29Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_seed_cell --test-threads=1
+
+running 1 test
+test w8_seed_cell ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 77.02s
+
+2026-10-30T07:47:46Z EXIT 0
+2026-10-30T07:47:46Z registry ok for x100-inline-cap12k5: shards=25 sum=303000 min=3000
+2026-10-30T07:47:46Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 10.59s
+
+2026-10-30T07:47:56Z EXIT 0
+2026-10-30T07:47:56Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 9.65s
+
+2026-10-30T07:48:06Z EXIT 0
+2026-10-30T07:48:06Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 12.79s
+
+2026-10-30T07:48:19Z EXIT 0
+2026-10-30T07:48:19Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 11.89s
+
+2026-10-30T07:48:31Z EXIT 0
+2026-10-30T07:48:31Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.60s
+
+2026-10-30T07:48:38Z EXIT 0
+2026-10-30T07:48:38Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 10.26s
+
+2026-10-30T07:48:49Z EXIT 0
+2026-10-30T07:48:49Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 12.09s
+
+2026-10-30T07:49:01Z EXIT 0
+2026-10-30T07:49:01Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 13.34s
+
+2026-10-30T07:49:14Z EXIT 0
+2026-10-30T07:49:14Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 10.22s
+
+2026-10-30T07:49:24Z EXIT 0
+2026-10-30T07:49:24Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 9.65s
+
+2026-10-30T07:49:34Z EXIT 0
+2026-10-30T07:49:34Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 9.61s
+
+2026-10-30T07:49:44Z EXIT 0
+2026-10-30T07:49:44Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 9.62s
+
+2026-10-30T07:49:53Z EXIT 0
+2026-10-30T07:49:53Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 9.75s
+
+2026-10-30T07:50:03Z EXIT 0
+2026-10-30T07:50:03Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 10.15s
+
+2026-10-30T07:50:13Z EXIT 0
+2026-10-30T07:50:13Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 9.41s
+
+2026-10-30T07:50:23Z EXIT 0
+2026-10-30T07:50:23Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.35s
+
+2026-10-30T07:50:31Z EXIT 0
+2026-10-30T07:50:31Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.85s
+
+2026-10-30T07:50:40Z EXIT 0
+2026-10-30T07:50:40Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.27s
+
+2026-10-30T07:50:48Z EXIT 0
+2026-10-30T07:50:48Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.57s
+
+2026-10-30T07:50:57Z EXIT 0
+2026-10-30T07:50:57Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.94s
+
+2026-10-30T07:51:06Z EXIT 0
+2026-10-30T07:51:06Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_warm_series --test-threads=1
+
+running 1 test
+test w8_warm_series ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 238.97s
+
+2026-10-30T07:55:05Z EXIT 0
+2026-10-30T07:55:05Z EXEC env W8_CELL=x100-inline-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-inline-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=inline W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_aggregate --test-threads=1
+
+running 1 test
+test w8_aggregate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+2026-10-30T07:55:05Z EXIT 0
+2026-10-30T07:55:05Z cell x100-inline-cap12k5 done
+2026-10-30T07:55:05Z loadavg 4.07 >= 2, waiting before cell start (attempt 1)
+2026-10-30T07:55:10Z loadavg 3.83 >= 2, waiting before cell start (attempt 2)
+2026-10-30T07:55:15Z loadavg 3.68 >= 2, waiting before cell start (attempt 3)
+2026-10-30T07:55:20Z loadavg 3.55 >= 2, waiting before cell start (attempt 4)
+2026-10-30T07:55:25Z loadavg 3.42 >= 2, waiting before cell start (attempt 5)
+2026-10-30T07:55:30Z loadavg 3.31 >= 2, waiting before cell start (attempt 6)
+2026-10-30T07:55:35Z loadavg 3.20 >= 2, waiting before cell start (attempt 7)
+2026-10-30T07:55:40Z loadavg 3.03 >= 2, waiting before cell start (attempt 8)
+2026-10-30T07:55:45Z loadavg 2.78 >= 2, waiting before cell start (attempt 9)
+2026-10-30T07:55:50Z loadavg 2.80 >= 2, waiting before cell start (attempt 10)
+2026-10-30T07:55:55Z loadavg 2.66 >= 2, waiting before cell start (attempt 11)
+2026-10-30T07:56:00Z loadavg 2.52 >= 2, waiting before cell start (attempt 12)
+2026-10-30T07:56:05Z loadavg 2.40 >= 2, waiting before cell start (attempt 13)
+2026-10-30T07:56:10Z loadavg 2.29 >= 2, waiting before cell start (attempt 14)
+2026-10-30T07:56:15Z loadavg 2.51 >= 2, waiting before cell start (attempt 15)
+2026-10-30T07:56:20Z loadavg 2.63 >= 2, waiting before cell start (attempt 16)
+2026-10-30T07:56:25Z loadavg 2.58 >= 2, waiting before cell start (attempt 17)
+2026-10-30T07:56:30Z loadavg 2.69 >= 2, waiting before cell start (attempt 18)
+2026-10-30T07:56:35Z loadavg 2.55 >= 2, waiting before cell start (attempt 19)
+2026-10-30T07:56:40Z loadavg 2.51 >= 2, waiting before cell start (attempt 20)
+2026-10-30T07:56:45Z loadavg 2.39 >= 2, waiting before cell start (attempt 21)
+2026-10-30T07:56:50Z loadavg 2.28 >= 2, waiting before cell start (attempt 22)
+2026-10-30T07:56:55Z loadavg 2.26 >= 2, waiting before cell start (attempt 23)
+2026-10-30T07:57:00Z loadavg 2.40 >= 2, waiting before cell start (attempt 24)
+2026-10-30T07:57:05Z loadavg 2.28 >= 2, waiting before cell start (attempt 25)
+2026-10-30T07:57:10Z loadavg 2.34 >= 2, waiting before cell start (attempt 26)
+2026-10-30T07:57:15Z loadavg 2.23 >= 2, waiting before cell start (attempt 27)
+2026-10-30T07:57:20Z loadavg 2.30 >= 2, waiting before cell start (attempt 28)
+2026-10-30T07:57:25Z loadavg 2.35 >= 2, waiting before cell start (attempt 29)
+2026-10-30T07:57:30Z loadavg 2.16 >= 2, waiting before cell start (attempt 30)
+2026-10-30T07:57:35Z loadavg 2.23 >= 2, waiting before cell start (attempt 31)
+2026-10-30T07:57:40Z loadavg 2.21 >= 2, waiting before cell start (attempt 32)
+2026-10-30T07:57:45Z loadavg 2.36 >= 2, waiting before cell start (attempt 33)
+2026-10-30T07:57:50Z loadavg 2.33 >= 2, waiting before cell start (attempt 34)
+2026-10-30T07:57:55Z loadavg 2.30 >= 2, waiting before cell start (attempt 35)
+2026-10-30T07:58:00Z loadavg 2.28 >= 2, waiting before cell start (attempt 36)
+2026-10-30T07:58:05Z loadavg 2.17 >= 2, waiting before cell start (attempt 37)
+2026-10-30T07:58:10Z loadavg 2.40 >= 2, waiting before cell start (attempt 38)
+2026-10-30T07:58:15Z loadavg 2.29 >= 2, waiting before cell start (attempt 39)
+2026-10-30T07:58:20Z loadavg 2.18 >= 2, waiting before cell start (attempt 40)
+2026-10-30T07:58:25Z loadavg 2.17 >= 2, waiting before cell start (attempt 41)
+2026-10-30T07:58:30Z loadavg 2.16 >= 2, waiting before cell start (attempt 42)
+2026-10-30T07:58:35Z loadavg 2.14 >= 2, waiting before cell start (attempt 43)
+2026-10-30T07:58:40Z loadavg 2.13 >= 2, waiting before cell start (attempt 44)
+2026-10-30T07:58:45Z cell x100-narrow-cap50k start rows=303000 cap=50000 layout=narrow cold=20 reps=20
+2026-10-30T07:58:45Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_seed_cell --test-threads=1
+
+running 1 test
+test w8_seed_cell ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 105.49s
+
+2026-10-30T08:00:31Z EXIT 0
+2026-10-30T08:00:31Z registry ok for x100-narrow-cap50k: shards=7 sum=303000 min=3000
+2026-10-30T08:00:31Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 14.14s
+
+2026-10-30T08:00:45Z EXIT 0
+2026-10-30T08:00:45Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 12.62s
+
+2026-10-30T08:00:58Z EXIT 0
+2026-10-30T08:00:58Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 11.85s
+
+2026-10-30T08:01:10Z EXIT 0
+2026-10-30T08:01:10Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 15.69s
+
+2026-10-30T08:01:25Z EXIT 0
+2026-10-30T08:01:25Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 15.20s
+
+2026-10-30T08:01:41Z EXIT 0
+2026-10-30T08:01:41Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 10.59s
+
+2026-10-30T08:01:51Z EXIT 0
+2026-10-30T08:01:51Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.52s
+
+2026-10-30T08:02:00Z EXIT 0
+2026-10-30T08:02:00Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 9.39s
+
+2026-10-30T08:02:09Z EXIT 0
+2026-10-30T08:02:09Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.77s
+
+2026-10-30T08:02:18Z EXIT 0
+2026-10-30T08:02:18Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 9.23s
+
+2026-10-30T08:02:27Z EXIT 0
+2026-10-30T08:02:27Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 9.66s
+
+2026-10-30T08:02:37Z EXIT 0
+2026-10-30T08:02:37Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 10.36s
+
+2026-10-30T08:02:47Z EXIT 0
+2026-10-30T08:02:47Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 11.02s
+
+2026-10-30T08:02:58Z EXIT 0
+2026-10-30T08:02:58Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.77s
+
+2026-10-30T08:03:06Z EXIT 0
+2026-10-30T08:03:06Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.64s
+
+2026-10-30T08:03:14Z EXIT 0
+2026-10-30T08:03:14Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.31s
+
+2026-10-30T08:03:21Z EXIT 0
+2026-10-30T08:03:21Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.02s
+
+2026-10-30T08:03:29Z EXIT 0
+2026-10-30T08:03:29Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.51s
+
+2026-10-30T08:03:37Z EXIT 0
+2026-10-30T08:03:37Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.93s
+
+2026-10-30T08:03:45Z EXIT 0
+2026-10-30T08:03:45Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.09s
+
+2026-10-30T08:03:53Z EXIT 0
+2026-10-30T08:03:53Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_warm_series --test-threads=1
+
+running 1 test
+test w8_warm_series ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 168.54s
+
+2026-10-30T08:06:41Z EXIT 0
+2026-10-30T08:06:41Z EXEC env W8_CELL=x100-narrow-cap50k W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap50k W8_ROWS=303000 W8_CAP=50000 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_aggregate --test-threads=1
+
+running 1 test
+test w8_aggregate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+2026-10-30T08:06:41Z EXIT 0
+2026-10-30T08:06:42Z cell x100-narrow-cap50k done
+2026-10-30T08:06:42Z loadavg 2.35 >= 2, waiting before cell start (attempt 1)
+2026-10-30T08:06:47Z loadavg 2.32 >= 2, waiting before cell start (attempt 2)
+2026-10-30T08:06:52Z loadavg 2.29 >= 2, waiting before cell start (attempt 3)
+2026-10-30T08:06:57Z loadavg 2.19 >= 2, waiting before cell start (attempt 4)
+2026-10-30T08:07:02Z loadavg 2.18 >= 2, waiting before cell start (attempt 5)
+2026-10-30T08:07:07Z loadavg 2.08 >= 2, waiting before cell start (attempt 6)
+2026-10-30T08:07:12Z loadavg 2.31 >= 2, waiting before cell start (attempt 7)
+2026-10-30T08:07:17Z loadavg 2.37 >= 2, waiting before cell start (attempt 8)
+2026-10-30T08:07:22Z loadavg 2.26 >= 2, waiting before cell start (attempt 9)
+2026-10-30T08:07:27Z loadavg 2.40 >= 2, waiting before cell start (attempt 10)
+2026-10-30T08:07:32Z loadavg 2.37 >= 2, waiting before cell start (attempt 11)
+2026-10-30T08:07:37Z loadavg 2.50 >= 2, waiting before cell start (attempt 12)
+2026-10-30T08:07:42Z loadavg 2.54 >= 2, waiting before cell start (attempt 13)
+2026-10-30T08:07:47Z loadavg 2.50 >= 2, waiting before cell start (attempt 14)
+2026-10-30T08:07:52Z loadavg 2.38 >= 2, waiting before cell start (attempt 15)
+2026-10-30T08:07:57Z loadavg 2.35 >= 2, waiting before cell start (attempt 16)
+2026-10-30T08:08:02Z loadavg 2.24 >= 2, waiting before cell start (attempt 17)
+2026-10-30T08:08:07Z loadavg 2.38 >= 2, waiting before cell start (attempt 18)
+2026-10-30T08:08:12Z loadavg 2.43 >= 2, waiting before cell start (attempt 19)
+2026-10-30T08:08:17Z loadavg 2.23 >= 2, waiting before cell start (attempt 20)
+2026-10-30T08:08:22Z loadavg 2.46 >= 2, waiting before cell start (attempt 21)
+2026-10-30T08:08:27Z loadavg 2.42 >= 2, waiting before cell start (attempt 22)
+2026-10-30T08:08:32Z loadavg 2.31 >= 2, waiting before cell start (attempt 23)
+2026-10-30T08:08:37Z loadavg 2.36 >= 2, waiting before cell start (attempt 24)
+2026-10-30T08:08:42Z loadavg 2.25 >= 2, waiting before cell start (attempt 25)
+2026-10-30T08:08:47Z loadavg 2.07 >= 2, waiting before cell start (attempt 26)
+2026-10-30T08:08:52Z loadavg 2.06 >= 2, waiting before cell start (attempt 27)
+2026-10-30T08:08:57Z loadavg 2.22 >= 2, waiting before cell start (attempt 28)
+2026-10-30T08:09:02Z loadavg 2.28 >= 2, waiting before cell start (attempt 29)
+2026-10-30T08:09:07Z loadavg 2.26 >= 2, waiting before cell start (attempt 30)
+2026-10-30T08:09:12Z loadavg 2.40 >= 2, waiting before cell start (attempt 31)
+2026-10-30T08:09:17Z loadavg 2.37 >= 2, waiting before cell start (attempt 32)
+2026-10-30T08:09:22Z loadavg 2.42 >= 2, waiting before cell start (attempt 33)
+2026-10-30T08:09:27Z loadavg 2.38 >= 2, waiting before cell start (attempt 34)
+2026-10-30T08:09:32Z loadavg 2.27 >= 2, waiting before cell start (attempt 35)
+2026-10-30T08:09:37Z loadavg 2.25 >= 2, waiting before cell start (attempt 36)
+2026-10-30T08:09:42Z loadavg 2.15 >= 2, waiting before cell start (attempt 37)
+2026-10-30T08:09:47Z loadavg 2.14 >= 2, waiting before cell start (attempt 38)
+2026-10-30T08:09:52Z loadavg 2.21 >= 2, waiting before cell start (attempt 39)
+2026-10-30T08:09:57Z loadavg 2.11 >= 2, waiting before cell start (attempt 40)
+2026-10-30T08:10:02Z loadavg 2.10 >= 2, waiting before cell start (attempt 41)
+2026-10-30T08:10:07Z cell x100-narrow-cap12k5 start rows=303000 cap=12500 layout=narrow cold=20 reps=20
+2026-10-30T08:10:07Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_seed_cell --test-threads=1
+
+running 1 test
+test w8_seed_cell ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 79.96s
+
+2026-10-30T08:11:27Z EXIT 0
+2026-10-30T08:11:27Z registry ok for x100-narrow-cap12k5: shards=25 sum=303000 min=3000
+2026-10-30T08:11:27Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 11.27s
+
+2026-10-30T08:11:38Z EXIT 0
+2026-10-30T08:11:38Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.38s
+
+2026-10-30T08:11:47Z EXIT 0
+2026-10-30T08:11:47Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.02s
+
+2026-10-30T08:11:55Z EXIT 0
+2026-10-30T08:11:55Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.52s
+
+2026-10-30T08:12:03Z EXIT 0
+2026-10-30T08:12:03Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 9.66s
+
+2026-10-30T08:12:13Z EXIT 0
+2026-10-30T08:12:13Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.81s
+
+2026-10-30T08:12:22Z EXIT 0
+2026-10-30T08:12:22Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.20s
+
+2026-10-30T08:12:29Z EXIT 0
+2026-10-30T08:12:29Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.98s
+
+2026-10-30T08:12:37Z EXIT 0
+2026-10-30T08:12:37Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.84s
+
+2026-10-30T08:12:45Z EXIT 0
+2026-10-30T08:12:45Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.13s
+
+2026-10-30T08:12:52Z EXIT 0
+2026-10-30T08:12:52Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 6.63s
+
+2026-10-30T08:12:59Z EXIT 0
+2026-10-30T08:12:59Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 6.47s
+
+2026-10-30T08:13:05Z EXIT 0
+2026-10-30T08:13:05Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.08s
+
+2026-10-30T08:13:12Z EXIT 0
+2026-10-30T08:13:12Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.20s
+
+2026-10-30T08:13:20Z EXIT 0
+2026-10-30T08:13:20Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 13.25s
+
+2026-10-30T08:13:33Z EXIT 0
+2026-10-30T08:13:33Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 7.77s
+
+2026-10-30T08:13:41Z EXIT 0
+2026-10-30T08:13:41Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 8.83s
+
+2026-10-30T08:13:49Z EXIT 0
+2026-10-30T08:13:49Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 12.49s
+
+2026-10-30T08:14:02Z EXIT 0
+2026-10-30T08:14:02Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 10.31s
+
+2026-10-30T08:14:12Z EXIT 0
+2026-10-30T08:14:12Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_sample_cold --test-threads=1
+
+running 1 test
+test w8_sample_cold ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 11.42s
+
+2026-10-30T08:14:24Z EXIT 0
+2026-10-30T08:14:24Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_warm_series --test-threads=1
+
+running 1 test
+test w8_warm_series ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 180.76s
+
+2026-10-30T08:17:25Z EXIT 0
+2026-10-30T08:17:25Z EXEC env W8_CELL=x100-narrow-cap12k5 W8_ROOT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/w8/x100-narrow-cap12k5 W8_ROWS=303000 W8_CAP=12500 W8_LAYOUT=narrow W8_OUT=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-43-w8-benchmark/docs/evidence/issue-43-w8-benchmark-20261030/raw W8_ROW_SEED=16909060 W8_QUERY_SEED=1428696960 W8_STAMP=2026-10-30T07:26:32Z W8_REPS=20 TMPDIR=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch target/release/deps/search_cost_bench-805a6de85d3a5ed5 --ignored --exact w8_aggregate --test-threads=1
+
+running 1 test
+test w8_aggregate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+2026-10-30T08:17:25Z EXIT 0
+2026-10-30T08:17:25Z cell x100-narrow-cap12k5 done
+2026-10-30T08:17:25Z W8 END stamp=2026-10-30T08:17:25Z

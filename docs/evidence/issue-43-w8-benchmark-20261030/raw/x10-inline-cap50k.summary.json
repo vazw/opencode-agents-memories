@@ -1,0 +1,18 @@
+{
+  "cell": "x10-inline-cap50k",
+  "layout": "inline",
+  "rows": 30300,
+  "shards": 1,
+  "cap": 50000,
+  "stamp": "2026-10-30T07:26:32Z",
+  "payload_bytes": 211832820,
+  "shard_bytes": 252878848,
+  "read_bytes": 252977152,
+  "scan_us": 0.000,
+  "hydrate_us": 0.000,
+  "search_us": 605193.424,
+  "cold": {"n": 20, "min": 641588.448, "p50": 654677.142, "p95": 723553.791, "max": 1053030.383, "mean": 680598.220, "read_bytes_mean": 252977152.000, "read_bytes_ratio": 1.194230},
+  "warm": {"n": 20, "min": 597058.412, "p50": 605007.494, "p95": 608120.895, "max": 616412.660, "mean": 605450.636},
+  "exact_only": {"n": 5, "mean_us": 317928.472, "us_per_row": 10.492689},
+  "no_match": {"n": 5, "mean_us": 966333.799}
+}
