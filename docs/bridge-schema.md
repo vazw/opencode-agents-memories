@@ -76,7 +76,8 @@ Issue 70 adds one capability key per `memory` tool method — `add`, `search`, `
 keys under fifteen methods. The key means "this build's dispatch answers this method"; it
 never means "the store has data". The gating rule wave 2 implements: a wrapper that does not
 find a key MUST NOT call that method (the engine predates it); a key that is present but whose
-runtime is degraded answers `-32001`, which the tool lane turns into its structured no-op.
+runtime is degraded answers `-32001`, which the tool lane surfaces as `engine_unavailable` (a
+value, never a throw).
 
 `hello` is **not** a runtime method (D-40): it takes no `session_id` and is not counted in
 the fifteen.
@@ -197,13 +198,14 @@ absolute path is attempted, and the writer/reader's own rails (`0600`,
 temp+rename, symlink refusal, `create_dir_all`, the 100 MiB read cap) carry the
 load.
 
-Wave boundary: these nine are the **wire** methods only. Wave 2 ships the
-toolkit's six non-portability modes (`add`, `search`, `profile`, `list`,
-`forget`, `help`) in `plugin/src/tools.js`; the portability modes (`migrate`,
-`list-shards`, `export`, `import`) are wave 3 and answer a structured capability
-no-op in wave 2 even when the engine advertises the key. `help` stays local to
-the wrapper and `recall_project_sessions` stays. The timeline/pair/orphan
-assembly is not here — it remains `mem-web/src/api/memories.rs`.
+Wave boundary: these nine are the **wire** methods only. The toolkit's ten
+modes (`add`, `search`, `profile`, `list`, `forget`, `help`, `migrate`,
+`list-shards`, `export`, `import`) are routed in `plugin/src/tools.js` (issue 70
+waves 2–3); `help` stays local to the wrapper and `recall_project_sessions`
+stays. `list-shards`/`migrate` address the store by `project_path`, `export`/
+`import` by `project_id` plus an opaque absolute `.json` path; the wrapper never
+opens, stats or normalises a file. The timeline/pair/orphan assembly is not
+here — it remains `mem-web/src/api/memories.rs`.
 
 `inject`'s `include?` accepts either the frozen `["summary","metadata"]` array or the additive options object `{"recent_count"?: int, "compaction"?: "ingest"|"restore", "query"?: string}`: `recent_count` bounds the episodic rows, `compaction` selects the session-scoped render (issue 33), and `query` carries the authored prompt (max 2000 code points; absent or blank keeps the tag-listed read). Unknown keys are ignored; no other field exists.
 

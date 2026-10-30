@@ -1,0 +1,89 @@
+# M19 — reason-whitelist
+# oracles: test_memory_tool_maps_request_failures_to_values, test_memory_tool_surfaces_the_wire_reason_over_the_bridge
+# files: plugin/src/tools.js, plugin/dist/tools.js
+# expected: non-zero for every oracle (a zero exit is a vacuous guard)
+
+# command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin && node --test --test-name-pattern=test_memory_tool_maps_request_failures_to_values tests/memory-tools.test.mjs
+# exit: 1
+--- output (test_memory_tool_maps_request_failures_to_values) ---
+✖ test_memory_tool_maps_request_failures_to_values (2.952228ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 80.89168
+
+✖ failing tests:
+
+test at tests/memory-tools.test.mjs:852:1
+✖ test_memory_tool_maps_request_failures_to_values (2.952228ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   error: 'engine_unavailable',
+  -   error: 'blank',
+      success: false
+    }
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin/tests/memory-tools.test.mjs:860:12)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { success: false, error: 'engine_unavailable' },
+    expected: { success: false, error: 'blank' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+--- end ---
+
+# command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin && node --test --test-name-pattern=test_memory_tool_surfaces_the_wire_reason_over_the_bridge tests/memory-tools.test.mjs
+# exit: 1
+--- output (test_memory_tool_surfaces_the_wire_reason_over_the_bridge) ---
+✖ test_memory_tool_surfaces_the_wire_reason_over_the_bridge (96.134726ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 167.188881
+
+✖ failing tests:
+
+test at tests/memory-tools.test.mjs:1426:1
+✖ test_memory_tool_surfaces_the_wire_reason_over_the_bridge (96.134726ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      {
+        error: 'learning_locked',
+        success: false
+      },
+      {
+  +     error: 'engine_unavailable',
+  -     error: 'project_path',
+        success: false
+      }
+    ]
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin/tests/memory-tools.test.mjs:1496:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { success: false, error: 'learning_locked' }, { success: false, error: 'engine_unavailable' } ],
+    expected: [ { success: false, error: 'learning_locked' }, { success: false, error: 'project_path' } ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+--- end ---

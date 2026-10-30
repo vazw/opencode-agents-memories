@@ -139,6 +139,8 @@ process.stdin.on("end", () => process.exit(0));
 function respond(parsed) {
   const id = parsed && parsed.id !== undefined ? parsed.id : null;
   const method = parsed && parsed.method;
+  // Read inside the generated body (never from the harness's own scope).
+  const params = parsed.params ?? {};
   // The T22 knob: an error reply whose data must survive to the wrapper.
   const wireError = wireErrors[method];
   if (wireError) {
@@ -187,14 +189,65 @@ function respond(parsed) {
   } else if (method === "forget") {
     result = { deleted: 1 };
   } else if (method === "profile") {
-    const params = (parsed && parsed.params) || {};
     // Presence, not truthiness: the wrapper's empty-string write is a write.
     result = Object.prototype.hasOwnProperty.call(params, "content")
       ? { saved: true }
       : { profile: null };
+  } else if (method === "list-shards") {
+    result = {
+      storagePath: "/stub/storage",
+      currentProject: {
+        tag: "project_stub",
+        scopeHash: "0123456789abcdef",
+        projectPath: "/workspace/project",
+      },
+      shards: [],
+      summary: {
+        total: 0,
+        current: 0,
+        linked: 0,
+        orphaned: 0,
+        missingFile: 0,
+        empty: 0,
+        ambiguous: 0,
+      },
+    };
+  } else if (method === "migrate") {
+    result = {
+      actions: [
+        {
+          type: "Rename",
+          from: "/old/a.db",
+          to: "/workspace/project/a.db",
+          detail: "a.db -> a.db",
+        },
+      ],
+      dry_run: params.dry_run === true,
+      matched_by: "storedProjectPath",
+      migrated_memories: 3,
+      migrated_shards: 1,
+      new_hash: "0123456789abcdef",
+      new_path: "/workspace/project",
+      old_hash: "fedcba9876543210",
+      old_path: "/old",
+    };
+  } else if (method === "export") {
+    result = {
+      container_tag: "project_stub",
+      count: 2,
+      output_path: params.output_path,
+      scope_hash: "0123456789abcdef",
+    };
+  } else if (method === "import") {
+    result = {
+      container_tag: "project_stub",
+      dry_run: params.dry_run === true,
+      imported: 1,
+      rejected: [],
+      skipped: [{ id: "mem-old", reason: "duplicate" }],
+    };
   } else if (method === "inject") {
     if (injectMode === "compaction") {
-      const params = (parsed && parsed.params) || {};
       const mode = params.include && params.include.compaction;
       if (mode === "restore") {
         result = { block: BLOCKS.restore, memory_count: 7, tokens: 0, truncated: false, handling_ms: 0 };

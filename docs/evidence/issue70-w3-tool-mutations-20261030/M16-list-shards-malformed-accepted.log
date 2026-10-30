@@ -1,0 +1,43 @@
+# M16 — list-shards-malformed-accepted
+# oracles: test_memory_tool_maps_a_malformed_result_to_engine_unavailable
+# files: plugin/src/tools.js, plugin/dist/tools.js
+# expected: non-zero for every oracle (a zero exit is a vacuous guard)
+
+# command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin && node --test --test-name-pattern=test_memory_tool_maps_a_malformed_result_to_engine_unavailable tests/memory-tools.test.mjs
+# exit: 1
+--- output (test_memory_tool_maps_a_malformed_result_to_engine_unavailable) ---
+✖ test_memory_tool_maps_a_malformed_result_to_engine_unavailable (3.494115ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 79.94788
+
+✖ failing tests:
+
+test at tests/memory-tools.test.mjs:915:1
+✖ test_memory_tool_maps_a_malformed_result_to_engine_unavailable (3.494115ms)
+  AssertionError [ERR_ASSERTION]: list-shards must reject an empty result
+  + actual - expected
+  
+    {
+  +   success: true
+  -   error: 'engine_unavailable',
+  -   success: false
+    }
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin/tests/memory-tools.test.mjs:931:12)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: { success: true },
+    expected: { success: false, error: 'engine_unavailable' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+--- end ---

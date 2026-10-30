@@ -1,0 +1,44 @@
+# M18 — capability-noop-third-key-dropped
+# oracles: test_memory_tool_call_reaches_the_engine_as_the_routed_methods
+# files: plugin/src/tools.js, plugin/dist/tools.js
+# expected: non-zero for every oracle (a zero exit is a vacuous guard)
+
+# command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin && node --test --test-name-pattern=test_memory_tool_call_reaches_the_engine_as_the_routed_methods tests/memory-tools.test.mjs
+# exit: 1
+--- output (test_memory_tool_call_reaches_the_engine_as_the_routed_methods) ---
+✖ test_memory_tool_call_reaches_the_engine_as_the_routed_methods (99.357601ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 174.616184
+
+✖ failing tests:
+
+test at tests/memory-tools.test.mjs:1215:1
+✖ test_memory_tool_call_reaches_the_engine_as_the_routed_methods (99.357601ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  -   capability: 'forget',
+      error: 'capability_unavailable',
+      success: false
+    }
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin/tests/memory-tools.test.mjs:1297:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { success: false, error: 'capability_unavailable' },
+    expected: { success: false, error: 'capability_unavailable', capability: 'forget' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+--- end ---

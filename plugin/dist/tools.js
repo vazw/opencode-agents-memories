@@ -21,21 +21,20 @@
 // `Tool.Error` with no recovery instruction.
 //
 // Issue 70 wave 2 adds the second, agent-facing tool (`MEMORY_TOOL_NAME`,
-// upstream's ten-mode toolkit). Its wrapper-owned failure vocabulary — never on
-// the wire, so it lives here and not in docs/bridge-schema.md — is seven
-// tokens: `unknown_mode` (the mode is not one of the ten), `scope_unavailable`
-// (the host has no directory), `invalid_params` (`projectId`/`scope` present
-// and not a string, or `query` in `profile` mode), `scope_rejected` (the
-// model's `projectId` resolves elsewhere), `capability_unavailable`
-// (`+capability`: the hello omits the method's key, or the mode is one of the
-// four portability modes wave 3 will route), `session_unavailable` (the call
-// context carries no id) and `engine_unavailable` (no handshake, a transport
-// failure, a timeout or a malformed result). A wire refusal passes through as
-// its own §4 `data.reason` token: the tool keeps no local whitelist (D7), so a
-// new reason needs no wrapper change. The precedence is fixed and tested —
-// `unknown_mode`, `help`, `scope_unavailable`, `invalid_params`,
-// `scope_rejected`, `capability_unavailable`, `session_unavailable`, then the
-// request — because the adjacent pairs are behaviour, not prose.
+// upstream's ten-mode toolkit); wave 3 routes the last four modes. Its
+// wrapper-owned failure vocabulary — never on the wire, so it lives here and
+// not in docs/bridge-schema.md — is seven tokens: `unknown_mode` (the mode is
+// not one of the ten), `scope_unavailable` (the host has no directory),
+// `invalid_params` (`projectId`/`scope` present and not a string, or `query`
+// in `profile` mode), `scope_rejected` (the model's `projectId` resolves
+// elsewhere), `capability_unavailable` (`+capability`: the hello omits the
+// method's key), `session_unavailable` (the call context carries no id) and
+// `engine_unavailable` (no handshake, a transport failure, a timeout or a
+// malformed result). A wire refusal passes through as its own §4 `data.reason`
+// token: the tool keeps no local whitelist (D7), so a new reason needs no
+// wrapper change. The precedence is fixed and tested — `unknown_mode`, `help`,
+// `scope_unavailable`, `invalid_params`, `scope_rejected`, `session_unavailable`,
+// then the request — because the adjacent pairs are behaviour, not prose.
 
 import path from "node:path";
 
@@ -90,6 +89,9 @@ export function createRecallTool({ projectId, sendRecall } = {}) {
     name: RECALL_TOOL_NAME,
     description: RECALL_TOOL_DESCRIPTION,
     input: RECALL_TOOL_INPUT,
+    // Native, not Code-Mode-only (D13): the native flag keeps the tool on
+    // the provider's direct list; the permission action stays the tool name.
+    options: { codemode: false },
     async execute(args, toolContext) {
       // A host with no project directory refuses every call before the
       // model's own argument can be believed.
@@ -125,11 +127,11 @@ export function createRecallTool({ projectId, sendRecall } = {}) {
   };
 }
 
-// ── the memory tool (issue 70 wave 2) ──────────────────────────────────
-// Upstream's ten-mode toolkit, of which this wave routes the six modes that
-// need no portability service. The other four stay DECLARED and answer a
-// structured capability no-op: this build's engine advertises the keys, but
-// wave 2 must not send (D3) — wave 3 flips the routes, not the vocabulary.
+// ── the memory tool (issue 70 waves 2–3) ───────────────────────────────
+// Upstream's ten-mode toolkit: `help` is local and the other nine route to
+// their §3 wire methods. The capability gate keeps one owner in
+// `createToolRequest`, so a build that omits a method's key answers one
+// structured no-op and the tool itself holds no capability knowledge.
 
 export const MEMORY_TOOL_NAME = "memory";
 
@@ -153,9 +155,6 @@ export const MEMORY_TOOL_MODES = [
   // module specifier — a false positive, but the gate is the gate.
   `import`,
 ];
-
-// Wave 3's four; sorted for the guide's `unavailable` list.
-export const MEMORY_TOOL_UNAVAILABLE_MODES = ["export", `import`, "list-shards", "migrate"];
 
 export const MEMORY_TOOL_INPUT = {
   type: "object",
@@ -207,8 +206,32 @@ function memoryToolHelp() {
       },
       { command: "list", description: "List recent memories", args: ["scope?", "limit?"] },
       { command: "forget", description: "Remove one memory by id", args: ["memoryId", "scope?"] },
+      {
+        command: "list-shards",
+        description: "List project memory shards and orphaned path associations",
+        args: [],
+      },
+      {
+        command: "migrate",
+        description:
+          "Reassociate orphaned project shards after a directory move (target must be empty)",
+        args: ["fromPath?", "fromHash?", "dryRun?", "allowLinkedSource?"],
+      },
+      {
+        command: "export",
+        description: "Export current project memories to a portable JSON file",
+        args: ["outputPath"],
+      },
+      {
+        // Template literal, like MEMORY_TOOL_MODES: a quoted token here is
+        // read by the bundle-boundary scan as a module specifier (B15).
+        command: `import`,
+        description:
+          "Import memories from a portable JSON file (re-embeds; aborts on duplicate ids)",
+        args: ["inputPath", "dryRun?"],
+      },
     ],
-    unavailable: [...MEMORY_TOOL_UNAVAILABLE_MODES],
+    unavailable: [],
     tagGuidance: "Use technical keywords for search. Tags rank highest.",
   };
 }
@@ -228,6 +251,9 @@ export function createMemoryTool({ projectId, request } = {}) {
     name: MEMORY_TOOL_NAME,
     description: MEMORY_TOOL_DESCRIPTION,
     input: MEMORY_TOOL_INPUT,
+    // Native, not Code-Mode-only (D13): the native flag keeps the tool on
+    // the provider's direct list; the permission action stays the tool name.
+    options: { codemode: false },
     async execute(args, toolContext) {
       // 1. The mode decides everything else. Absent means `help`; `null`,
       // numbers and unknown strings are refused rather than guessed.
@@ -266,21 +292,21 @@ export function createMemoryTool({ projectId, request } = {}) {
       ) {
         return failure("scope_rejected");
       }
-      // 6. The wave boundary: the four portability modes are DECLARED and never
-      // routed — no request, even though this build's hello advertises the key.
-      if (MEMORY_TOOL_UNAVAILABLE_MODES.includes(mode)) {
-        return reply({ success: false, error: "capability_unavailable", capability: mode });
-      }
-      // 7. A call with no session id never reaches the wire: `add` persists
+      // 6. A call with no session id never reaches the wire: `add` persists
       // `session_id`, so an invented fallback would write a lie into the store.
       const sessionID = toolContext?.sessionID;
       if (typeof sessionID !== "string" || sessionID.trim().length === 0) {
         return failure("session_unavailable");
       }
-      // 8. The request runs. Parameters are built by assigning present keys
+      // 7. The request runs. Parameters are built by assigning present keys
       // only — never by spreading the model's args, so an absent key cannot
       // travel as `undefined` and an undeclared one cannot be smuggled.
-      const params = { session_id: sessionID, project_id: hostProject };
+      // D2: two identity keys, one source — the raw host directory under the
+      // key §3 assigns for this mode, never both.
+      const pathAddressed = mode === "list-shards" || mode === "migrate";
+      const params = pathAddressed
+        ? { session_id: sessionID, project_path: hostProject }
+        : { session_id: sessionID, project_id: hostProject };
       switch (mode) {
         case "add":
           assignPresent(params, "content", args?.content);
@@ -305,6 +331,24 @@ export function createMemoryTool({ projectId, request } = {}) {
           // Presence, not truthiness: `""` is a write the wire refuses as
           // `blank`, never a silent read.
           assignPresent(params, "content", args?.content);
+          break;
+        case "list-shards":
+          break;
+        case "migrate":
+          assignPresent(params, "from_path", args?.fromPath);
+          assignPresent(params, "from_hash", args?.fromHash);
+          assignPresent(params, "dry_run", args?.dryRun);
+          assignPresent(params, "allow_linked_source", args?.allowLinkedSource);
+          break;
+        case "export":
+          // Opaque: no absolute/`.json` check; the wire's `path` refusal is
+          // the answer (D3).
+          assignPresent(params, "output_path", args?.outputPath);
+          break;
+        // Template label, per D8: a quoted import token trips the bundle scan.
+        case `import`:
+          assignPresent(params, "input_path", args?.inputPath);
+          assignPresent(params, "dry_run", args?.dryRun);
           break;
       }
       let envelope;
@@ -374,6 +418,60 @@ function mapMemoryResult(mode, result) {
         return reply({ success: true, saved: result.saved });
       }
       return failure("engine_unavailable");
+    }
+    case "list-shards": {
+      // §3's DTO, camelCase and unrenamed; a missing field is malformed.
+      if (
+        typeof result.storagePath !== "string" ||
+        !Array.isArray(result.shards) ||
+        result.currentProject === null ||
+        typeof result.currentProject !== "object" ||
+        Array.isArray(result.currentProject) ||
+        result.summary === null ||
+        typeof result.summary !== "object" ||
+        Array.isArray(result.summary)
+      ) {
+        return failure("engine_unavailable");
+      }
+      return reply({ ...result, success: true });
+    }
+    case "migrate": {
+      if (
+        !Array.isArray(result.actions) ||
+        typeof result.dry_run !== "boolean" ||
+        !Number.isInteger(result.migrated_memories) ||
+        !Number.isInteger(result.migrated_shards) ||
+        typeof result.matched_by !== "string" ||
+        typeof result.new_hash !== "string" ||
+        typeof result.old_hash !== "string"
+      ) {
+        return failure("engine_unavailable");
+      }
+      return reply({ ...result, success: true });
+    }
+    case "export": {
+      if (
+        typeof result.container_tag !== "string" ||
+        !Number.isInteger(result.count) ||
+        typeof result.output_path !== "string" ||
+        typeof result.scope_hash !== "string"
+      ) {
+        return failure("engine_unavailable");
+      }
+      return reply({ ...result, success: true });
+    }
+    // Template label, per D8: a quoted import token trips the bundle scan.
+    case `import`: {
+      if (
+        typeof result.container_tag !== "string" ||
+        typeof result.dry_run !== "boolean" ||
+        !Number.isInteger(result.imported) ||
+        !Array.isArray(result.rejected) ||
+        !Array.isArray(result.skipped)
+      ) {
+        return failure("engine_unavailable");
+      }
+      return reply({ ...result, success: true });
     }
     default:
       return failure("engine_unavailable");

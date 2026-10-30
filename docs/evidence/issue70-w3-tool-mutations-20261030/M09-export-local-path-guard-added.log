@@ -1,0 +1,28 @@
+# M09 — export-local-path-guard-added
+# oracles: test_memory_tool_routes_export_with_the_path_verbatim
+# files: plugin/src/tools.js, plugin/dist/tools.js
+# expected: non-zero for every oracle (a zero exit is a vacuous guard)
+
+# command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin && node --test --test-name-pattern=test_memory_tool_routes_export_with_the_path_verbatim tests/memory-tools.test.mjs
+# exit: 1
+--- output (test_memory_tool_routes_export_with_the_path_verbatim) ---
+✖ test_memory_tool_routes_export_with_the_path_verbatim (2.26595ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 77.258795
+
+✖ failing tests:
+
+test at tests/memory-tools.test.mjs:767:1
+✖ test_memory_tool_routes_export_with_the_path_verbatim (2.26595ms)
+  TypeError [Error]: Cannot read properties of undefined (reading 'params')
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin/tests/memory-tools.test.mjs:795:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+
+--- end ---

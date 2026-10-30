@@ -262,7 +262,7 @@ test("test_memory_tool_declares_the_ten_mode_descriptor", () => {
   assert.deepEqual(
     toolSurface.MEMORY_TOOL_MODES,
     ["add", "search", "profile", "list", "forget", "help", "migrate", "list-shards", "export", "import"],
-    "the enum declares all ten upstream modes, routed or not"
+    "the enum declares all ten upstream modes; all ten route"
   );
 
   const input = toolSurface.MEMORY_TOOL_INPUT;
@@ -315,13 +315,14 @@ test("test_memory_tool_help_lists_the_routed_and_unavailable_modes", async () =>
   assert.equal(fromEmpty.tagGuidance, "Use technical keywords for search. Tags rank highest.");
   assert.deepEqual(
     fromEmpty.unavailable,
-    ["export", "import", "list-shards", "migrate"],
-    "the guide is honest about the four modes this build does not route"
+    [],
+    "the guide is honest: everything it lists is routed"
   );
+  assert.equal(fromEmpty.commands.length, 9, "nine commands");
   assert.deepEqual(
     fromEmpty.commands.map((entry) => entry.command),
-    ["add", "search", "profile", "list", "forget"],
-    "five commands, and `help` is not listed (upstream's precedent)"
+    ["add", "search", "profile", "list", "forget", "list-shards", "migrate", "export", "import"],
+    "nine commands, and `help` is not listed (upstream's precedent)"
   );
   assert.deepEqual(
     fromEmpty.commands.map((entry) => entry.args),
@@ -331,6 +332,10 @@ test("test_memory_tool_help_lists_the_routed_and_unavailable_modes", async () =>
       ["content?"],
       ["scope?", "limit?"],
       ["memoryId", "scope?"],
+      [],
+      ["fromPath?", "fromHash?", "dryRun?", "allowLinkedSource?"],
+      ["outputPath"],
+      ["inputPath", "dryRun?"],
     ],
     "each command lists only what this build accepts"
   );
@@ -437,7 +442,41 @@ test("test_memory_tool_requires_a_call_session", async () => {
   assert.equal(calls.length, 0, "a refused call sends nothing");
 });
 
-// ── the five routed wire modes ────────────────────────────────────────
+test("test_memory_tool_requires_a_call_session_for_portability_modes", async () => {
+  const { calls, request } = recordingRequest({
+    ok: true,
+    result: { storagePath: "/stub/storage", currentProject: {}, shards: [], summary: {} },
+  });
+  const tool = toolSurface.createMemoryTool({ projectId: "/w/p", request });
+
+  // The boundary flip moves the session check BEFORE the request for the four
+  // portability modes: no early no-op any more, so a session-less portability
+  // call must answer `session_unavailable`, never `capability_unavailable`.
+  const valid = [
+    { mode: "list-shards" },
+    { mode: "migrate", fromPath: "/old" },
+    { mode: "export", outputPath: "/x.json" },
+    { mode: "import", inputPath: "/x.json" },
+  ];
+  for (const args of valid) {
+    for (const toolContext of [undefined, { sessionID: "" }, { sessionID: "   " }]) {
+      assert.deepEqual(
+        await payload(tool.execute(args, toolContext)),
+        { success: false, error: "session_unavailable" },
+        `${args.mode} without a call session must not reach the wire`
+      );
+    }
+  }
+  assert.equal(calls.length, 0, "a refused portability call sends nothing");
+
+  // The positive control: with a real session the same call sends once and
+  // carries the context's id.
+  await tool.execute({ mode: "list-shards" }, { sessionID: "ses-1" });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].params.session_id, "ses-1");
+});
+
+// ── the nine routed wire modes ────────────────────────────────────────
 
 test("test_memory_tool_routes_add_to_the_add_method", async () => {
   const { calls, request } = recordingRequest({ ok: true, result: { id: "mem-1" } });
@@ -603,64 +642,241 @@ test("test_memory_tool_rejects_query_in_profile_mode", async () => {
   assert.equal(calls.length, 0);
 });
 
-test("test_memory_tool_returns_the_capability_no_op_for_the_four_portability_modes", async () => {
-  const { calls, request } = recordingRequest();
-  const tool = toolSurface.createMemoryTool({ projectId: "/w/p", request });
+// ── the portability modes (issue 70 wave 3) ───────────────────────────
+// Two identity keys, one source (D2): `list-shards`/`migrate` address the
+// store by `project_path` (the raw host directory); the rest by `project_id`.
 
-  // (i) Every argument supplied and `projectId` pinned to the host directory:
-  // the mode is DECLARED and never routed, even though this build's hello
-  // advertises all four keys. A foreign id here would make this sub-case (ii).
-  const supplied = {
-    migrate: {
-      fromPath: "/old",
-      fromHash: "0123456789abcdef",
-      dryRun: true,
-      allowLinkedSource: true,
+test("test_memory_tool_routes_list_shards_with_the_host_project_path", async () => {
+  const dto = {
+    storagePath: "/stub/storage",
+    currentProject: {
+      tag: "project_stub",
+      scopeHash: "0123456789abcdef",
+      projectPath: "/workspace/project",
     },
-    "list-shards": {},
-    export: { outputPath: "/tmp/out.json" },
-    import: { inputPath: "/tmp/in.json", dryRun: true },
+    shards: [],
+    summary: {
+      total: 0,
+      current: 0,
+      linked: 0,
+      orphaned: 0,
+      missingFile: 0,
+      empty: 0,
+      ambiguous: 0,
+    },
   };
-  for (const mode of toolSurface.MEMORY_TOOL_UNAVAILABLE_MODES) {
-    assert.deepEqual(
-      await payload(
-        tool.execute({ mode, projectId: "/w/p", ...supplied[mode] }, { sessionID: "ses-1" })
-      ),
-      { success: false, error: "capability_unavailable", capability: mode },
-      `${mode} must answer the structured no-op`
-    );
-  }
-  assert.equal(calls.length, 0, "no portability mode ever sends a request");
+  const { calls, request } = recordingRequest({ ok: true, result: dto });
+  // Host keeps its trailing slash: the raw string capture wrote must travel.
+  const tool = toolSurface.createMemoryTool({ projectId: "/w/p/", request });
 
-  // (ii) sub-case (a): a foreign id is a SCOPE refusal before the boundary —
-  // precedence 5 before 6, pinned by input.
+  const first = await payload(
+    tool.execute(
+      { mode: "list-shards", projectId: "/w/p", scope: "all-projects", limit: 5 },
+      { sessionID: "ses-1" }
+    )
+  );
+  assert.deepEqual(calls[0], {
+    method: "list-shards",
+    params: { session_id: "ses-1", project_path: "/w/p/" },
+  });
+  assert.equal("project_id" in calls[0].params, false, "the two identity keys are never both sent");
+  assert.equal("scope" in calls[0].params, false, "list-shards takes no scope");
+  assert.equal("limit" in calls[0].params, false, "list-shards takes no limit");
+  assert.deepEqual(first, { ...dto, success: true }, "the DTO passes through whole");
+
+  // A second call repeats the raw host: nothing mutated the captured base.
+  await tool.execute({ mode: "list-shards", projectId: "/w/p" }, { sessionID: "ses-1" });
+  assert.deepEqual(calls[1].params, { session_id: "ses-1", project_path: "/w/p/" });
+
+  // D9's re-homed adjacency pin: a foreign id is a SCOPE refusal before the
+  // request, reachable only through a portability mode.
   assert.deepEqual(
-    await payload(tool.execute({ mode: "migrate", projectId: "/w/other" }, { sessionID: "ses-1" })),
+    await payload(
+      tool.execute({ mode: "list-shards", projectId: "/w/other" }, { sessionID: "ses-1" })
+    ),
     { success: false, error: "scope_rejected" }
   );
-  assert.equal(calls.length, 0);
+  assert.equal(calls.length, 2, "the refused call sends nothing");
+});
 
-  // (iii) sub-case (b): an absent call context and a blank id are the
-  // capability no-op — precedence 6 before 7, pinned by input.
-  assert.deepEqual(
-    await payload(tool.execute({ mode: "migrate", fromPath: "/old" }, undefined)),
-    { success: false, error: "capability_unavailable", capability: "migrate" }
+test("test_memory_tool_routes_migrate_with_present_key_selection", async () => {
+  const report = {
+    actions: [
+      {
+        type: "Rename",
+        from: "/old/a.db",
+        to: "/workspace/project/a.db",
+        detail: "a.db -> a.db",
+      },
+    ],
+    dry_run: true,
+    matched_by: "storedProjectPath",
+    migrated_memories: 3,
+    migrated_shards: 1,
+    new_hash: "0123456789abcdef",
+    new_path: "/workspace/project",
+    old_hash: "fedcba9876543210",
+    old_path: "/old",
+  };
+  const { calls, request } = recordingRequest({ ok: true, result: report });
+  // `migrate` is path-addressed, like `list-shards`: the raw host travels as
+  // `project_path`, never `project_id`.
+  const tool = toolSurface.createMemoryTool({ projectId: "/w/p/", request });
+
+  const full = await payload(
+    tool.execute(
+      {
+        mode: "migrate",
+        fromPath: "/old",
+        fromHash: "0123456789abcdef",
+        dryRun: true,
+        allowLinkedSource: true,
+      },
+      { sessionID: "ses-1" }
+    )
   );
+  assert.deepEqual(calls[0], {
+    method: "migrate",
+    params: {
+      session_id: "ses-1",
+      project_path: "/w/p/",
+      from_path: "/old",
+      from_hash: "0123456789abcdef",
+      dry_run: true,
+      allow_linked_source: true,
+    },
+  });
   assert.deepEqual(
-    await payload(tool.execute({ mode: "migrate", fromPath: "/old" }, { sessionID: "" })),
-    { success: false, error: "capability_unavailable", capability: "migrate" }
+    full,
+    { ...report, success: true },
+    "the nine-key report and its per-action `detail` pass through"
   );
-  assert.equal(calls.length, 0);
+
+  // Present-key only: an omitted selector/flag is ABSENT, not `undefined`.
+  await tool.execute({ mode: "migrate", fromPath: "/old" }, { sessionID: "ses-1" });
+  assert.deepEqual(calls[1].params, {
+    session_id: "ses-1",
+    project_path: "/w/p/",
+    from_path: "/old",
+  });
+  assert.equal("from_hash" in calls[1].params, false);
+  assert.equal("dry_run" in calls[1].params, false);
+  assert.equal("allow_linked_source" in calls[1].params, false);
+});
+
+test("test_memory_tool_routes_export_with_the_path_verbatim", async () => {
+  const dto = {
+    container_tag: "project_stub",
+    count: 2,
+    output_path: "/tmp/out.json",
+    scope_hash: "0123456789abcdef",
+  };
+  const { calls, request } = recordingRequest({ ok: true, result: dto });
+  // `export` is id-addressed: `project_id`, never `project_path`.
+  const tool = toolSurface.createMemoryTool({ projectId: "/w/p/", request });
+
+  const first = await payload(
+    tool.execute({ mode: "export", outputPath: "/tmp/out.json" }, { sessionID: "ses-1" })
+  );
+  assert.deepEqual(calls[0], {
+    method: "export",
+    params: {
+      session_id: "ses-1",
+      project_id: "/w/p/",
+      output_path: "/tmp/out.json",
+    },
+  });
+  assert.deepEqual(first, { ...dto, success: true });
+  assert.equal(first.scope_hash, "0123456789abcdef", "the scope hash survives whole");
+
+  // Paths are opaque (D3): a relative path travels VERBATIM; the wire's own
+  // `path` refusal is the answer, never a local absolute-`.json` check (M09).
+  await tool.execute({ mode: "export", outputPath: "out.json" }, { sessionID: "ses-1" });
+  assert.deepEqual(calls[1].params, {
+    session_id: "ses-1",
+    project_id: "/w/p/",
+    output_path: "out.json",
+  });
+
+  // Present-key only: no outputPath means no `output_path` key at all.
+  await tool.execute({ mode: "export" }, { sessionID: "ses-1" });
+  assert.deepEqual(calls[2].params, { session_id: "ses-1", project_id: "/w/p/" });
+  assert.equal("output_path" in calls[2].params, false);
+});
+
+test("test_memory_tool_routes_import_with_the_dry_run_flag", async () => {
+  const dto = {
+    container_tag: "project_stub",
+    dry_run: true,
+    imported: 1,
+    rejected: [{ id: "mem-bad", reason: "invalid_scope" }],
+    skipped: [{ id: "mem-old", reason: "duplicate" }],
+  };
+  const { calls, request } = recordingRequest({ ok: true, result: dto });
+  const tool = toolSurface.createMemoryTool({ projectId: "/w/p/", request });
+
+  const first = await payload(
+    tool.execute(
+      { mode: "import", inputPath: "/tmp/in.json", dryRun: true },
+      { sessionID: "ses-1" }
+    )
+  );
+  // The exact four-key deepEqual is what separates a dropped path (M07) from
+  // a dropped dry run (M08); `project_path` must never appear here.
+  assert.deepEqual(calls[0], {
+    method: "import",
+    params: {
+      session_id: "ses-1",
+      project_id: "/w/p/",
+      input_path: "/tmp/in.json",
+      dry_run: true,
+    },
+  });
+  assert.equal("project_path" in calls[0].params, false, "import is id-addressed");
+  assert.deepEqual(
+    first,
+    { ...dto, success: true },
+    "the per-row `rejected`/`skipped` notes survive verbatim"
+  );
+
+  // Omitted `dryRun` → no `dry_run` key (a spread would carry `undefined`).
+  await tool.execute({ mode: "import", inputPath: "/tmp/in.json" }, { sessionID: "ses-1" });
+  assert.deepEqual(calls[1].params, {
+    session_id: "ses-1",
+    project_id: "/w/p/",
+    input_path: "/tmp/in.json",
+  });
+  assert.equal("dry_run" in calls[1].params, false);
 });
 
 test("test_memory_tool_maps_request_failures_to_values", async () => {
   // The wire's own §4 refusal becomes the tool's `error`, verbatim: no local
-  // whitelist, so a new reason needs no wrapper change.
-  for (const error of ["private", "learning_locked"]) {
+  // whitelist, so a new reason needs no wrapper change. `blank` and
+  // `no_user_email` are the two profile tokens the registry row names for
+  // `profile-tool-runtime`; M19's blanket whitelist is what makes them bite.
+  for (const error of ["blank", "no_user_email", "private", "learning_locked"]) {
     const { calls, request } = recordingRequest({ ok: false, error });
     const tool = toolSurface.createMemoryTool({ projectId: "/w/p", request });
     assert.deepEqual(
       await payload(tool.execute({ mode: "add", content: "x" }, { sessionID: "ses-1" })),
+      { success: false, error }
+    );
+    assert.equal(calls.length, 1, "a wire refusal means the request did run");
+  }
+
+  // Portability-only refusals surface the same way, through a portability
+  // mode: the token travels verbatim and exactly one request was made.
+  const portabilityRefusals = [
+    [{ mode: "list-shards" }, "project_path"],
+    [{ mode: "migrate", fromPath: "/old" }, "from_required"],
+    [{ mode: "export", outputPath: "/x.json" }, "path"],
+    [{ mode: "import", inputPath: "/x.json" }, "import_aborted"],
+  ];
+  for (const [args, error] of portabilityRefusals) {
+    const { calls, request } = recordingRequest({ ok: false, error });
+    const tool = toolSurface.createMemoryTool({ projectId: "/w/p", request });
+    assert.deepEqual(
+      await payload(tool.execute(args, { sessionID: "ses-1" })),
       { success: false, error }
     );
     assert.equal(calls.length, 1, "a wire refusal means the request did run");
@@ -697,13 +913,17 @@ test("test_memory_tool_maps_request_failures_to_values", async () => {
 });
 
 test("test_memory_tool_maps_a_malformed_result_to_engine_unavailable", async () => {
-  // `{}` for all five routed modes: every shape check must bite.
+  // `{}` for all nine routed modes: every shape check must bite.
   const emptyPage = [
     { mode: "add", args: { content: "x" } },
     { mode: "search", args: { query: "q" } },
     { mode: "list", args: {} },
     { mode: "forget", args: { memoryId: "m" } },
     { mode: "profile", args: {} },
+    { mode: "list-shards", args: {} },
+    { mode: "migrate", args: { fromPath: "/old" } },
+    { mode: "export", args: { outputPath: "/tmp/out.json" } },
+    { mode: "import", args: { inputPath: "/tmp/in.json" } },
   ];
   for (const { mode, args } of emptyPage) {
     const { calls, request } = recordingRequest({ ok: true, result: {} });
@@ -726,6 +946,10 @@ test("test_memory_tool_maps_a_malformed_result_to_engine_unavailable", async () 
     ["forget", { memoryId: "m" }, { deleted: "1" }],
     ["forget", { memoryId: "m" }, { deleted: 1.5 }],
     ["profile", {}, { profile_data: {} }],
+    ["list-shards", {}, { shards: "no" }],
+    ["migrate", { fromPath: "/old" }, { actions: "no" }],
+    ["export", { outputPath: "/tmp/out.json" }, { count: "2" }],
+    ["import", { inputPath: "/tmp/in.json" }, { rejected: {} }],
   ];
   for (const [mode, args, result] of malformed) {
     const { request } = recordingRequest({ ok: true, result });
@@ -900,6 +1124,12 @@ test("test_setup_registers_both_agent_tools", async () => {
     ["recall_project_sessions", "memory"],
     "recall registers first, then the ten-mode memory toolkit"
   );
+  // Both tools are NATIVE, not Code-Mode-only (D13): host v2.2.2 advertises
+  // exactly the tools whose `options.codemode === false` on the provider's
+  // direct list, and `execute` admits only `codemode !== false` tools. The
+  // permission action is the tool name, so `options` carries no `permission`.
+  assert.deepEqual(added[0].options, { codemode: false });
+  assert.deepEqual(added[1].options, { codemode: false });
   // The host derives the callable name from `options.namespace` when it is
   // set (`effectiveName`): no namespace keeps the bare name callable.
   assert.equal(added[0].options?.namespace, undefined);
@@ -991,7 +1221,8 @@ test(
     const requestLogPath = path.join(tmp, "wire.log");
     const manifestPath = path.join(tmp, "stub.json");
     // The stub ADVERTISES the four portability keys and OMITS `forget`, so one
-    // run proves both no-op causes: the mode is unrouted, the key is missing.
+    // run proves the routed portability calls and the missing-key no-op: the
+    // keys are advertised, `forget`'s is not.
     stageStubEngine(pkgDir, {
       requestLogPath,
       manifestPath,
@@ -1021,8 +1252,11 @@ test(
       { args: { mode: "list", limit: 5 } },
       { args: { mode: "profile" } }, // read
       { args: { mode: "profile", content: "Prefer short answers" } }, // write
-      { args: { mode: "forget", memoryId: "mem-1" } }, // capability omitted
-      { args: { mode: "migrate", fromPath: "/old" } }, // declared, never routed
+      { args: { mode: "forget", memoryId: "mem-1" } }, // capability omitted → no-op
+      { args: { mode: "migrate", fromPath: "/old", dryRun: true } }, // routed through the migrate method
+      { args: { mode: "list-shards" } },
+      { args: { mode: "export", outputPath: "/tmp/export.json" } },
+      { args: { mode: "import", inputPath: "/tmp/export.json", dryRun: true } },
     ].map((call) => ({ args: call.args, toolContext: { sessionID: "ses-tool" } }));
     const fixturePath = path.join(tmp, "fixture.json");
     fs.writeFileSync(fixturePath, JSON.stringify({ directory: "/workspace/project", calls }));
@@ -1047,8 +1281,8 @@ test(
     assert.deepEqual(record.names, ["recall_project_sessions", "memory"]);
     // Call 1: `help` on a host that has a directory and a session — still local.
     assert.equal(record.payloads[0].success, true);
-    assert.equal(record.payloads[0].commands.length, 5);
-    assert.deepEqual(record.payloads[0].unavailable, ["export", "import", "list-shards", "migrate"]);
+    assert.equal(record.payloads[0].commands.length, 9);
+    assert.deepEqual(record.payloads[0].unavailable, []);
     assert.deepEqual(record.payloads[1], { success: true, id: "mem-stub-1" });
     assert.deepEqual(record.payloads[2], {
       success: true,
@@ -1058,16 +1292,65 @@ test(
     assert.deepEqual(record.payloads[3], { success: true, count: 0, items: [] });
     assert.deepEqual(record.payloads[4], { success: true, profile: null });
     assert.deepEqual(record.payloads[5], { success: true, saved: true });
-    // The two structured no-ops, for the two different causes.
+    // The one structured no-op (`forget`, key omitted) and the routed migrate
+    // payload: the capability gate and the boundary flip, in one run.
     assert.deepEqual(record.payloads[6], {
       success: false,
       error: "capability_unavailable",
       capability: "forget",
     });
     assert.deepEqual(record.payloads[7], {
-      success: false,
-      error: "capability_unavailable",
-      capability: "migrate",
+      success: true,
+      actions: [
+        {
+          type: "Rename",
+          from: "/old/a.db",
+          to: "/workspace/project/a.db",
+          detail: "a.db -> a.db",
+        },
+      ],
+      dry_run: true,
+      matched_by: "storedProjectPath",
+      migrated_memories: 3,
+      migrated_shards: 1,
+      new_hash: "0123456789abcdef",
+      new_path: "/workspace/project",
+      old_hash: "fedcba9876543210",
+      old_path: "/old",
+    });
+    assert.deepEqual(record.payloads[8], {
+      success: true,
+      storagePath: "/stub/storage",
+      currentProject: {
+        tag: "project_stub",
+        scopeHash: "0123456789abcdef",
+        projectPath: "/workspace/project",
+      },
+      shards: [],
+      summary: {
+        total: 0,
+        current: 0,
+        linked: 0,
+        orphaned: 0,
+        missingFile: 0,
+        empty: 0,
+        ambiguous: 0,
+      },
+    });
+    assert.deepEqual(record.payloads[9], {
+      success: true,
+      container_tag: "project_stub",
+      count: 2,
+      output_path: "/tmp/export.json",
+      scope_hash: "0123456789abcdef",
+    });
+    assert.deepEqual(record.payloads[10], {
+      success: true,
+      container_tag: "project_stub",
+      dry_run: true,
+      imported: 1,
+      rejected: [],
+      skipped: [{ id: "mem-old", reason: "duplicate" }],
     });
 
     const TOOL_METHODS = [
@@ -1084,24 +1367,57 @@ test(
     const toolLines = record.wire.filter((message) => message && TOOL_METHODS.includes(message.method));
     assert.deepEqual(
       toolLines.map((message) => message.method),
-      ["add", "search", "list", "profile", "profile"],
-      "help/forget/migrate sent nothing; the five routed calls did"
+      ["add", "search", "list", "profile", "profile", "migrate", "list-shards", "export", "import"],
+      "help/forget sent nothing; the nine routed calls did"
     );
+    // §3 assigns the identity key per method: the path-addressed modes carry
+    // the raw host as `project_path`, the rest as `project_id` — never both.
+    const pathAddressed = new Set(["migrate", "list-shards"]);
     for (const line of toolLines) {
       assert.equal(line.params.session_id, "ses-tool");
-      assert.equal(
-        line.params.project_id,
-        "/workspace/project",
-        "the host directory travels raw; the model's projectId never does"
-      );
+      if (pathAddressed.has(line.method)) {
+        assert.equal(
+          line.params.project_path,
+          "/workspace/project",
+          "the host directory travels raw under the key §3 assigns; the model's projectId never does"
+        );
+        assert.equal("project_id" in line.params, false, "the two identity keys are never both sent");
+      } else {
+        assert.equal(
+          line.params.project_id,
+          "/workspace/project",
+          "the host directory travels raw under the key §3 assigns; the model's projectId never does"
+        );
+        assert.equal("project_path" in line.params, false, "the two identity keys are never both sent");
+      }
     }
+    assert.equal(record.wire.filter((message) => message && message.method === "help").length, 0);
+    assert.equal(record.wire.filter((message) => message && message.method === "forget").length, 0);
+    // The flags and paths each routed portability call carried.
+    assert.deepEqual(toolLines.filter((line) => line.method === "migrate")[0].params, {
+      session_id: "ses-tool",
+      project_path: "/workspace/project",
+      from_path: "/old",
+      dry_run: true,
+    });
+    assert.deepEqual(toolLines.filter((line) => line.method === "export")[0].params, {
+      session_id: "ses-tool",
+      project_id: "/workspace/project",
+      output_path: "/tmp/export.json",
+    });
+    assert.deepEqual(toolLines.filter((line) => line.method === "import")[0].params, {
+      session_id: "ses-tool",
+      project_id: "/workspace/project",
+      input_path: "/tmp/export.json",
+      dry_run: true,
+    });
     // What the stub actually advertised: the hello answer is not on the wire
     // log (it records requests), so the stub writes its own capability record.
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
     assert.equal(
       manifest.capabilities.migrate,
       true,
-      "the stub advertised the portability key the tool must not use"
+      "the stub advertised the portability key the tool now routes through"
     );
     assert.equal(manifest.capabilities.forget, undefined, "the stub omitted the forget key");
   }
@@ -1121,6 +1437,7 @@ test(
       capabilities: {
         compaction: true,
         fire_and_forget_capture: true,
+        "list-shards": true,
         profile: true,
         skills: true,
         standalone: true,
@@ -1131,6 +1448,11 @@ test(
           code: -32603,
           message: "profile learning lock is held",
           data: { reason: "learning_locked", retryable: true },
+        },
+        "list-shards": {
+          code: -32602,
+          message: "Invalid params",
+          data: { reason: "project_path" },
         },
       },
     });
@@ -1144,6 +1466,10 @@ test(
         calls: [
           {
             args: { mode: "profile", content: "Prefer short answers" },
+            toolContext: { sessionID: "ses-tool" },
+          },
+          {
+            args: { mode: "list-shards" },
             toolContext: { sessionID: "ses-tool" },
           },
         ],
@@ -1167,13 +1493,22 @@ test(
     assert.equal(run.timedOut, false);
 
     const record = JSON.parse(fs.readFileSync(donePath, "utf8"));
-    assert.deepEqual(record.payloads[0], { success: false, error: "learning_locked" });
+    assert.deepEqual(record.payloads, [
+      { success: false, error: "learning_locked" },
+      { success: false, error: "project_path" },
+    ]);
     const profileLines = record.wire.filter((message) => message && message.method === "profile");
     assert.equal(profileLines.length, 1, "exactly one profile line was sent");
     assert.deepEqual(profileLines[0].params, {
       session_id: "ses-tool",
       project_id: "/workspace/project",
       content: "Prefer short answers",
+    });
+    const shardLines = record.wire.filter((message) => message && message.method === "list-shards");
+    assert.equal(shardLines.length, 1, "exactly one list-shards line was sent");
+    assert.deepEqual(shardLines[0].params, {
+      session_id: "ses-tool",
+      project_path: "/workspace/project",
     });
   }
 );

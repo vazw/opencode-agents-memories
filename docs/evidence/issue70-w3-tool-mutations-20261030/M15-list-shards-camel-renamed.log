@@ -1,0 +1,52 @@
+# M15 — list-shards-camel-renamed
+# oracles: test_memory_tool_routes_list_shards_with_the_host_project_path
+# files: plugin/src/tools.js, plugin/dist/tools.js
+# expected: non-zero for every oracle (a zero exit is a vacuous guard)
+
+# command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin && node --test --test-name-pattern=test_memory_tool_routes_list_shards_with_the_host_project_path tests/memory-tools.test.mjs
+# exit: 1
+--- output (test_memory_tool_routes_list_shards_with_the_host_project_path) ---
+✖ test_memory_tool_routes_list_shards_with_the_host_project_path (3.470641ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 82.255268
+
+✖ failing tests:
+
+test at tests/memory-tools.test.mjs:649:1
+✖ test_memory_tool_routes_list_shards_with_the_host_project_path (3.470641ms)
+  AssertionError [ERR_ASSERTION]: the DTO passes through whole
+  + actual - expected
+  
+    {
+      currentProject: {
+        projectPath: '/workspace/project',
+        scopeHash: '0123456789abcdef',
+        tag: 'project_stub'
+      },
+      shards: [],
+  +   storage_path: '/stub/storage',
+  -   storagePath: '/stub/storage',
+      success: true,
+      summary: {
+        ambiguous: 0,
+        current: 0,
+        empty: 0,
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin/tests/memory-tools.test.mjs:685:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: { currentProject: { tag: 'project_stub', scopeHash: '0123456789abcdef', projectPath: '/workspace/project' }, shards: [], summary: { total: 0, current: 0, linked: 0, orphaned: 0, missingFile: 0, empty: 0, ambiguous: 0 }, storage_path: '/stub/storage', success: true },
+    expected: { storagePath: '/stub/storage', currentProject: { tag: 'project_stub', scopeHash: '0123456789abcdef', projectPath: '/workspace/project' }, shards: [], summary: { total: 0, current: 0, linked: 0, orphaned: 0, missingFile: 0, empty: 0, ambiguous: 0 }, success: true },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+--- end ---

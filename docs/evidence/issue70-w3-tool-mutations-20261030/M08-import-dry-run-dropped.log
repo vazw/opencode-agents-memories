@@ -1,0 +1,47 @@
+# M08 — import-dry-run-dropped
+# oracles: test_memory_tool_routes_import_with_the_dry_run_flag
+# files: plugin/src/tools.js, plugin/dist/tools.js
+# expected: non-zero for every oracle (a zero exit is a vacuous guard)
+
+# command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin && node --test --test-name-pattern=test_memory_tool_routes_import_with_the_dry_run_flag tests/memory-tools.test.mjs
+# exit: 1
+--- output (test_memory_tool_routes_import_with_the_dry_run_flag) ---
+✖ test_memory_tool_routes_import_with_the_dry_run_flag (3.050914ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 83.03489
+
+✖ failing tests:
+
+test at tests/memory-tools.test.mjs:807:1
+✖ test_memory_tool_routes_import_with_the_dry_run_flag (3.050914ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+      method: 'import',
+      params: {
+  -     dry_run: true,
+        input_path: '/tmp/in.json',
+        project_id: '/w/p/',
+        session_id: 'ses-1'
+      }
+    }
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin/tests/memory-tools.test.mjs:826:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { method: 'import', params: { session_id: 'ses-1', project_id: '/w/p/', input_path: '/tmp/in.json' } },
+    expected: { method: 'import', params: { session_id: 'ses-1', project_id: '/w/p/', input_path: '/tmp/in.json', dry_run: true } },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+--- end ---

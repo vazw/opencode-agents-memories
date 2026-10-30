@@ -1,0 +1,47 @@
+# M11 — session-fallback-for-portability
+# oracles: test_memory_tool_requires_a_call_session_for_portability_modes
+# files: plugin/src/tools.js, plugin/dist/tools.js
+# expected: non-zero for every oracle (a zero exit is a vacuous guard)
+
+# command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin && node --test --test-name-pattern=test_memory_tool_requires_a_call_session_for_portability_modes tests/memory-tools.test.mjs
+# exit: 1
+--- output (test_memory_tool_requires_a_call_session_for_portability_modes) ---
+✖ test_memory_tool_requires_a_call_session_for_portability_modes (3.215873ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 77.758382
+
+✖ failing tests:
+
+test at tests/memory-tools.test.mjs:445:1
+✖ test_memory_tool_requires_a_call_session_for_portability_modes (3.215873ms)
+  AssertionError [ERR_ASSERTION]: list-shards without a call session must not reach the wire
+  + actual - expected
+  
+    {
+  +   currentProject: {},
+  +   shards: [],
+  +   storagePath: '/stub/storage',
+  +   success: true,
+  +   summary: {}
+  -   error: 'session_unavailable',
+  -   success: false
+    }
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin/tests/memory-tools.test.mjs:463:14)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: { storagePath: '/stub/storage', currentProject: {}, shards: [], summary: {}, success: true },
+    expected: { success: false, error: 'session_unavailable' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+--- end ---

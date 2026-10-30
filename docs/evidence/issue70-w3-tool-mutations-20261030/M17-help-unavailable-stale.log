@@ -1,0 +1,45 @@
+# M17 — help-unavailable-stale
+# oracles: test_memory_tool_help_lists_the_routed_and_unavailable_modes
+# files: plugin/src/tools.js, plugin/dist/tools.js
+# expected: non-zero for every oracle (a zero exit is a vacuous guard)
+
+# command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin && node --test --test-name-pattern=test_memory_tool_help_lists_the_routed_and_unavailable_modes tests/memory-tools.test.mjs
+# exit: 1
+--- output (test_memory_tool_help_lists_the_routed_and_unavailable_modes) ---
+✖ test_memory_tool_help_lists_the_routed_and_unavailable_modes (3.115525ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 79.35062
+
+✖ failing tests:
+
+test at tests/memory-tools.test.mjs:306:1
+✖ test_memory_tool_help_lists_the_routed_and_unavailable_modes (3.115525ms)
+  AssertionError [ERR_ASSERTION]: the guide is honest: everything it lists is routed
+  + actual - expected
+  
+  + [
+  +   'export',
+  +   'import',
+  +   'list-shards',
+  +   'migrate'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin/tests/memory-tools.test.mjs:316:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [ 'export', 'import', 'list-shards', 'migrate' ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+--- end ---

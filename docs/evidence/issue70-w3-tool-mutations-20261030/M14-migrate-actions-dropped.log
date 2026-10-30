@@ -1,0 +1,53 @@
+# M14 — migrate-actions-dropped
+# oracles: test_memory_tool_routes_migrate_with_present_key_selection
+# files: plugin/src/tools.js, plugin/dist/tools.js
+# expected: non-zero for every oracle (a zero exit is a vacuous guard)
+
+# command: cd /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin && node --test --test-name-pattern=test_memory_tool_routes_migrate_with_present_key_selection tests/memory-tools.test.mjs
+# exit: 1
+--- output (test_memory_tool_routes_migrate_with_present_key_selection) ---
+✖ test_memory_tool_routes_migrate_with_present_key_selection (3.196687ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 81.222782
+
+✖ failing tests:
+
+test at tests/memory-tools.test.mjs:702:1
+✖ test_memory_tool_routes_migrate_with_present_key_selection (3.196687ms)
+  AssertionError [ERR_ASSERTION]: the nine-key report and its per-action `detail` pass through
+  + actual - expected
+  
+    {
+  +   actions: [],
+  -   actions: [
+  -     {
+  -       detail: 'a.db -> a.db',
+  -       from: '/old/a.db',
+  -       to: '/workspace/project/a.db',
+  -       type: 'Rename'
+  -     }
+  -   ],
+      dry_run: true,
+      matched_by: 'storedProjectPath',
+      migrated_memories: 3,
+      migrated_shards: 1,
+      new_hash: '0123456789abcdef',
+  
+      at TestContext.<anonymous> (file:///home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issue-70-w3-portability-tool/plugin/tests/memory-tools.test.mjs:749:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: { actions: [], dry_run: true, matched_by: 'storedProjectPath', migrated_memories: 3, migrated_shards: 1, new_hash: '0123456789abcdef', new_path: '/workspace/project', old_hash: 'fedcba9876543210', old_path: '/old', success: true },
+    expected: { actions: [ [Object] ], dry_run: true, matched_by: 'storedProjectPath', migrated_memories: 3, migrated_shards: 1, new_hash: '0123456789abcdef', new_path: '/workspace/project', old_hash: 'fedcba9876543210', old_path: '/old', success: true },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+--- end ---
