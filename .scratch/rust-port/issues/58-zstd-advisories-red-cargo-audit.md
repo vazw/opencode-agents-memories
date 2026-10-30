@@ -156,3 +156,11 @@ needs an owner decision (accept with a documented class-checked entry, or hold f
   - The `zstd` reachability trace (whether `turso_core`'s sstable/FTS path feeds untrusted bytes to
     decompression) is **not** being done, and is no longer on the path to a decision: it would bound
     exploitability of a finding that cannot be fixed either way.
+
+- **2026-10-30 — re-derived.** `cargo audit --json` from the repo root: **3 vulnerabilities** —
+  `RUSTSEC-2026-0391` (zstd 0.13.3), `RUSTSEC-2026-0398` and `RUSTSEC-2026-0403` (zstd-safe 7.3.0) —
+  and **10 allowed warnings** (`-0395`, `-0396`, `-0397`, `-0399`, `-0400`, `-0401`, `-0402`, `-0404`,
+  `-0405`, `-0406`). The review citations that named `-0404/-0405/-0406` as vulnerabilities were reading
+  the warning IDs; the live vulnerabilities are `-0391/-0398/-0403`. **Reopen check:** crates.io's newest
+  `turso_core 0.9.0-pre.2` still requires `tantivy ^0.26.2`, so the issue stays **paused** and the gate
+  stays red by the owner's ruling. Logs: `.tmp/progress/zstd-audit-20261030.{json,log,deps.json}`.
