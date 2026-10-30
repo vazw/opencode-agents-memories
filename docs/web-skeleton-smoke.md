@@ -507,7 +507,7 @@ Binary under test: sha256 prefix `9dcded5b953f` (12 hex).
 
 > **Addendum (issue 54).** This sheet is a historical measurement record: it
 > was measured on the binary above against the then-37-row table (38 rows since
-> issue 48) and has not been re-measured. Issue 54 changed the maintenance
+> issue 48; 39 since W6.6) and has not been re-measured. Issue 54 changed the maintenance
 > wiring: `POST /api/deduplicate` now answers 200 on a composed runtime (or the
 > 200 `{"success":false,"error":"Deduplication is disabled in config"}`
 > business message when `deduplicationEnabled` is false); `/api/cleanup` and
@@ -583,3 +583,137 @@ The per-endpoint request shapes, statuses and bodies are the ones in the
 sections above: **A.** memories / tags / stats / search, **B.** bulk
 operations, **C.** profile, **D.** skills and the OpenCode catalog,
 **E.** maintenance, **F.** sessions.
+
+## G. Milestones and the Agents view (W6.6)
+
+W6.6 adds one **product** route, `GET /api/projects/{project_id}/milestones`
+(`mem-web`'s 39th route-table row, `web-ui`'s 35th `ENDPOINTS` row). It has no
+upstream counterpart: upstream ships no agents screen and no milestone
+endpoint. The route answers the project's milestones newest first, each with
+its `contributors` (the only durable agent attribution) and the `facts.db`
+rows it promoted (the `facts.source_ref` join). `?limit` defaults to 200, caps
+at 500 and refuses anything else with the fixed `400`
+`{"success":false,"error":"Invalid limit parameter"}` — never a clamp.
+
+This section is a **manual** smoke (`testable: no`): its automated proxies are
+`test_production_wiring_serves_the_seeded_milestones` (the same join through
+the binary's composition root) and the `web-ui` agents tests (the fold).
+
+### G.1 The harness (roster + drill-down)
+
+```bash
+cd web-ui && trunk build               # once: the harness serves web-ui/dist
+cargo run -p mem-web --example session_history_demo
+```
+
+The harness seeds two milestones (three contributors: `Planner` in both,
+`Implementer` in one) and two promoted facts, then prints an OS-assigned
+address (measured 2026-10-30):
+
+```text
+UI (agents):   http://127.0.0.1:46087/agents?project=demo-project
+demo token:    demo-token  (demo-only, loopback-only)
+API milestones: curl -H 'x-opencode-mem-token: demo-token' \
+   http://127.0.0.1:46087/api/projects/demo-project/milestones
+```
+
+Open the `/agents?project=demo-project` URL: the panel seeds the project id
+from `?project=`, issues exactly one same-origin request on mount, and renders
+the roster — `Planner` (`agent-parent`, 2 milestones) before `Implementer`
+(`agent-child`, 1 milestone). Clicking a row opens the drill-down: milestones
+newest first, each carrying its server-reported source count and its promoted
+fact. DevTools shows no console error, no second origin and no login UI (the
+token rides the injected marker's header).
+
+The same answer through the API (the harness's measured body; the `fact-…` ids
+are deterministic from the fact text, the fact `createdAt` is its insert
+stamp):
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "demo-milestone-2",
+      "projectId": "demo-project",
+      "agentId": "agent-parent",
+      "summary": "Milestone demo-milestone-2: consolidated demo work",
+      "contributors": [
+        {
+          "sessionRowId": "row-3",
+          "sessionId": "demo-session",
+          "agentId": "agent-parent",
+          "agentName": "Planner",
+          "createdAt": 1800000002000,
+          "summary": "reviewed the milestone projection"
+        }
+      ],
+      "sourceCount": 1,
+      "windowStart": 1800000002000,
+      "windowEnd": 1800000002000,
+      "createdAt": 1800000002000,
+      "promotedFacts": [
+        {
+          "id": "fact-578f5090c486100231493a9b84e047d0",
+          "content": "Run the demo with cargo run --example session_history_demo.",
+          "createdAt": 1793375925301
+        }
+      ]
+    },
+    {
+      "id": "demo-milestone-1",
+      "projectId": "demo-project",
+      "agentId": "agent-parent",
+      "summary": "Milestone demo-milestone-1: consolidated demo work",
+      "contributors": [
+        {
+          "sessionRowId": "row-1",
+          "sessionId": "demo-session",
+          "agentId": "agent-parent",
+          "agentName": "Planner",
+          "createdAt": 1800000000000,
+          "summary": "scaffolded the explorer demo"
+        },
+        {
+          "sessionRowId": "row-2",
+          "sessionId": "demo-session",
+          "agentId": "agent-child",
+          "agentName": "Implementer",
+          "createdAt": 1800000001000,
+          "summary": "wired the session-history endpoints"
+        }
+      ],
+      "sourceCount": 2,
+      "windowStart": 1800000000000,
+      "windowEnd": 1800000001000,
+      "createdAt": 1800000001000,
+      "promotedFacts": [
+        {
+          "id": "fact-587c80a25a4cc407aa53cb1abf93abda",
+          "content": "The explorer ships a project-scoped milestone route.",
+          "createdAt": 1793375925103
+        }
+      ]
+    }
+  ]
+}
+```
+
+### G.2 The standalone binary (empty state)
+
+Spawn the engine exactly as the reproduction recipe does, minting the token
+through one token-less request, then:
+
+```bash
+curl --max-time 5 -sS -H "x-opencode-mem-token: $TOKEN" \
+  "http://127.0.0.1:$PORT/api/projects/demo/milestones"
+# {"success":true,"data":[]}
+```
+
+Open `http://127.0.0.1:$PORT/agents?project=demo`: the panel's one request
+answers the empty array and the screen renders the empty state
+`No contributing agents in this project yet.` — not the `501` degraded state.
+A composed runtime with `featureFlags.promotionPipeline` off still answers
+`200` with `promotedFacts: []` (the facts store is absent, checked before it
+can be created); the `501` `Agent attribution is not available in this build.`
+state is reserved for a composition whose ports are entirely unavailable.
