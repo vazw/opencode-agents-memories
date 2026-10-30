@@ -825,6 +825,9 @@ The owner accepted **ADR-0020** and **ADR-0021** on 2026-10-30 (both `Accepted` 
 
 ## W8 MEASURED 2026-10-30 (base `26d5f00492d8c5fec8e6061a28a1966ddbbf2506`)
 
+Landed on `main` at `4dfd4b6` (rebased from the `26d5f00` base onto `c4f4a1c`; three commits
+`80d693d` / `6e03398` / `4dfd4b6`, review approved).
+
 Decision **D4 — NEW-ADR**: the 100 ms p95 budget fails at 10× and 100×; `max_vectors_per_shard`
 12,500 does not help (cold p95 12,655,531 µs vs 8,996,590 µs, 1.407× the 50,000 cap at the inline 100×
 pair); the narrow companion layout does not pay at 100× (−14.1 % cold at 10×, +64.8 % cold at 100×,
