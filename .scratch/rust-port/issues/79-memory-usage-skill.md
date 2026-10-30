@@ -1,8 +1,9 @@
 # 79 — plugin · The `memory-usage` skill is not registered through the V2 skill bridge
 
-Status: ready-for-agent — 2026-10-30 (creates `plugin/skills/memory-usage/SKILL.md`, `PLUGIN_SKILL_ID` +
-`pluginSkillEntry` in `plugin/src/skills.js` (+ its `dist/` twin), the `readPluginSkill` seam, and the
-`"skills"` entry in `plugin/package.json`'s `files`; plugin suite 26 files / 160 tests).
+Status: done — 2026-10-30 — landed at `743163d` (fast-forward from `6b518fe`; the `memory-usage` skill
+registers beside the engine catalogue, additive on a failed catalogue read, fail-open on an unreadable
+file; plugin suite 26 files / 160 tests; 11-mutant battery under
+`docs/evidence/issue79-memory-usage-skill-mutations-20261030/`).
 
 ## What is missing
 
@@ -57,6 +58,18 @@ change to the ten modes the skill text teaches reopens it too: the text is a con
 - The engine catalogue's own entries, `skills.db`, and `readSkillCatalogue`.
 - `docs/bridge-schema.md` (this entry is not on the wire) and `docs/agents/testing.md` (no upstream test).
 
+## Landed
+
+- Commit `743163d` "feat(79): ship the memory-usage skill through the v2 skill bridge" (fast-forward from
+  `6b518fe`): 20 files, +963/−44, review APPROVED.
+- `plugin/skills/memory-usage/SKILL.md` registered as `opencode-mem.memory-usage` after the engine
+  catalogue (absolute path from `import.meta.url`, re-read per refresh, `autoinvoke: false`); a null
+  catalogue is additive and never evicts; an unreadable/empty file logs `skills.plugin_entry_unreadable`
+  and skips; `package.json` ships `skills/`.
+- Tests: plugin suite 26 files / **160** tests (`skills-bridge.test.mjs` 14 → 18: S1–S4; eleven expectations
+  moved; one renamed); an 11-mutant battery with SHA-256 snapshot restores under
+  `docs/evidence/issue79-memory-usage-skill-mutations-20261030/`; plugin-only delta (`rust_paths = 0`).
+
 ## Comments
 
 - **2026-10-30 — filed from the issue 70 wave-3 split.** The r4 plan for that wave bundled this skill with
@@ -64,3 +77,18 @@ change to the ten modes the skill text teaches reopens it too: the text is a con
   call that hit the no-op), R2 (a null-catalogue refresh that evicted every DB skill and was untested) and
   R3 (the file set contradicted itself). Issue 70 landed and closed without the skill; this issue owns it,
   with S4 as the R2 test and the two-argument calls pinned by S3.
+
+**2026-10-30 — issue 79 landing (the `memory-usage` skill).**
+
+Measured at `743163d`:
+
+```
+plugin: 26 files / 160 tests / 160 pass / 0 fail / 0 skipped
+skills-bridge.test.mjs: 18 tests (S1–S4 added; 11 expectations moved; test 7 renamed)
+memory-tools.test.mjs: 34 tests (unchanged)
+mutants: 11/11 exited non-zero (SHA-256 snapshot restores; both twins + package.json + SKILL.md)
+rust delta: 0 paths (no cargo call)
+```
+
+Residual owners: none. The skill is port-owned; no upstream file maps to it, so the parity matrix is
+unchanged.
