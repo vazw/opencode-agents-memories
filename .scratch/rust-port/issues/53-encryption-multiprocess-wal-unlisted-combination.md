@@ -1,6 +1,6 @@
 # 53 — Storage · A supported config lands in a combination turso's manual excludes: encryption × multiprocess WAL
 
-Status: ready-for-agent — 2026-10-28 (owner ruled **O3**: keep built-in encryption + multiprocess WAL and
+Status: ready-for-human — 2026-10-30 (repo half landed; owner applies the drafted wiki paragraph; the vault commit is the owner's) (owner ruled **O3**: keep built-in encryption + multiprocess WAL and
 document the divergence with the measured G1/G2 numbers. Docs-only wave: ADR-0012's Consequences and the
 vault's documented limitation. Brief under `## Agent Brief`.)
 experimental multiprocess WAL — a cell turso's manual excludes for page-codec databases — and a user who
@@ -196,7 +196,7 @@ Whichever is chosen, this issue owns **only** the cell. It does not re-open 43's
   one paragraph in ADR-0012's `## Consequences` (the vault's own ADR) and the vault's documented limitation,
   carrying the G1/G2 numbers, not adjectives. No connect-seam change, no flag change, no re-probe.
 
-- **2026-10-30 — O3 executed as a documentation-only wave.** 53.4 and 53.6 are ticked above. ADR-0012's
+- **2026-10-30 — O3 executed as a documentation-only wave.** Merged fast-forward onto `main` at `7c24329`; the ADR, the in-repo CONTEXT and the draft are landed, and the owner's `wiki/concepts/multiprocess-wal.md` paragraph is the remaining step. 53.4 and 53.6 are ticked above. ADR-0012's
   `## Consequences` carries the limitation paragraph, and the vault's own documentation carries it too:
   `crates/mem-vault/CONTEXT.md`, `## Accepted, documented, not mitigated`, third bullet. Both quote the
   manual (`manual.md:1320-1323`, doc-sourced: not in this repository) against the engine
