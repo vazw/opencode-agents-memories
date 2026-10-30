@@ -29,8 +29,10 @@ This is the memory half of `GET /api/search` on the tag-filtered branch, measure
 4. merge: deduplicate by id, sort by `(similarity desc, created_at desc, id asc)` (the handler's
    `created_at` tie-break plus a deterministic `id`), take 20.
 
-The narrow arm's three statements that differ, verbatim from
-`crates/mem-store/tests/search_cost_bench.rs:1208-1231`:
+The narrow arm's three statements that differ (`crates/mem-store/tests/search_cost_bench.rs:1219-1242`):
+`NARROW_CONTENT_SCAN_SQL` (:1219-1224), `NARROW_TAGS_SCAN_SQL` (:1226-1231) and `NARROW_HYDRATE_SQL`
+(:1233-1242), dedented with the runtime `{placeholders}` list elided as `(?, …)` and line breaks
+reflowed:
 
 ```sql
 -- content scan
