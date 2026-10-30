@@ -13,8 +13,7 @@ W7 landed **2026-10-30** at `43d9954` — retired-shard reaping, 12 commits from
 `reap_cli` 6/0, workspace 2094/0/22; ADR-0023 landed and **Accepted** (owner, 2026-10-30); ADR-0019
 A14 amended.
 W5 landed **2026-10-30** at `e9c2da3` (prompts v2: 14 files, +1054/−143; review approved; `mem-store`
-401/0/12, `mem-profile` 250/0/4, workspace 2103/0/22; ADR-0020 and ADR-0021 both **Proposed** — owner
-acceptance open). **53 O3** landed its repo half at `7c24329` (owner applies the drafted wiki paragraph).
+401/0/12, `mem-profile` 250/0/4, workspace 2103/0/22; ADR-0020 and ADR-0021 both **Accepted** (owner, 2026-10-30)). **53 O3** landed its repo half at `7c24329` (owner applies the drafted wiki paragraph).
 Next: owner picks **70** (wire method set), **28** (live swap), or the **zstd advisories** re-derivation.
 The **ADR-0019 text** landed `Accepted` at `b36920e`, and **issue 72** consumed `delete_memories` at `6d2c1f4`.
 **Blocks issue 39 (retention cleanup) and issue 41 (scheduler).**
@@ -820,3 +819,4 @@ Residuals: a v2 file with missing columns is not repaired (the early return is p
 a fixture if that becomes load-bearing); the handoff's fmt-scope sentence and one stale pristine hash
 are evidence-administration notes; the Step 2–5 ledger stamps are estimates rather than `date -u`
 (the `mem_1792317820721_85ljkv5hf` recurrence; no gate depends on them).
+The owner accepted **ADR-0020** and **ADR-0021** on 2026-10-30 (both `Accepted` in their headers).

@@ -1,6 +1,6 @@
 # 0020 — Cross-file backup ordering: reverse commit order, one lock, one invariant registry
 
-- **Status:** Proposed
+- **Status:** Accepted (owner acceptance, 2026-10-30).
 - **Date:** 2026-10-30
 - **Builds on:** `docs/adr/0013-production-error-handling-panic-free.md` (typed refusals, no panic),
   `docs/adr/0021-schema-version-discipline.md` (per-set maxima; the runner's proof-gated per-file

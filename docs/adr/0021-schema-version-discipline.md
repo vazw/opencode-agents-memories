@@ -1,6 +1,6 @@
 # 0021 — Schema-version discipline: one runner, a mandatory `max_known`, refuse before pending
 
-- **Status:** Proposed
+- **Status:** Accepted (owner acceptance, 2026-10-30).
 - **Date:** 2026-10-28
 - **Builds on:** `docs/adr/0013-production-error-handling-panic-free.md` (typed refusals, no panic),
   `docs/adr/0018-shard-facts-source-of-truth.md` (the first set W2 raises).
