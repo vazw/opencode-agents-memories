@@ -58,3 +58,12 @@ max-known schema versions or the embedder cache root.
   full-store backup covers them).
 - Auto-update service, i18n translations, request-timeout polish (W7.1).
 - The web default `userId` gap — recorded as a follow-up, not a swap blocker.
+
+## Comments
+
+- **2026-10-31 — the shared-engine fix landed at `c37f05c` (issue 82), so the re-swap's Step 10 now
+  includes the two-workspace check.** The runbook §9b/§10 rows were updated; the engine must be rebuilt
+  from the landed `main` (the staged binary predates W6.6), the ONNX cache is provisioned
+  (`/tmp/.opencode-mem-onnx`, canonical v2.0 — re-run after a reboot), and a fresh pre-migration backup
+  is required (the store is v1 and has grown since the 00:52 backup). The re-swap migrates again:
+  metadata 1→2, prompts 1→2, shards 2→3 lazily.
