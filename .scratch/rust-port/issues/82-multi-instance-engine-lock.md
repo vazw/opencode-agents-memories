@@ -1,8 +1,7 @@
 # 82 — plugin · The host loads the plugin once per agent; only one engine can win the store lock, so every other agent's memory tool degrades
 
-Status: needs-triage — the fix needs one design decision (process-global bridge vs a shared engine
-service) before a blueprint; measured 2026-10-31 on the live swap, tool lane only (the store and the
-web surface are healthy).
+Status: landed — 2026-10-31 — fix at `c37f05c` (ff-only from `issue-82-shared-engine-bridge`; base
+`a01cfe7`; 20 files, +1634/−276). Residual: the Step 10 live re-swap, owned by issue 81.
 
 ## What is happening
 
@@ -52,7 +51,9 @@ agents see the same memory lane:
 - [ ] Two module instances of the plugin in one process (a cache-busted second `import`, the live-host
       shape) spawn **one** child and both answer `list-shards` with the same 22-shard view.
 - [ ] The live host after a full quit/start: all agents' `memory` modes answer; `search`/`add` answer
-      once the ONNX cache is provisioned; no `engine_unavailable` in the host log.
+      once the ONNX cache is provisioned; the two workspaces' `memory list-shards` both answer and the
+      wrapper emits no structured `"event":"degraded"` stderr (the host log records no tool results —
+      a whole-log grep is not a valid signal).
 - [ ] The single-engine lock still refuses a **second process** (unchanged issue-45 behaviour).
 - [ ] The `status` file is written only by a genuine loser (another process), never by a sibling
       instance of the same process.
@@ -66,3 +67,35 @@ agents see the same memory lane:
 - The web port (`3742` vs the config's `webServerPort` 4747) — a separate finding already recorded in
   the runbook/README.
 - Store migration, rollback, or the backup (issue 81).
+
+## Comments
+
+- **2026-10-31 — the acceptance criterion is corrected (Plan Gate r1).** "No `engine_unavailable` in the
+  host log" is unmeasurable: the host log records no tool results (whole-log `grep -c '"success":false'`
+  = 0; run `d7efb345` has 0 `list-shards` lines; the 20 `engine_unavailable` hits are agent-authored
+  bash text). The measurable signal is the two workspaces' `memory list-shards` results plus the
+  wrapper's structured `"event":"degraded"` stderr. Full gate report:
+  `.tmp/progress/blueprint-20261030-1905-issue82-shared-engine-bridge.gate-1.md`.
+
+## Landed
+
+2026-10-31 — the shared-engine bridge landed at **`c37f05c`** (`fix(plugin): share one engine bridge per
+host process (#82)`; ff-only from `issue-82-shared-engine-bridge`; base `a01cfe7`; 20 files,
++1634/−276). Reviewer APPROVED on independent re-execution
+(`.tmp/progress/blueprint-20261030-1905-issue82-shared-engine-bridge-r3.review-1.md`):
+
+| gate | result |
+|---|---|
+| plugin suite | **27 files / 166 tests / 166 pass / 0 fail** (re-derived; 36.9 s) |
+| `cmp src dist` | 0 (byte-identical, 43,125 B) |
+| Gate A (real engine, one process, two imports) | `enginePids` length 1, both generations `success:true`, both `storagePath === $R` |
+| Gate B (second process while A holds) | both answers `engine_unavailable`, `enginePids []`, `$R/status` names A's engine pid (ppid = A's probe) |
+| `engine_lock` (cross-process) | **7/7 passed**, unchanged |
+| mutants | **3/3 killed** — registry key, exit-75 suppression, restart cap |
+| pre-fix RED | re-derived independently: `helloCount 2 !== 1` (cases 1/2), `degraded 2 !== 1` (case 4), case 3 green (2 spawns, distinct argv) |
+
+The per-root state is data-only (no closures); the per-agent split (`capturedSessionId`,
+`captureIdByPrompt`, `NOTIFIED`, `compactionPartCounter`) is intact; the only cross-generation function
+is the documented first-spawn `shutdownHandler` → `shutdownAll`. `docs/bridge-schema.md` §7/§8 and the
+runbook §9b/§10 rows were updated. Step 10 (the live re-swap: one engine for the 26 loads, the
+parent-pid check, two workspaces' `list-shards`) is the owner gate and remains with issue 81.
