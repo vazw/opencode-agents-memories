@@ -10,7 +10,7 @@ pub use normalize::{
     OPENCODE_TIMEOUT_MS_MIN, OPENCODE_TIMEOUT_OUTER_MARGIN_MS, QWEN3_EMBEDDING_QUERY_PREFIX,
     embedding_dimensions_for_model, embedding_model_preset, expand_path,
     normalize_auto_capture_max_context_bytes, normalize_auto_cleanup_retention_days,
-    normalize_embedding_dimensions, normalize_embedding_dtype,
+    normalize_embedding_dimensions, normalize_embedding_dtype, normalize_embedding_max_tokens,
     normalize_episodic_consolidation_age_days, normalize_injection_markers,
     normalize_memory_temperature, normalize_opencode_timeout_ms, normalize_opencode_variant,
     normalize_ttl_fallback_days, normalize_user_profile_auto_cleanup_interval,
@@ -272,6 +272,10 @@ impl Config {
                 .and_then(|preset| preset.document_prefix.clone())
         });
         let embedding_dtype = normalize_embedding_dtype(file.embedding_dtype.as_ref())?;
+        let embedding_max_tokens = file
+            .embedding_max_tokens
+            .map(normalize_embedding_max_tokens)
+            .transpose()?;
         let auto_capture_max_context_bytes = normalize_auto_capture_max_context_bytes(
             file.auto_capture_max_context_bytes
                 .unwrap_or(DEFAULTS.auto_capture_max_context_bytes),
@@ -424,6 +428,7 @@ impl Config {
             embedding_query_prefix,
             embedding_document_prefix,
             embedding_dtype,
+            embedding_max_tokens,
             embedding_api_url: file.embedding_api_url,
             embedding_api_key,
             similarity_threshold: file

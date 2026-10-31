@@ -442,15 +442,24 @@ pub fn embedder_from_config(config: &Config) -> Arc<dyn mem_embed::embedder::Emb
             mem_embed::remote::retry::system_sleep(),
         )),
         _ => Arc::new(mem_embed::local::LocalOnnxEmbedder::new(
-            mem_embed::local::LocalLoadOptions {
-                model: config.embedding_model.clone(),
-                cache_root: local_cache_root(config),
-                dtype: config.embedding_dtype,
-                pooling: config.embedding_pooling,
-                intra_threads: None,
-                hub: None,
-            },
+            local_load_options_from_config(config),
         )),
+    }
+}
+
+/// The local loader options the engine composes from a resolved config.
+///
+/// Extracted from [`embedder_from_config`] so the config-to-loader hop (which
+/// carries the token-cap override) is observable on its own.
+pub fn local_load_options_from_config(config: &Config) -> mem_embed::local::LocalLoadOptions {
+    mem_embed::local::LocalLoadOptions {
+        model: config.embedding_model.clone(),
+        cache_root: local_cache_root(config),
+        dtype: config.embedding_dtype,
+        pooling: config.embedding_pooling,
+        intra_threads: None,
+        hub: None,
+        max_tokens: config.embedding_max_tokens,
     }
 }
 

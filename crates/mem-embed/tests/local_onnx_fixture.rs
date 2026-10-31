@@ -54,6 +54,7 @@ fn embedder_for(
         pooling: EmbeddingPooling::Mean,
         intra_threads: Some(1),
         hub,
+        max_tokens: None,
     })
 }
 

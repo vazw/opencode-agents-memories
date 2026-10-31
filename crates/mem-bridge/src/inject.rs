@@ -389,6 +389,8 @@ impl InjectService {
             Some(text) => self.embedder.embed(text).await.ok(),
             None => None,
         };
+        // Announce the first truncated input this process sees.
+        let _ = crate::truncation_report::REPORTER.report_first(self.embedder.as_ref(), "inject");
 
         // 3. Related older sessions (semantic when a query embedded),
         // blockers before similarity, recent ids excluded.

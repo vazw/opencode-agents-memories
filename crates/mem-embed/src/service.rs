@@ -37,6 +37,8 @@ pub struct EmbeddingServiceOptions {
     pub query_prefix: Option<String>,
     pub document_prefix: Option<String>,
     pub dtype: Option<LocalOnnxDtype>,
+    /// The configured token-cap override (`None` = the model's own limit).
+    pub max_tokens: Option<u32>,
     pub api_url: Option<String>,
     pub api_key: Option<String>,
     pub cache_root: PathBuf,
@@ -59,6 +61,7 @@ impl EmbeddingServiceOptions {
             query_prefix: cfg.embedding_query_prefix.clone(),
             document_prefix: cfg.embedding_document_prefix.clone(),
             dtype: cfg.embedding_dtype,
+            max_tokens: cfg.embedding_max_tokens,
             api_url: cfg.embedding_api_url.clone(),
             api_key: cfg.embedding_api_key.clone(),
             cache_root: cfg.storage_path.join(".cache"),
@@ -66,6 +69,20 @@ impl EmbeddingServiceOptions {
             embed_timeout: EMBED_TIMEOUT,
             intra_threads: None,
             hub: Some(Arc::new(ReqwestHubTransport::new())),
+        }
+    }
+
+    /// The local-loader options for this service: the one construction the
+    /// service and the composition root share (so the cap hop is testable).
+    pub fn local_load_options(&self) -> LocalLoadOptions {
+        LocalLoadOptions {
+            model: self.embedding_model.clone(),
+            cache_root: self.cache_root.clone(),
+            dtype: self.dtype,
+            pooling: self.pooling,
+            intra_threads: self.intra_threads,
+            hub: self.hub.clone(),
+            max_tokens: self.max_tokens,
         }
     }
 }
@@ -185,14 +202,7 @@ impl EmbeddingService {
                 crate::remote::retry::system_sleep(),
             ))
         } else {
-            Arc::new(LocalOnnxEmbedder::new(LocalLoadOptions {
-                model: options.embedding_model.clone(),
-                cache_root: options.cache_root.clone(),
-                dtype: options.dtype,
-                pooling: options.pooling,
-                intra_threads: options.intra_threads,
-                hub: options.hub.clone(),
-            }))
+            Arc::new(LocalOnnxEmbedder::new(options.local_load_options()))
         };
         Self::new(options, embedder)
     }

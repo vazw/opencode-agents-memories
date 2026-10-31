@@ -13,10 +13,10 @@ pub mod remote;
 pub mod runtime;
 pub mod service;
 
-pub use embedder::{BoxFuture, EmbedTask, Embedder};
+pub use embedder::{BoxFuture, EmbedTask, Embedder, TruncationSnapshot};
 pub use error::EmbedError;
 pub use hub::{HubTransport, ReqwestHubTransport, ensure_model_files, huggingface_file_url};
-pub use local::{LocalLoadOptions, LocalOnnxEmbedder, resolve_local_onnx_dtype};
+pub use local::{LocalLoadOptions, LocalOnnxEmbedder, TruncationStats, resolve_local_onnx_dtype};
 pub use prefix::{
     NOMIC_DOCUMENT_PREFIX, NOMIC_QUERY_PREFIX, PrefixOptions, apply_task_prefix,
     resolve_task_prefix,

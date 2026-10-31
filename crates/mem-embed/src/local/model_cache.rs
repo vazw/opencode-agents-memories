@@ -18,6 +18,8 @@ use std::path::{Path, PathBuf};
 
 pub use mem_core::config::LocalOnnxDtype;
 
+use crate::error::EmbedError;
+
 /// ONNX weight variants in descending precision, mirroring transformers.js'
 /// `DEFAULT_DTYPE_SUFFIX_MAPPING` (`(dtype, file-name suffix)`; fp32 has no
 /// suffix). The order is part of the contract: the probe returns the first hit.
@@ -123,6 +125,109 @@ pub fn resolve_local_onnx_dtype(model: &str, cache_root: &Path) -> Option<LocalO
         DeclaredDtype::Declared(dtype) => Some(dtype),
         DeclaredDtype::PerFileObject => None,
         DeclaredDtype::Absent => detect_cached_dtype(model, cache_root),
+    }
+}
+
+/// Read the token position limit the cached `config.json` declares.
+///
+/// Collects every present, positive-integer value among the root
+/// `max_position_embeddings` / `n_positions` keys and the same keys under
+/// `text_config`, and returns the **minimum** of those present (`None` when the
+/// file is missing/unparseable or declares none). A present but malformed value
+/// (string, float, zero, negative) is treated as absent and reported through
+/// `mem_core::logging::log` as it is read: each call reads the file once and
+/// reports each malformed declaration it encounters on that read, so no
+/// once-mechanism is implied or needed.
+///
+/// Callers must validate the model id first (`local::validate_model_id`) —
+/// that is the path-traversal wall for this read.
+pub fn read_declared_position_limit(model: &str, cache_root: &Path) -> Option<usize> {
+    let Ok(text) = std::fs::read_to_string(model_cache_root(model, cache_root).join("config.json"))
+    else {
+        return None;
+    };
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return None;
+    };
+    let mut limits = Vec::new();
+    for container in [Some(&parsed), parsed.get("text_config")]
+        .into_iter()
+        .flatten()
+    {
+        for key in ["max_position_embeddings", "n_positions"] {
+            if let Some(limit) = declared_position_value(model, key, container) {
+                limits.push(limit);
+            }
+        }
+    }
+    limits.into_iter().min()
+}
+
+/// One declaration: a positive integer, or `None` (absent or malformed —
+/// malformed is reported through the logging facade, never an error).
+fn declared_position_value(model: &str, key: &str, container: &serde_json::Value) -> Option<usize> {
+    let value = container.get(key)?;
+    match value.as_u64() {
+        Some(limit) if limit > 0 => usize::try_from(limit).ok(),
+        _ => {
+            mem_core::logging::log(
+                "embedding.position_limit_ignored",
+                Some(&serde_json::json!({
+                    "model": model,
+                    "key": key,
+                    "value": value,
+                })),
+            );
+            None
+        }
+    }
+}
+
+/// Resolve the token cap this build feeds the model, from the declared limit,
+/// the tokenizer's special-token count and the optional configured override.
+///
+/// `Ok(None)` means unbounded. The override is never clamped: it is refused
+/// loudly when it exceeds a declared limit. Without an override, a declaration
+/// that cannot hold its own template (`declared <= specials + 1`) is refused at
+/// load rather than producing a `[SEP]`-only vector; otherwise the cap is
+/// `declared - specials`.
+///
+/// The signature carries no model id (this is a pure policy function); the
+/// refusal names `config.json`, the source of the declaration, and both
+/// numbers.
+pub fn effective_max_tokens(
+    declared: Option<usize>,
+    special_tokens: usize,
+    configured: Option<u32>,
+) -> Result<Option<usize>, EmbedError> {
+    match (declared, configured) {
+        (Some(model_limit), Some(configured)) => {
+            let configured_usize = configured as usize;
+            if configured_usize > model_limit {
+                return Err(EmbedError::MaxTokensExceedsModelLimit {
+                    configured,
+                    model_limit,
+                });
+            }
+            Ok(Some(configured_usize))
+        }
+        (None, Some(configured)) => Ok(Some(configured as usize)),
+        (Some(model_limit), None) => {
+            if model_limit <= special_tokens + 1 {
+                return Err(EmbedError::ModelLoad {
+                    model: "config.json".to_string(),
+                    message: format!(
+                        "the cached config.json declares {model_limit} token positions, which \
+                         cannot hold the tokenizer's {special_tokens} special tokens plus at \
+                         least one content token (needs at least {}); provision a model with a \
+                         larger position limit",
+                        special_tokens + 1
+                    ),
+                });
+            }
+            Ok(Some(model_limit - special_tokens))
+        }
+        (None, None) => Ok(None),
     }
 }
 

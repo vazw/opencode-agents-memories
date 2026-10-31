@@ -91,6 +91,7 @@ fn options() -> EmbeddingServiceOptions {
         query_prefix: None,
         document_prefix: None,
         dtype: None,
+        max_tokens: None,
         api_url: None,
         api_key: None,
         cache_root: std::env::temp_dir(),

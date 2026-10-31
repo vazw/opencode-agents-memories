@@ -540,3 +540,49 @@ fn test_allow_unguarded_open_resolves_from_the_camel_case_key() {
     let explicit_off = run_ok(Some(r#"{"allowUnguardedOpen": false}"#), None, &Env::new());
     assert!(!explicit_off.allow_unguarded_open);
 }
+
+// ---------------------------------------------------------------------------
+// Step 6 — embeddingMaxTokens (the cap override)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_embedding_max_tokens_defaults_to_none() {
+    let config = run_ok(None, None, &Env::new());
+    assert_eq!(
+        config.embedding_max_tokens, None,
+        "unset means the model's own declared limit"
+    );
+}
+
+#[test]
+fn test_embedding_max_tokens_parses_an_integral_override() {
+    let config = run_ok(Some(r#"{"embeddingMaxTokens": 1024}"#), None, &Env::new());
+    assert_eq!(config.embedding_max_tokens, Some(1024));
+}
+
+#[test]
+fn test_embedding_max_tokens_rejects_zero() {
+    let error = run(Some(r#"{"embeddingMaxTokens": 0}"#), None, &Env::new())
+        .expect_err("zero is not a token cap");
+    let ConfigError::InvalidValue { key, .. } = &error else {
+        panic!("expected InvalidValue, got: {error:?}")
+    };
+    assert_eq!(*key, "embeddingMaxTokens");
+    assert!(error.to_string().contains("embeddingMaxTokens"));
+}
+
+#[test]
+fn test_embedding_max_tokens_rejects_negative_fractional_and_absurd() {
+    for raw in ["-1", "1.5", "2000000"] {
+        let error = run(
+            Some(&format!(r#"{{"embeddingMaxTokens": {raw}}}"#)),
+            None,
+            &Env::new(),
+        )
+        .expect_err("out-of-range values are rejected, never coerced");
+        let ConfigError::InvalidValue { key, .. } = &error else {
+            panic!("{raw}: expected InvalidValue, got: {error:?}")
+        };
+        assert_eq!(*key, "embeddingMaxTokens", "{raw}");
+    }
+}

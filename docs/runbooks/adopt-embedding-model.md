@@ -118,17 +118,24 @@ every `cp -a`.
 
 ## The config edit
 
-Two keys, in place, nothing else:
+Two keys, in place, nothing else (plus the optional `embeddingMaxTokens`):
 
 ```jsonc
 "embeddingModel": "Xenova/multilingual-e5-base",
 "embeddingDtype": "q8",
+"embeddingMaxTokens": 512,   // optional: defaults to the model's own limit
 ```
 
 - The model value is replaced on its existing line; if no active
   `embeddingDtype` exists, one line is inserted directly below. Comments,
   commas and every other line are byte-preserved, and the diff is verified to
   be exactly one replaced line plus one inserted (or two replaced) line.
+- `embeddingMaxTokens` is **optional and normally omitted**. Unset, the cap is
+  the model's own declared position limit minus the tokenizer's special tokens
+  (e5: 512, nomic: 8,190). Set, it must not exceed the declared limit: the
+  engine refuses the load with `MaxTokensExceedsModelLimit` (the message names
+  the remedy) instead of clamping. It enters the storage embedding identity, so
+  lowering it on a live store changes every new vector and needs a re-embed.
 - `embeddingPooling` / `embeddingDimensions` are **refused** if active: an
   explicit key beats the `multilingual-e5` preset, so the adoption would
   silently run with the wrong pooling or width.
@@ -139,6 +146,11 @@ Two keys, in place, nothing else:
 
 ## Failure semantics (do not soften these)
 
+- **Corpus consequence of a 512-position model.** Inputs are capped at the
+  model's declared position limit (head and tail kept, middle dropped), so the
+  **at least 213** rows over ~1,800 chars lose their middles on e5 — the
+  accepted cost of that model, not a defect. nomic's 8,190 cap truncates
+  nothing today (MEASURED: 3,146 rows, longest 6,603 chars ≈ 1,785 tokens).
 - Re-embed is **per-scope atomic**. A mid-run failure leaves the scopes already
   done on e5 and every remaining scope on nomic; the store then answers reads
   for those scopes with a typed `ShardModelMismatch` — a designed refusal, not

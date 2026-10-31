@@ -30,6 +30,20 @@ impl std::fmt::Display for EmbedTask {
     }
 }
 
+/// What an embedder observed about input truncation.
+///
+/// `cap_tokens` is the resolved cap the provider applied (`None` = unbounded),
+/// `truncated_inputs` counts inputs that lost at least one token, and
+/// `dropped_tokens` is the total removed. The remote lane reports nothing
+/// (`None` from [`Embedder::truncation_stats`]): server-side truncation is
+/// invisible to us.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TruncationSnapshot {
+    pub cap_tokens: Option<u64>,
+    pub truncated_inputs: u64,
+    pub dropped_tokens: u64,
+}
+
 /// Embedding provider seam consumed by W1.3 / mem-ai / W2.1.
 ///
 /// Divergence from upstream (recorded): the trait receives the FINAL text.
@@ -43,4 +57,10 @@ pub trait Embedder: Send + Sync {
 
     /// Embed final (already-prefixed) text into a vector.
     fn embed(&self, text: &str) -> BoxFuture<'_, Result<Vec<f32>, EmbedError>>;
+
+    /// Truncation counters for this provider, or `None` when unknown (the
+    /// default: the remote lane cannot see server-side truncation).
+    fn truncation_stats(&self) -> Option<TruncationSnapshot> {
+        None
+    }
 }

@@ -18,11 +18,12 @@ pub use tokenize::{TokenizedInput, encode_text, load_tokenizer};
 
 use std::path::{Component, Path};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokenizers::pipeline::PipelineTokenizer;
 use tokio::sync::OnceCell;
 
-use crate::embedder::{BoxFuture, Embedder};
+use crate::embedder::{BoxFuture, Embedder, TruncationSnapshot};
 use crate::error::EmbedError;
 use crate::hub::{HubTransport, ensure_model_files};
 
@@ -42,6 +43,48 @@ pub struct LocalLoadOptions {
     pub pooling: EmbeddingPooling,
     pub intra_threads: Option<usize>,
     pub hub: Option<Arc<dyn HubTransport>>,
+    /// The configured token-cap override (`None` = use the model's own
+    /// declared position limit).
+    pub max_tokens: Option<u32>,
+}
+
+/// The shared truncation counters behind [`Embedder::truncation_stats`].
+///
+/// `cap_tokens` is stored as `0` for "unbounded" (a resolved cap is always at
+/// least 2), so the snapshot is three relaxed atomic loads. Atomics because
+/// `embed` runs on `spawn_blocking` threads while the bridge reads the
+/// counters from the runtime.
+#[derive(Debug, Clone, Default)]
+pub struct TruncationStats {
+    cap_tokens: Arc<AtomicU64>,
+    truncated_inputs: Arc<AtomicU64>,
+    dropped_tokens: Arc<AtomicU64>,
+}
+
+impl TruncationStats {
+    fn new(cap_tokens: Option<usize>) -> Self {
+        let stats = Self::default();
+        stats
+            .cap_tokens
+            .store(cap_tokens.map_or(0, |cap| cap as u64), Ordering::Relaxed);
+        stats
+    }
+
+    fn record(&self, dropped: usize) {
+        self.truncated_inputs.fetch_add(1, Ordering::Relaxed);
+        self.dropped_tokens
+            .fetch_add(dropped as u64, Ordering::Relaxed);
+    }
+
+    /// The counters as the bridge/CLI read them.
+    pub fn snapshot(&self) -> TruncationSnapshot {
+        let cap = self.cap_tokens.load(Ordering::Relaxed);
+        TruncationSnapshot {
+            cap_tokens: (cap != 0).then_some(cap),
+            truncated_inputs: self.truncated_inputs.load(Ordering::Relaxed),
+            dropped_tokens: self.dropped_tokens.load(Ordering::Relaxed),
+        }
+    }
 }
 
 /// A loaded model: session + tokenizer + the pooling strategy to apply.
@@ -49,6 +92,11 @@ struct LocalLoaded {
     session: LoadedSession,
     tokenizer: PipelineTokenizer,
     pooling: EmbeddingPooling,
+    /// The resolved token cap (`usize::MAX` = unbounded).
+    max_tokens: usize,
+    stats: TruncationStats,
+    /// The model id, for the per-input truncation event.
+    model: String,
 }
 
 impl LocalLoaded {
@@ -58,7 +106,23 @@ impl LocalLoaded {
             ids,
             attention_mask,
             type_ids,
-        } = encode_text(&self.tokenizer, text)?;
+            dropped_tokens,
+        } = encode_text(&self.tokenizer, text, self.max_tokens)?;
+        if dropped_tokens > 0 {
+            self.stats.record(dropped_tokens);
+            // Counts only — never the text, never a path. The file sink is the
+            // per-input channel; a bare `tracing::warn!` here would reach no
+            // sink at all.
+            mem_core::logging::log(
+                "embedding.input_truncated",
+                Some(&serde_json::json!({
+                    "model": self.model.as_str(),
+                    "cap_tokens": self.max_tokens,
+                    "dropped_tokens": dropped_tokens,
+                    "text_chars": text.chars().count(),
+                })),
+            );
+        }
         let (shape, data) =
             self.session
                 .run(&ids, attention_mask.as_deref(), type_ids.as_deref())?;
@@ -145,11 +209,40 @@ impl LocalOnnxEmbedder {
         let session = LoadedSession::load(model, &bytes, self.options.intra_threads)?;
         let tokenizer = load_tokenizer(&model_dir.join(TOKENIZER_FILE))?;
 
+        // The one-time special-token probe stays inline: `load()` is already a
+        // blocking path (the `std::fs::read` of the weights and
+        // `Session::load` above), so an empty-string encode adds no new class
+        // of blocking. `spawn_blocking` here would need an `Arc` round-trip of
+        // the tokenizer for one encode and would not fix the far larger
+        // blocking read already on this path.
+        let special_tokens = encode_text(&tokenizer, "", usize::MAX)?.ids.len();
+        let declared = model_cache::read_declared_position_limit(model, &self.options.cache_root);
+        let resolved =
+            model_cache::effective_max_tokens(declared, special_tokens, self.options.max_tokens)?;
+        let source = match (resolved, self.options.max_tokens) {
+            (None, _) => "none",
+            (Some(_), Some(_)) => "configured",
+            (Some(_), None) => "model",
+        };
+        mem_core::logging::log(
+            "embedding.input_cap_resolved",
+            Some(&serde_json::json!({
+                "model": model.as_str(),
+                "cap_tokens": resolved,
+                "special_tokens": special_tokens,
+                "source": source,
+            })),
+        );
+        let stats = TruncationStats::new(resolved);
+
         tracing::debug!(model = %model, weights = weights_file, "loaded local ONNX embedding model");
         Ok(Arc::new(LocalLoaded {
             session,
             tokenizer,
             pooling: self.options.pooling,
+            max_tokens: resolved.unwrap_or(usize::MAX),
+            stats,
+            model: model.clone(),
         }))
     }
 }
@@ -173,6 +266,13 @@ impl Embedder for LocalOnnxEmbedder {
                     message: error.to_string(),
                 })?
         })
+    }
+
+    fn truncation_stats(&self) -> Option<TruncationSnapshot> {
+        self.loaded
+            .get()
+            .and_then(|result| result.as_ref().ok())
+            .map(|loaded| loaded.stats.snapshot())
     }
 }
 

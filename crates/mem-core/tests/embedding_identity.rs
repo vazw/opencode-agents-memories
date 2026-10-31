@@ -29,9 +29,10 @@ fn test_fingerprint_is_deterministic_and_field_sensitive() {
         base_fingerprint,
         "the same identity must serialize byte-identically"
     );
-    assert!(
-        base_fingerprint.starts_with("{\"v\":1,\"model\":"),
-        "declaration order is part of the format: {base_fingerprint}"
+    assert_eq!(
+        base_fingerprint,
+        r#"{"v":1,"model":"Xenova/nomic-embed-text-v1","dims":768,"pooling":"mean","dtype":null,"task_prefixes":false,"query_prefix":null,"document_prefix":null}"#,
+        "the default identity is byte-identical to the pre-change literal"
     );
 
     let variants: Vec<(&str, EmbeddingIdentity)> = vec![
@@ -77,6 +78,11 @@ fn test_fingerprint_is_deterministic_and_field_sensitive() {
             identity.document_prefix = Some("passage: ".to_string());
             identity
         }),
+        ("max_tokens", {
+            let mut identity = base.clone();
+            identity.max_tokens = Some(1024);
+            identity
+        }),
     ];
 
     for (field, variant) in variants {
@@ -86,6 +92,29 @@ fn test_fingerprint_is_deterministic_and_field_sensitive() {
             "changing `{field}` must change the fingerprint"
         );
     }
+}
+
+#[test]
+fn test_identity_moves_when_a_cap_is_configured() {
+    let mut config = default_config("embedding-identity-cap");
+    let base = EmbeddingIdentity::from_config(&config)
+        .fingerprint()
+        .expect("base identity serializes");
+
+    config.embedding_max_tokens = Some(1024);
+    let capped = EmbeddingIdentity::from_config(&config);
+    let fingerprint = capped.fingerprint().expect("capped identity serializes");
+
+    assert_eq!(
+        capped.max_tokens,
+        Some(1024),
+        "the configured cap maps from `Config`"
+    );
+    assert_ne!(fingerprint, base, "a configured cap must move the identity");
+    assert!(
+        fingerprint.contains(r#""max_tokens":1024"#),
+        "the cap is serialized under its own key: {fingerprint}"
+    );
 }
 
 /// The fingerprint lands in a plaintext shard that backups copy: neither the

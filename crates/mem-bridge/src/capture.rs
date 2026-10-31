@@ -208,6 +208,9 @@ pub async fn write_capture_summary(
                                 })?,
                         )
                     };
+                    // Announce the first truncated input this process sees.
+                    let _ = crate::truncation_report::REPORTER
+                        .report_first(deps.embedder.as_ref(), "capture");
 
                     // Existence check ACROSS every shard of the scope: the
                     // deterministic id may live in a retired shard, so a

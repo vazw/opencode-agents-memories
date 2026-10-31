@@ -77,6 +77,7 @@ fn identity(model: &str, dimensions: u32) -> EmbeddingIdentity {
         use_task_prefixes: false,
         query_prefix: None,
         document_prefix: None,
+        max_tokens: None,
     }
 }
 

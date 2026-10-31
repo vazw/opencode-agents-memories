@@ -138,6 +138,10 @@ impl MemoriesService {
                     .map_err(|error| internal_from("tools.add.tags_embed_failed", error))?,
             )
         };
+        // Announce the first truncated input this process sees (the per-input
+        // rate stays in the engine's file sink).
+        let _ =
+            crate::truncation_report::REPORTER.report_first(self.embedder.as_ref(), "tools.add");
 
         let scope = resolve_scope(self.resolver.as_ref(), project_id)?;
         let now = now_millis();

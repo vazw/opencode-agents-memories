@@ -89,6 +89,14 @@ pub enum EmbedError {
     /// report this without re-running `Embedder::warmup`.
     #[error("Embedding warmup failed: {message}")]
     WarmupFailed { message: String },
+
+    /// `embeddingMaxTokens` is larger than the model's own declared position
+    /// limit. Refused at load, never clamped: clamping would re-hide the crash
+    /// the operator asked to avoid.
+    #[error(
+        "embeddingMaxTokens {configured} exceeds the model's {model_limit} token positions. Lower embeddingMaxTokens to at most {model_limit}, or unset it to use the model's own limit."
+    )]
+    MaxTokensExceedsModelLimit { configured: u32, model_limit: usize },
 }
 
 impl EmbedError {

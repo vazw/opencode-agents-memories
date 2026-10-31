@@ -28,6 +28,8 @@ pub struct EmbeddingIdentity {
     pub query_prefix: Option<String>,
     /// The document prefix, when configured.
     pub document_prefix: Option<String>,
+    /// The configured token-cap override (`None` = the model's own limit).
+    pub max_tokens: Option<u32>,
 }
 
 impl EmbeddingIdentity {
@@ -41,6 +43,7 @@ impl EmbeddingIdentity {
             use_task_prefixes: cfg.embedding_use_task_prefixes,
             query_prefix: cfg.embedding_query_prefix.clone(),
             document_prefix: cfg.embedding_document_prefix.clone(),
+            max_tokens: cfg.embedding_max_tokens,
         }
     }
 
@@ -67,13 +70,19 @@ impl EmbeddingIdentity {
             task_prefixes: self.use_task_prefixes,
             query_prefix: self.query_prefix.as_deref(),
             document_prefix: self.document_prefix.as_deref(),
+            max_tokens: self.max_tokens,
         })
     }
 }
 
 /// The versioned canonical shape. Field order is declaration order (no
-/// `json!` map, no `skip_serializing_if`), so the bytes are stable across
-/// values; `None` renders as `null` rather than disappearing.
+/// `json!` map), so the bytes are stable across values; every `None` renders
+/// as `null` — except `max_tokens`, the one field omitted when unset.
+///
+/// `max_tokens` is omitted rather than rendered as `null` because a `null` (or
+/// a v2 bump) would change every existing store's bytes and force a store-wide
+/// re-embed, while an *unset* cap changes no behaviour at all. v1 is kept for
+/// that reason.
 #[derive(Serialize)]
 struct FingerprintV1<'a> {
     v: u8,
@@ -84,4 +93,6 @@ struct FingerprintV1<'a> {
     task_prefixes: bool,
     query_prefix: Option<&'a str>,
     document_prefix: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
 }

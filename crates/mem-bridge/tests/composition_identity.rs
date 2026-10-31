@@ -91,3 +91,23 @@ async fn test_composition_wires_the_embedding_identity() {
     common::cleanup_temp_dir(&root);
     common::cleanup_temp_dir(&home);
 }
+
+/// Step 9 — the Config → `LocalLoadOptions` hop carries the token-cap
+/// override (mutant: the extracted builder drops the field).
+#[test]
+fn test_composition_carries_the_configured_cap() {
+    let root = common::temp_dir("composition-cap-root");
+    let home = common::temp_dir("composition-cap-home");
+    let mut config = load_config(&root, &home);
+    config.embedding_max_tokens = Some(1024);
+
+    let options = mem_bridge::composition::local_load_options_from_config(&config);
+
+    assert_eq!(
+        options.max_tokens,
+        Some(1024),
+        "the composition must pass `embeddingMaxTokens` to the local loader"
+    );
+    common::cleanup_temp_dir(&root);
+    common::cleanup_temp_dir(&home);
+}

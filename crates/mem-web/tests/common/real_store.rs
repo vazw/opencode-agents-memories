@@ -75,6 +75,7 @@ fn identity() -> mem_core::embedding::EmbeddingIdentity {
         use_task_prefixes: false,
         query_prefix: None,
         document_prefix: None,
+        max_tokens: None,
     }
 }
 

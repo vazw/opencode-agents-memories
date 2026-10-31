@@ -42,6 +42,7 @@ fn identity_for_store(config: &mem_store::config::StoreConfig) -> EmbeddingIdent
         use_task_prefixes: false,
         query_prefix: None,
         document_prefix: None,
+        max_tokens: None,
     }
 }
 

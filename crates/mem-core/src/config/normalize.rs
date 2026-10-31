@@ -149,6 +149,19 @@ pub fn normalize_embedding_dimensions(value: f64) -> Result<u32, ConfigError> {
     }
 }
 
+/// `embeddingMaxTokens`: the operator's override for the token cap, integral
+/// and within `1..=1_048_576`; rejected (never coerced) otherwise.
+pub fn normalize_embedding_max_tokens(value: f64) -> Result<u32, ConfigError> {
+    if value.is_finite() && value.fract() == 0.0 && (1.0..=1_048_576.0).contains(&value) {
+        Ok(value as u32)
+    } else {
+        Err(ConfigError::InvalidValue {
+            key: "embeddingMaxTokens",
+            value: render_number(value),
+        })
+    }
+}
+
 /// Prompt count between automatic user-profile AI cleanup runs: finite
 /// integral `>= 1`.
 pub fn normalize_user_profile_auto_cleanup_interval(value: f64) -> Result<u32, ConfigError> {

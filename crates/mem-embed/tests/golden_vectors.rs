@@ -112,6 +112,7 @@ async fn test_nomic_embeddings_match_recorded_ts_goldens() {
         intra_threads: None,
         // Network wall: a cache miss must fail loudly, never download.
         hub: None,
+        max_tokens: None,
     });
 
     let mut min_cosine = f64::INFINITY;

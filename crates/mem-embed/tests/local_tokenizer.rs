@@ -14,7 +14,7 @@ use mem_embed::local::tokenize::{encode_text, load_tokenizer};
 #[test]
 fn test_tokenizer_loads_committed_fixture_and_encodes() {
     let tokenizer = load_tokenizer(&common::fixture_path("tiny_tokenizer.json")).expect("load");
-    let encoded = encode_text(&tokenizer, "hello world").expect("encode");
+    let encoded = encode_text(&tokenizer, "hello world", usize::MAX).expect("encode");
     assert_eq!(encoded.ids, vec![1, 3, 4, 2]);
     // The fixture declares no padding, so no attention mask / type ids exist.
     assert_eq!(encoded.attention_mask, None);
@@ -24,6 +24,6 @@ fn test_tokenizer_loads_committed_fixture_and_encodes() {
 #[test]
 fn test_tokenizer_maps_unknown_words_to_unk() {
     let tokenizer = load_tokenizer(&common::fixture_path("tiny_tokenizer.json")).expect("load");
-    let encoded = encode_text(&tokenizer, "hello nope").expect("encode");
+    let encoded = encode_text(&tokenizer, "hello nope", usize::MAX).expect("encode");
     assert_eq!(encoded.ids, vec![1, 3, 0, 2]);
 }

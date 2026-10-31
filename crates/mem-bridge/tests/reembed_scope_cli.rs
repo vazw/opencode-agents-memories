@@ -203,6 +203,7 @@ fn identity(document_prefix: Option<&str>) -> EmbeddingIdentity {
         use_task_prefixes: false,
         query_prefix: None,
         document_prefix: document_prefix.map(str::to_string),
+        max_tokens: None,
     }
 }
 

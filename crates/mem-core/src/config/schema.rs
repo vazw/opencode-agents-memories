@@ -345,6 +345,7 @@ pub struct FileConfig {
     pub embedding_query_prefix: Option<String>,
     pub embedding_document_prefix: Option<String>,
     pub embedding_dtype: Option<Value>,
+    pub embedding_max_tokens: Option<f64>,
     pub similarity_threshold: Option<f64>,
     pub max_memories: Option<u32>,
     /// Upstream's `maxProfileItems`, parsed for compatibility and
@@ -650,6 +651,9 @@ pub struct Config {
     pub embedding_query_prefix: Option<String>,
     pub embedding_document_prefix: Option<String>,
     pub embedding_dtype: Option<LocalOnnxDtype>,
+    /// The operator's token-cap override (`None` = use the model's declared
+    /// position limit).
+    pub embedding_max_tokens: Option<u32>,
     pub embedding_api_url: Option<String>,
     pub embedding_api_key: Option<String>,
 

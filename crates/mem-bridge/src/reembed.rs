@@ -173,11 +173,14 @@ pub fn run(config: &Config, storage_root: &Path, request: &ReembedRequest) -> i3
         // its shipped `reembed_scope`, which calls `ensure_ready` inside).
         ready.ensure_ready().await?;
         // The composition is pinned to `EmbeddingService` (AC22): the raw
-        // `Embedder` skips the document prefix that the identity covers.
+        // `Embedder` skips the document prefix that the identity covers. The
+        // handle is kept so the run's truncation totals can be reported after
+        // the migration (the service owns the same `Arc`).
+        let embedder = embedder_from_config(config);
         let re_embedder: Arc<dyn ReEmbedder> = Arc::new(ServiceReEmbedder {
             service: EmbeddingService::new(
                 EmbeddingServiceOptions::from_config(config),
-                embedder_from_config(config),
+                embedder.clone(),
             ),
         });
         let migration = MigrationService::new(
@@ -187,7 +190,17 @@ pub fn run(config: &Config, storage_root: &Path, request: &ReembedRequest) -> i3
             connections,
             re_embedder,
         );
-        migration.reembed_scope(scope, &scope_hash).await
+        let result = migration.reembed_scope(scope, &scope_hash).await;
+        // Aggregate row/token loss for THIS run, before `print_completed` (the
+        // stdout `reembed.completed` line stays byte-identical). Untested call
+        // site: it needs a scope whose rows truncate (see the blueprint's
+        // [TEST PLAN] closing paragraph); `report_totals` itself is covered.
+        let _ = crate::truncation_report::TruncationReporter::report_totals(
+            embedder.as_ref(),
+            "reembed",
+            "reembed.input_truncated",
+        );
+        result
     });
 
     match outcome {
