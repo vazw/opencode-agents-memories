@@ -377,6 +377,16 @@ impl ShardManager {
     /// repeats it instead of naming it; here it is ONE helper, because a
     /// second copy is exactly how the plural drifted out of the first.
     ///
+    /// The port's four callers are `create_shard`, `register_existing_shard`
+    /// and `reassign_shard_scope` — one per upstream site, in that order —
+    /// plus `rotate_shard`, which is port-specific: upstream has no such
+    /// method (ADR-0022 D-22-4 replaces its two-step create/retire) and it
+    /// reuses this shape because it writes the same column.
+    /// `reassign_shard_scope` passes the row's OWN scope (upstream L528 reads
+    /// `row.scope`), so its scope text comes from the registry, not from its
+    /// arguments. `tests/shard_stored_path.rs` pins the raw column of all
+    /// four.
+    ///
     /// The **plural** is the invariant (L441: "Stored db_path is always
     /// `<scope>s/<basename>`"). [`Self::resolve_stored_path`] and
     /// [`Self::get_shard_by_path`] both take the BASENAME, so a wrong prefix
