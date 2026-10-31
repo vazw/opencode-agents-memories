@@ -82,6 +82,32 @@ fn version_line() -> String {
     )
 }
 
+/// The sync usage block printed by `-h`/`--help` (pinned by
+/// `tests/workspace_smoke.rs`). It is printed BEFORE any config load or store
+/// open: a `--help` probe that fell through into a real stdio engine on the
+/// default root took the live engine's lock and wrote a bogus `degraded`
+/// `status` line into the live store.
+const USAGE: &str = "\
+usage: opencode-agents-memory [--mode=<mode>] [--storage-root <path>] [options]
+
+Modes (--mode=<mode>): stdio (default), standalone, print-crates,
+  purge-session, reembed-scope, reap-shards, hang-on-shutdown.
+
+Options:
+  --storage-root <path>   storage root (default $HOME/.opencode-mem/data)
+  --web-host <host>       web UI bind host (default 127.0.0.1)
+  --web-port <port>       web UI bind port (default 3742)
+  --web-dist <path>       explicit web UI build directory
+  --project <id>          purge-session: project scope
+  --session <id>          purge-session: session id
+  --agent <id>            purge-session: agent id
+  --confirm <token>       purge-session: the printed confirmation token
+  --scope <tag>           reembed-scope: container tag to re-embed
+  --apply                 reap-shards: perform the reap (dry run otherwise)
+  -h, --help              print this help and exit
+  --version               print the version and exit
+";
+
 /// The root composition's web launcher: an axum server (mem-web) inside
 /// this process. The boxed future is returned through the seam; sync
 /// composition never awaits a future, and no tokio type is named (M1) —
@@ -260,6 +286,10 @@ struct ParsedArgs {
     apply: bool,
     /// `--apply=<value>` was seen: a usage error in reap mode.
     apply_inline: bool,
+    /// Arguments the sync parser does not know. A usage error (exit 2), never
+    /// silently ignored: an ignored flag used to fall through into a real
+    /// engine on the DEFAULT live root.
+    unknown: Vec<String>,
 }
 
 /// The sync arg-parse (M1): mode, storage root, web host/port overrides, the
@@ -290,7 +320,7 @@ fn parse_args<I: Iterator<Item = (String, Option<String>)>>(args: I) -> ParsedAr
                 None => parsed.apply = true,
                 Some(_) => parsed.apply_inline = true,
             },
-            other => eprintln!("ignoring argument {other:?}"),
+            other => parsed.unknown.push(other.to_owned()),
         }
     }
     parsed
@@ -373,6 +403,15 @@ fn main() {
                 | "confirm"
         )
     });
+
+    // `--help`/`-h` is usage, handled sync and BEFORE any runtime exists: it
+    // used to be "ignored" here and fell through into a real `Stdio` engine on
+    // the DEFAULT root, which lost the live lock and wrote a `degraded`
+    // `status` line into the live store.
+    if raw.iter().any(|arg| arg == "--help" || arg == "-h") {
+        print!("{USAGE}");
+        return;
+    }
 
     // Special literal modes handled sync, BEFORE any runtime exists.
     if raw.iter().any(|a| a == "--version") {
@@ -465,6 +504,21 @@ fn main() {
                 }
             }
         }
+    }
+
+    // An unknown argument is a usage error, never a silent "ignore" that falls
+    // through into a real engine. This runs AFTER the mode dispatch, so
+    // reap-shards keeps its own 64 usage verdict for a foreign or valued flag,
+    // and BEFORE any config load or store open.
+    if !args.unknown.is_empty() {
+        eprintln!(
+            "usage: opencode-agents-memory [--mode=<mode>] [--storage-root <path>] [options]"
+        );
+        for argument in &args.unknown {
+            eprintln!("unknown argument {argument:?}");
+        }
+        eprintln!("run `opencode-agents-memory --help` for the full list");
+        std::process::exit(2);
     }
 
     // The web UI's location is a composition-root setting (W6.8): CLI flag >

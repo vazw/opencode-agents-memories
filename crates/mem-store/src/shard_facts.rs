@@ -101,8 +101,19 @@ pub struct ShardFactsOutcome {
 /// Applies the idempotent v1..v3 shard schema (no backup: the v3 step is
 /// additive and convergent, ADR-0018 D-14). No `db_path` is supplied, so no
 /// backup — and therefore no exclusivity proof — can arise (issue 46).
+///
+/// **Self-verifying.** `apply_schema_migrations` decides what to apply from
+/// `user_version` alone, so a file whose header claims v3 while missing the
+/// table v3 exists to create is never repaired by the runner: every write then
+/// dies in [`sync_count`] with "no such table: shard_stats", while reads
+/// (`list`, `search`) never call it and keep working. The stamp is therefore
+/// verified against `sqlite_master` and the table created when absent. The
+/// common path pays one read and issues no DDL. Every write path funnels
+/// through here (`resolve_write_shard → prepare_write_shard`), so `add`,
+/// `forget`, the scope-wide delete, re-embed and the legacy migrator all
+/// self-heal.
 pub async fn ensure_v3(db: &dyn Db, dimensions: u32) -> Result<i64, StoreError> {
-    apply_schema_migrations(
+    let version = apply_schema_migrations(
         db,
         &crate::schema_migrations::memory_shard_migrations(dimensions),
         &MigrationOptions {
@@ -112,7 +123,18 @@ pub async fn ensure_v3(db: &dyn Db, dimensions: u32) -> Result<i64, StoreError> 
         },
         None,
     )
-    .await
+    .await?;
+    if query_one(db, sql::SQLITE_MASTER_SHARD_STATS_TABLE, Vec::new())
+        .await?
+        .is_none()
+    {
+        tracing::warn!(
+            user_version = version,
+            "shard facts: a v3-stamped shard is missing shard_stats; repairing the table"
+        );
+        db.execute(SHARD_STATS_DDL, Vec::new()).await?;
+    }
+    Ok(version)
 }
 
 /// `COUNT(*)` as `u64` (clamped like the existing registry sync).

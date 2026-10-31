@@ -274,8 +274,11 @@ injection (never a host error); a `capture` error is logged and never blindly re
 
 ### The closed `data.reason` vocabulary (issue 70 wave 1)
 
-A `-32602` from the nine tool methods carries `error.data.reason`; a `-32603`
-may carry one where noted. The vocabulary is **closed** — every token the build
+A `-32602` from the nine tool methods carries `error.data.reason`; every
+`-32603` carries one too — `internal` when no more specific token applies, so a
+reject can never be mistaken for a transport failure (the wrapper reports a
+reason-less reject as `engine_unavailable`, i.e. "the engine is gone"). The
+vocabulary is **closed** — every token the build
 can emit is listed here, so `<param>` is never a placeholder, and no new numeric
 code is introduced (D-44's table does not move). Session-id violations keep
 their own `{"session_id", "violation"}` shape instead of a `reason`.
@@ -289,6 +292,7 @@ their own `{"session_id", "violation"}` shape instead of a `reason`.
 | `profile_conflict` | `-32603` | the optimistic profile version was lost |
 | `profile_unreadable` | `-32603` | stored `profile_data` is not parseable JSON/object |
 | `locked` | `-32603` | a foreign live `.turso-operation.lock` blocks the `add` |
+| `internal` | `-32603` | any other engine failure; the generic token, always present |
 | `project_id` | `-32602` | missing, non-string or blank `project_id` |
 | `project_path` | `-32602` | missing, non-string or blank `project_path` |
 | `scope` | `-32602` | unknown or missing `scope` where it is required |

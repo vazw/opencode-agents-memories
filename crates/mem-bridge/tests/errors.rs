@@ -380,3 +380,32 @@ async fn oracle_runtime(storage_root: &std::path::Path) -> mem_bridge::engine::E
         tools: None,
     }
 }
+
+// ---------------------------------------------------------------------------
+// Every `-32603` names its reason
+// ---------------------------------------------------------------------------
+
+/// A reason-less `-32603` is what the plugin reports as `engine_unavailable`
+/// (`plugin/src/tools.js`: only a string `data.reason` is a token, everything
+/// else is transport-class). The engine was UP when a schema defect answered
+/// bare `-32603`, so the tool told the user the engine was gone. `internal()`
+/// must therefore always carry a reason token.
+#[test]
+fn test_internal_error_carries_a_reason_token() {
+    let request = parse_line(r#"{"id":"add-1","jsonrpc":"2.0","method":"memory","params":{}}"#)
+        .expect("parses");
+    let response =
+        mem_bridge::tools::respond(&request, Err(mem_bridge::tools::ToolError::internal()));
+    let error = response.error.as_ref().expect("error envelope");
+    assert_eq!(error.code, -32603, "still an internal error");
+    let reason = error
+        .data
+        .as_ref()
+        .and_then(|data| data.get("reason"))
+        .and_then(Value::as_str);
+    assert_eq!(
+        reason,
+        Some("internal"),
+        "a -32603 without data.reason is reported as engine_unavailable: {response:?}"
+    );
+}

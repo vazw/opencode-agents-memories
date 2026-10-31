@@ -445,6 +445,11 @@ pub const SET_VECTOR_COUNT: &str = r#"UPDATE shards SET vector_count = ? WHERE i
 pub const SQLITE_MASTER_MEMORIES_TABLE: &str =
     r#"SELECT name FROM sqlite_master WHERE type='table' AND name='memories'"#;
 
+// shard_facts::ensure_v3 (W2 self-heal): the same probe for the v3 table, so a
+// v3-stamped file missing `shard_stats` is repaired instead of trusted.
+pub const SQLITE_MASTER_SHARD_STATS_TABLE: &str =
+    r#"SELECT name FROM sqlite_master WHERE type='table' AND name='shard_stats'"#;
+
 // shard-manager.ts L406 (markShardReadOnly).
 pub const MARK_SHARD_INACTIVE: &str = r#"UPDATE shards SET is_active = 0 WHERE id = ?"#;
 

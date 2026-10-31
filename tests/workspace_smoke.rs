@@ -99,3 +99,81 @@ fn test_binary_refuses_mcp_modes_before_loading_config() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// `--help`/`-h` and unknown flags are usage, never an engine start (§6.4)
+// ---------------------------------------------------------------------------
+
+fn scratch_dir(name: &str) -> std::path::PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.subsec_nanos())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!(
+        "opencode-mem-smoke-{name}-{}-{nanos}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create scratch dir");
+    dir
+}
+
+/// Runs the binary with a scratch `HOME` AND a scratch `--storage-root`, so a
+/// binary that (wrongly) falls through into engine mode can never reach the
+/// live store — the exact hazard `--help` carried: it was "ignored"
+/// (`src/main.rs` `parse_args`), became a real stdio engine on the DEFAULT
+/// root, lost the lock and wrote a bogus `degraded` status line into the live
+/// store.
+fn run_cli(flag: &str, root: &std::path::Path) -> (String, String, i32) {
+    let home = scratch_dir("cli-home");
+    let output = Command::new(env!("CARGO_BIN_EXE_opencode-agents-memory"))
+        .arg(flag)
+        .arg("--storage-root")
+        .arg(root)
+        .env_clear()
+        .env("HOME", &home)
+        .env("OPENCODE_MEM_STORAGE_ROOT", root)
+        .stdin(Stdio::null())
+        .output()
+        .expect("spawn the binary");
+    let _ = std::fs::remove_dir_all(&home);
+    (
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+        output.status.code().unwrap_or(-1),
+    )
+}
+
+#[test]
+fn test_help_prints_usage_and_exits_zero() {
+    for flag in ["--help", "-h"] {
+        let root = scratch_dir("help-root").join("storage");
+        let (stdout, stderr, code) = run_cli(flag, &root);
+        assert_eq!(code, 0, "{flag} must exit 0, stderr: {stderr}");
+        assert!(
+            stdout.contains("usage: opencode-agents-memory"),
+            "{flag} must print the usage block on stdout, got: {stdout:?} / {stderr:?}"
+        );
+        assert!(
+            !root.exists(),
+            "{flag} must never start an engine (the root stays uncreated)"
+        );
+    }
+}
+
+#[test]
+fn test_unknown_flag_exits_two_without_starting_an_engine() {
+    let root = scratch_dir("unknown-flag-root").join("storage");
+    let (stdout, stderr, code) = run_cli("--definitely-not-a-flag", &root);
+    assert_eq!(
+        code, 2,
+        "an unknown flag is a usage error, not an engine start: {stdout:?} / {stderr:?}"
+    );
+    assert!(
+        stderr.contains("--definitely-not-a-flag"),
+        "the refusal names the offending flag: {stderr:?}"
+    );
+    assert!(
+        !root.exists(),
+        "the refused invocation never creates the root"
+    );
+}

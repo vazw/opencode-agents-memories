@@ -10,11 +10,14 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use mem_store::config::StoreConfig;
-use mem_store::db::{BatchMode, BoxFuture, Db, DbHandle, ExecResult, Row, Statement, Value};
+use mem_store::db::{
+    BatchMode, BoxFuture, Db, DbHandle, ExecResult, Row, Statement, Value, query_one,
+};
 use mem_store::error::StoreError;
 use mem_store::schema_migrations::{
     MigrationOptions, SchemaMigration, apply_schema_migrations, memory_shard_migrations,
 };
+use mem_store::scope::Scope;
 use mem_store::sql;
 
 // ---------------------------------------------------------------------------
@@ -510,5 +513,130 @@ async fn test_a_build_that_knows_only_v2_refuses_a_v3_file() {
         "the refusal must name the found and supported versions, got {error:?}"
     );
     drop(db);
+    common::cleanup_temp_dir(&config.storage_path).expect("cleanup temp dir");
+}
+
+// ---------------------------------------------------------------------------
+// 8/8 self-heal — a v3-stamped shard that never got the v3 table
+// ---------------------------------------------------------------------------
+
+/// The scope hash of the self-heal fixture.
+const SELF_HEAL_HASH: &str = "b7c1d2e3f4a50001";
+
+async fn shard_stats_table_exists(db: &dyn Db) -> bool {
+    query_one(
+        db,
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='shard_stats'",
+        Vec::new(),
+    )
+    .await
+    .expect("shard_stats probe")
+    .is_some()
+}
+
+/// The exact on-disk state measured on the live `antwall` shard:
+/// `PRAGMA user_version = 3` with `memories` + `shard_metadata` only.
+///
+/// `apply_schema_migrations` decides what to apply from `user_version` ALONE
+/// (`schema_migrations.rs:194-201`), so a v3 stamp suppressed the v3 DDL and
+/// every write to the scope died in `prepare_write_shard → sync_count` with
+/// "no such table: shard_stats" — while reads (`list`, `search`) never call
+/// `sync_count` and kept working. `ensure_v3` must verify the table its header
+/// claims, not trust the header.
+#[tokio::test]
+async fn test_v3_stamped_shard_without_shard_stats_is_repaired_on_write() {
+    let (config, _connections, manager) =
+        common::real_components(common::store_config("mig-v3-selfheal")).await;
+    let path = manager
+        .get_shard_path(Scope::Project, SELF_HEAL_HASH, 0)
+        .expect("shard path");
+    let db = manager.open_shard(&path).await.expect("open the shard");
+    let through_v2: Vec<_> = memory_shard_migrations(2)
+        .into_iter()
+        .filter(|migration| migration.version <= 2)
+        .collect();
+    apply_schema_migrations(
+        db.as_ref(),
+        &through_v2,
+        &MigrationOptions {
+            db_path: None,
+            label: "v2-fixture",
+            max_known: 2,
+        },
+        None,
+    )
+    .await
+    .expect("apply v1..v2");
+    // The dimensions the live shard carries: without them the write path
+    // refuses the shard as incompatible before `prepare_write_shard` runs.
+    db.execute(
+        "INSERT OR REPLACE INTO shard_metadata (key, value) VALUES ('embedding_dimensions', ?1)",
+        vec![Value::Text(
+            manager.config().embedding_dimensions.to_string(),
+        )],
+    )
+    .await
+    .expect("dimensions metadata");
+    db.execute(
+        "INSERT OR REPLACE INTO shard_metadata (key, value) VALUES ('embedding_model', ?1)",
+        vec![Value::Text(manager.config().embedding_model.clone())],
+    )
+    .await
+    .expect("model metadata");
+    // One row, so the repaired count is a measured 1 — not the 0 that an
+    // absent `shard_stats` row reports too.
+    db.execute(
+        "INSERT INTO memories (id, content, vector, container_tag, created_at, updated_at)
+         VALUES (?1, ?2, vector32(?3), ?4, 1, 1)",
+        vec![
+            Value::Text("m1".to_string()),
+            Value::Text("content-1".to_string()),
+            Value::Text(mem_store::vector::vector_to_text(&[1.0f32, 0.0]).expect("vector")),
+            Value::Text(format!("opencode_project_{SELF_HEAL_HASH}")),
+        ],
+    )
+    .await
+    .expect("seed one row");
+    // The corruption: the header claims v3, the table was never created.
+    db.execute(&sql::set_user_version_sql(3), Vec::new())
+        .await
+        .expect("stamp v3");
+    assert!(
+        !shard_stats_table_exists(db.as_ref()).await,
+        "the fixture must reproduce the live state: a v3 stamp without shard_stats"
+    );
+    let registered = manager
+        .register_existing_shard(Scope::Project, SELF_HEAL_HASH, 0, &path, 0, true)
+        .await
+        .expect("register the shard");
+    drop(db);
+
+    // RED before the fix: `no such table: shard_stats`, raised by `sync_count`
+    // through `prepare_write_shard`.
+    let written = manager
+        .get_write_shard(Scope::Project, SELF_HEAL_HASH)
+        .await
+        .expect("a v3-stamped shard missing shard_stats is repaired, not refused");
+    assert_eq!(written.id, registered.id);
+    assert_eq!(
+        written.vector_count, 1,
+        "the repaired count is the measured truth, not the stale registry 0"
+    );
+
+    let db = manager.open_shard(&path).await.expect("reopen");
+    assert!(
+        shard_stats_table_exists(db.as_ref()).await,
+        "the write path created the missing v3 table"
+    );
+    assert_eq!(
+        query_one(db.as_ref(), sql::PRAGMA_USER_VERSION, Vec::new())
+            .await
+            .expect("version probe")
+            .and_then(|row| row.i64("user_version")),
+        Some(3),
+        "the repair never moves the stamp"
+    );
+    drop(db);
+
     common::cleanup_temp_dir(&config.storage_path).expect("cleanup temp dir");
 }

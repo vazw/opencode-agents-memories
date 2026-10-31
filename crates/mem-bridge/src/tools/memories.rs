@@ -18,7 +18,7 @@ use crate::composition::ComposedRuntime;
 use crate::jsonrpc::Request;
 use crate::scope_resolver::ProjectScopeResolver;
 
-use super::{ToolError, optional_string, required_string, resolve_scope};
+use super::{ToolError, internal_from, optional_string, required_string, resolve_scope};
 
 /// The four memory-tier methods' shared service.
 pub struct MemoriesService {
@@ -127,7 +127,7 @@ impl MemoriesService {
             .embedder
             .embed(&stripped)
             .await
-            .map_err(|_error| ToolError::internal())?;
+            .map_err(|error| internal_from("tools.add.embed_failed", error))?;
         let tags_vector = if tags.is_empty() {
             None
         } else {
@@ -135,7 +135,7 @@ impl MemoriesService {
                 self.embedder
                     .embed(&format_tags_for_embedding(&tags))
                     .await
-                    .map_err(|_error| ToolError::internal())?,
+                    .map_err(|error| internal_from("tools.add.tags_embed_failed", error))?,
             )
         };
 
@@ -143,9 +143,10 @@ impl MemoriesService {
         let now = now_millis();
         let id = new_memory_id(now, now_nanos());
         let metadata_json = match metadata {
-            Some(metadata) => {
-                Some(serde_json::to_string(&metadata).map_err(|_error| ToolError::internal())?)
-            }
+            Some(metadata) => Some(
+                serde_json::to_string(&metadata)
+                    .map_err(|error| internal_from("tools.add.metadata_encode_failed", error))?,
+            ),
             None => None,
         };
         let insert = MemoryInsert {
@@ -215,7 +216,7 @@ impl MemoriesService {
                 mem_store::error::StoreError::MigrationLocked { .. } => {
                     ToolError::internal_data(json!({ "reason": "locked" }))
                 }
-                _ => ToolError::internal(),
+                store_error => internal_from("tools.add.write_failed", store_error),
             })?;
 
         Ok(json!({ "id": id }))
@@ -249,7 +250,7 @@ impl MemoriesService {
                 .shards
                 .get_all_shards(shard_ref.scope, hash.as_deref())
                 .await
-                .map_err(|_error| ToolError::internal())?;
+                .map_err(|error| internal_from("tools.list.shards_failed", error))?;
             for shard in shards {
                 // A registered-but-missing file is an empty shard, never a
                 // file to resurrect (opening would create it).
@@ -260,11 +261,11 @@ impl MemoriesService {
                     .shards
                     .open_shard(&shard.db_path)
                     .await
-                    .map_err(|_error| ToolError::internal())?;
+                    .map_err(|error| internal_from("tools.list.open_shard_failed", error))?;
                 let fetched =
                     mem_store::vector::list_memories_by_container_tag(db.as_ref(), &filter, limit)
                         .await
-                        .map_err(|_error| ToolError::internal())?;
+                        .map_err(|error| internal_from("tools.list.read_failed", error))?;
                 for row in &fetched {
                     rows.push((
                         row.i64("created_at").unwrap_or(0),
@@ -351,7 +352,7 @@ impl MemoriesService {
             .embedder
             .embed(query)
             .await
-            .map_err(|_error| ToolError::internal())?;
+            .map_err(|error| internal_from("tools.search.embed_failed", error))?;
 
         // (similarity, created_at, id, row)
         let mut hits: Vec<(f64, i64, String, Value)> = Vec::new();
@@ -364,7 +365,7 @@ impl MemoriesService {
                 .shards
                 .get_all_shards(shard_ref.scope, hash.as_deref())
                 .await
-                .map_err(|_error| ToolError::internal())?;
+                .map_err(|error| internal_from("tools.search.shards_failed", error))?;
             for shard in shards {
                 if std::fs::metadata(&shard.db_path).is_err() {
                     continue;
@@ -373,7 +374,7 @@ impl MemoriesService {
                     .shards
                     .open_shard(&shard.db_path)
                     .await
-                    .map_err(|_error| ToolError::internal())?;
+                    .map_err(|error| internal_from("tools.search.open_shard_failed", error))?;
                 let found = mem_store::vector::search_in_shard(
                     db.as_ref(),
                     &query_vector,
@@ -382,11 +383,11 @@ impl MemoriesService {
                     Some(query),
                 )
                 .await
-                .map_err(|_error| ToolError::internal())?;
+                .map_err(|error| internal_from("tools.search.scan_failed", error))?;
                 for hit in found {
                     let row = mem_store::vector::get_memory_by_id(db.as_ref(), &hit.id)
                         .await
-                        .map_err(|_error| ToolError::internal())?;
+                        .map_err(|error| internal_from("tools.search.hydrate_failed", error))?;
                     let Some(row) = row else {
                         // Vanished between the scan and the hydrate: dropped.
                         continue;
@@ -451,7 +452,7 @@ impl MemoriesService {
                         .shards
                         .get_all_shards(scope_kind, None)
                         .await
-                        .map_err(|_error| ToolError::internal())?
+                        .map_err(|error| internal_from("tools.forget.shards_failed", error))?
                     {
                         let known = tuples.iter().any(|(known_scope, known_hash)| {
                             *known_scope == scope_kind && known_hash == &shard.scope_hash
@@ -471,7 +472,7 @@ impl MemoriesService {
                 .shards
                 .delete_memory_in_scope(scope_kind, &scope_hash, memory_id)
                 .await
-                .map_err(|_error| ToolError::internal())?;
+                .map_err(|error| internal_from("tools.forget.delete_failed", error))?;
         }
         Ok(json!({ "deleted": deleted }))
     }

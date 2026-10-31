@@ -507,9 +507,14 @@ async fn test_store_faults_become_internal_without_echoing_detail() {
     .await;
     let error = response.error.as_ref().expect("error envelope");
     assert_eq!(error.code, -32603);
-    assert!(
-        error.data.is_none(),
-        "the store fault carries no advisory data, so no detail can leak"
+    // The generic reason token is the ONLY advisory member: a fixed string, so
+    // the store's own message (which may name a path or a table) never leaks.
+    // A reason-less reject would be reported by the wrapper as
+    // `engine_unavailable`, i.e. "the engine is gone".
+    assert_eq!(
+        error.data,
+        Some(json!({ "reason": "internal" })),
+        "the store fault carries the generic token and nothing else"
     );
     assert_eq!(error.message, "Internal error");
 }

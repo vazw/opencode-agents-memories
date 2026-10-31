@@ -506,7 +506,12 @@ fn test_stdout_protocol_only() {
         });
         if is_stdout_print {
             assert!(
-                line.contains("version_line") || line.contains("name") || line.contains("--help"),
+                line.contains("version_line")
+                    || line.contains("name")
+                    || line.contains("--help")
+                    // `print!("{USAGE}")`: the `--help`/`-h` block is the
+                    // help mode the message below already names.
+                    || line.contains("USAGE"),
                 "main.rs stdout is restricted to version/help/print-crates: {line:?}"
             );
         }

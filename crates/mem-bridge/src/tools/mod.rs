@@ -13,7 +13,7 @@ pub mod profile;
 
 use std::sync::Arc;
 
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::composition::ComposedRuntime;
 use crate::error_map::{self, ErrorKind};
@@ -111,9 +111,16 @@ impl ToolError {
         self
     }
 
-    /// A bare `-32603`.
+    /// A `-32603` that always names its reason.
+    ///
+    /// The wrapper reports a reject WITHOUT `data.reason` as
+    /// `engine_unavailable` (`plugin/src/tools.js`), so a bare internal error
+    /// tells the user the engine is gone when it is answering. A schema
+    /// defect once surfaced exactly that way, so `internal` carries the
+    /// generic token and [`ToolError::internal_data`] overrides it when a
+    /// specific one (`locked`, `profile_unreadable`, …) applies.
     pub fn internal() -> Self {
-        Self::Internal { data: None }
+        Self::internal_data(json!({ "reason": "internal" }))
     }
 
     /// A `-32603` with advisory data (the `locked`/`learning_locked`/
@@ -121,6 +128,23 @@ impl ToolError {
     pub fn internal_data(data: Value) -> Self {
         Self::Internal { data: Some(data) }
     }
+}
+
+/// Logs a failure cause ONCE, then answers `-32603` with the generic token.
+///
+/// The cause is known at exactly the `map_err` line and was previously thrown
+/// away: the wire carries only "internal", so the reason a write failed was
+/// unrecoverable (the `engine_unavailable` diagnosis could not read the
+/// `StoreError` at all). Only the error's own message is logged — never a
+/// request param.
+pub(crate) fn internal_from<E: std::fmt::Display>(event: &'static str, error: E) -> ToolError {
+    crate::engine::structured_stderr(
+        event,
+        "error",
+        "tools",
+        json!({ "detail": error.to_string() }),
+    );
+    ToolError::internal()
 }
 
 /// Maps one handler outcome onto the JSON-RPC response the wire carries.
@@ -173,7 +197,9 @@ pub(crate) fn resolve_scope(
 ) -> Result<crate::project_scope::ResolvedProjectScope, ToolError> {
     resolver.resolve(project_id).map_err(|error| match error {
         crate::project_scope::ProjectScopeError::BlankProjectId => ToolError::invalid("project_id"),
-        crate::project_scope::ProjectScopeError::Core(_) => ToolError::internal(),
+        core_error @ crate::project_scope::ProjectScopeError::Core(_) => {
+            internal_from("tools.scope.resolve_failed", core_error)
+        }
     })
 }
 
