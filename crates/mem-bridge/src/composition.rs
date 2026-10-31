@@ -410,6 +410,19 @@ impl crate::scope_resolver::ProjectScopeResolver for EnvResolver {
     }
 }
 
+/// The local ONNX cache root: `<storagePath>/.cache`, the same tree the
+/// upstream plugin uses (`example/opencode-mem/src/services/embedding.ts:232`
+/// sets `mod.env.cacheDir = join(CONFIG.storagePath, ".cache")`).
+///
+/// Deliberately not `std::env::temp_dir()`: on the runbook host `/tmp` is a
+/// 16 GB tmpfs, so the weights would be RAM (523 MB that cannot be
+/// reclaimed), and every reboot would wipe the model — every `search`/`add`
+/// would answer `-32603` until the cache was re-provisioned. Under the store
+/// the weights are disk-backed (reclaimable page cache) and survive a reboot.
+pub fn local_cache_root(config: &Config) -> PathBuf {
+    config.storage_path.join(".cache")
+}
+
 /// The default embedding loader: Local ONNX unless a remote url+key pair
 /// is set (matching `EmbeddingService`'s branch, but handing the raw
 /// `Arc<dyn Embedder>` every W5.3 seam expects).
@@ -431,7 +444,7 @@ pub fn embedder_from_config(config: &Config) -> Arc<dyn mem_embed::embedder::Emb
         _ => Arc::new(mem_embed::local::LocalOnnxEmbedder::new(
             mem_embed::local::LocalLoadOptions {
                 model: config.embedding_model.clone(),
-                cache_root: std::env::temp_dir().join(".opencode-mem-onnx"),
+                cache_root: local_cache_root(config),
                 dtype: config.embedding_dtype,
                 pooling: config.embedding_pooling,
                 intra_threads: None,
@@ -626,6 +639,73 @@ mod tests {
                 .expect("read the changelogs")
                 .is_empty(),
             "the changelog snapshots are erased with the profile"
+        );
+
+        cleanup(&root);
+        cleanup(&home);
+    }
+
+    /// The local ONNX cache lives under the store, not under `$TMPDIR`: the
+    /// weights are disk-backed and survive a reboot, and 523 MB of tmpfs RAM
+    /// is not paid for the model.
+    #[test]
+    fn test_local_cache_root_is_under_the_storage_path() {
+        let root = temp_dir("cache-root");
+        let home = temp_dir("cache-home");
+        let env: BTreeMap<String, String> = [("HOME", home.to_string_lossy().to_string())]
+            .map(|(key, value)| (key.to_string(), value))
+            .into_iter()
+            .collect();
+        let mut config = Config::load(&mem_core::config::ConfigPaths::standard(&home), &env)
+            .expect("the default config loads");
+        config.storage_path = root.clone();
+
+        assert_eq!(local_cache_root(&config), root.join(".cache"));
+        assert_ne!(
+            local_cache_root(&config),
+            std::env::temp_dir().join(".opencode-mem-onnx")
+        );
+
+        cleanup(&root);
+        cleanup(&home);
+    }
+
+    /// A store with no provisioned model must fail with an error that names
+    /// the cache path under the storage root AND the provision command — the
+    /// old `-32603` with no remedy was the failure mode this pins.
+    #[mem_store::tokio::test(crate = "mem_store::tokio")]
+    async fn test_missing_model_names_the_store_cache_and_the_provision_command() {
+        let root = temp_dir("cache-missing");
+        let home = temp_dir("cache-missing-home");
+        let env: BTreeMap<String, String> = [("HOME", home.to_string_lossy().to_string())]
+            .map(|(key, value)| (key.to_string(), value))
+            .into_iter()
+            .collect();
+        let mut config = Config::load(&mem_core::config::ConfigPaths::standard(&home), &env)
+            .expect("the default config loads");
+        config.storage_path = root.clone();
+        config.embedding_model = "Xenova/selftest-model-not-provisioned".to_string();
+        config.embedding_dtype = None;
+
+        let embedder = embedder_from_config(&config);
+        let error = embedder
+            .embed("x")
+            .await
+            .expect_err("an unprovisioned cache must not embed");
+        let message = error.to_string();
+        assert!(
+            message.contains(
+                &root
+                    .join(".cache")
+                    .join("Xenova/selftest-model-not-provisioned")
+                    .to_string_lossy()
+                    .to_string()
+            ),
+            "the error must name the cache path under the storage root, got: {message}"
+        );
+        assert!(
+            message.contains("provision-onnx-cache.sh"),
+            "the error must name the provision command, got: {message}"
         );
 
         cleanup(&root);

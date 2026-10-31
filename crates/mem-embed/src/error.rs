@@ -23,7 +23,9 @@ pub enum EmbedError {
     InvalidModelId { model: String },
 
     /// Required model files are missing and no hub fetch was available.
-    #[error("Embedding model files missing for {model}: {path}")]
+    #[error(
+        "Embedding model files missing for {model}: {path}. Provision the cache with scripts/provision-onnx-cache.sh — the engine never downloads models at runtime."
+    )]
     ModelFilesMissing { model: String, path: PathBuf },
 
     /// The session could not be committed from the model bytes.
