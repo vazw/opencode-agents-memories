@@ -505,13 +505,15 @@ fn test_stdout_protocol_only() {
                 && (rest.starts_with("println!(") || rest.starts_with("print!("))
         });
         if is_stdout_print {
+            // `print!("{USAGE}")` is the `--help`/`-h` block — the help mode
+            // the message below already names. Pinned as the exact line: a
+            // substring token would let any future line mentioning `USAGE`
+            // through the scan.
+            if line.trim() == r#"print!("{USAGE}");"# {
+                continue;
+            }
             assert!(
-                line.contains("version_line")
-                    || line.contains("name")
-                    || line.contains("--help")
-                    // `print!("{USAGE}")`: the `--help`/`-h` block is the
-                    // help mode the message below already names.
-                    || line.contains("USAGE"),
+                line.contains("version_line") || line.contains("name") || line.contains("--help"),
                 "main.rs stdout is restricted to version/help/print-crates: {line:?}"
             );
         }

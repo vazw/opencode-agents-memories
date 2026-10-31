@@ -91,7 +91,9 @@ const USAGE: &str = "\
 usage: opencode-agents-memory [--mode=<mode>] [--storage-root <path>] [options]
 
 Modes (--mode=<mode>): stdio (default), standalone, print-crates,
-  purge-session, reembed-scope, reap-shards, hang-on-shutdown.
+  purge-session, reembed-scope, reap-shards. hang-on-shutdown is accepted only
+  when OPENCODE_MEM_HANG_ON_SHUTDOWN is set; mcp-stdio and mcp-http are
+  recognised and refused with exit 78.
 
 Options:
   --storage-root <path>   storage root (default $HOME/.opencode-mem/data)
@@ -425,6 +427,34 @@ fn main() {
         argv.iter()
             .map(|(name, inline)| (name.clone(), inline.clone())),
     );
+
+    // reap-shards validates its OWN usage first: EX_USAGE (64) for a valued
+    // `--apply`, a foreign scope flag, or `--apply` swallowing a value. This
+    // runs before the generic unknown-flag refusal so a token the reap rules
+    // own keeps the reap verdict instead of the generic 2.
+    let reap_mode = args.mode.as_deref().map(str::trim) == Some("reap-shards");
+    if reap_mode && (args.apply_inline || apply_value_trap || reap_foreign_flag) {
+        eprintln!(
+            "usage: opencode-agents-memory --mode=reap-shards [--apply] [--storage-root <path>]"
+        );
+        std::process::exit(64);
+    }
+
+    // An unknown argument is a usage error, never a silent "ignore" that falls
+    // through into a real engine. This runs BEFORE the mode dispatch — a sync
+    // mode that returns early (`print-crates`) must not swallow one either —
+    // and BEFORE any config load or store open.
+    if !args.unknown.is_empty() {
+        eprintln!(
+            "usage: opencode-agents-memory [--mode=<mode>] [--storage-root <path>] [options]"
+        );
+        for argument in &args.unknown {
+            eprintln!("unknown argument {argument:?}");
+        }
+        eprintln!("run `opencode-agents-memory --help` for the full list");
+        std::process::exit(2);
+    }
+
     if let Some(root) = args
         .storage_root
         .clone()
@@ -479,15 +509,8 @@ fn main() {
             // tag, which the runner rejects with 64 (invalid scope).
             reembed_tag = Some(args.scope.clone().unwrap_or_default());
         } else if mode == "reap-shards" {
-            // W7: usage is validated HERE, before `Config::load_default` and
-            // before any store is opened, so a bad invocation never creates
-            // the root. A silently ignored scope filter is a data-safety trap.
-            if args.apply_inline || apply_value_trap || reap_foreign_flag {
-                eprintln!(
-                    "usage: opencode-agents-memory --mode=reap-shards [--apply] [--storage-root <path>]"
-                );
-                std::process::exit(64);
-            }
+            // The usage verdicts were already taken above, before the generic
+            // unknown-flag refusal; only the request is built here.
             reap_request = Some(mem_bridge::reap::ReapRequest { apply: args.apply });
         } else {
             match LaunchMode::parse(&mode) {
@@ -504,21 +527,6 @@ fn main() {
                 }
             }
         }
-    }
-
-    // An unknown argument is a usage error, never a silent "ignore" that falls
-    // through into a real engine. This runs AFTER the mode dispatch, so
-    // reap-shards keeps its own 64 usage verdict for a foreign or valued flag,
-    // and BEFORE any config load or store open.
-    if !args.unknown.is_empty() {
-        eprintln!(
-            "usage: opencode-agents-memory [--mode=<mode>] [--storage-root <path>] [options]"
-        );
-        for argument in &args.unknown {
-            eprintln!("unknown argument {argument:?}");
-        }
-        eprintln!("run `opencode-agents-memory --help` for the full list");
-        std::process::exit(2);
     }
 
     // The web UI's location is a composition-root setting (W6.8): CLI flag >

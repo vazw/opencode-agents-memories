@@ -511,6 +511,101 @@ async fn test_delete_memory_in_scope_rejects_an_invalid_scope_hash_without_delet
     );
 }
 
+/// AC8 / self-heal: a **v3-stamped** shard whose `shard_stats` table is
+/// missing is repaired on touch, then counted.
+///
+/// This is the live damage state, not AC7's v2-stamped variant:
+/// `apply_schema_migrations` decides what to apply from `user_version` alone,
+/// so a v3 header has no pending step and would create nothing —
+/// `delete_memories`' closing `sync_count` then dies with
+/// "no such table: shard_stats" and the erase request erases nothing.
+#[tokio::test]
+async fn test_delete_memory_in_scope_repairs_a_v3_stamped_shard_without_shard_stats() {
+    let config = common::test_store_config("scope-delete-v3-lying-stamp", 2, 1000);
+    let (_config, _connections, manager) = common::real_components(config).await;
+    let shard = manager
+        .create_shard(Scope::Project, HASH, 0)
+        .await
+        .expect("create the shard");
+    insert_into_shard(
+        &manager,
+        &shard.db_path,
+        &seed_record("dup-id", TAG_SHARD_0),
+    )
+    .await;
+    assert!(
+        copy_exists(&manager, &shard.db_path, "dup-id").await,
+        "the fixture really seeds the row the delete must remove"
+    );
+
+    // The live damage state: the table is gone while the header still claims
+    // v3, so the runner has nothing pending and creates nothing.
+    let db = manager
+        .open_shard(&shard.db_path)
+        .await
+        .expect("open shard");
+    db.execute("DROP TABLE shard_stats", Vec::new())
+        .await
+        .expect("drop the v3 table");
+    db.execute(&sql::set_user_version_sql(3), Vec::new())
+        .await
+        .expect("stamp v3");
+    drop(db);
+    let db = manager
+        .open_shard(&shard.db_path)
+        .await
+        .expect("open shard");
+    assert!(
+        query_one(
+            db.as_ref(),
+            sql::SQLITE_MASTER_SHARD_STATS_TABLE,
+            Vec::new()
+        )
+        .await
+        .expect("table probe")
+        .is_none(),
+        "the fixture really removes the v3 table under a v3 stamp"
+    );
+    drop(db);
+
+    let copies = manager
+        .delete_memory_in_scope(Scope::Project, HASH, "dup-id")
+        .await
+        .expect("a lying v3 stamp is repaired, not failed");
+    assert_eq!(copies, 1, "the copy is counted and deleted");
+
+    assert!(
+        !copy_exists(&manager, &shard.db_path, "dup-id").await,
+        "the row is gone"
+    );
+    let db = manager
+        .open_shard(&shard.db_path)
+        .await
+        .expect("open shard");
+    assert!(
+        query_one(
+            db.as_ref(),
+            sql::SQLITE_MASTER_SHARD_STATS_TABLE,
+            Vec::new()
+        )
+        .await
+        .expect("table probe")
+        .is_some(),
+        "the delete's migrate-on-touch created shard_stats"
+    );
+    drop(db);
+    assert_eq!(
+        stored_count(&manager, &shard.db_path).await,
+        0,
+        "the repaired table carries the statement-measured count"
+    );
+    assert_eq!(
+        registry_count(&manager, &shard).await,
+        0,
+        "the registry adopts the committed count"
+    );
+}
+
 /// AC7: a pre-v3 shard is migrated on touch before the counted batch —
 /// `open_shard` does not migrate and `delete_memories` needs `shard_stats`.
 #[tokio::test]

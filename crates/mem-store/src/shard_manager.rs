@@ -1111,23 +1111,19 @@ impl ShardManager {
     }
 
     /// Upstream `ensureShardSchema` (no shard_metadata rewrite).
+    ///
+    /// Delegates to [`crate::shard_facts::ensure_v3`] — the same idempotent
+    /// v1..v3 runner PLUS the `sqlite_master` probe that repairs a shard whose
+    /// `user_version` claims v3 while `shard_stats` is missing. Without the
+    /// delegation this seam (the scope-wide delete at
+    /// [`Self::delete_memory_in_scope`] and [`Self::init_shard_db`]) would
+    /// still die in `sync_count` on exactly the shard the repair exists for.
     pub async fn ensure_shard_schema(
         &self,
         db: &dyn Db,
         dimensions: u32,
     ) -> Result<i64, StoreError> {
-        crate::schema_migrations::apply_schema_migrations(
-            db,
-            &crate::schema_migrations::memory_shard_migrations(dimensions),
-            &crate::schema_migrations::MigrationOptions {
-                db_path: None,
-                label: "memory-shard",
-                max_known: crate::schema_migrations::MEMORY_SHARD_MAX_KNOWN,
-            },
-            // No backup is taken without a `db_path`, so no proof is needed.
-            None,
-        )
-        .await
+        crate::shard_facts::ensure_v3(db, dimensions).await
     }
 
     pub(crate) fn row_to_shard_info(&self, row: Row) -> ShardInfo {

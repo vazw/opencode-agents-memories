@@ -177,3 +177,46 @@ fn test_unknown_flag_exits_two_without_starting_an_engine() {
         "the refused invocation never creates the root"
     );
 }
+
+/// The unknown-flag refusal is not mode-dependent: `--mode=print-crates`
+/// returns synchronously BEFORE any engine exists, and it used to return
+/// before the refusal too, so `--mode=print-crates --nope` exited 0 and said
+/// nothing. An unknown token is a usage error in every mode.
+#[test]
+fn test_unknown_flag_after_a_sync_mode_exits_two() {
+    let root = scratch_dir("unknown-flag-mode-root").join("storage");
+    let home = scratch_dir("unknown-flag-mode-home");
+    let output = Command::new(env!("CARGO_BIN_EXE_opencode-agents-memory"))
+        .args([
+            "--mode=print-crates",
+            "--definitely-not-a-flag",
+            "--storage-root",
+        ])
+        .arg(&root)
+        .env_clear()
+        .env("HOME", &home)
+        .env("OPENCODE_MEM_STORAGE_ROOT", &root)
+        .stdin(Stdio::null())
+        .output()
+        .expect("spawn the binary");
+    let _ = std::fs::remove_dir_all(&home);
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "print-crates must not swallow an unknown flag: {stdout:?} / {stderr:?}"
+    );
+    assert!(
+        stdout.is_empty(),
+        "a refused invocation prints no crate names: {stdout:?}"
+    );
+    assert!(
+        stderr.contains("--definitely-not-a-flag"),
+        "the refusal names the offending flag: {stderr:?}"
+    );
+    assert!(
+        !root.exists(),
+        "the refused invocation never creates the root"
+    );
+}

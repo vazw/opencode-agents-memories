@@ -108,10 +108,12 @@ pub struct ShardFactsOutcome {
 /// dies in [`sync_count`] with "no such table: shard_stats", while reads
 /// (`list`, `search`) never call it and keep working. The stamp is therefore
 /// verified against `sqlite_master` and the table created when absent. The
-/// common path pays one read and issues no DDL. Every write path funnels
-/// through here (`resolve_write_shard → prepare_write_shard`), so `add`,
-/// `forget`, the scope-wide delete, re-embed and the legacy migrator all
-/// self-heal.
+/// common path pays one read and issues no DDL. Two seams reach this body: the
+/// write seam ([`prepare_write_shard`], itself reached from
+/// `resolve_write_shard`) and
+/// [`ShardManager::ensure_shard_schema`](crate::shard_manager::ShardManager::ensure_shard_schema)
+/// (shard init and the scope-wide delete), so `add`, `forget`, the scope-wide
+/// delete, re-embed and the legacy migrator all self-heal.
 pub async fn ensure_v3(db: &dyn Db, dimensions: u32) -> Result<i64, StoreError> {
     let version = apply_schema_migrations(
         db,
@@ -244,8 +246,11 @@ pub struct ShardWriteFacts {
 /// Order is load-bearing: the idempotent v1..v3 migration first (`ensure_v3`),
 /// then ONE identity-facts read (through the per-connection cache, R-13), then
 /// the judgement — a positive mismatch refuses **before** the count body runs,
-/// so the shard is never mutated by a refused write. W2's claim/count body
-/// then runs with the facts already read (no second identity statement).
+/// so a refused write never reaches the claim/count/insert. `ensure_v3` runs
+/// before the judgement, so a foreign-model shard whose v3 stamp lies still
+/// gains the missing `shard_stats` table and is then refused: that corner is
+/// schema-repaired, not byte-untouched. W2's claim/count body then runs with
+/// the facts already read (no second identity statement).
 ///
 /// Concurrent writers cannot straddle the pair: the read is one statement and
 /// the claim is conditional (`INSERT OR IGNORE`), so a present key always

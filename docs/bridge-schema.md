@@ -327,6 +327,14 @@ Error envelopes are canonical wire objects too:
 `data` is optional and advisory; it must never carry a secret or transcript content. A
 parse error answers with `"id":null` (JSON-RPC 2.0: the id is not recoverable).
 
+The tool methods also emit one structured **stderr** diagnostic per failed call
+(`tools.<method>.<stage>_failed`, level `error`, component `tools`, payload
+`{"detail":"<the cause's Display text>"}`). Unlike `web.launch_failed`'s
+`detail_short: true` posture (§8), this line deliberately carries the cause's own
+Display text: the wire reason is the closed token `internal`, so the cause is
+recoverable nowhere else. `detail` is never a request param, a credential or memory
+content — the Display impls in reach name the fault (and may name a local path).
+
 ## 5. Shutdown (D-45)
 
 1. The wrapper sends `shutdown`; the engine replies `{"ok":true}` and stops accepting new
