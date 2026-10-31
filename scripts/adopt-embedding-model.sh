@@ -1209,6 +1209,16 @@ print_reembed_resume() {
 	if [ -n "$REHEARSE_ROOT" ]; then
 		resume+=(--rehearse "$REHEARSE_ROOT")
 	fi
+	# The flags actually in use, so the printed command resumes THIS run. The
+	# engine is carried only when it is not the default staged path: STEP 1
+	# rebuilds and re-stages that one, so pinning it would defeat the rebuild.
+	if [ -n "$SOURCE_DIR" ]; then
+		resume+=(--source "$SOURCE_DIR")
+	fi
+	if [ "$ENGINE_BIN" != "$(default_engine_path)" ]; then
+		resume+=(--engine "$ENGINE_BIN")
+	fi
+	resume+=(--weights-sha256 "$TARGET_WEIGHTS_SHA256" --weights-bytes "$TARGET_WEIGHTS_BYTES")
 	if [ "${#remaining[@]}" -gt 0 ]; then
 		scope_tag=${remaining[0]}
 	fi

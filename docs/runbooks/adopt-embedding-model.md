@@ -51,7 +51,7 @@ scripts/adopt-embedding-model.sh --dry-run
 #    exit-5 prerequisite: web-ui/dist/index.html must exist
 #    exit-7 prerequisite: the staged bundle must be removed first, or
 #    stage-engine builds and THEN exits 7
-ls -l web-ui/dist/index.html plugin/engine/linux-x64/web-ui/dist/index.html
+ls -l web-ui/dist/index.html
 rm -rf plugin/engine/linux-x64/web-ui/dist
 bash plugin/scripts/stage-engine.sh
 LC_ALL=C grep -c opencode-mem-onnx plugin/engine/linux-x64/opencode-agents-memory   # must print 0

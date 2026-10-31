@@ -653,14 +653,57 @@ case_11_a_mid_run_failure_stops_and_prints_the_resume() {
 	case $case_out in *'resume'*) ;; *) bfail 'no resume command was printed'; return 1 ;; esac
 	# The resume command must be runnable: the remaining scope, and the flags
 	# actually in use — a rehearsal operator copy-pasting a command without
-	# --rehearse would hit the live store.
-	case $case_out in *'--swap --yes'*) ;; *) bfail 'the resume command does not say --swap --yes'; return 1 ;; esac
+	# --rehearse would hit the live store. Anchor the flag assertions on the
+	# resume LINE: --source also appears in the provision command above it.
+	local resume_line=''
+	resume_line=$(printf '%s\n' "$case_out" | grep -m1 -F -- '--swap --yes' || true)
+	if [ -z "$resume_line" ]; then
+		bfail 'no resume command line was printed'
+		return 1
+	fi
 	case $case_out in *'--scope opencode_project_cccccccccccccccc'*) ;; *) bfail 'the resume command does not name the remaining scope'; return 1 ;; esac
-	case $case_out in *"--rehearse $r"*) ;; *) bfail 'the resume command dropped --rehearse'; return 1 ;; esac
+	case $resume_line in *"--rehearse $r"*) ;; *) bfail 'the resume command dropped --rehearse'; return 1 ;; esac
+	# A resume that dropped --source/--engine/--weights-* would silently fall
+	# back to the defaults instead of continuing the run that stopped.
+	case $resume_line in *"--source $r/source"*) ;; *) bfail 'the resume command dropped --source'; return 1 ;; esac
+	case $resume_line in *"--engine $r/bin/opencode-agents-memory"*) ;; *) bfail 'the resume command dropped the engine in use'; return 1 ;; esac
+	case $resume_line in *"--weights-sha256 $(fake_sha)"*) ;; *) bfail 'the resume command dropped the pinned weights digest'; return 1 ;; esac
 	# And it must state the rebuild the resume needs.
 	case $case_out in *'stage-engine.sh'*) ;; *) bfail 'the STOPPED block does not print the engine rebuild'; return 1 ;; esac
 	if [ "$(wc -l <"$r/engine.log" | tr -d ' ')" -ne 2 ]; then
 		bfail 'the re-embed did not stop at the failing scope (expected 2 engine calls)'
+		return 1
+	fi
+	# Second leg: the FAILING scope is the FIRST enumerated one. That is the
+	# measured failure (a stale engine dies at scope 1 of 22), and it is the
+	# only input that reaches migrated=0 — with a later scope the block's
+	# "N scope(s) already listed above are on e5" sentence happens to be true,
+	# which is why the old text stayed green.
+	mkrehearsal midfail-first || { bfail 'fixture setup failed'; return 1; }
+	swap_args
+	case_out=$(TMPDIR="$r/tmp" FAKE_ENGINE_LOG="$r/engine.log" \
+		FAKE_ENGINE_FAIL_SCOPE=opencode_project_aaaaaaaaaaaaaaaa \
+		"$adopt" "${SWAP_ARGS[@]}" 2>&1)
+	case_rc=$?
+	if [ "$case_rc" -ne 74 ]; then
+		bfail "a first-scope failure must exit 74, got $case_rc"
+		return 1
+	fi
+	case $case_out in
+	*'NO scope has been migrated — the store is unchanged'*) ;;
+	*)
+		bfail 'a zero-migrated failure does not say the store is unchanged'
+		return 1
+		;;
+	esac
+	case $case_out in
+	*'already listed above are on'*)
+		bfail 'the zero-migrated STOPPED block still claims the listed scopes are on e5'
+		return 1
+		;;
+	esac
+	if [ "$(wc -l <"$r/engine.log" | tr -d ' ')" -ne 1 ]; then
+		bfail 'the re-embed did not stop at the first scope (expected 1 engine call)'
 		return 1
 	fi
 	return 0
@@ -952,6 +995,24 @@ case_21_a_stale_engine_is_refused_before_the_config_edit() {
 		bfail 'the refused run took a backup before refusing'
 		return 1
 	fi
+	# The dry-run is step 2 of the runbook and the rebuild is step 3, so the same
+	# engine must be a PENDING line there (rc 0), never a FAIL — otherwise the
+	# documented first step starts red and the operator reads it as a blocker.
+	invoke --dry-run --rehearse "$r" --source "$r/source" \
+		--engine "$r/bin/stale-engine" \
+		--weights-sha256 "$(fake_sha)" --weights-bytes "$(fake_bytes)"
+	if [ "$case_rc" -ne 0 ]; then
+		bfail "a dry-run with a stale engine must not fail (rc 0), got $case_rc"
+		return 1
+	fi
+	case $case_out in *'[pend]'*) ;; *) bfail 'the dry-run does not mark the stale engine pending'; return 1 ;; esac
+	case $case_out in *'predates the cache-root change'*) ;; *) bfail 'the dry-run does not name the cache-root change'; return 1 ;; esac
+	case $case_out in
+	*'[FAIL]'*)
+		bfail 'the dry-run reports the stale engine as a FAIL — the rebuild is the next documented step'
+		return 1
+		;;
+	esac
 	return 0
 }
 
@@ -1005,6 +1066,41 @@ case_22_a_failed_scope_enumeration_is_refused() {
 		return 1
 	fi
 	case $case_out in *'cannot enumerate the active scopes from the metadata copy'*) ;; *) bfail 'the rollback refusal does not name the enumeration'; return 1 ;; esac
+	# 4. --verify: the same failed copy must be blamed on the COPY, with the
+	# identity read skipped. The old `mapfile < <(enumerate_scopes || true)`
+	# shape read the failure as an empty store and reported "no active scope in
+	# metadata.db" / "no shard db for scope" — a mislabel of a readable store.
+	invoke_with_path "$r/binpath" --verify --rehearse "$r"
+	if [ "$case_rc" -ne 3 ]; then
+		bfail "a --verify whose metadata copy fails must exit 3, got $case_rc"
+		return 1
+	fi
+	case $case_out in
+	*'[FAIL] cannot enumerate the active scopes from the metadata copy'*) ;;
+	*)
+		bfail '--verify does not report the failed enumeration as a FAIL naming the copy'
+		return 1
+		;;
+	esac
+	case $case_out in
+	*'the shard identity read is skipped'*) ;;
+	*)
+		bfail '--verify does not skip the shard identity read after a failed enumeration'
+		return 1
+		;;
+	esac
+	case $case_out in
+	*'no active scope in metadata.db'*)
+		bfail '--verify mislabels the failed enumeration as an empty store'
+		return 1
+		;;
+	esac
+	case $case_out in
+	*'no shard db for scope'*)
+		bfail '--verify mislabels the failed enumeration as a missing shard'
+		return 1
+		;;
+	esac
 	return 0
 }
 
@@ -1177,6 +1273,23 @@ case_28_the_engine_pre_reembed_backups_do_not_block_the_next_backup() {
 		bfail 'the backup deleted the engine backup — it must only be excluded from the scan'
 		return 1
 	fi
+	# The owner's decision to reclaim that space depends on the count and the
+	# size, and the exact command has to be copy-pasteable from the summary.
+	local pre_bytes=$(( $(wc -c <"$bak.bak") + $(wc -c <"$bak.bak-wal") ))
+	case $case_out in
+	*"engine backups  : 2 pre-reembed file(s), $pre_bytes B under $r/opencode-mem/data"*) ;;
+	*)
+		bfail "the summary does not report the 2 pre-reembed files and their $pre_bytes B"
+		return 1
+		;;
+	esac
+	case $case_out in
+	*"find $r/opencode-mem/data -name \"*pre-reembed*\" -depth -delete"*) ;;
+	*)
+		bfail 'the summary does not print the pre-reembed cleanup command'
+		return 1
+		;;
+	esac
 	return 0
 }
 
