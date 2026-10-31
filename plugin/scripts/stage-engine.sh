@@ -47,8 +47,11 @@ fi
 
 cargo build --release "${CARGO_ARGS[@]+"${CARGO_ARGS[@]}"}" -p opencode-agents-memory
 
-BUILD_DIR="${CARGO_TARGET_DIR:-target}"
-BIN="$BUILD_DIR/$TARGET_SUBDIR/release/opencode-agents-memory"
+# Cargo builds into the WORKSPACE target, not plugin/target: resolve the root from
+# the manifest that owns this package, so the check follows the real output dir.
+WORKSPACE_ROOT="$(dirname "$(cargo locate-project --workspace --message-format plain)")"
+BUILD_DIR="${CARGO_TARGET_DIR:-$WORKSPACE_ROOT/target}"
+BIN="$BUILD_DIR/${TARGET_SUBDIR}release/opencode-agents-memory"
 if [ ! -x "$BIN" ]; then
   echo "stage-engine: built binary '$BIN' is missing/not executable — refusing to stage (loud failure, M26)" >&2
   exit 3

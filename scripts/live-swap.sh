@@ -1019,7 +1019,7 @@ dry_run() {
 			ck_fail "no staged engine at $engine — run plugin/scripts/stage-engine.sh"
 		fi
 		if [ -f "$PLUGIN_DIR/scripts/stage-engine.sh" ]; then
-			ck_info "rebuild: sh $PLUGIN_DIR/scripts/stage-engine.sh"
+			ck_info "rebuild: bash $PLUGIN_DIR/scripts/stage-engine.sh"
 		fi
 	else
 		ck_fail "plugin directory not found: $PLUGIN_DIR"
@@ -1390,8 +1390,9 @@ run_verify_mode() {
 	printf '  and call the "memory" tool with mode:"list-shards" in BOTH. Each must answer\n'
 	printf '  success:true, storagePath=~/.opencode-mem/data, 22 shards, current 1 / linked 20 /\n'
 	printf '  orphaned 1. Pre-fix the second workspace answered engine_unavailable (issue 82).\n'
-	printf '  Also: memory mode:"help" in both must report engine_version 0.1.0, protocol 1.0.0,\n'
-	printf '  unavailable: [] — and one call with options.codemode:false must succeed.\n'
+	printf '  Also: memory mode:"help" in both must answer success:true with unavailable: [],\n'
+	printf '  and one call with options.codemode:false must succeed. help carries no\n'
+	printf '  engine_version/protocol — those live in the engine hello (0.1.0 / 1.0.0).\n'
 	printf '  Then the host endpoints: curl http://127.0.0.1:<host-port>/api/skill (contains\n'
 	printf '  opencode-mem.memory-usage) and /api/plugin (state active, source.type local).\n'
 
