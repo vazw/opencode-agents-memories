@@ -1,0 +1,15 @@
+byte-level check of the config edit:
+
+$ diff <pre-swap> <current>
+175c175
+<         "opencode-mem@latest"
+---
+>         "/home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin"
+
+$ wc -c (delta must be exactly len(new) - len(old) = 39)
+ 7427 /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode.jsonc.pre-swap-20261031T075014Z
+ 7466 /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode.jsonc
+14893 total
+
+$ the bytewise-unedited prefix/suffix still matches (only line 175 differs)
+IDENTICAL-EXCEPT-LINE-175

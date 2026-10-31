@@ -1,0 +1,22 @@
+independent verification (not the script's own diff -r):
+
+$ cd <backup> && sha256sum -c MANIFEST.sha256 --quiet
+manifest_rc=0
+
+$ sha256sum of every file under data/ in the backup vs the restored store
+files compared: 60
+DATA-IDENTICAL (0 differing files)
+
+$ configs restored byte-identical?
+ef2d9fbe7640e1c0b27f7afb6f7437ec659b2588a2073383806c030cef211427  /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T074914Z/config/opencode.jsonc
+ef2d9fbe7640e1c0b27f7afb6f7437ec659b2588a2073383806c030cef211427  /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode.jsonc
+94888c5c36ce168f3e6a89dfdc8403d26cfddfe251b885d21b9bfe6d669a0058  /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T074914Z/config/opencode-mem.jsonc
+94888c5c36ce168f3e6a89dfdc8403d26cfddfe251b885d21b9bfe6d669a0058  /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode-mem.jsonc
+
+$ the port-era store is kept aside, never deleted
+/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/data.port-20261031T074914Z/port-era.txt
+aside metadata user_version=2
+restored metadata user_version=1
+aside shard user_version=3
+restored shard user_version=2
+restored port-era.txt present=no

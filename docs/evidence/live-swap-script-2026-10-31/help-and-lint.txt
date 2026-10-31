@@ -1,0 +1,119 @@
+Executed on the live machine 2026-10-31 (OpenCode was RUNNING throughout: pid 12998/25843).
+Both commands are read-only; the live store and config were not written.
+
+$ bash -n scripts/live-swap.sh; echo bash_n_rc=$?
+bash_n_rc=0
+
+$ shellcheck scripts/live-swap.sh; echo shellcheck_rc=$?
+shellcheck_rc=0
+
+$ scripts/live-swap.sh --help
+live-swap.sh — execute docs/runbooks/live-swap.md
+
+  The runbook is the spec. This script is the same sequence, ordered the same
+  way, with the safety rails the runbook states as prose made mechanical.
+
+USAGE
+  live-swap.sh [MODE] [OPTIONS]
+
+  A bare invocation (no MODE) is --dry-run: it prints the plan and runs the
+  read-only preflight, and it writes nothing — safe while OpenCode runs.
+
+MODES
+  --dry-run   Preflight only. Checks the store, the free space (need ~2x),
+              the config values, the plugin dist/engine, whether OpenCode or
+              the engine is running, the backup root, and the ONNX cache
+              state; prints every command the real modes would run.
+              Changes nothing. Exit 3 if a FAIL line appears.
+
+  --backup    Runbook §3-§5, the pre-start half:
+                1. refuse if OpenCode or the store's engine is running (§2),
+                2. PRAGMA wal_checkpoint(TRUNCATE) on every *.db (expect
+                   0|0|0), then find -delete only the derived *-shm/*-tshm;
+                   a non-empty *-wal is a refusal, never a delete,
+                3. dated cp -a of the store root to
+                   ~/.opencode-mem-backups/<UTC> plus both config files,
+                4. sha256 MANIFEST.sha256 and `sha256sum -c`,
+                5. PRAGMA integrity_check per DB (expect every one `ok`),
+                6. the LATEST pointer and a swap.log line per action.
+              Re-running makes a new dated backup; nothing is overwritten.
+
+  --swap      --backup, then the runbook's §7-§8:
+                1. scripts/provision-onnx-cache.sh (§7; ~38 s cold),
+                2. a copy of opencode.jsonc as .pre-swap-<TS>,
+                3. the single quoted token "opencode-mem@latest" replaced in
+                   place by the absolute plugin directory — one string, same
+                   commas, comments and layout untouched,
+                4. the diff, and the exact restore command.
+              Interactive confirmation before the config edit; --yes for a
+              non-interactive run. The script does NOT start OpenCode: it
+              prints "start OpenCode now, then run --verify". The store
+              migration happens at the next start (§6).
+
+  --verify    After you start OpenCode (runbook §9b/§10), read-only except for
+              one canary memory (§12 of the battery):
+                1. the engine process count for the store (expect 1),
+                2. that engine's parent — must be the OpenCode host (the
+                   one-process discriminator; if it is not, stop and record),
+                3. the store versions: metadata 2, prompts 2, shards 3 lazily,
+                4. web health on the engine's actual port (3742 by default;
+                   --web-port / OPENCODE_MEM_WEB_PORT override),
+                5. the token at <store>/data/.auth-token, minted by the 401,
+                6. one search, one add canary, one search for the canary,
+                7. the status file: absent, or naming a dead pid.
+              Then prints the MANUAL two-workspace `memory list-shards`
+              instruction — the live discriminator this script cannot run.
+              Exit 3 on any FAIL. Re-running is safe (one more canary each
+              time; nothing else is written).
+
+  --rollback  Runbook §12, the rehearsed move-aside:
+                1. refuse if OpenCode or the engine is running,
+                2. restore both config files from the latest backup,
+                3. mv the port-era store aside to
+                   <backup-root>/data.port-<TS> (never deleted),
+                4. cp -a the backup's data/ back, then diff -r to prove the
+                   copy is byte-identical,
+                5. the restart instruction.
+              Interactive confirmation; --yes for a non-interactive run.
+
+OPTIONS
+  --yes                Do not ask; the owner has already read the plan.
+  --rehearse DIR       Operate on a scratch copy, never the live root:
+                       DIR/opencode-mem (a store copy), DIR/config (fake
+                       config files), DIR/backups. Fails closed if DIR
+                       resolves to (or contains) the live store, config or
+                       backup root. The live-process refusal is skipped
+                       because nothing live is written; a process holding
+                       the *scratch* storage root is still a refusal.
+  --store DIR          Store root (default ~/.opencode-mem; data/ lives in it).
+  --config-dir DIR     Config directory (default ~/.config/opencode).
+  --backup-root DIR    Backup root (default ~/.opencode-mem-backups). Must be
+                       outside the store root.
+  --plugin-dir DIR     Plugin package (default <repo>/plugin).
+  --container-tag TAG  Canary container tag for --verify (default: this
+                       project's, opencode_project_4182e0858e0c93a1).
+  --web-port N         The engine's web port for --verify (default: the
+                       engine's own --web-port, then OPENCODE_MEM_WEB_PORT,
+                       then 3742 — the config's webServerPort 4747 is NOT
+                       forwarded by the plugin launch).
+  --from TS            --rollback: restore this backup instead of LATEST.
+  -h, --help           This text.
+
+SEQUENCE (the runbook's order)
+  1. quit OpenCode              this script refuses to write while it runs
+  2. live-swap.sh --dry-run     read the plan and the checks
+  3. live-swap.sh --backup      checkpoint + dated backup + manifest + integrity
+  4. live-swap.sh --swap        provision the cache, swap the plugin entry
+  5. start OpenCode             the engine migrates the store in place (§6)
+  6. quit, start once more      the fresh-engine reopen (§9)
+  7. live-swap.sh --verify      the battery, then the two-workspace check
+  8. one week of dogfood        (§11)
+  9. live-swap.sh --rollback    only if §11's rollback triggers fire
+
+EXIT STATUS
+  0  the mode did what it reports
+  1  refused or aborted (nothing live was written, or the write was reverted)
+  3  the mode ran and a FAIL line was reported (see the output)
+  130 the owner answered no
+
+--help exit=0

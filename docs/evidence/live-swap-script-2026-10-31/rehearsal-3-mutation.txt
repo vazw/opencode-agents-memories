@@ -1,0 +1,8 @@
+simulating the port era on the scratch copy only:
+  $ sqlite3 data/metadata.db "PRAGMA user_version=2;"
+  $ sqlite3 data/projects/project_4182e0858e0c93a1_shard_0.db "PRAGMA user_version=3;"
+  $ printf "port era\n" > data/port-era.txt
+
+metadata user_version=2
+shard 4182 user_version=3
+port-era.txt present=yes

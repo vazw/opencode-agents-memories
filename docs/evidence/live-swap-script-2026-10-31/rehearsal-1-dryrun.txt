@@ -1,0 +1,61 @@
+$ scripts/live-swap.sh --dry-run --rehearse <scratch>
+
+== live-swap --dry-run (reads only; nothing is written) ==
+[2026-10-31T07:49:09Z] store=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem config=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config backups=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups plugin=/home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin
+[2026-10-31T07:49:09Z] rehearsal root=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final (scratch paths, not the live ones)
+
+== 1. preflight (runbook §1) ==
+  [ ok ] store root exists: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem
+  [info] dbs=29 files=151 project_shards=22
+  [info] wal state: nonempty_wal=7 derived_sidecars=39
+  [ ok ] the upstream .cache model directory exists (the provisioner source, §7)
+  [ ok ] disk: store=654637475 B, free=1035678568448 B, need ~1309274950 B (2x, §1)
+
+== 1b. config values (runbook §1, §8) ==
+  [info] storagePath    = ~/.opencode-mem/data (the plugin resolves $HOME/.opencode-mem/data, §1)
+  [info] embeddingModel = Xenova/nomic-embed-text-v1
+  [info] webServerPort  = 4747 (NOT forwarded by the plugin launch; the engine binds 3742, §1)
+  [pend] opencode.jsonc still loads upstream opencode-mem@latest — --swap replaces it (§8)
+  [info] the local path also appears as a comment — commented lines are not entries
+
+== 1c. plugin dist + staged engine (§8, issue 81) ==
+  [ ok ] plugin bundle: /home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin/dist/plugin.js (51381 B)
+  [ ok ] staged engine: /home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin/engine/linux-x64/opencode-agents-memory
+  [info] engine sha256=72d7f64d5bdcbabd54b5c59b8a35c93712d4a6699c3557f4dbf01f8b24d5e653 (2026-10-30 21:48:54.141280833 +0700)
+  [ ok ] web UI bundle staged beside the engine
+  [warn] the staged engine is OLDER than dist/plugin.js — rebuild it from landed main (plugin/scripts/stage-engine.sh, issue 81)
+  [info] rebuild: sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin/scripts/stage-engine.sh
+
+== 1d. is anything running? (runbook §2) ==
+  [ ok ] no engine process for this store
+  [info] OpenCode running: pid 12998 25843 — irrelevant to these scratch paths (rehearsal writes nothing live)
+  [info] --dry-run and --verify are safe now; the other modes are not
+
+== 1e. backup root (§4) ==
+  [ ok ] backup root will be created under a writable parent: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final
+  [ ok ] the backup root is outside the store root (required, §4)
+
+== 1f. ONNX cache state (§7) ==
+  [info] cache: /tmp/.opencode-mem-onnx/Xenova/nomic-embed-text-v1 (tokenizer_version=2.0, model_onnx_bytes=547552426)
+  [ ok ] tokenizer is the canonical v2.0 form the rc.2 reader accepts
+
+== planned actions (nothing here runs during --dry-run) ==
+  WOULD quit OpenCode; confirm with pgrep -af opencode (§2)
+  WOULD sqlite3 <each of the 29 *.db> 'PRAGMA wal_checkpoint(TRUNCATE);' (§3)
+  WOULD find data -name "*-shm" -o -name "*-tshm" -delete   (never a .db, never a non-empty -wal) (§3)
+  WOULD cp -a /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/<UTC>   +   both config files into <UTC>/config/ (§4)
+  WOULD sha256 manifest over every file, then sha256sum -c (§5)
+  WOULD PRAGMA integrity_check per DB, read with immutable=1 (§5)
+  WOULD printf '<UTC>' > /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/LATEST (§4)
+  WOULD sh /home/vaz/Code/Personal/Rust/opencode-agents-memory/scripts/provision-onnx-cache.sh (§7)
+  WOULD cp -a /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode.jsonc <same>.pre-swap-<TS>   then replace "opencode-mem@latest" with "/home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin" (§8)
+  WOULD start OpenCode; the engine migrates in place (metadata 1->2, prompts 1->2, shards 2->3 lazily, §6)
+  WOULD quit and start OpenCode once more (the fresh-engine reopen, §9)
+  WOULD /home/vaz/Code/Personal/Rust/opencode-agents-memory/scripts/live-swap.sh --verify   (§9b/§10)
+  WOULD keep the backup untouched for one week of dogfood (§11); roll back with /home/vaz/Code/Personal/Rust/opencode-agents-memory/scripts/live-swap.sh --rollback (§12)
+
+== summary ==
+  failures=0 warnings=1 pending=false-start-conditions=1
+[2026-10-31T07:49:09Z] finished mode=dry-run failures=0 warnings=1
+
+exit=0

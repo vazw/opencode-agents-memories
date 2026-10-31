@@ -1,0 +1,7 @@
+scratch root: .tmp/scratch/rehearsal-final (gitignored)
+source store: ~/.opencode-mem (read-only cp -a, never written)
+
+623M	/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final
+files=151 dbs=29
+metadata.db user_version=1
+config sha256: opencode.jsonc=ef2d9fbe7640e1c0b27f7afb6f7437ec659b2588a2073383806c030cef211427 opencode-mem.jsonc=94888c5c36ce168f3e6a89dfdc8403d26cfddfe251b885d21b9bfe6d669a0058

@@ -1,0 +1,19 @@
+$ bash scripts/test-live-swap.sh
+
+ok   case_01_help_names_every_mode
+ok   case_02_bare_invocation_writes_nothing
+ok   case_03_dry_run_fails_on_a_missing_store
+ok   case_04_swap_replaces_one_active_line_only
+ok   case_05_swap_refuses_a_double_edit
+ok   case_06_swap_is_idempotent
+ok   case_07_swap_refuses_an_unrelated_config
+ok   case_08_rehearse_refuses_a_live_path
+ok   case_09_backup_writes_a_verified_manifest
+ok   case_10_the_manifest_is_behavioural
+ok   case_11_rollback_refuses_a_post_swap_backup
+ok   case_12_rollback_restores_bytes_and_keeps_the_port_era_store
+ok   case_13_backup_does_not_publish_a_bad_restore_point
+wall time: 7s
+PASS 13/13
+
+exit=0

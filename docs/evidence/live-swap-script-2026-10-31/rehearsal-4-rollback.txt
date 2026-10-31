@@ -1,0 +1,33 @@
+$ scripts/live-swap.sh --rollback --rehearse <scratch> --yes
+[2026-10-31T07:49:27Z] live-swap.sh mode=rollback store=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem backups=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups commit=0317c90
+[2026-10-31T07:49:27Z] rehearsal: the live OpenCode process check is skipped (scratch store: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem)
+[2026-10-31T07:49:27Z] rehearsal note: OpenCode is running (pid 12998 25843); nothing live is written
+
+== rollback to 20261031T074914Z (runbook §12) ==
+this will:
+  1. restore /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T074914Z/config/opencode.jsonc     -> /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode.jsonc
+  2. restore /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T074914Z/config/opencode-mem.jsonc -> /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode-mem.jsonc
+  3. mv /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem/data -> /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/data.port-20261031T074914Z   (kept, never deleted)
+  4. cp -a /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T074914Z/data -> /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem/data   then diff -r to prove it is byte-identical
+[2026-10-31T07:49:27Z] auto-confirmed (--yes): restore the store and both config files from 20261031T074914Z (the port-era store is moved aside, not deleted)
+[2026-10-31T07:49:27Z] current configs saved to /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/pre-rollback-20261031T074914Z (kept)
+[2026-10-31T07:49:27Z] restored both config files from /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T074914Z/config
+[2026-10-31T07:49:27Z] mv /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem/data /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/data.port-20261031T074914Z   (the port-era store is kept for diagnosis)
+[2026-10-31T07:49:28Z] cp -a /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T074914Z/data /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem/data
+
+== restore verification ==
+  [ ok ] the restored data/ is byte-identical to the backup
+  [info] restored counts: dbs=29 files=83 project_shards=22
+
+== next ==
+start OpenCode; the upstream plugin (restored in opencode.jsonc) writes again.
+the port-era store is at: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/data.port-20261031T074914Z   (keep it; delete it yourself once you are sure)
+the previous configs are at: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/pre-rollback-20261031T074914Z
+to go back to the port: re-run /home/vaz/Code/Personal/Rust/opencode-agents-memory/scripts/live-swap.sh --swap
+
+== summary ==
+  failures=0 warnings=0
+  the rollback completed; start OpenCode and confirm the upstream plugin writes again (§12).
+[2026-10-31T07:49:28Z] finished mode=rollback failures=0 warnings=0
+
+exit=0

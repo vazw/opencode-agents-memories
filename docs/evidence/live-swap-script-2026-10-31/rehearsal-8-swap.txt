@@ -1,0 +1,152 @@
+$ scripts/live-swap.sh --swap --rehearse <scratch> --yes
+[2026-10-31T07:50:08Z] live-swap.sh mode=swap store=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem backups=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups commit=0317c90
+[2026-10-31T07:50:08Z] rehearsal: the live OpenCode process check is skipped (scratch store: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem)
+[2026-10-31T07:50:08Z] rehearsal note: OpenCode is running (pid 12998 25843); nothing live is written
+[2026-10-31T07:50:08Z] swap: plugin=/home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin engine_sha256=72d7f64d5bdcbabd54b5c59b8a35c93712d4a6699c3557f4dbf01f8b24d5e653 commit=0317c90
+
+this runs: backup (§3-§5) -> provision (§7) -> plugin-entry swap (§8).
+it does NOT start OpenCode; you do, then you run --verify.
+[2026-10-31T07:50:08Z] auto-confirmed (--yes): checkpoint+back up the live store, provision the ONNX cache, and replace "opencode-mem@latest" with "/home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin" in /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode.jsonc
+
+== 3. checkpoint the live DBs (runbook §3) ==
+[2026-10-31T07:50:08Z] checkpointing 29 databases under /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem/data
+  data/ai-sessions.db -> 0|0|0
+  data/episodic.db -> 0|0|0
+  data/metadata.db -> 0|0|0
+  data/.profile-learning-coordination.db -> 0|0|0
+  data/projects/project_03b7931d97d0837c_shard_0.db -> 0|0|0
+  data/projects/project_12f3367ad73f86b8_shard_0.db -> 0|0|0
+  data/projects/project_1579634fb04f6a2d_shard_0.db -> 0|0|0
+  data/projects/project_2991cca9ba1ab013_shard_0.db -> 0|0|0
+  data/projects/project_3d5f981354135289_shard_0.db -> 0|0|0
+  data/projects/project_4182e0858e0c93a1_shard_0.db -> 0|0|0
+  data/projects/project_4e0bd88bb61068fc_shard_0.db -> 0|0|0
+  data/projects/project_56c3912b7371f31b_shard_0.db -> 0|0|0
+  data/projects/project_6183486a14210f83_shard_0.db -> 0|0|0
+  data/projects/project_76688b45006c2dc8_shard_0.db -> 0|0|0
+  data/projects/project_8464b82a892b16cf_shard_0.db -> 0|0|0
+  data/projects/project_87e13638a743d4ed_shard_0.db -> 0|0|0
+  data/projects/project_8fbd9ef97319c0dc_shard_0.db -> 0|0|0
+  data/projects/project_a004f9ff6f25bf3f_shard_0.db -> 0|0|0
+  data/projects/project_b6a9ddc693aba750_shard_0.db -> 0|0|0
+  data/projects/project_b7a8895b5cdfe1b9_shard_0.db -> 0|0|0
+  data/projects/project_c4cfb5149f636c54_shard_0.db -> 0|0|0
+  data/projects/project_ceb74de5e6f0f59b_shard_0.db -> 0|0|0
+  data/projects/project_d43861d6ee66ce05_shard_0.db -> 0|0|0
+  data/projects/project_e266c5689d45bee3_shard_0.db -> 0|0|0
+  data/projects/project_f72ad766d333a57c_shard_0.db -> 0|0|0
+  data/projects/project_fd1a5bd594cec6d2_shard_0.db -> 0|0|0
+  data/skills.db -> 0|0|0
+  data/user-profiles.db -> 0|0|0
+  data/user-prompts.db -> 0|0|0
+[2026-10-31T07:50:08Z] removing the derived *-shm / *-tshm sidecars (rebuilt on the next open, §3)
+[2026-10-31T07:50:08Z] checkpoint done: 29 databases, failures=0, non-empty WAL=0, sidecars removed
+
+== 4. dated backup of the whole root + both config files (runbook §4) ==
+[2026-10-31T07:50:09Z] backup root /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups: free=1035663351808 need=1293173462 store=646586731 B
+[2026-10-31T07:50:09Z] cp -a /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T075009Z
+[2026-10-31T07:50:09Z] backup = /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T075009Z (LATEST is written only after §5 passes)
+617M	/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T075009Z
+files=87 dbs=29
+
+== 5. manifest, verify, per-DB integrity (runbook §5) ==
+[2026-10-31T07:50:11Z] MANIFEST.sha256: 87 entries
+[2026-10-31T07:50:13Z] sha256sum -c: 0 failed (87 entries)
+  data/ai-sessions.db ok
+  data/episodic.db ok
+  data/metadata.db ok
+  data/.profile-learning-coordination.db ok
+  data/projects/project_03b7931d97d0837c_shard_0.db ok
+  data/projects/project_12f3367ad73f86b8_shard_0.db ok
+  data/projects/project_1579634fb04f6a2d_shard_0.db ok
+  data/projects/project_2991cca9ba1ab013_shard_0.db ok
+  data/projects/project_3d5f981354135289_shard_0.db ok
+  data/projects/project_4182e0858e0c93a1_shard_0.db ok
+  data/projects/project_4e0bd88bb61068fc_shard_0.db ok
+  data/projects/project_56c3912b7371f31b_shard_0.db ok
+  data/projects/project_6183486a14210f83_shard_0.db ok
+  data/projects/project_76688b45006c2dc8_shard_0.db ok
+  data/projects/project_8464b82a892b16cf_shard_0.db ok
+  data/projects/project_87e13638a743d4ed_shard_0.db ok
+  data/projects/project_8fbd9ef97319c0dc_shard_0.db ok
+  data/projects/project_a004f9ff6f25bf3f_shard_0.db ok
+  data/projects/project_b6a9ddc693aba750_shard_0.db ok
+  data/projects/project_b7a8895b5cdfe1b9_shard_0.db ok
+  data/projects/project_c4cfb5149f636c54_shard_0.db ok
+  data/projects/project_ceb74de5e6f0f59b_shard_0.db ok
+  data/projects/project_d43861d6ee66ce05_shard_0.db ok
+  data/projects/project_e266c5689d45bee3_shard_0.db ok
+  data/projects/project_f72ad766d333a57c_shard_0.db ok
+  data/projects/project_fd1a5bd594cec6d2_shard_0.db ok
+  data/skills.db ok
+  data/user-profiles.db ok
+  data/user-prompts.db ok
+[2026-10-31T07:50:13Z] integrity_check: 29 databases, ok=29, failures=0
+  [ ok ] every copied database passes integrity_check (29/29)
+[2026-10-31T07:50:13Z] wrote /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T075009Z/BACKUP-INFO
+[2026-10-31T07:50:13Z] LATEST -> 20261031T075009Z
+
+backup path: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T075009Z
+rollback   : /home/vaz/Code/Personal/Rust/opencode-agents-memory/scripts/live-swap.sh --rollback   (or --from 20261031T075009Z)
+
+== 7. provision the ONNX cache (runbook §7) ==
+[2026-10-31T07:50:13Z] rehearsal: skipping /home/vaz/Code/Personal/Rust/opencode-agents-memory/scripts/provision-onnx-cache.sh (it writes /tmp, outside the scratch root)
+
+== 8. swap the plugin entry (runbook §8) ==
+[2026-10-31T07:50:14Z] plugin entries: active "opencode-mem@latest"=1, active "/home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin"=0 (commented lines do not count)
+
+planned edit of /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode.jsonc:
+  - "opencode-mem@latest"
+  + "/home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin"
+  (one line, one string; commas, comments and layout untouched)
+the store migration happens at the NEXT start (runbook §6); this script does not start OpenCode.
+[2026-10-31T07:50:14Z] auto-confirmed (--yes): replace "opencode-mem@latest" with "/home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin" in /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode.jsonc (copy kept as .pre-swap-<TS>)
+[2026-10-31T07:50:14Z] pre-swap copy: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode.jsonc.pre-swap-20261031T075014Z
+[2026-10-31T07:50:14Z] swapped the plugin entry in /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode.jsonc
+
+--- diff (pre-swap -> current) ---
+--- /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode.jsonc.pre-swap-20261031T075014Z	2026-10-31 01:57:16.181208945 +0700
++++ /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode.jsonc	2026-10-31 14:50:14.030567543 +0700
+@@ -172,7 +172,7 @@
+         "@mohak34/opencode-notifier@latest",
+         "opencode-antigravity-auth@latest",
+         // "/home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin"
+-        "opencode-mem@latest"
++        "/home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin"
+     ],
+     "providers": {
+         "litellm": {
+
+restore command (any time):
+  cp -a /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode.jsonc.pre-swap-20261031T075014Z /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode.jsonc
+backup (whole store + both configs):
+  /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T075009Z
+
+== next ==
+start OpenCode now, then run:
+  /home/vaz/Code/Personal/Rust/opencode-agents-memory/scripts/live-swap.sh --verify
+expected on the first start (§6, §9): the memory tool answers, the web UI loads, no engine
+stderr beyond consolidation.startup_tick / engine.shutdown_complete. Then quit and start
+once more (the fresh-engine reopen) before the two-workspace check in --verify.
+store migration happens at that start; the backup above is the rollback (§12).
+[2026-10-31T07:50:14Z] finished mode=swap failures=0 warnings=0
+
+exit=0
+
+$ second run (idempotence):
+== 8. swap the plugin entry (runbook §8) ==
+[2026-10-31T07:50:19Z] plugin entries: active "opencode-mem@latest"=0, active "/home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin"=1 (commented lines do not count)
+[2026-10-31T07:50:19Z] the plugin entry is already the local path ("/home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin") — nothing to change (idempotent)
+  [info] config already references /home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin
+restore command: cp -a /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode.jsonc.pre-swap-20261031T075014Z /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/config/opencode.jsonc
+
+== next ==
+start OpenCode now, then run:
+  /home/vaz/Code/Personal/Rust/opencode-agents-memory/scripts/live-swap.sh --verify
+expected on the first start (§6, §9): the memory tool answers, the web UI loads, no engine
+stderr beyond consolidation.startup_tick / engine.shutdown_complete. Then quit and start
+once more (the fresh-engine reopen) before the two-workspace check in --verify.
+store migration happens at that start; the backup above is the rollback (§12).
+[2026-10-31T07:50:19Z] finished mode=swap failures=0 warnings=0
+
+exit=0

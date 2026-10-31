@@ -5,6 +5,12 @@ port. **This document is the procedure; issue 81 is the execution.** Every comma
 copies on 2026-10-30 (evidence: `docs/evidence/live-swap-2026-10-30/`); no step here has been run against
 the live store.
 
+**`scripts/live-swap.sh` is this document as a program** — same order, same expected values. `--help`
+lists the modes; `--dry-run` runs the read-only preflight and prints every command; `--backup`, `--swap`,
+`--verify` and `--rollback` are §3–§5, §7–§8, §9b/§10 and §12; `--rehearse <dir>` points all of it at a
+scratch store copy. Every mode refuses to write while OpenCode or the engine is running. Where the two
+disagree, this document wins and the script is the bug.
+
 - Store: `~/.opencode-mem/data` — at rehearsal **22 project shards / 3,104 memories / 768 dims / 1,745
   prompts / 2 profiles + 10 changelogs / 29 DBs**, plus `data/.cache` (546 MB, the ONNX weights).
 - Config: `~/.config/opencode/opencode.jsonc` (plugin entry) and `~/.config/opencode/opencode-mem.jsonc`

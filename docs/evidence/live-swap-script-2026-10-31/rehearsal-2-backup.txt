@@ -1,0 +1,94 @@
+$ scripts/live-swap.sh --backup --rehearse <scratch> --yes
+[2026-10-31T07:49:14Z] live-swap.sh mode=backup store=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem backups=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups commit=0317c90
+[2026-10-31T07:49:14Z] rehearsal: the live OpenCode process check is skipped (scratch store: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem)
+[2026-10-31T07:49:14Z] rehearsal note: OpenCode is running (pid 12998 25843); nothing live is written
+[2026-10-31T07:49:14Z] about to checkpoint and copy /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem (654637475 B) to /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups
+[2026-10-31T07:49:14Z] auto-confirmed (--yes): checkpoint the live store, delete the derived *-shm/*-tshm sidecars, and copy the whole root to /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/<UTC>
+
+== 3. checkpoint the live DBs (runbook §3) ==
+[2026-10-31T07:49:14Z] checkpointing 29 databases under /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem/data
+  data/ai-sessions.db -> 0|0|0
+  data/episodic.db -> 0|0|0
+  data/metadata.db -> 0|0|0
+  data/.profile-learning-coordination.db -> 0|0|0
+  data/projects/project_03b7931d97d0837c_shard_0.db -> 0|0|0
+  data/projects/project_12f3367ad73f86b8_shard_0.db -> 0|0|0
+  data/projects/project_1579634fb04f6a2d_shard_0.db -> 0|0|0
+  data/projects/project_2991cca9ba1ab013_shard_0.db -> 0|0|0
+  data/projects/project_3d5f981354135289_shard_0.db -> 0|0|0
+  data/projects/project_4182e0858e0c93a1_shard_0.db -> 0|0|0
+  data/projects/project_4e0bd88bb61068fc_shard_0.db -> 0|0|0
+  data/projects/project_56c3912b7371f31b_shard_0.db -> 0|0|0
+  data/projects/project_6183486a14210f83_shard_0.db -> 0|0|0
+  data/projects/project_76688b45006c2dc8_shard_0.db -> 0|0|0
+  data/projects/project_8464b82a892b16cf_shard_0.db -> 0|0|0
+  data/projects/project_87e13638a743d4ed_shard_0.db -> 0|0|0
+  data/projects/project_8fbd9ef97319c0dc_shard_0.db -> 0|0|0
+  data/projects/project_a004f9ff6f25bf3f_shard_0.db -> 0|0|0
+  data/projects/project_b6a9ddc693aba750_shard_0.db -> 0|0|0
+  data/projects/project_b7a8895b5cdfe1b9_shard_0.db -> 0|0|0
+  data/projects/project_c4cfb5149f636c54_shard_0.db -> 0|0|0
+  data/projects/project_ceb74de5e6f0f59b_shard_0.db -> 0|0|0
+  data/projects/project_d43861d6ee66ce05_shard_0.db -> 0|0|0
+  data/projects/project_e266c5689d45bee3_shard_0.db -> 0|0|0
+  data/projects/project_f72ad766d333a57c_shard_0.db -> 0|0|0
+  data/projects/project_fd1a5bd594cec6d2_shard_0.db -> 0|0|0
+  data/skills.db -> 0|0|0
+  data/user-profiles.db -> 0|0|0
+  data/user-prompts.db -> 0|0|0
+[2026-10-31T07:49:14Z] removing the derived *-shm / *-tshm sidecars (rebuilt on the next open, §3)
+[2026-10-31T07:49:14Z] checkpoint done: 29 databases, failures=0, non-empty WAL=0, sidecars removed
+
+== 4. dated backup of the whole root + both config files (runbook §4) ==
+[2026-10-31T07:49:14Z] backup root /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups: free=1035664871424 need=1293148566 store=646574283 B
+[2026-10-31T07:49:14Z] cp -a /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T074914Z
+[2026-10-31T07:49:14Z] backup = /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T074914Z (LATEST is written only after §5 passes)
+617M	/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T074914Z
+files=85 dbs=29
+
+== 5. manifest, verify, per-DB integrity (runbook §5) ==
+[2026-10-31T07:49:17Z] MANIFEST.sha256: 85 entries
+[2026-10-31T07:49:19Z] sha256sum -c: 0 failed (85 entries)
+  data/ai-sessions.db ok
+  data/episodic.db ok
+  data/metadata.db ok
+  data/.profile-learning-coordination.db ok
+  data/projects/project_03b7931d97d0837c_shard_0.db ok
+  data/projects/project_12f3367ad73f86b8_shard_0.db ok
+  data/projects/project_1579634fb04f6a2d_shard_0.db ok
+  data/projects/project_2991cca9ba1ab013_shard_0.db ok
+  data/projects/project_3d5f981354135289_shard_0.db ok
+  data/projects/project_4182e0858e0c93a1_shard_0.db ok
+  data/projects/project_4e0bd88bb61068fc_shard_0.db ok
+  data/projects/project_56c3912b7371f31b_shard_0.db ok
+  data/projects/project_6183486a14210f83_shard_0.db ok
+  data/projects/project_76688b45006c2dc8_shard_0.db ok
+  data/projects/project_8464b82a892b16cf_shard_0.db ok
+  data/projects/project_87e13638a743d4ed_shard_0.db ok
+  data/projects/project_8fbd9ef97319c0dc_shard_0.db ok
+  data/projects/project_a004f9ff6f25bf3f_shard_0.db ok
+  data/projects/project_b6a9ddc693aba750_shard_0.db ok
+  data/projects/project_b7a8895b5cdfe1b9_shard_0.db ok
+  data/projects/project_c4cfb5149f636c54_shard_0.db ok
+  data/projects/project_ceb74de5e6f0f59b_shard_0.db ok
+  data/projects/project_d43861d6ee66ce05_shard_0.db ok
+  data/projects/project_e266c5689d45bee3_shard_0.db ok
+  data/projects/project_f72ad766d333a57c_shard_0.db ok
+  data/projects/project_fd1a5bd594cec6d2_shard_0.db ok
+  data/skills.db ok
+  data/user-profiles.db ok
+  data/user-prompts.db ok
+[2026-10-31T07:49:19Z] integrity_check: 29 databases, ok=29, failures=0
+  [ ok ] every copied database passes integrity_check (29/29)
+[2026-10-31T07:49:19Z] wrote /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T074914Z/BACKUP-INFO
+[2026-10-31T07:49:19Z] LATEST -> 20261031T074914Z
+
+backup path: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups/20261031T074914Z
+rollback   : /home/vaz/Code/Personal/Rust/opencode-agents-memory/scripts/live-swap.sh --rollback   (or --from 20261031T074914Z)
+
+== done ==
+[2026-10-31T07:49:19Z] backup complete; the store was not migrated (that is the next start, §6)
+start OpenCode when you are ready: /home/vaz/Code/Personal/Rust/opencode-agents-memory/scripts/live-swap.sh --swap first, or quit again and re-run this script for a newer backup.
+[2026-10-31T07:49:19Z] finished mode=backup failures=0 warnings=0
+
+exit=0

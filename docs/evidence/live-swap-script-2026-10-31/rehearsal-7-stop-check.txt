@@ -1,0 +1,4 @@
+$ scripts/live-swap.sh --swap --rehearse <scratch> --yes   (engine still up)
+[2026-10-31T07:50:02Z] live-swap.sh mode=swap store=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem backups=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/backups commit=0317c90
+live-swap: an engine is still running for /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem/data (pid 22706) — quit OpenCode and wait for it to exit (§2)
+exit=1

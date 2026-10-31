@@ -1,0 +1,51 @@
+$ scripts/live-swap.sh --verify --rehearse <scratch> --web-port 3799
+(engine: the staged plugin/engine/linux-x64 binary, started by hand against the
+scratch store on port 3799 — the script never starts OpenCode or the engine)
+
+
+== verify (runbook §9b/§10) — after OpenCode started ==
+  [info] OpenCode host pid(s): 12998 25843
+  [ ok ] exactly one engine for this store: pid 22706
+  [info] rehearsal: the engine's parent (ppid=1) is this shell, not an OpenCode host — on the live host this is the FAIL that reopens the socket-service question (§9b fact 3)
+  [ ok ] the store lock names the running engine (pid 22706)
+
+== web surface (runbook §1, §10 rows 11-12) ==
+  [info] engine web port: 3799 (config webServerPort 4747 is not forwarded)
+  [ ok ] /api/health = {"success":true,"status":"ok","authEnabled":false}
+  [ ok ] /api/stats answered 401 — the first gated call, which mints the token (§7)
+  [ ok ] token minted at /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rehearsal-final/opencode-mem/data/.auth-token (64 chars) — NOT ~/.opencode-mem/.auth-token
+
+== search + add canary (runbook §7, battery row 12) ==
+  [ ok ] search works: 28 hit(s), top similarity 0.561898096957182 (runbook: rank 1 ≈0.54)
+  [info] top id: mem_1792900662953_j6e64unbf
+  [ ok ] add works: canary stored as mem_1793432995330_4437592d7 (tag opencode_project_4182e0858e0c93a1)
+  [info] the canary is one real memory row; delete it in the web UI if you do not want it
+  [ ok ] the canary is findable (rank 1) — add then search round-trips
+
+== store versions (runbook §6) — after the canary touched the store ==
+  [ ok ] metadata.db is version 2 (migrated)
+  [ ok ] user-prompts.db is version 2
+  [info] project shards: total=22 v3=1 v2=21 other=0 (2->3 is lazy, on the first write to that project, §6)
+
+== status file (bridge-schema §7) ==
+  [ ok ] no status file — no instance reported a degradation
+
+== store counts ==
+  [info] dbs=29 files=159 project_shards=22
+
+MANUAL — the live discriminator this script cannot run (runbook §10 rows 1-2):
+  with OpenCode running, open TWO different workspaces (two agent instances/locations)
+  and call the "memory" tool with mode:"list-shards" in BOTH. Each must answer
+  success:true, storagePath=~/.opencode-mem/data, 22 shards, current 1 / linked 20 /
+  orphaned 1. Pre-fix the second workspace answered engine_unavailable (issue 82).
+  Also: memory mode:"help" in both must report engine_version 0.1.0, protocol 1.0.0,
+  unavailable: [] — and one call with options.codemode:false must succeed.
+  Then the host endpoints: curl http://127.0.0.1:<host-port>/api/skill (contains
+  opencode-mem.memory-usage) and /api/plugin (state active, source.type local).
+
+== summary ==
+  failures=0 warnings=0
+  the engine-side battery is green; the two-workspace check above is still yours to run.
+[2026-10-31T07:49:55Z] finished mode=verify failures=0 warnings=0
+
+exit=0
