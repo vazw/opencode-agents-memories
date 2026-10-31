@@ -1,0 +1,27 @@
+# Mutant M2 — resolve_paths backup-root-outside-the-store refusal deleted (review-2 §5/§10.2: M2 must stay red)
+# tree: .tmp/scratch/rework3-wt (git archive 38b9241 + this tree's two scripts, git init)
+# script_sha256=c85d58f372830d09a4a3fdfdc2975be4ccb73c134b706bf046b4b742016b2013 (mutant; pristine 1fdf75f0bd2e51bfd9f7822b977f149fb01b84b63ff57505d3da26b4a60af346)
+# test_sha256=357ff0ffbf8442248428782d99a9994708e8fc3a0fbaff5475f524f25c69e310
+# command: bash scripts/test-live-swap.sh
+
+ok   case_01_help_names_every_mode
+ok   case_02_bare_invocation_writes_nothing
+ok   case_03_dry_run_fails_on_a_missing_store
+ok   case_04_swap_replaces_one_active_line_only
+ok   case_05_swap_refuses_a_double_edit
+ok   case_06_swap_is_idempotent
+ok   case_07_swap_refuses_an_unrelated_config
+ok   case_08_rehearse_refuses_a_live_path
+ok   case_09_backup_writes_a_verified_manifest
+ok   case_10_the_manifest_is_behavioural
+ok   case_11_rollback_refuses_a_post_swap_backup
+ok   case_12_rollback_restores_bytes_and_keeps_the_port_era_store
+ok   case_13_backup_does_not_publish_a_bad_restore_point
+FAIL case_14_backup_root_must_live_outside_the_store — the refusal does not name the outside-the-store rule
+       live-swap: OpenCode is running (pid 12998 25843) — quit the application, then re-run (§2)
+ok   case_15_engine_lock_naming_a_live_pid_is_refused
+ok   case_16_a_non_empty_wal_is_a_refusal_not_a_delete
+ok   case_17_rollback_refuses_a_backup_that_does_not_verify
+wall time: 8s
+FAIL 16/17
+rc=1

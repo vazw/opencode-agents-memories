@@ -1,3 +1,7 @@
+# lint + --help, re-run after review-2
+# script_sha256=1fdf75f0bd2e51bfd9f7822b977f149fb01b84b63ff57505d3da26b4a60af346
+# test_sha256=357ff0ffbf8442248428782d99a9994708e8fc3a0fbaff5475f524f25c69e310
+
 $ bash -n scripts/live-swap.sh scripts/test-live-swap.sh
 rc=0
 
@@ -101,6 +105,8 @@ OPTIONS
   --from TS            --rollback: restore this backup instead of LATEST.
                        TS must be a dated stamp (20261030T175230Z), optional
                        -N collision suffix; `/`, `..` and paths are rejected.
+                       Validated in every mode, so a malformed TS exits 2 even
+                       where the mode ignores it.
   -h, --help           This text.
 
 SEQUENCE (the runbook's order)

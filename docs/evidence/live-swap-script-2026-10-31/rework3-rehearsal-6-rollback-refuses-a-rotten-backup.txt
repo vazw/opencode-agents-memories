@@ -1,0 +1,24 @@
+# Rehearsal — a backup that no longer verifies is refused before any write (review-2 §4.3)
+# tree: .tmp/scratch/rework3f-rehearsal
+# script_sha256=1fdf75f0bd2e51bfd9f7822b977f149fb01b84b63ff57505d3da26b4a60af346
+
+$ printf 'x' >> .tmp/scratch/rework3f-rehearsal/backups/20261031T084349Z/data/metadata.db
+rc=0
+
+$ snapshot the store and config before the attempt
+store files: 83, config files: 2
+data.port-* dirs before: 1
+
+$ ./scripts/live-swap.sh --rollback --rehearse .tmp/scratch/rework3f-rehearsal --yes --from 20261031T084349Z
+[2026-10-31T08:44:24Z] rehearsal: the live OpenCode process check is skipped (scratch store: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/opencode-mem)
+[2026-10-31T08:44:24Z] rehearsal note: OpenCode is running (pid 12998 25843); nothing live is written
+[2026-10-31T08:44:24Z] live-swap.sh mode=rollback store=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/opencode-mem backups=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/backups commit=38b9241
+./data/metadata.db: FAILED
+sha256sum: WARNING: 1 computed checksum did NOT match
+live-swap: the backup does not verify (§5) — not restoring
+rc=1
+
+$ after the refusal
+store unchanged
+config unchanged
+data.port-* dirs after: 1

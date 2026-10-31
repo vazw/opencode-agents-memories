@@ -1,4 +1,5 @@
 # §4.8 nit — a refused writing mode must not create the backup root or swap.log
+# script_sha256=caa3cf75eb6a42c7d17af4eb27f8170dbc39597a32ad18ab46b95a3cb01368f1 (the 38b9241 scripts these ran; `commit=807a739` is that scratch tree HEAD, not the script)
 $ printf '{"pid":8227,...}' > opencode-mem/data/.engine.lock
 $ ./scripts/live-swap.sh --backup --rehearse .tmp/scratch/rework2-nits --yes
 live-swap: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-nits/opencode-mem/data/.engine.lock names a live pid 8227 — the store is still owned (§2)

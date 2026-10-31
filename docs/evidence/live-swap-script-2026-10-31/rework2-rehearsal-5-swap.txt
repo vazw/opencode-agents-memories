@@ -1,4 +1,5 @@
 # Rehearsal --swap on the fake config (scratch tree only), rework-2
+# script_sha256=caa3cf75eb6a42c7d17af4eb27f8170dbc39597a32ad18ab46b95a3cb01368f1 (the 38b9241 scripts these ran; `commit=807a739` is that scratch tree HEAD, not the script)
 $ ./scripts/live-swap.sh --swap --rehearse .tmp/scratch/rework2-rehearsal --yes
   [warn] the staged engine is OLDER than /home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin/dist/plugin.js — rebuild it first (plugin/scripts/stage-engine.sh, issue 81)
 [2026-10-31T08:15:52Z] rehearsal: the live OpenCode process check is skipped (scratch store: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/opencode-mem)

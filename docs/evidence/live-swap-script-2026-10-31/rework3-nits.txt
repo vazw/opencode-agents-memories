@@ -1,0 +1,23 @@
+# The review-2 §4.5 nits, measured
+# script_sha256=1fdf75f0bd2e51bfd9f7822b977f149fb01b84b63ff57505d3da26b4a60af346
+
+# 1. --from with no value: exit 2 and a clean message (was rc 1 + a raw bash ${2:?} text)
+$ ./scripts/live-swap.sh --rollback --from
+live-swap: --from needs a backup stamp
+rc=2
+
+$ ./scripts/live-swap.sh --rollback --from ""
+live-swap: --from needs a backup stamp
+rc=2
+
+# 2. --from is validated in every mode; the help now says so (behaviour unchanged on purpose)
+$ ./scripts/live-swap.sh --dry-run --from evil
+live-swap: --from must be a backup stamp like 20261030T175230Z (got: evil)
+rc=2
+
+# 3. a missing dist/plugin.js no longer prints the misleading "engine is OLDER" warning
+$ ./scripts/live-swap.sh --dry-run --store .tmp/scratch/rework3f-rehearsal/opencode-mem --config-dir .tmp/scratch/rework3f-rehearsal/config --backup-root .tmp/scratch/rework3f-rehearsal/backups --plugin-dir .tmp/scratch/rework3-noplugin
+== 1c. plugin dist + staged engine (§8, issue 81) ==
+  [FAIL] plugin bundle missing: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-noplugin/dist/plugin.js
+  [FAIL] no staged engine at /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-noplugin/engine/linux-x64/opencode-agents-memory — run plugin/scripts/stage-engine.sh
+(excerpt: no OLDER line above)

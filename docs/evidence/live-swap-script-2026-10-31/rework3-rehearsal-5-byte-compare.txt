@@ -1,0 +1,20 @@
+# Independent compare — not the script's diff -r
+# tree: .tmp/scratch/rework3f-rehearsal
+# script_sha256=1fdf75f0bd2e51bfd9f7822b977f149fb01b84b63ff57505d3da26b4a60af346
+
+$ per-file sha256, backup/data vs restored data/
+identical: 60 of 60 files hash identically
+
+$ cmp configs
+opencode.jsonc byte-identical
+opencode-mem.jsonc byte-identical
+
+$ restored store versions
+metadata user_version = 1
+shard user_version = 2
+marker absent
+
+$ moved-aside port-era store
+metadata user_version = 2
+shard user_version = 3
+marker PRESENT (kept for diagnosis)

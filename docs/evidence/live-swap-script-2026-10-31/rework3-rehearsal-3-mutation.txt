@@ -1,0 +1,17 @@
+# Rehearsal mutation — the port era, on the scratch copy only
+# tree: .tmp/scratch/rework3f-rehearsal
+# script_sha256=1fdf75f0bd2e51bfd9f7822b977f149fb01b84b63ff57505d3da26b4a60af346
+
+$ sqlite3 .../data/metadata.db 'PRAGMA user_version=2;'
+rc=0
+
+$ sqlite3 .../data/projects/project_03b7931d97d0837c_shard_0.db 'PRAGMA user_version=3;'
+rc=0
+
+$ printf 'port era\n' > .../data/port-era.txt
+rc=0
+
+$ verify
+metadata user_version = 2
+shard user_version = 3
+-rw-r--r-- 1 vaz vaz 9 ต.ค.  31 15:44 .tmp/scratch/rework3f-rehearsal/opencode-mem/data/port-era.txt

@@ -9,7 +9,7 @@
 # read-only (`rev-parse`).
 #
 # Usage: bash scripts/test-live-swap.sh
-# Exit:  0 when all 16 cases pass, 1 otherwise.
+# Exit:  0 when all 17 cases pass, 1 otherwise.
 set -uo pipefail
 
 SECONDS=0
@@ -22,7 +22,7 @@ swap=$repo_root/scripts/live-swap.sh
 plugin=$repo_root/plugin
 work=$repo_root/.tmp/scratch/live-swap-selftest
 ok=0
-total=16
+total=17
 case_reason=
 case_out=
 
@@ -164,7 +164,7 @@ case_02_bare_invocation_writes_nothing() {
 		return 1
 
 	fi
-	case $case_out in *'dry-run'*) ;; *) bfail 'a bare invocation did not run the dry-run mode' ;; esac
+	case $case_out in *'dry-run'*) ;; *) bfail 'a bare invocation did not run the dry-run mode'; return 1 ;; esac
 	return 0
 }
 
@@ -175,7 +175,7 @@ case_03_dry_run_fails_on_a_missing_store() {
 		return 1
 
 	fi
-	case $case_out in *'[FAIL] store root/data not found'*) ;; *) bfail 'the missing store was not reported as FAIL' ;; esac
+	case $case_out in *'[FAIL] store root/data not found'*) ;; *) bfail 'the missing store was not reported as FAIL'; return 1 ;; esac
 	return 0
 }
 
@@ -231,7 +231,7 @@ case_05_swap_refuses_a_double_edit() {
 		return 1
 
 	fi
-	case $case_out in *'double edit'*) ;; *) bfail 'the refusal does not name the double edit' ;; esac
+	case $case_out in *'double edit'*) ;; *) bfail 'the refusal does not name the double edit'; return 1 ;; esac
 	return 0
 }
 
@@ -248,7 +248,7 @@ case_06_swap_is_idempotent() {
 		return 1
 
 	fi
-	case $case_out in *'nothing to change (idempotent)'*) ;; *) bfail 'the second swap did not report idempotence' ;; esac
+	case $case_out in *'nothing to change (idempotent)'*) ;; *) bfail 'the second swap did not report idempotence'; return 1 ;; esac
 	if [ "$(sha256sum "$r/config/opencode.jsonc" | cut -d' ' -f1)" != "$first" ]; then
 		bfail 'the second swap modified the config again'
 		return 1
@@ -289,7 +289,7 @@ case_08_rehearse_refuses_a_live_path() {
 		return 1
 
 	fi
-	case $case_out in *'inside the live store'*) ;; *) bfail 'the live-path refusal is not explicit' ;; esac
+	case $case_out in *'inside the live store'*) ;; *) bfail 'the live-path refusal is not explicit'; return 1 ;; esac
 	invoke --dry-run --rehearse "$HOME"
 	if [ "$case_rc" -ne 1 ]; then
 		bfail '--rehearse pointed at a directory containing the live store must be refused'
@@ -387,8 +387,8 @@ case_11_rollback_refuses_a_post_swap_backup() {
 		return 1
 
 	fi
-	case $case_out in *'was taken AFTER the swap'*) ;; *) bfail 'the refusal does not explain the post-swap config' ;; esac
-	case $case_out in *'20260101T000000Z'*) ;; *) bfail 'the refusal does not name the pre-swap backup' ;; esac
+	case $case_out in *'was taken AFTER the swap'*) ;; *) bfail 'the refusal does not explain the post-swap config'; return 1 ;; esac
+	case $case_out in *'20260101T000000Z'*) ;; *) bfail 'the refusal does not name the pre-swap backup'; return 1 ;; esac
 	if [ "$(sha_tree "$r/opencode-mem")" != "$before" ]; then
 		bfail 'the refused rollback modified the store'
 		return 1
@@ -427,6 +427,26 @@ case_12_rollback_restores_bytes_and_keeps_the_port_era_store() {
 		bfail 'the port-era file survived into the restored store'
 		return 1
 	fi
+	# §4.1(a)/§4.7: with no LATEST a bare --rollback falls back to the newest
+	# backup carrying BOTH MANIFEST.sha256 and BACKUP-INFO. The fallback note
+	# must not be captured into the stamp (it was, before RESOLVED_TS).
+	mv "$r/backups/LATEST" "$r/backups/LATEST.hold"
+	invoke --rollback --rehearse "$r" --yes
+	if [ "$case_rc" -ne 0 ]; then
+		bfail "the no-LATEST fallback failed: $case_out"
+		return 1
+	fi
+	case $case_out in
+	*"no LATEST pointer; using the newest dated backup: $ts"*) ;;
+	*)
+		bfail 'the no-LATEST fallback did not name the backup it used'
+		return 1
+		;;
+	esac
+	if [ "$(sha_tree "$r/opencode-mem/data")" != "$expected" ]; then
+		bfail 'the fallback restore is not byte-identical to the backup'
+		return 1
+	fi
 	return 0
 }
 
@@ -444,7 +464,7 @@ case_13_backup_does_not_publish_a_bad_restore_point() {
 		return 1
 
 	fi
-	case $case_out in *'integrity_check failed'*) ;; *) bfail 'the integrity failure is not named' ;; esac
+	case $case_out in *'integrity_check failed'*) ;; *) bfail 'the integrity failure is not named'; return 1 ;; esac
 	return 0
 }
 
@@ -522,6 +542,43 @@ case_16_a_non_empty_wal_is_a_refusal_not_a_delete() {
 	return 0
 }
 
+case_17_rollback_refuses_a_backup_that_does_not_verify() {
+	mkrehearsal rotten || { bfail 'fixture setup failed'; return 1; }
+	"$swap" --backup --rehearse "$r" --yes >/dev/null 2>&1 || { bfail 'the backup failed'; return 1; }
+	local ts='' dir='' store_before='' config_before=''
+	ts=$(cat "$r/backups/LATEST")
+	dir=$r/backups/$ts
+	# one byte past the manifest: the directory is no longer a restore point
+	printf 'x' >>"$dir/data/metadata.db"
+	store_before=$(sha_tree "$r/opencode-mem")
+	config_before=$(sha_tree "$r/config")
+	invoke --rollback --rehearse "$r" --yes --from "$ts"
+	if [ "$case_rc" -ne 1 ]; then
+		bfail "a backup that does not verify must be refused (rc 1), got $case_rc"
+		return 1
+	fi
+	case $case_out in
+	*'does not verify (§5)'*) ;;
+	*)
+		bfail 'the refusal does not say the backup failed to verify'
+		return 1
+		;;
+	esac
+	if [ "$(sha_tree "$r/opencode-mem")" != "$store_before" ]; then
+		bfail 'the refused rollback modified the store'
+		return 1
+	fi
+	if [ "$(sha_tree "$r/config")" != "$config_before" ]; then
+		bfail 'the refused rollback modified the config'
+		return 1
+	fi
+	if [ -n "$(find "$r/backups" -maxdepth 1 -type d -name 'data.port-*' -print -quit)" ]; then
+		bfail 'the refused rollback moved the port-era store aside'
+		return 1
+	fi
+	return 0
+}
+
 run() {
 	local fn=$1
 	case_reason=
@@ -553,6 +610,7 @@ run case_13_backup_does_not_publish_a_bad_restore_point
 run case_14_backup_root_must_live_outside_the_store
 run case_15_engine_lock_naming_a_live_pid_is_refused
 run case_16_a_non_empty_wal_is_a_refusal_not_a_delete
+run case_17_rollback_refuses_a_backup_that_does_not_verify
 
 printf 'wall time: %ss\n' "$SECONDS"
 if [ "$ok" -eq "$total" ]; then

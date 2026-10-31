@@ -1,4 +1,5 @@
 # Independent byte compare (not the script diff -r), rework-2
+# script_sha256=caa3cf75eb6a42c7d17af4eb27f8170dbc39597a32ad18ab46b95a3cb01368f1 (the 38b9241 scripts these ran; `commit=807a739` is that scratch tree HEAD, not the script)
 $ sha256sum over backup/data and restored data (path-relative, sorted)
 backup_files=60 restored_files=60
 data/: every file hashes identically (0 differing)

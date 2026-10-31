@@ -1,0 +1,53 @@
+# Mutant M1 — make_backup writes BACKUP-INFO to /dev/null (review-2 §5/§10.2: M1 must stay red)
+# tree: .tmp/scratch/rework3-wt (git archive 38b9241 + this tree's two scripts, git init)
+# script_sha256=d795100932e69bbb25bf69781e0a768fcd661b7549cfa8a0cd6bbf0d9df52baa (mutant; pristine 1fdf75f0bd2e51bfd9f7822b977f149fb01b84b63ff57505d3da26b4a60af346)
+# test_sha256=357ff0ffbf8442248428782d99a9994708e8fc3a0fbaff5475f524f25c69e310
+# command: bash scripts/test-live-swap.sh
+
+ok   case_01_help_names_every_mode
+ok   case_02_bare_invocation_writes_nothing
+ok   case_03_dry_run_fails_on_a_missing_store
+ok   case_04_swap_replaces_one_active_line_only
+ok   case_05_swap_refuses_a_double_edit
+ok   case_06_swap_is_idempotent
+ok   case_07_swap_refuses_an_unrelated_config
+ok   case_08_rehearse_refuses_a_live_path
+FAIL case_09_backup_writes_a_verified_manifest — no BACKUP-INFO completeness marker
+       [2026-10-31T08:43:06Z] rehearsal: the live OpenCode process check is skipped (scratch store: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/backup/opencode-mem)
+       [2026-10-31T08:43:06Z] rehearsal note: OpenCode is running (pid 12998 25843); nothing live is written
+       [2026-10-31T08:43:06Z] live-swap.sh mode=backup store=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/backup/opencode-mem backups=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/backup/backups commit=7d42b23
+       [2026-10-31T08:43:06Z] about to checkpoint and copy /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/backup/opencode-mem (16402 B) to /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/backup/backups
+       [2026-10-31T08:43:06Z] auto-confirmed (--yes): checkpoint the live store, delete the derived *-shm/*-tshm sidecars, and copy the whole root to /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/backup/backups/<UTC>
+       
+       == 3. checkpoint the live DBs (runbook §3) ==
+       [2026-10-31T08:43:06Z] checkpointing 2 databases under /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/backup/opencode-mem/data
+         data/metadata.db -> 0|-1|-1
+         data/skills.db -> 0|-1|-1
+       [2026-10-31T08:43:06Z] removing the derived *-shm / *-tshm sidecars (rebuilt on the next open, §3)
+       [2026-10-31T08:43:06Z] checkpoint done: 2 databases, failures=0, non-empty WAL=0, sidecars removed
+       
+       == 4. dated backup of the whole root + both config files (runbook §4) ==
+       [2026-10-31T08:43:06Z] backup root /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/backup/backups: free=1035561930752 need=32804 store=16402 B
+       [2026-10-31T08:43:06Z] cp -a /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/backup/opencode-mem /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/backup/backups/20261031T084306Z
+       [2026-10-31T08:43:06Z] backup = /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/backup/backups/20261031T084306Z (LATEST is written only after §5 passes)
+       28K	/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/backup/backups/20261031T084306Z
+       files=5 dbs=2
+       
+ok   case_10_the_manifest_is_behavioural
+ok   case_11_rollback_refuses_a_post_swap_backup
+FAIL case_12_rollback_restores_bytes_and_keeps_the_port_era_store — the no-LATEST fallback failed: [2026-10-31T08:43:08Z] rehearsal: the live OpenCode process check is skipped (scratch store: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/restore/opencode-mem)
+[2026-10-31T08:43:08Z] rehearsal note: OpenCode is running (pid 12998 25843); nothing live is written
+[2026-10-31T08:43:08Z] live-swap.sh mode=rollback store=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/restore/opencode-mem backups=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/restore/backups commit=7d42b23
+live-swap: no verified backup found under /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/restore/backups (§12)
+       [2026-10-31T08:43:08Z] rehearsal: the live OpenCode process check is skipped (scratch store: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/restore/opencode-mem)
+       [2026-10-31T08:43:08Z] rehearsal note: OpenCode is running (pid 12998 25843); nothing live is written
+       [2026-10-31T08:43:08Z] live-swap.sh mode=rollback store=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/restore/opencode-mem backups=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/restore/backups commit=7d42b23
+       live-swap: no verified backup found under /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/restore/backups (§12)
+ok   case_13_backup_does_not_publish_a_bad_restore_point
+ok   case_14_backup_root_must_live_outside_the_store
+ok   case_15_engine_lock_naming_a_live_pid_is_refused
+ok   case_16_a_non_empty_wal_is_a_refusal_not_a_delete
+ok   case_17_rollback_refuses_a_backup_that_does_not_verify
+wall time: 8s
+FAIL 15/17
+rc=1

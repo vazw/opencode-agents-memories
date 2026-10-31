@@ -263,6 +263,8 @@ OPTIONS
   --from TS            --rollback: restore this backup instead of LATEST.
                        TS must be a dated stamp (20261030T175230Z), optional
                        -N collision suffix; `/`, `..` and paths are rejected.
+                       Validated in every mode, so a malformed TS exits 2 even
+                       where the mode ignores it.
   -h, --help           This text.
 
 SEQUENCE (the runbook's order)
@@ -324,7 +326,11 @@ parse_args() {
 			shift
 			;;
 		--from)
-			FROM_TS=${2:?--from needs a backup stamp}
+			if [ $# -lt 2 ] || [ -z "$2" ]; then
+				printf 'live-swap: --from needs a backup stamp\n' >&2
+				exit 2
+			fi
+			FROM_TS=$2
 			if ! valid_restore_stamp "$FROM_TS"; then
 				printf 'live-swap: --from must be a backup stamp like 20261030T175230Z (got: %s)\n' "$FROM_TS" >&2
 				exit 2
@@ -1003,7 +1009,10 @@ dry_run() {
 			else
 				ck_fail "no web UI bundle beside the engine ($webdist) — the web surface degrades (§9/issue 36)"
 			fi
-			if engine_is_stale; then
+			# Only compare against a bundle that exists: with dist/plugin.js
+			# missing, `-ot` is true and the warning would land on top of the
+			# real FAIL above.
+			if [ -f "$PLUGIN_DIR/dist/plugin.js" ] && engine_is_stale; then
 				ck_warn 'the staged engine is OLDER than dist/plugin.js — rebuild it from landed main (plugin/scripts/stage-engine.sh, issue 81)'
 			fi
 		else
@@ -1057,7 +1066,7 @@ dry_run() {
 				ck_warn "LATEST was taken AFTER the swap (its config already points at the port) — --rollback needs --from an earlier backup (§12)"
 			fi
 		else
-			ck_warn "no LATEST pointer yet — --backup writes one. A bare --rollback only falls back to a dated backup holding BOTH MANIFEST.sha256 and BACKUP-INFO; a hand-made backup without BACKUP-INFO (the live machine's 20261030T175230Z is one) is not used — pass --from <TS> (§12)"
+			ck_warn "no LATEST pointer yet — --backup writes one. A bare --rollback only falls back to a dated backup holding BOTH MANIFEST.sha256 and BACKUP-INFO; a hand-made backup without BACKUP-INFO (the live machine's 20261030T175230Z is one) is not a fallback candidate, and its config/opencode.jsonc already carries the active $PLUGIN_DIR entry, so --rollback cannot restore the plugin entry from it either. --swap takes the first valid rollback backup before it edits the config — keep the pre-swap stamp it prints (§12)"
 		fi
 		local newest=''
 		newest=$(find "$BACKUP_ROOT" -maxdepth 1 -type d -name '20*' | sort | tail -n 1 || true)
@@ -1402,6 +1411,10 @@ verify_summary() {
 	fi
 }
 
+# resolve_restore_ts — set RESOLVED_TS to the stamp to restore (LATEST, the
+# newest verified fallback, or --from). Deliberately not a command
+# substitution: log() writes to stdout, so capturing it would corrupt the
+# stamp, and the fallback note would never reach swap.log.
 resolve_restore_ts() {
 	local chosen=$FROM_TS
 	if [ -z "$chosen" ]; then
@@ -1424,7 +1437,7 @@ resolve_restore_ts() {
 	# stamp: only a dated directory name may become a restore path (§12).
 	valid_restore_stamp "$chosen" || die "not a backup stamp: $chosen — refusing to restore from it (§12)"
 	[ -d "$BACKUP_ROOT/$chosen" ] || die "backup not found: $BACKUP_ROOT/$chosen"
-	printf '%s' "$chosen"
+	RESOLVED_TS=$chosen
 }
 
 run_rollback_mode() {
@@ -1433,7 +1446,8 @@ run_rollback_mode() {
 	require_stopped
 	begin_writing_log
 	local ts='' backup='' aside='' saved=''
-	ts=$(resolve_restore_ts)
+	resolve_restore_ts
+	ts=$RESOLVED_TS
 	backup=$BACKUP_ROOT/$ts
 	[ -d "$backup/data" ] || die "the backup has no data/: $backup (§12)"
 	[ -f "$backup/config/opencode.jsonc" ] || die "the backup has no config/opencode.jsonc: $backup"
@@ -1445,14 +1459,23 @@ run_rollback_mode() {
 	# nothing. Refuse and name the pre-swap candidates instead.
 	local to="\"$PLUGIN_DIR\""
 	if [ "$(count_active_entry "$backup/config/opencode.jsonc" "$to")" -ge 1 ]; then
-		local candidates='' d=''
+		local candidates='' d='' remedy=''
 		for d in $(find "$BACKUP_ROOT" -maxdepth 1 -type d -name '20*' | sort -r); do
 			if [ -f "$d/config/opencode.jsonc" ] &&
 				[ "$(count_active_entry "$d/config/opencode.jsonc" "$to")" -eq 0 ]; then
 				candidates="$candidates $(basename -- "$d")"
 			fi
 		done
-		die "the backup $ts was taken AFTER the swap: its config/opencode.jsonc already points at $PLUGIN_DIR, so restoring it would not revert the plugin entry (§12). Pre-swap backups:${candidates:- none found} — pass --from <TS>"
+		if [ -n "$candidates" ]; then
+			if [ -n "$FROM_TS" ]; then
+				remedy=' — the --from value must be one of those stamps'
+			else
+				remedy=' — pass --from <TS> with one of those stamps'
+			fi
+		else
+			remedy=' — no backup on disk holds the pre-swap config, so no restore point brings the plugin entry back; the first valid one is the backup --swap takes before it edits the config (§12)'
+		fi
+		die "the backup $ts was taken AFTER the swap: its config/opencode.jsonc already points at $PLUGIN_DIR, so restoring it would not revert the plugin entry (§12). Pre-swap backups:${candidates:- none found}${remedy}"
 	fi
 
 	# §5: a restore point is a directory whose manifest verifies. diff -r below
@@ -1518,6 +1541,7 @@ run_rollback_mode() {
 }
 
 unique_suffix=
+RESOLVED_TS=
 
 # ── main ──────────────────────────────────────────────────────────────────
 main() {

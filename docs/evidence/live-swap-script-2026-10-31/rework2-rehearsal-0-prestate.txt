@@ -1,4 +1,5 @@
 # Rehearsal pre-state — a copy of the live store + a fake config (rework-2)
+# script_sha256=caa3cf75eb6a42c7d17af4eb27f8170dbc39597a32ad18ab46b95a3cb01368f1 (the 38b9241 scripts these ran; `commit=807a739` is that scratch tree HEAD, not the script)
 $ du -sh, file/db counts, metadata user_version, config sha256
 624M	/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/opencode-mem
 files=151

@@ -1,4 +1,5 @@
 # §4.4 / security gate mandate 3 — --from accepts only a dated backup stamp
+# script_sha256=caa3cf75eb6a42c7d17af4eb27f8170dbc39597a32ad18ab46b95a3cb01368f1 (the 38b9241 scripts these ran; `commit=807a739` is that scratch tree HEAD, not the script)
 # (review-1 measured `--from ../evil` restoring configs from <backup-root>/../evil)
 $ ./scripts/live-swap.sh --rollback --rehearse R --yes --from ../evil
 live-swap: --from must be a backup stamp like 20261030T175230Z (got: ../evil)

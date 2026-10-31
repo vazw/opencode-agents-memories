@@ -1,14 +1,17 @@
 $ ./scripts/live-swap.sh --dry-run   # live machine, OpenCode running; read-only
+# script_sha256=1fdf75f0bd2e51bfd9f7822b977f149fb01b84b63ff57505d3da26b4a60af346
+# commit=38b9241 (this working tree)
+
 
 == live-swap --dry-run (reads only; nothing is written) ==
-[2026-10-31T08:14:16Z] store=/home/vaz/.opencode-mem config=/home/vaz/.config/opencode backups=/home/vaz/.opencode-mem-backups plugin=/home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin
+[2026-10-31T08:44:59Z] store=/home/vaz/.opencode-mem config=/home/vaz/.config/opencode backups=/home/vaz/.opencode-mem-backups plugin=/home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin
 
 == 1. preflight (runbook §1) ==
   [ ok ] store root exists: /home/vaz/.opencode-mem
-  [info] dbs=29 files=151 project_shards=22
-  [info] wal state: nonempty_wal=7 derived_sidecars=39
+  [info] dbs=29 files=147 project_shards=22
+  [info] wal state: nonempty_wal=5 derived_sidecars=37
   [ ok ] the upstream .cache model directory exists (the provisioner source, §7)
-  [ ok ] disk: store=655236618 B, free=1035667918848 B, need ~1310473236 B (2x, §1)
+  [ ok ] disk: store=653767248 B, free=1035547262976 B, need ~1307534496 B (2x, §1)
 
 == 1b. config values (runbook §1, §8) ==
   [info] storagePath    = ~/.opencode-mem/data (the plugin resolves $HOME/.opencode-mem/data, §1)
@@ -32,7 +35,7 @@ $ ./scripts/live-swap.sh --dry-run   # live machine, OpenCode running; read-only
 
 == 1e. backup root (§4) ==
   [ ok ] backup root writable: /home/vaz/.opencode-mem-backups
-  [warn] no LATEST pointer yet — --backup writes one. A bare --rollback only falls back to a dated backup holding BOTH MANIFEST.sha256 and BACKUP-INFO; a hand-made backup without BACKUP-INFO (the live machine's 20261030T175230Z is one) is not used — pass --from <TS> (§12)
+  [warn] no LATEST pointer yet — --backup writes one. A bare --rollback only falls back to a dated backup holding BOTH MANIFEST.sha256 and BACKUP-INFO; a hand-made backup without BACKUP-INFO (the live machine's 20261030T175230Z is one) is not a fallback candidate, and its config/opencode.jsonc already carries the active /home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin entry, so --rollback cannot restore the plugin entry from it either. --swap takes the first valid rollback backup before it edits the config — keep the pre-swap stamp it prints (§12)
   [info] newest backup: 20261030T175230Z — 617M, 86 files
   [ ok ] the backup root is outside the store root (required, §4)
 
@@ -57,5 +60,5 @@ $ ./scripts/live-swap.sh --dry-run   # live machine, OpenCode running; read-only
 
 == summary ==
   failures=0 warnings=2 pending=false-start-conditions=2
-[2026-10-31T08:14:16Z] finished mode=dry-run failures=0 warnings=2
+[2026-10-31T08:45:00Z] finished mode=dry-run failures=0 warnings=2
 rc=0

@@ -1,0 +1,18 @@
+# Rehearsal pre-state — a cp -a of the real store + copies of both live config files
+# tree: .tmp/scratch/rework3f-rehearsal (scratch only)
+# script_sha256=1fdf75f0bd2e51bfd9f7822b977f149fb01b84b63ff57505d3da26b4a60af346
+
+$ du -sh .tmp/scratch/rework3f-rehearsal
+622M	.tmp/scratch/rework3f-rehearsal
+
+$ find .tmp/scratch/rework3f-rehearsal/opencode-mem -type f | wc -l
+147
+
+$ grep -c '^\s*"opencode-mem@latest"' .tmp/scratch/rework3f-rehearsal/config/opencode.jsonc
+175:        "opencode-mem@latest"
+
+$ sqlite3 .tmp/scratch/rework3f-rehearsal/opencode-mem/data/metadata.db 'PRAGMA user_version;'
+1
+
+$ stat -c ... data/metadata.db
+.tmp/scratch/rework3f-rehearsal/opencode-mem/data/metadata.db 24576 2026-10-31 15:21:17.308672048 +0700

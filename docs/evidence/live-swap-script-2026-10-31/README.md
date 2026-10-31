@@ -5,7 +5,7 @@ Evidence for the owner-facing executor of `docs/runbooks/live-swap.md` (landed a
 `--swap` and no `--rollback` ran against them, and no `--backup` ran either (OpenCode was running the
 whole time, which is exactly the condition every writing mode refuses on).
 
-Two files ship: `scripts/live-swap.sh` (the executor) and `scripts/test-live-swap.sh` (16 behavioural
+Two files ship: `scripts/live-swap.sh` (the executor) and `scripts/test-live-swap.sh` (17 behavioural
 cases against scratch trees).
 
 ## Results
@@ -17,7 +17,7 @@ cases against scratch trees).
 | `bash -n` + `shellcheck` on `scripts/test-live-swap.sh` | rc 0 | `test-live-swap.txt` |
 | `--help` on the live machine | rc 0, names every mode + the runbook | `help-and-lint.txt` |
 | `--dry-run` on the live machine (OpenCode running) | rc 0, `failures=0 warnings=2 pending=2`, nothing written | `dry-run-live.txt` |
-| `scripts/test-live-swap.sh` | **PASS 16/16** (13 at `807a739` + 3 guard cases), 7 s | `test-live-swap.txt` |
+| `scripts/test-live-swap.sh` | **PASS 17/17** (13 at `807a739`, 3 guard cases at `38b9241`, the corrupted-backup rollback case in this tree), 8 s | `test-live-swap.txt` |
 | rehearsal `--backup` on a scratch copy | 29 DBs checkpointed (`0|0|0`), 85-file manifest verified, integrity 29/29 `ok` | `rehearsal-2-backup.txt` |
 | rehearsal `--rollback` on the same scratch copy | restored `data/` byte-identical (60/60 files), port-era store moved aside intact | `rehearsal-4-rollback.txt`, `rehearsal-5-byte-compare.txt` |
 | rehearsal `--verify` against a real engine | green: 1 engine, health 200, token minted, search 28 hits (top 0.5619), canary stored + found rank 1, metadata v2 / prompts v2 / 1 shard v3 | `rehearsal-6-verify.txt` |
@@ -136,6 +136,67 @@ Rehearsal (fresh copy: `.tmp/scratch/rework2-rehearsal`, `cp -a ~/.opencode-mem`
 5. a 50-byte append to the pre-swap backup's `data/metadata.db` → `--rollback --from <that TS>` exits 1
    with "the backup does not verify (§5) — not restoring" and an unchanged store/config snapshot
    (`rework2-rehearsal-6-rollback-refuses-a-rotten-backup.txt`).
+
+## Rework after review-2 (`38b9241` → this tree)
+
+The second review (`.tmp/progress/live-swap-script.review-2.md`) **rejected** `38b9241` on four narrow
+items — its dangerous surface was already sound. This tree fixes all four; pinning the §4.1(a) sentence
+also exposed a latent bug (below) that the sentence would otherwise have shipped as advice.
+
+`scripts/live-swap.sh` is now `1fdf75f0…af346` (was `caa3cf75…1368f1`); `scripts/test-live-swap.sh` is
+`357ff0ff…9e310` (was `2a81b2a2…3effb`). `bash -n` rc 0, `shellcheck` 0.11.0 rc 0,
+`bash scripts/test-live-swap.sh` **PASS 17/17** in 8 s; the live `--dry-run` is rc 0
+(`failures=0 warnings=2 pending=2`) and writes nothing.
+
+| review-2 | change | transcript |
+|---|---|---|
+| §4.1(a) | the no-`LATEST` warning no longer offers `--from` as a remedy: `20261030T175230Z` has no `BACKUP-INFO` (not a fallback candidate) and its config already carries the active plugin path, so `--rollback` refuses it as a post-swap backup. The message now says `--swap` takes the first valid rollback backup and to keep the pre-swap stamp it prints | `dry-run-live.txt`, `rework3-rehearsal-1-dryrun.txt` |
+| §4.1(b) | the post-swap refusal's tail branches on the caller: with `--from` it says the value must name a pre-swap stamp; without it, it says to pass `--from <TS> with one of those stamps`; with no candidate on disk it says no restore point holds the pre-swap config | `rework3-post-swap-message.txt`, case 11 |
+| §4.1(c) | runbook §12 says the hand-made `20261030T175230Z` restores the store but not the plugin entry, and that the manual route has the same defect | `docs/runbooks/live-swap.md` |
+| §4.2 | the eight remaining `case … *) bfail '…' ;; esac` sites are `*) bfail '…'; return 1 ;;`, so no case can record a reason and return 0 | `test-live-swap.txt` |
+| §4.3 | new case 17: after `--backup --rehearse`, one byte is appended to `backups/<TS>/data/metadata.db`; `--rollback --rehearse --yes --from <TS>` must exit 1 with `does not verify (§5)`, an unchanged store **and** config `sha_tree`, and no new `data.port-*` | `test-live-swap.txt`, `rework3-mutant-M4.txt`, `rework3-rehearsal-6-rollback-refuses-a-rotten-backup.txt` |
+| §4.4 | every `rework2-*` transcript header names the `38b9241` script sha (`caa3cf75…`); every new transcript names `1fdf75f0…` | the transcript files themselves |
+| §4.5 | `--from` with no value (or `""`) exits 2 with `--from needs a backup stamp` (was rc 1 + a raw `${2:?}` message); help notes the stamp is validated in every mode; a missing `dist/plugin.js` no longer prints the misleading "engine is OLDER" warn on top of the FAIL | `rework3-nits.txt` |
+
+**Deviation found while pinning the §4.1(a) sentence.** That sentence says a bare `--rollback` falls back
+to the newest backup carrying both `MANIFEST.sha256` and `BACKUP-INFO`. It did not: `resolve_restore_ts`
+was called as `ts=$(resolve_restore_ts)`, and its fallback branch called `log`, whose stdout line was
+captured into the stamp — so a no-`LATEST` rollback died at "the backup has no data/" with a mangled path.
+Both earlier reviews exercised that branch only with an explicit `--from`. The function now sets
+`RESOLVED_TS` instead of printing the stamp; case 12 gained a second, bare `--rollback` leg (no `LATEST`,
+no `--from`) that restores byte-identically and asserts the fallback note, so the fix is pinned. Case 12
+was extended rather than adding an 18th case: the suite total stays 17.
+
+Mutants on the scratch tree (`.tmp/scratch/rework3-wt`: `git archive 38b9241` + this tree's two scripts,
+`git init`, `plugin/engine` symlinked; pristine sha identical to the committed blob, restored between each):
+
+| # | mutant | suite | reason |
+|---|---|---|---|
+| M1 | `BACKUP-INFO` written to `/dev/null` | **FAIL 15/17** | case 09 "no BACKUP-INFO completeness marker"; case 12's fallback leg then finds no verified backup |
+| M2 | backup-root-outside-the-store refusal deleted | **FAIL 16/17** | case 14 — the refusal does not name the outside-the-store rule |
+| M3 | `.engine.lock` live-pid refusal deleted | **FAIL 16/17** | case 15 — rc 0 where rc 1 is required |
+| M4 | pre-rollback `MANIFEST.sha256` refusal deleted | **FAIL 16/17** | case 17 — rc 0 where rc 1 is required |
+
+Rehearsal (fresh `cp -a` of the real store + copies of both live configs:
+`.tmp/scratch/rework3f-rehearsal`, 622 MB, 147 files, 29 DBs, `metadata.db` v1):
+
+1. `--dry-run --rehearse` — the new no-`LATEST` warning, `warnings=2`, rc 0 (`rework3-rehearsal-1-dryrun.txt`).
+2. `--backup --rehearse --yes` — 29 checkpoints, manifest verified, 29/29 integrity, `LATEST` written after
+   §5 (`rework3-rehearsal-2-backup.txt`).
+3. mutation (port era, copy only): `metadata.db` 1→2, a real shard 2→3, `data/port-era.txt`
+   (`rework3-rehearsal-3-mutation.txt`).
+4. `--rollback --rehearse --yes --from <TS>` — manifest verified before the write, both configs restored,
+   `data/` moved aside, copied back, `diff -r` clean (`rework3-rehearsal-4-rollback.txt`).
+5. independent compare — 60/60 files hash identically, both configs byte-identical, restored store v1/v2 with
+   no marker, the aside keeps v2/v3 + the marker (`rework3-rehearsal-5-byte-compare.txt`).
+6. one byte appended to the backup's `metadata.db`, then `--rollback --from <TS>` — rc 1
+   "the backup does not verify (§5) — not restoring", store and config unchanged, no new `data.port-*`
+   (`rework3-rehearsal-6-rollback-refuses-a-rotten-backup.txt`).
+
+Live safety, re-measured after every run: config sha256s still `ef2d9fbe…1427` / `94888c5c…0058`,
+`~/.opencode-mem-backups` still holds only `20261030T175230Z` with no `LATEST`, no `swap.log`, and no
+`data.port-*`; the live store was never written (no `--swap` / `--backup` / `--rollback` ran against it;
+every write landed under `.tmp/scratch/`).
 
 ## Not covered by this evidence
 

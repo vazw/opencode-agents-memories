@@ -1,0 +1,37 @@
+# Rehearsal --rollback --from 20261031T084349Z on the mutated scratch copy
+# tree: .tmp/scratch/rework3f-rehearsal
+# script_sha256=1fdf75f0bd2e51bfd9f7822b977f149fb01b84b63ff57505d3da26b4a60af346
+# command: ./scripts/live-swap.sh --rollback --rehearse .tmp/scratch/rework3f-rehearsal --yes --from 20261031T084349Z
+
+[2026-10-31T08:44:02Z] rehearsal: the live OpenCode process check is skipped (scratch store: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/opencode-mem)
+[2026-10-31T08:44:02Z] rehearsal note: OpenCode is running (pid 12998 25843); nothing live is written
+[2026-10-31T08:44:02Z] live-swap.sh mode=rollback store=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/opencode-mem backups=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/backups commit=38b9241
+[2026-10-31T08:44:04Z] sha256sum -c on /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/backups/20261031T084349Z: 0 failed — the restore point verifies
+
+== rollback to 20261031T084349Z (runbook §12) ==
+this will:
+  1. restore /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/backups/20261031T084349Z/config/opencode.jsonc     -> /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/config/opencode.jsonc
+  2. restore /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/backups/20261031T084349Z/config/opencode-mem.jsonc -> /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/config/opencode-mem.jsonc
+  3. mv /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/opencode-mem/data -> /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/backups/data.port-20261031T084349Z   (kept, never deleted)
+  4. cp -a /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/backups/20261031T084349Z/data -> /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/opencode-mem/data   then diff -r to prove it is byte-identical
+[2026-10-31T08:44:04Z] auto-confirmed (--yes): restore the store and both config files from 20261031T084349Z (the port-era store is moved aside, not deleted)
+[2026-10-31T08:44:04Z] current configs saved to /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/backups/pre-rollback-20261031T084349Z (kept)
+[2026-10-31T08:44:04Z] restored both config files from /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/backups/20261031T084349Z/config
+[2026-10-31T08:44:05Z] mv /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/opencode-mem/data /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/backups/data.port-20261031T084349Z   (the port-era store is kept for diagnosis)
+[2026-10-31T08:44:05Z] cp -a /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/backups/20261031T084349Z/data /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/opencode-mem/data
+
+== restore verification ==
+  [ ok ] the restored data/ is byte-identical to the backup
+  [info] restored counts: dbs=29 files=83 project_shards=22
+
+== next ==
+start OpenCode; the upstream plugin (restored in opencode.jsonc) writes again.
+the port-era store is at: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/backups/data.port-20261031T084349Z   (keep it; delete it yourself once you are sure)
+the previous configs are at: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3f-rehearsal/backups/pre-rollback-20261031T084349Z
+to go back to the port: re-run /home/vaz/Code/Personal/Rust/opencode-agents-memory/scripts/live-swap.sh --swap
+
+== summary ==
+  failures=0 warnings=0
+  the rollback completed; start OpenCode and confirm the upstream plugin writes again (§12).
+[2026-10-31T08:44:05Z] finished mode=rollback failures=0 warnings=0
+rc=0

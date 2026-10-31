@@ -1,0 +1,19 @@
+# The reworded §4.1(b) tail of the post-swap refusal (three caller shapes + the no-LATEST fallback)
+# tree: .tmp/scratch/live-swap-selftest/postswap and .tmp/scratch/rework3-nocand2 (suite fixtures)
+# script_sha256=1fdf75f0bd2e51bfd9f7822b977f149fb01b84b63ff57505d3da26b4a60af346
+
+# 1. the caller already passed --from (the stamp is a post-swap backup)
+$ ./scripts/live-swap.sh --rollback --rehearse .tmp/scratch/live-swap-selftest/postswap --yes --from 20260102T000000Z
+live-swap: the backup 20260102T000000Z was taken AFTER the swap: its config/opencode.jsonc already points at /home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin, so restoring it would not revert the plugin entry (§12). Pre-swap backups: 20260101T000000Z — the --from value must be one of those stamps
+rc=1
+
+# 2. no --from: no LATEST, the fallback picks the newest verified backup (post-swap), then the guard names --from
+$ ./scripts/live-swap.sh --rollback --rehearse .tmp/scratch/live-swap-selftest/postswap --yes
+[2026-10-31T08:44:51Z] no LATEST pointer; using the newest dated backup: 20260102T000000Z
+live-swap: the backup 20260102T000000Z was taken AFTER the swap: its config/opencode.jsonc already points at /home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin, so restoring it would not revert the plugin entry (§12). Pre-swap backups: 20260101T000000Z — pass --from <TS> with one of those stamps
+rc=1
+
+# 3. no pre-swap backup on disk at all
+$ ./scripts/live-swap.sh --rollback --rehearse .tmp/scratch/rework3-nocand2 --yes --from 20260102T000000Z
+live-swap: the backup 20260102T000000Z was taken AFTER the swap: its config/opencode.jsonc already points at /home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin, so restoring it would not revert the plugin entry (§12). Pre-swap backups: none found — no backup on disk holds the pre-swap config, so no restore point brings the plugin entry back; the first valid one is the backup --swap takes before it edits the config (§12)
+rc=1

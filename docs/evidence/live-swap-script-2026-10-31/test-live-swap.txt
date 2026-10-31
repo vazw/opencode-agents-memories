@@ -1,4 +1,9 @@
-$ bash scripts/test-live-swap.sh
+# The self-test, re-run after review-2 (17 cases: 16 + the corrupted-backup rollback case)
+# script_sha256=1fdf75f0bd2e51bfd9f7822b977f149fb01b84b63ff57505d3da26b4a60af346
+# test_sha256=357ff0ffbf8442248428782d99a9994708e8fc3a0fbaff5475f524f25c69e310
+# commit=38b9241 (scripts exercised: this working tree)
+# command: bash scripts/test-live-swap.sh
+
 ok   case_01_help_names_every_mode
 ok   case_02_bare_invocation_writes_nothing
 ok   case_03_dry_run_fails_on_a_missing_store
@@ -15,6 +20,7 @@ ok   case_13_backup_does_not_publish_a_bad_restore_point
 ok   case_14_backup_root_must_live_outside_the_store
 ok   case_15_engine_lock_naming_a_live_pid_is_refused
 ok   case_16_a_non_empty_wal_is_a_refusal_not_a_delete
-wall time: 7s
-PASS 16/16
+ok   case_17_rollback_refuses_a_backup_that_does_not_verify
+wall time: 8s
+PASS 17/17
 rc=0

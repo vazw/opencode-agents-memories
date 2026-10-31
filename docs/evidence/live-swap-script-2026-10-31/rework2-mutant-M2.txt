@@ -1,4 +1,5 @@
 # Mutant M2 — the backup-root-outside guard is deleted (review-1 §5 M2)
+# script_sha256=caa3cf75eb6a42c7d17af4eb27f8170dbc39597a32ad18ab46b95a3cb01368f1 (the 38b9241 scripts these ran; `commit=807a739` is that scratch tree HEAD, not the script)
 # tree: .tmp/scratch/rework2-wt
 # command: bash scripts/test-live-swap.sh
 

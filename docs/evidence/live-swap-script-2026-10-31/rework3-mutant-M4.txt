@@ -1,0 +1,46 @@
+# Mutant M4 — the pre-rollback MANIFEST.sha256 refusal deleted (the new oracle for review-2 §4.3)
+# tree: .tmp/scratch/rework3-wt (git archive 38b9241 + this tree's two scripts, git init)
+# script_sha256=7c241c03625a6fe4e5340122eb537cd45a3bf3220d4072718a77961ad3559ece (mutant; pristine 1fdf75f0bd2e51bfd9f7822b977f149fb01b84b63ff57505d3da26b4a60af346)
+# test_sha256=357ff0ffbf8442248428782d99a9994708e8fc3a0fbaff5475f524f25c69e310
+# command: bash scripts/test-live-swap.sh
+
+ok   case_01_help_names_every_mode
+ok   case_02_bare_invocation_writes_nothing
+ok   case_03_dry_run_fails_on_a_missing_store
+ok   case_04_swap_replaces_one_active_line_only
+ok   case_05_swap_refuses_a_double_edit
+ok   case_06_swap_is_idempotent
+ok   case_07_swap_refuses_an_unrelated_config
+ok   case_08_rehearse_refuses_a_live_path
+ok   case_09_backup_writes_a_verified_manifest
+ok   case_10_the_manifest_is_behavioural
+ok   case_11_rollback_refuses_a_post_swap_backup
+ok   case_12_rollback_restores_bytes_and_keeps_the_port_era_store
+ok   case_13_backup_does_not_publish_a_bad_restore_point
+ok   case_14_backup_root_must_live_outside_the_store
+ok   case_15_engine_lock_naming_a_live_pid_is_refused
+ok   case_16_a_non_empty_wal_is_a_refusal_not_a_delete
+FAIL case_17_rollback_refuses_a_backup_that_does_not_verify — a backup that does not verify must be refused (rc 1), got 0
+       [2026-10-31T08:43:34Z] rehearsal: the live OpenCode process check is skipped (scratch store: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/opencode-mem)
+       [2026-10-31T08:43:34Z] rehearsal note: OpenCode is running (pid 12998 25843); nothing live is written
+       [2026-10-31T08:43:34Z] live-swap.sh mode=rollback store=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/opencode-mem backups=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/backups commit=7d42b23
+       [2026-10-31T08:43:34Z] sha256sum -c on /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/backups/20261031T084333Z: 0 failed — the restore point verifies
+       
+       == rollback to 20261031T084333Z (runbook §12) ==
+       this will:
+         1. restore /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/backups/20261031T084333Z/config/opencode.jsonc     -> /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/config/opencode.jsonc
+         2. restore /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/backups/20261031T084333Z/config/opencode-mem.jsonc -> /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/config/opencode-mem.jsonc
+         3. mv /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/opencode-mem/data -> /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/backups/data.port-20261031T084333Z   (kept, never deleted)
+         4. cp -a /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/backups/20261031T084333Z/data -> /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/opencode-mem/data   then diff -r to prove it is byte-identical
+       [2026-10-31T08:43:34Z] auto-confirmed (--yes): restore the store and both config files from 20261031T084333Z (the port-era store is moved aside, not deleted)
+       [2026-10-31T08:43:34Z] current configs saved to /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/backups/pre-rollback-20261031T084333Z (kept)
+       [2026-10-31T08:43:34Z] restored both config files from /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/backups/20261031T084333Z/config
+       [2026-10-31T08:43:34Z] mv /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/opencode-mem/data /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/backups/data.port-20261031T084333Z   (the port-era store is kept for diagnosis)
+       [2026-10-31T08:43:34Z] cp -a /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/backups/20261031T084333Z/data /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework3-wt/.tmp/scratch/live-swap-selftest/rotten/opencode-mem/data
+       
+       == restore verification ==
+         [ ok ] the restored data/ is byte-identical to the backup
+       
+wall time: 8s
+FAIL 16/17
+rc=1

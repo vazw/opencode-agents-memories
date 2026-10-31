@@ -344,6 +344,13 @@ leave stale files behind).
 `scripts/live-swap.sh --rollback` runs this sequence and verifies the chosen backup's
 `MANIFEST.sha256` (§5) **before** it writes anything; a backup that fails that check is not restored.
 
+**Not every backup is a plugin-entry rollback point.** The hand-made `~/.opencode-mem-backups/20261030T175230Z`
+(the night-before copy) restores the store but **not** the plugin entry: its `config/opencode.jsonc` already
+carries the active local plugin path, so this manual route (like `--rollback`) would install a config that
+still loads the port. `--rollback` refuses such a backup and names the pre-swap candidates. The first valid
+rollback point is the backup `--swap` itself takes **before** it edits the config: keep the pre-swap stamp
+`--swap` prints, and use `--from <that stamp>` once a later `--backup` has moved `LATEST`.
+
 ## 13. Export → import: the DR / portability route, not the primary swap
 
 `~/.opencode-mem/exports/opencode-agents-memory-20261030T151445Z.json` (1,547,433 B, sha256

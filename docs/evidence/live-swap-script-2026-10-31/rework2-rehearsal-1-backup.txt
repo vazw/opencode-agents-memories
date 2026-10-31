@@ -1,4 +1,5 @@
 $ ./scripts/live-swap.sh --backup --rehearse .tmp/scratch/rework2-rehearsal --yes
+# script_sha256=caa3cf75eb6a42c7d17af4eb27f8170dbc39597a32ad18ab46b95a3cb01368f1 (the 38b9241 scripts these ran; `commit=807a739` is that scratch tree HEAD, not the script)
 [2026-10-31T08:14:46Z] rehearsal: the live OpenCode process check is skipped (scratch store: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/opencode-mem)
 [2026-10-31T08:14:46Z] rehearsal note: OpenCode is running (pid 12998 25843); nothing live is written
 [2026-10-31T08:14:46Z] live-swap.sh mode=backup store=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/opencode-mem backups=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/backups commit=807a739
