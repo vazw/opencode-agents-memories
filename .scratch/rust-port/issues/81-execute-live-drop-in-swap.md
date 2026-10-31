@@ -1,9 +1,8 @@
 # 81 — ops · Execute the live drop-in swap: migrate in place, provision, swap the plugin, verify, dogfood, roll back
 
-Status: ready-for-human — 2026-10-31: the runbook landed at `70d9206` and W6.6 at `1bf1e8a`.
-Owner-executed: rebuild the engine from `main`, then run `docs/runbooks/live-swap.md`; the
-config-editor applies the plugin-entry swap after the human gate. Evidence lands in
-`docs/evidence/live-swap-<date>/`.
+Status: landed — 2026-10-31 — the live swap executed at 09:26:40Z (pre-swap stamp
+`20261031T092550Z`; outcome under `## Comments`). Residual: the manual two-workspace check and the
+one-week dogfood window (owner).
 
 ## What is missing
 
@@ -61,9 +60,13 @@ max-known schema versions or the embedder cache root.
 
 ## Comments
 
-- **2026-10-31 — the shared-engine fix landed at `c37f05c` (issue 82), so the re-swap's Step 10 now
-  includes the two-workspace check.** The runbook §9b/§10 rows were updated; the engine must be rebuilt
-  from the landed `main` (the staged binary predates W6.6), the ONNX cache is provisioned
-  (`/tmp/.opencode-mem-onnx`, canonical v2.0 — re-run after a reboot), and a fresh pre-migration backup
-  is required (the store is v1 and has grown since the 00:52 backup). The re-swap migrates again:
-  metadata 1→2, prompts 1→2, shards 2→3 lazily.
+- **2026-10-31 — the live swap executed; the pre-swap stamp is `20261031T092550Z`.** `scripts/live-swap.sh
+  --swap` at 09:26:40Z: backup `~/.opencode-mem-backups/20261031T092550Z` (whole store + both configs;
+  the only plugin-entry rollback point), config copy `.pre-swap-20261031T092640Z`, plugin entry → the
+  local path. `--verify` after the start: **failures=0 warnings=0** — one engine for the store (parent =
+  the OpenCode host), the lock names it, web 3742, token minted, search 28 hits (top 0.5619), add canary
+  rank 1, metadata v2, prompts v2, 2 shards v3 / 20 v2, no status file. The `memory` tool answers from
+  this session (`list-shards` 22 shards, current 1 / linked 20 / orphaned 1; `help` `unavailable: []`).
+  The manual two-workspace check and the dogfood remain. Rollback:
+  `scripts/live-swap.sh --rollback --from 20261031T092550Z`. The shared-engine fix (issue 82) landed at
+  `c37f05c` before this swap; the runbook §9b/§10 rows and the staged engine (16:03) were current.
