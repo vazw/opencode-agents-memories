@@ -46,7 +46,7 @@ async fn test_metadata_v2_allows_many_inactive_rows_but_only_one_active() {
                 project(),
                 hash(),
                 Value::Integer(1),
-                Value::Text(format!("project/project_{HASH}_shard_1.db")),
+                Value::Text(format!("projects/project_{HASH}_shard_1.db")),
                 Value::Integer(0),
             ],
         )
@@ -143,7 +143,7 @@ async fn test_metadata_v2_repairs_extra_active_shards_to_the_highest_index() {
                     project(),
                     hash(),
                     Value::Integer(index),
-                    Value::Text(format!("project/project_{HASH}_shard_{index}.db")),
+                    Value::Text(format!("projects/project_{HASH}_shard_{index}.db")),
                     Value::Integer(is_active),
                 ],
             )

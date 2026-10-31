@@ -370,13 +370,24 @@ impl ShardManager {
         self.storage_path.join(format!("{scope}s")).join(file_name)
     }
 
-    /// Upstream `join(`${scope}s`, basename)` + `replace(/\\/g, "/")`.
-    fn stored_path_string(&self, full_path: &Path, scope: Scope) -> String {
-        let file_name = full_path
+    /// Upstream's stored `db_path` — one expression, spelled out at all three
+    /// write sites (`createShard` shard-manager.ts L173,
+    /// `registerExistingShard` L230, `reassignShardScope` L528): join the
+    /// scope directory with the basename, then map `\` to `/`. Upstream
+    /// repeats it instead of naming it; here it is ONE helper, because a
+    /// second copy is exactly how the plural drifted out of the first.
+    ///
+    /// The **plural** is the invariant (L441: "Stored db_path is always
+    /// `<scope>s/<basename>`"). [`Self::resolve_stored_path`] and
+    /// [`Self::get_shard_by_path`] both take the BASENAME, so a wrong prefix
+    /// still resolves and only the registry row is wrong — which is why every
+    /// reader masked the defect.
+    fn stored_path_string(&self, path: &Path, scope: &str) -> String {
+        let file_name = path
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_default();
-        format!("{}/{}", scope.as_str(), file_name).replace('\\', "/")
+        format!("{scope}s/{file_name}").replace('\\', "/")
     }
 
     /// Upstream `ensureInitialized`: dedup in-flight init, then REVALIDATE
@@ -738,7 +749,7 @@ impl ShardManager {
     ) -> Result<ShardInfo, StoreError> {
         let db = self.ensure_initialized().await?;
         let full_path = self.get_shard_path(scope, scope_hash, shard_index)?;
-        let stored = self.stored_path_string(&full_path, scope);
+        let stored = self.stored_path_string(&full_path, scope.as_str());
         let now = now_millis();
 
         // Initialize the shard file BEFORE inserting the registry row. If
@@ -858,7 +869,7 @@ impl ShardManager {
         assert_safe_scope_hash(scope_hash)?;
         let db = self.ensure_initialized().await?;
         let full_path = self.get_shard_path(scope, scope_hash, next_index)?;
-        let stored = self.stored_path_string(&full_path, scope);
+        let stored = self.stored_path_string(&full_path, scope.as_str());
         let now = now_millis();
 
         // File init stays OUTSIDE the transaction (orphan-row guard).
@@ -1024,7 +1035,7 @@ impl ShardManager {
                 message: error.to_string(),
             })?;
         let db = self.ensure_initialized().await?;
-        let stored = self.stored_path_string(db_path, scope);
+        let stored = self.stored_path_string(db_path, scope.as_str());
         let now = now_millis();
         let write = db
             .execute(
@@ -1617,7 +1628,7 @@ impl ShardManager {
             });
         };
         let scope_text = db_row_scope(&row);
-        let stored = self.stored_path_string_from(new_db_path, &scope_text);
+        let stored = self.stored_path_string(new_db_path, &scope_text);
         db.execute(
             crate::sql::REASSIGN_SHARD_SCOPE,
             vec![
@@ -1640,14 +1651,6 @@ impl ShardManager {
             .ok_or_else(|| StoreError::Internal {
                 message: format!("Failed to reassign shard {shard_id}"),
             })
-    }
-
-    fn stored_path_string_from(&self, path: &Path, scope: &str) -> String {
-        let file_name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_default();
-        format!("{scope}s/{file_name}").replace('\\', "/")
     }
 }
 
