@@ -1,0 +1,20 @@
+# §4.5 — a backup that does not verify must be refused BEFORE the store is moved aside
+$ printf '...' >> backups/20261031T081446Z/data/metadata.db
+$ (cd backups/20261031T081446Z && sha256sum -c MANIFEST.sha256 --quiet)
+./data/metadata.db: FAILED
+sha256sum: WARNING: 1 computed checksum did NOT match
+sha_rc=1
+
+$ ./scripts/live-swap.sh --rollback --rehearse .tmp/scratch/rework2-rehearsal --yes --from 20261031T081446Z
+[2026-10-31T08:16:31Z] rehearsal: the live OpenCode process check is skipped (scratch store: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/opencode-mem)
+[2026-10-31T08:16:31Z] rehearsal note: OpenCode is running (pid 12998 25843); nothing live is written
+[2026-10-31T08:16:31Z] live-swap.sh mode=rollback store=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/opencode-mem backups=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/backups commit=807a739
+./data/metadata.db: FAILED
+sha256sum: WARNING: 1 computed checksum did NOT match
+live-swap: the backup does not verify (§5) — not restoring
+rc=1
+
+# the refused rollback wrote nothing
+store+config snapshot identical (88 entries)
+data.port-* dirs before=2 after=2
+config opencode.jsonc sha256=42ddb4c2131eb2d101023703e75c055bc4ac165934ed0086b0f635eb69e817d2

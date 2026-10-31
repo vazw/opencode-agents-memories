@@ -1,5 +1,4 @@
 $ bash scripts/test-live-swap.sh
-
 ok   case_01_help_names_every_mode
 ok   case_02_bare_invocation_writes_nothing
 ok   case_03_dry_run_fails_on_a_missing_store
@@ -13,7 +12,9 @@ ok   case_10_the_manifest_is_behavioural
 ok   case_11_rollback_refuses_a_post_swap_backup
 ok   case_12_rollback_restores_bytes_and_keeps_the_port_era_store
 ok   case_13_backup_does_not_publish_a_bad_restore_point
+ok   case_14_backup_root_must_live_outside_the_store
+ok   case_15_engine_lock_naming_a_live_pid_is_refused
+ok   case_16_a_non_empty_wal_is_a_refusal_not_a_delete
 wall time: 7s
-PASS 13/13
-
-exit=0
+PASS 16/16
+rc=0

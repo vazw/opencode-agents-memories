@@ -1,0 +1,49 @@
+# §4.8 nit — a same-second collision appends -N; LATEST must name the real directory
+$ mkdir -p backups/20261031T081711Z backups/20261031T081712Z   # the collision is pre-made, so unique_dir appends -2
+$ ./scripts/live-swap.sh --backup --rehearse .tmp/scratch/rework2-nits --yes
+[2026-10-31T08:17:11Z] rehearsal: the live OpenCode process check is skipped (scratch store: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-nits/opencode-mem)
+[2026-10-31T08:17:11Z] rehearsal note: OpenCode is running (pid 12998 25843); nothing live is written
+[2026-10-31T08:17:11Z] live-swap.sh mode=backup store=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-nits/opencode-mem backups=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-nits/backups commit=807a739
+[2026-10-31T08:17:11Z] about to checkpoint and copy /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-nits/opencode-mem (16384 B) to /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-nits/backups
+[2026-10-31T08:17:11Z] auto-confirmed (--yes): checkpoint the live store, delete the derived *-shm/*-tshm sidecars, and copy the whole root to /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-nits/backups/<UTC>
+
+== 3. checkpoint the live DBs (runbook §3) ==
+[2026-10-31T08:17:11Z] checkpointing 2 databases under /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-nits/opencode-mem/data
+  data/metadata.db -> 0|-1|-1
+  data/skills.db -> 0|-1|-1
+[2026-10-31T08:17:11Z] removing the derived *-shm / *-tshm sidecars (rebuilt on the next open, §3)
+[2026-10-31T08:17:11Z] checkpoint done: 2 databases, failures=0, non-empty WAL=0, sidecars removed
+
+== 4. dated backup of the whole root + both config files (runbook §4) ==
+[2026-10-31T08:17:11Z] backup root /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-nits/backups: free=1035653545984 need=32768 store=16384 B
+[2026-10-31T08:17:11Z] cp -a /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-nits/opencode-mem /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-nits/backups/20261031T081711Z-2
+[2026-10-31T08:17:11Z] backup = /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-nits/backups/20261031T081711Z-2 (LATEST is written only after §5 passes)
+24K	/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-nits/backups/20261031T081711Z-2
+files=4 dbs=2
+
+== 5. manifest, verify, per-DB integrity (runbook §5) ==
+[2026-10-31T08:17:11Z] MANIFEST.sha256: 4 entries
+[2026-10-31T08:17:11Z] sha256sum -c: 0 failed (4 entries)
+  data/metadata.db ok
+  data/skills.db ok
+[2026-10-31T08:17:12Z] integrity_check: 2 databases, ok=2, failures=0
+  [ ok ] every copied database passes integrity_check (2/2)
+[2026-10-31T08:17:12Z] wrote /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-nits/backups/20261031T081711Z-2/BACKUP-INFO
+[2026-10-31T08:17:12Z] LATEST -> 20261031T081711Z-2
+
+backup path: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-nits/backups/20261031T081711Z-2
+rollback   : /home/vaz/Code/Personal/Rust/opencode-agents-memory/scripts/live-swap.sh --rollback   (or --from 20261031T081711Z-2)
+
+== done ==
+[2026-10-31T08:17:12Z] backup complete; the store was not migrated (that is the next start, §6)
+do not start OpenCode: run /home/vaz/Code/Personal/Rust/opencode-agents-memory/scripts/live-swap.sh --swap next (or re-run --backup for a newer backup).
+[2026-10-31T08:17:12Z] finished mode=backup failures=0 warnings=0
+rc=0
+
+LATEST=20261031T081711Z-2
+backup dirs:
+20261031T081711Z
+20261031T081711Z-2
+20261031T081712Z
+
+LATEST points at a real, verified backup (20261031T081711Z-2)

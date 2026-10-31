@@ -120,6 +120,13 @@ confirm() {
 
 abspath() { realpath -m -- "$1"; }
 
+# valid_restore_stamp <value> — exactly a dated backup directory name: the UTC
+# stamp --backup writes, plus an optional -N collision suffix. This is also the
+# whole of the --from path validation: no `/`, no `..`, no absolute path.
+valid_restore_stamp() {
+	[[ $1 =~ ^[0-9]{8}T[0-9]{6}Z(-[0-9]+)?$ ]]
+}
+
 is_under() {
 	# $1 child, $2 parent — equal counts as under.
 	case $1/ in
@@ -171,6 +178,9 @@ USAGE
   A bare invocation (no MODE) is --dry-run: it prints the plan and runs the
   read-only preflight, and it writes nothing — safe while OpenCode runs.
 
+  Linux only: the runbook's host is Void Linux, and the script uses GNU
+  coreutils (stat -c, df --output, du -sb, find -delete, sort -z).
+
 MODES
   --dry-run   Preflight only. Checks the store, the free space (need ~2x),
               the config values, the plugin dist/engine, whether OpenCode or
@@ -208,8 +218,9 @@ MODES
                 2. that engine's parent — must be the OpenCode host (the
                    one-process discriminator; if it is not, stop and record),
                 3. the store versions: metadata 2, prompts 2, shards 3 lazily,
-                4. web health on the engine's actual port (3742 by default;
-                   --web-port / OPENCODE_MEM_WEB_PORT override),
+                4. web health on the engine's actual port (the engine's own
+                   --web-port when its cmdline names one; otherwise
+                   --web-port, then OPENCODE_MEM_WEB_PORT, then 3742),
                 5. the token at <store>/data/.auth-token, minted by the 401,
                 6. one search, one add canary, one search for the canary,
                 7. the status file: absent, or naming a dead pid.
@@ -244,11 +255,14 @@ OPTIONS
   --plugin-dir DIR     Plugin package (default <repo>/plugin).
   --container-tag TAG  Canary container tag for --verify (default: this
                        project's, opencode_project_4182e0858e0c93a1).
-  --web-port N         The engine's web port for --verify (default: the
-                       engine's own --web-port, then OPENCODE_MEM_WEB_PORT,
-                       then 3742 — the config's webServerPort 4747 is NOT
-                       forwarded by the plugin launch).
+  --web-port N         Fallback web port for --verify. The engine's own
+                       --web-port on its command line always wins; this flag
+                       applies only when that command line names none, then
+                       OPENCODE_MEM_WEB_PORT, then 3742. The config's
+                       webServerPort 4747 is NOT forwarded by the launch.
   --from TS            --rollback: restore this backup instead of LATEST.
+                       TS must be a dated stamp (20261030T175230Z), optional
+                       -N collision suffix; `/`, `..` and paths are rejected.
   -h, --help           This text.
 
 SEQUENCE (the runbook's order)
@@ -265,6 +279,7 @@ SEQUENCE (the runbook's order)
 EXIT STATUS
   0  the mode did what it reports
   1  refused or aborted (nothing live was written, or the write was reverted)
+  2  a command-line argument was rejected (unknown flag, or a malformed --from)
   3  the mode ran and a FAIL line was reported (see the output)
   130 the owner answered no
 HELP
@@ -310,6 +325,10 @@ parse_args() {
 			;;
 		--from)
 			FROM_TS=${2:?--from needs a backup stamp}
+			if ! valid_restore_stamp "$FROM_TS"; then
+				printf 'live-swap: --from must be a backup stamp like 20261030T175230Z (got: %s)\n' "$FROM_TS" >&2
+				exit 2
+			fi
 			shift
 			;;
 		-h | --help)
@@ -332,6 +351,11 @@ DATA_DIR=
 LIVE_STORE_REAL=
 
 resolve_paths() {
+	# GNU coreutils are assumed throughout (stat -c, df --output, du -sb,
+	# find -delete, sort -z); the runbook's host is Void Linux.
+	if [ "$(uname -s)" != Linux ]; then
+		die "this executor targets Linux only (GNU coreutils; the runbook's host is Void Linux)"
+	fi
 	if [ -n "$REHEARSE_ROOT" ]; then
 		[ -d "$REHEARSE_ROOT" ] || die "--rehearse: not a directory: $REHEARSE_ROOT"
 		REHEARSE_ROOT=$(abspath "$REHEARSE_ROOT")
@@ -386,7 +410,6 @@ host_os() {
 	kernel=$(uname -s)
 	case $kernel in
 	Linux) printf 'linux' ;;
-	Darwin) printf 'darwin' ;;
 	*) printf '' ;;
 	esac
 }
@@ -412,6 +435,12 @@ engine_path() {
 	printf '%s/engine/%s-%s/%s' "$PLUGIN_DIR" "$os" "$arch" "$ENGINE_NAME"
 }
 
+engine_is_stale() {
+	local engine=''
+	engine=$(engine_path)
+	[ -n "$engine" ] && [ -x "$engine" ] && [ "$engine" -ot "$PLUGIN_DIR/dist/plugin.js" ]
+}
+
 require_plugin() {
 	[ -d "$PLUGIN_DIR" ] || die "plugin directory not found: $PLUGIN_DIR"
 	[ -f "$PLUGIN_DIR/dist/plugin.js" ] || die "plugin bundle not found: $PLUGIN_DIR/dist/plugin.js"
@@ -419,6 +448,12 @@ require_plugin() {
 	engine=$(engine_path)
 	[ -n "$engine" ] || die "unsupported host: $(uname -s)/$(uname -m)"
 	[ -x "$engine" ] || die "staged engine not found or not executable: $engine (run plugin/scripts/stage-engine.sh)"
+	# The runbook's precondition for issue 81: the cutover must use an engine
+	# rebuilt from landed main, not the rehearsal build. --swap reports this
+	# before asking for confirmation, like --dry-run does.
+	if engine_is_stale; then
+		ck_warn "the staged engine is OLDER than $PLUGIN_DIR/dist/plugin.js — rebuild it first (plugin/scripts/stage-engine.sh, issue 81)"
+	fi
 }
 
 # ── process scan (nothing here writes) ────────────────────────────────────
@@ -619,7 +654,8 @@ checkpoint_store() {
 	done
 	# Derived, rebuildable files only. Never a *.db, never a non-empty *.db-wal.
 	log "removing the derived *-shm / *-tshm sidecars (rebuilt on the next open, §3)"
-	find "$DATA_DIR" -type f \( -name '*-shm' -o -name '*-tshm' \) -delete
+	find "$DATA_DIR" -type f \( -name '*-shm' -o -name '*-tshm' \) -delete ||
+		die "cannot remove the derived sidecars in $DATA_DIR (§3)"
 	left=$(count_lines "$(find "$DATA_DIR" -type f -name '*-wal' -size +0c | sort)")
 	if [ "$left" -ne 0 ]; then
 		die "$left non-empty *.db-wal file(s) remain after the checkpoint — a torn copy is likely; NOT deleting them (§3)"
@@ -647,6 +683,9 @@ make_backup() {
 	heading '4. dated backup of the whole root + both config files (runbook §4)'
 	ts=$(utc_stamp)
 	backup=$(unique_dir "$BACKUP_ROOT/$ts")
+	# unique_dir may append -N on a same-second collision; the stamp that names
+	# LATEST and the printed --from must be the directory that actually exists.
+	ts=$(basename -- "$backup")
 	mkdir -p "$BACKUP_ROOT" || die "cannot create the backup root: $BACKUP_ROOT"
 	bytes=$(du -sb "$STORE_ROOT" | cut -f1)
 	free=$(df -B1 --output=avail "$BACKUP_ROOT" | sed -n '2p' | tr -d ' ')
@@ -871,7 +910,7 @@ provision_cache() {
 	esac
 	case $out in
 	*model_onnx_sha256="$EXPECTED_ONNX_SHA"*) ck_ok 'model_onnx sha256 matches the runbook' ;;
-	*) log 'WARN the provisioned model_onnx sha256 differs from the runbook figure' ;;
+	*) ck_warn 'the provisioned model_onnx sha256 differs from the runbook figure' ;;
 	esac
 }
 
@@ -964,7 +1003,7 @@ dry_run() {
 			else
 				ck_fail "no web UI bundle beside the engine ($webdist) — the web surface degrades (§9/issue 36)"
 			fi
-			if [ "$engine" -ot "$PLUGIN_DIR/dist/plugin.js" ]; then
+			if engine_is_stale; then
 				ck_warn 'the staged engine is OLDER than dist/plugin.js — rebuild it from landed main (plugin/scripts/stage-engine.sh, issue 81)'
 			fi
 		else
@@ -1018,7 +1057,7 @@ dry_run() {
 				ck_warn "LATEST was taken AFTER the swap (its config already points at the port) — --rollback needs --from an earlier backup (§12)"
 			fi
 		else
-			ck_warn 'no LATEST pointer yet — --backup writes one; --rollback falls back to the newest dated directory'
+			ck_warn "no LATEST pointer yet — --backup writes one. A bare --rollback only falls back to a dated backup holding BOTH MANIFEST.sha256 and BACKUP-INFO; a hand-made backup without BACKUP-INFO (the live machine's 20261030T175230Z is one) is not used — pass --from <TS> (§12)"
 		fi
 		local newest=''
 		newest=$(find "$BACKUP_ROOT" -maxdepth 1 -type d -name '20*' | sort | tail -n 1 || true)
@@ -1087,10 +1126,19 @@ dry_run() {
 	fi
 }
 
+# Every writing mode opens its log only AFTER require_stopped: a refused run
+# must not have created the backup root or written swap.log outside the store.
+begin_writing_log() {
+	mkdir -p "$BACKUP_ROOT" || die "cannot create the backup root: $BACKUP_ROOT"
+	LOG_FILE=$BACKUP_ROOT/swap.log
+	log "live-swap.sh mode=$MODE store=$STORE_ROOT backups=$BACKUP_ROOT commit=$(git_commit)"
+}
+
 run_backup_mode() {
 	require_store
 	require_config
 	require_stopped
+	begin_writing_log
 	local bytes=''
 	bytes=$(du -sb "$STORE_ROOT" | cut -f1)
 	log "about to checkpoint and copy $STORE_ROOT ($bytes B) to $BACKUP_ROOT"
@@ -1102,7 +1150,7 @@ run_backup_mode() {
 	make_backup
 	heading 'done'
 	log 'backup complete; the store was not migrated (that is the next start, §6)'
-	printf 'start OpenCode when you are ready: %s --swap first, or quit again and re-run this script for a newer backup.\n' "$SCRIPT_PATH"
+	printf 'do not start OpenCode: run %s --swap next (or re-run --backup for a newer backup).\n' "$SCRIPT_PATH"
 }
 
 run_swap_mode() {
@@ -1110,10 +1158,15 @@ run_swap_mode() {
 	require_config
 	require_plugin
 	require_stopped
+	begin_writing_log
+	local stale=''
+	if engine_is_stale; then
+		stale=' WARNING: the staged engine is OLDER than plugin/dist/plugin.js — rebuild it first (plugin/scripts/stage-engine.sh, issue 81).'
+	fi
 	log "swap: plugin=$PLUGIN_DIR engine_sha256=$(sha256_of "$(engine_path)") commit=$(git_commit)"
 	printf '\nthis runs: backup (§3-§5) -> provision (§7) -> plugin-entry swap (§8).\n'
 	printf 'it does NOT start OpenCode; you do, then you run --verify.\n'
-	confirm "checkpoint+back up the live store, provision the ONNX cache, and replace $FROM_TOKEN with \"$PLUGIN_DIR\" in $CONFIG_DIR/opencode.jsonc"
+	confirm "checkpoint+back up the live store, provision the ONNX cache, and replace $FROM_TOKEN with \"$PLUGIN_DIR\" in $CONFIG_DIR/opencode.jsonc.${stale}"
 	if [ "$CONFIRMED" -ne 1 ]; then
 		log 'the owner declined; nothing was written'
 		exit 130
@@ -1367,6 +1420,9 @@ resolve_restore_ts() {
 			log "no LATEST pointer; using the newest dated backup: $chosen"
 		fi
 	fi
+	# LATEST is a file on disk too, so validate whichever source supplied the
+	# stamp: only a dated directory name may become a restore path (§12).
+	valid_restore_stamp "$chosen" || die "not a backup stamp: $chosen — refusing to restore from it (§12)"
 	[ -d "$BACKUP_ROOT/$chosen" ] || die "backup not found: $BACKUP_ROOT/$chosen"
 	printf '%s' "$chosen"
 }
@@ -1375,6 +1431,7 @@ run_rollback_mode() {
 	require_store
 	require_config
 	require_stopped
+	begin_writing_log
 	local ts='' backup='' aside='' saved=''
 	ts=$(resolve_restore_ts)
 	backup=$BACKUP_ROOT/$ts
@@ -1397,6 +1454,15 @@ run_rollback_mode() {
 		done
 		die "the backup $ts was taken AFTER the swap: its config/opencode.jsonc already points at $PLUGIN_DIR, so restoring it would not revert the plugin entry (§12). Pre-swap backups:${candidates:- none found} — pass --from <TS>"
 	fi
+
+	# §5: a restore point is a directory whose manifest verifies. diff -r below
+	# compares the copy to the very source it came from (faithful copy, not a
+	# valid restore point), so verify the manifest BEFORE anything is written.
+	[ -f "$backup/MANIFEST.sha256" ] || die "the backup has no MANIFEST.sha256: $backup — not restoring (§5)"
+	if ! (cd "$backup" && sha256sum -c MANIFEST.sha256 --quiet); then
+		die "the backup does not verify (§5) — not restoring"
+	fi
+	log "sha256sum -c on $backup: 0 failed — the restore point verifies"
 
 	heading "rollback to $ts (runbook §12)"
 	printf 'this will:\n'
@@ -1457,12 +1523,6 @@ unique_suffix=
 main() {
 	parse_args "$@"
 	resolve_paths
-
-	if [ "$MODE" != dry-run ] && [ "$MODE" != verify ]; then
-		mkdir -p "$BACKUP_ROOT"
-		LOG_FILE=$BACKUP_ROOT/swap.log
-		log "live-swap.sh mode=$MODE store=$STORE_ROOT backups=$BACKUP_ROOT commit=$(git_commit)"
-	fi
 
 	case $MODE in
 	dry-run) dry_run ;;

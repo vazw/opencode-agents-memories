@@ -1,0 +1,4 @@
+# Mutation on the scratch copy (port era): metadata.db 1->2, one real shard 2->3, data/port-era.txt
+$ sqlite3 ... "PRAGMA user_version=2;" ; sqlite3 <shard> "PRAGMA user_version=3;" ; printf port era
+metadata.db user_version=2
+shard project_03b7931d97d0837c_shard_0.db user_version=3

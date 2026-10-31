@@ -1,0 +1,8 @@
+# Rehearsal pre-state — a copy of the live store + a fake config (rework-2)
+$ du -sh, file/db counts, metadata user_version, config sha256
+624M	/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/opencode-mem
+files=151
+dbs=29
+metadata.db user_version=1
+43c0b94519d86c198e38b19b4c2f67b232663d88834894f2a668dd15c73600bf  /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/config/opencode.jsonc
+90a7f15cc7ce4b11faa64c8674bca7c928f7521f8edb3e1c1613cae1f5da4806  /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/config/opencode-mem.jsonc

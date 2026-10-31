@@ -1,13 +1,10 @@
-Executed on the live machine 2026-10-31 (OpenCode was RUNNING throughout: pid 12998/25843).
-Both commands are read-only; the live store and config were not written.
+$ bash -n scripts/live-swap.sh scripts/test-live-swap.sh
+rc=0
 
-$ bash -n scripts/live-swap.sh; echo bash_n_rc=$?
-bash_n_rc=0
+$ shellcheck scripts/live-swap.sh scripts/test-live-swap.sh   # v0.11.0
+rc=0
 
-$ shellcheck scripts/live-swap.sh; echo shellcheck_rc=$?
-shellcheck_rc=0
-
-$ scripts/live-swap.sh --help
+$ ./scripts/live-swap.sh --help
 live-swap.sh — execute docs/runbooks/live-swap.md
 
   The runbook is the spec. This script is the same sequence, ordered the same
@@ -18,6 +15,9 @@ USAGE
 
   A bare invocation (no MODE) is --dry-run: it prints the plan and runs the
   read-only preflight, and it writes nothing — safe while OpenCode runs.
+
+  Linux only: the runbook's host is Void Linux, and the script uses GNU
+  coreutils (stat -c, df --output, du -sb, find -delete, sort -z).
 
 MODES
   --dry-run   Preflight only. Checks the store, the free space (need ~2x),
@@ -56,8 +56,9 @@ MODES
                 2. that engine's parent — must be the OpenCode host (the
                    one-process discriminator; if it is not, stop and record),
                 3. the store versions: metadata 2, prompts 2, shards 3 lazily,
-                4. web health on the engine's actual port (3742 by default;
-                   --web-port / OPENCODE_MEM_WEB_PORT override),
+                4. web health on the engine's actual port (the engine's own
+                   --web-port when its cmdline names one; otherwise
+                   --web-port, then OPENCODE_MEM_WEB_PORT, then 3742),
                 5. the token at <store>/data/.auth-token, minted by the 401,
                 6. one search, one add canary, one search for the canary,
                 7. the status file: absent, or naming a dead pid.
@@ -92,11 +93,14 @@ OPTIONS
   --plugin-dir DIR     Plugin package (default <repo>/plugin).
   --container-tag TAG  Canary container tag for --verify (default: this
                        project's, opencode_project_4182e0858e0c93a1).
-  --web-port N         The engine's web port for --verify (default: the
-                       engine's own --web-port, then OPENCODE_MEM_WEB_PORT,
-                       then 3742 — the config's webServerPort 4747 is NOT
-                       forwarded by the plugin launch).
+  --web-port N         Fallback web port for --verify. The engine's own
+                       --web-port on its command line always wins; this flag
+                       applies only when that command line names none, then
+                       OPENCODE_MEM_WEB_PORT, then 3742. The config's
+                       webServerPort 4747 is NOT forwarded by the launch.
   --from TS            --rollback: restore this backup instead of LATEST.
+                       TS must be a dated stamp (20261030T175230Z), optional
+                       -N collision suffix; `/`, `..` and paths are rejected.
   -h, --help           This text.
 
 SEQUENCE (the runbook's order)
@@ -113,7 +117,7 @@ SEQUENCE (the runbook's order)
 EXIT STATUS
   0  the mode did what it reports
   1  refused or aborted (nothing live was written, or the write was reverted)
+  2  a command-line argument was rejected (unknown flag, or a malformed --from)
   3  the mode ran and a FAIL line was reported (see the output)
   130 the owner answered no
-
---help exit=0
+rc=0

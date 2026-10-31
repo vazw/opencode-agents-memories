@@ -9,7 +9,7 @@
 # read-only (`rev-parse`).
 #
 # Usage: bash scripts/test-live-swap.sh
-# Exit:  0 when all 13 cases pass, 1 otherwise.
+# Exit:  0 when all 16 cases pass, 1 otherwise.
 set -uo pipefail
 
 SECONDS=0
@@ -22,7 +22,7 @@ swap=$repo_root/scripts/live-swap.sh
 plugin=$repo_root/plugin
 work=$repo_root/.tmp/scratch/live-swap-selftest
 ok=0
-total=13
+total=16
 case_reason=
 case_out=
 
@@ -135,18 +135,21 @@ invoke() {
 # ── cases ─────────────────────────────────────────────────────────────────
 case_01_help_names_every_mode() {
 	local out=''
-	out=$("$swap" --help 2>&1) || bfail '--help exited non-zero'
-	case $out in *'--dry-run'*) ;; *) bfail '--help does not name --dry-run' ;; esac
-	case $out in *'--backup'*) ;; *) bfail '--help does not name --backup' ;; esac
-	case $out in *'--swap'*) ;; *) bfail '--help does not name --swap' ;; esac
-	case $out in *'--verify'*) ;; *) bfail '--help does not name --verify' ;; esac
-	case $out in *'--rollback'*) ;; *) bfail '--help does not name --rollback' ;; esac
-	case $out in *'docs/runbooks/live-swap.md'*) ;; *) bfail '--help does not point at the runbook' ;; esac
+	if ! out=$("$swap" --help 2>&1); then
+		bfail '--help exited non-zero'
+		return 1
+	fi
+	case $out in *'--dry-run'*) ;; *) bfail '--help does not name --dry-run'; return 1 ;; esac
+	case $out in *'--backup'*) ;; *) bfail '--help does not name --backup'; return 1 ;; esac
+	case $out in *'--swap'*) ;; *) bfail '--help does not name --swap'; return 1 ;; esac
+	case $out in *'--verify'*) ;; *) bfail '--help does not name --verify'; return 1 ;; esac
+	case $out in *'--rollback'*) ;; *) bfail '--help does not name --rollback'; return 1 ;; esac
+	case $out in *'docs/runbooks/live-swap.md'*) ;; *) bfail '--help does not point at the runbook'; return 1 ;; esac
 	return 0
 }
 
 case_02_bare_invocation_writes_nothing() {
-	mkrehearsal bare || bfail 'fixture setup failed'
+	mkrehearsal bare || { bfail 'fixture setup failed'; return 1; }
 	local before='' after=''
 	before=$(tree_snapshot "$r")
 	invoke --rehearse "$r"
@@ -177,7 +180,7 @@ case_03_dry_run_fails_on_a_missing_store() {
 }
 
 case_04_swap_replaces_one_active_line_only() {
-	mkrehearsal swap || bfail 'fixture setup failed'
+	mkrehearsal swap || { bfail 'fixture setup failed'; return 1; }
 	local expected=$work/expected-swapped.jsonc
 	write_expected_swapped "$expected"
 	invoke --swap --rehearse "$r" --yes
@@ -210,7 +213,7 @@ case_04_swap_replaces_one_active_line_only() {
 }
 
 case_05_swap_refuses_a_double_edit() {
-	mkrehearsal double || bfail 'fixture setup failed'
+	mkrehearsal double || { bfail 'fixture setup failed'; return 1; }
 	# both an active upstream entry and an active local entry
 	awk -v p="\"$plugin\"" '{ print; if ($0 ~ /"opencode-mem@latest"/) print "        " p "," }' \
 		"$r/config/opencode.jsonc" >"$r/config/opencode.jsonc.tmp"
@@ -233,8 +236,8 @@ case_05_swap_refuses_a_double_edit() {
 }
 
 case_06_swap_is_idempotent() {
-	mkrehearsal idem || bfail 'fixture setup failed'
-	"$swap" --swap --rehearse "$r" --yes >/dev/null 2>&1 || bfail 'the first swap failed'
+	mkrehearsal idem || { bfail 'fixture setup failed'; return 1; }
+	"$swap" --swap --rehearse "$r" --yes >/dev/null 2>&1 || { bfail 'the first swap failed'; return 1; }
 	local first=''
 	first=$(sha256sum "$r/config/opencode.jsonc" | cut -d' ' -f1)
 	local copies_before=''
@@ -260,7 +263,7 @@ case_06_swap_is_idempotent() {
 }
 
 case_07_swap_refuses_an_unrelated_config() {
-	mkrehearsal unrelated || bfail 'fixture setup failed'
+	mkrehearsal unrelated || { bfail 'fixture setup failed'; return 1; }
 	printf '{ "plugins": [ "some-other-plugin@latest" ] }\n' >"$r/config/opencode.jsonc"
 	local before=''
 	before=$(sha256sum "$r/config/opencode.jsonc" | cut -d' ' -f1)
@@ -297,7 +300,7 @@ case_08_rehearse_refuses_a_live_path() {
 }
 
 case_09_backup_writes_a_verified_manifest() {
-	mkrehearsal backup || bfail 'fixture setup failed'
+	mkrehearsal backup || { bfail 'fixture setup failed'; return 1; }
 	invoke --backup --rehearse "$r" --yes
 	if [ "$case_rc" -ne 0 ]; then
 		bfail "the backup failed: $case_out"
@@ -312,16 +315,31 @@ case_09_backup_writes_a_verified_manifest() {
 
 	fi
 	dir=$r/backups/$latest
-	[ -f "$dir/MANIFEST.sha256" ] || bfail 'no MANIFEST.sha256'
-	[ -f "$dir/BACKUP-INFO" ] || bfail 'no BACKUP-INFO completeness marker'
+	if [ ! -f "$dir/MANIFEST.sha256" ]; then
+		bfail 'no MANIFEST.sha256'
+		return 1
+	fi
+	if [ ! -f "$dir/BACKUP-INFO" ]; then
+		bfail 'no BACKUP-INFO completeness marker'
+		return 1
+	fi
 	if ! (cd "$dir" && sha256sum -c MANIFEST.sha256 --quiet); then
 		bfail 'the manifest does not verify'
 		return 1
 
 	fi
-	grep -qF './data/metadata.db' "$dir/MANIFEST.sha256" || bfail 'the manifest omits the database'
-	[ -f "$dir/data/metadata.db" ] || bfail 'the database is not in the backup'
-	[ -f "$dir/config/opencode.jsonc" ] || bfail 'the config is not in the backup'
+	if ! grep -qF './data/metadata.db' "$dir/MANIFEST.sha256"; then
+		bfail 'the manifest omits the database'
+		return 1
+	fi
+	if [ ! -f "$dir/data/metadata.db" ]; then
+		bfail 'the database is not in the backup'
+		return 1
+	fi
+	if [ ! -f "$dir/config/opencode.jsonc" ]; then
+		bfail 'the config is not in the backup'
+		return 1
+	fi
 	# no derived sidecars left behind by the checkpoint
 	if [ -n "$(find "$dir/data" -type f \( -name '*-shm' -o -name '*-tshm' \) -print -quit)" ]; then
 		bfail 'the backup carries derived *-shm/*-tshm sidecars'
@@ -332,8 +350,8 @@ case_09_backup_writes_a_verified_manifest() {
 }
 
 case_10_the_manifest_is_behavioural() {
-	mkrehearsal manifest || bfail 'fixture setup failed'
-	"$swap" --backup --rehearse "$r" --yes >/dev/null 2>&1 || bfail 'the backup failed'
+	mkrehearsal manifest || { bfail 'fixture setup failed'; return 1; }
+	"$swap" --backup --rehearse "$r" --yes >/dev/null 2>&1 || { bfail 'the backup failed'; return 1; }
 	local latest='' dir=''
 	latest=$(cat "$r/backups/LATEST")
 	dir=$r/backups/$latest
@@ -348,7 +366,7 @@ case_10_the_manifest_is_behavioural() {
 }
 
 case_11_rollback_refuses_a_post_swap_backup() {
-	mkrehearsal postswap || bfail 'fixture setup failed'
+	mkrehearsal postswap || { bfail 'fixture setup failed'; return 1; }
 	local pre=$r/backups/20260101T000000Z post=$r/backups/20260102T000000Z
 	mkdir -p "$pre/data" "$pre/config" "$post/data" "$post/config"
 	printf 'x\n' >"$pre/BACKUP-INFO"
@@ -380,8 +398,8 @@ case_11_rollback_refuses_a_post_swap_backup() {
 }
 
 case_12_rollback_restores_bytes_and_keeps_the_port_era_store() {
-	mkrehearsal restore || bfail 'fixture setup failed'
-	"$swap" --backup --rehearse "$r" --yes >/dev/null 2>&1 || bfail 'the backup failed'
+	mkrehearsal restore || { bfail 'fixture setup failed'; return 1; }
+	"$swap" --backup --rehearse "$r" --yes >/dev/null 2>&1 || { bfail 'the backup failed'; return 1; }
 	local ts='' dir=''
 	ts=$(cat "$r/backups/LATEST")
 	dir=$r/backups/$ts
@@ -401,13 +419,19 @@ case_12_rollback_restores_bytes_and_keeps_the_port_era_store() {
 		return 1
 
 	fi
-	[ -f "$r/backups/data.port-$ts/port-era.txt" ] || bfail 'the port-era store was not moved aside'
-	[ -f "$r/opencode-mem/data/port-era.txt" ] && bfail 'the port-era file survived into the restored store'
+	if [ ! -f "$r/backups/data.port-$ts/port-era.txt" ]; then
+		bfail 'the port-era store was not moved aside'
+		return 1
+	fi
+	if [ -f "$r/opencode-mem/data/port-era.txt" ]; then
+		bfail 'the port-era file survived into the restored store'
+		return 1
+	fi
 	return 0
 }
 
 case_13_backup_does_not_publish_a_bad_restore_point() {
-	mkrehearsal corrupt || bfail 'fixture setup failed'
+	mkrehearsal corrupt || { bfail 'fixture setup failed'; return 1; }
 	printf 'this is not a database\n' >"$r/opencode-mem/data/broken.db"
 	invoke --backup --rehearse "$r" --yes
 	if [ "$case_rc" -eq 0 ]; then
@@ -421,6 +445,80 @@ case_13_backup_does_not_publish_a_bad_restore_point() {
 
 	fi
 	case $case_out in *'integrity_check failed'*) ;; *) bfail 'the integrity failure is not named' ;; esac
+	return 0
+}
+
+case_14_backup_root_must_live_outside_the_store() {
+	mkrehearsal outroot || { bfail 'fixture setup failed'; return 1; }
+	# No --rehearse on purpose: --rehearse pins the backup root under the scratch
+	# root, so the outside-the-store guard is only reachable through --store /
+	# --config-dir. resolve_paths refuses before any process check or write.
+	invoke --backup --store "$r/opencode-mem" --config-dir "$r/config" \
+		--backup-root "$r/opencode-mem/backups" --yes
+	if [ "$case_rc" -ne 1 ]; then
+		bfail "a backup root inside the store must be refused (rc 1), got $case_rc"
+		return 1
+	fi
+	if ! printf '%s' "$case_out" | grep -qF 'must live OUTSIDE'; then
+		bfail 'the refusal does not name the outside-the-store rule'
+		return 1
+	fi
+	if [ -e "$r/opencode-mem/backups" ]; then
+		bfail 'the refused run created the backup root inside the store'
+		return 1
+	fi
+	return 0
+}
+
+case_15_engine_lock_naming_a_live_pid_is_refused() {
+	mkrehearsal lock || { bfail 'fixture setup failed'; return 1; }
+	# $$ is this harness: alive for the whole case, so the lock names a live pid.
+	printf '{"pid":%d,"startedAt":"2026-10-31T00:00:00Z"}\n' "$$" \
+		>"$r/opencode-mem/data/.engine.lock"
+	invoke --backup --rehearse "$r" --yes
+	if [ "$case_rc" -ne 1 ]; then
+		bfail "a store whose .engine.lock names a live pid must be refused (rc 1), got $case_rc"
+		return 1
+	fi
+	if ! printf '%s' "$case_out" | grep -qF 'still owned'; then
+		bfail 'the refusal does not say the store is still owned'
+		return 1
+	fi
+	if [ -e "$r/backups/LATEST" ]; then
+		bfail 'the refused backup published LATEST'
+		return 1
+	fi
+	return 0
+}
+
+case_16_a_non_empty_wal_is_a_refusal_not_a_delete() {
+	mkrehearsal wal || { bfail 'fixture setup failed'; return 1; }
+	mkdir -p "$r/opencode-mem/data/projects"
+	# A stale WAL with no base DB: the checkpoint loop never opens it, so it is
+	# still non-empty when the guard counts the WALs. Its content is not a valid
+	# WAL frame set on purpose — nothing may consume or delete it.
+	printf 'stale wal bytes, never deleted\n' >"$r/opencode-mem/data/projects/stale.db-wal"
+	invoke --backup --rehearse "$r" --yes
+	if [ "$case_rc" -ne 1 ]; then
+		bfail "a non-empty *.db-wal must be refused (rc 1), got $case_rc"
+		return 1
+	fi
+	if ! printf '%s' "$case_out" | grep -qF 'non-empty *.db-wal'; then
+		bfail 'the refusal does not name the non-empty *.db-wal'
+		return 1
+	fi
+	if ! printf '%s' "$case_out" | grep -qF 'NOT deleting them'; then
+		bfail 'the refusal does not state that the WAL is kept'
+		return 1
+	fi
+	if [ ! -f "$r/opencode-mem/data/projects/stale.db-wal" ]; then
+		bfail 'the refusal deleted the non-empty WAL — the non-negotiable is broken'
+		return 1
+	fi
+	if [ -e "$r/backups/LATEST" ]; then
+		bfail 'a torn copy was published as a restore point'
+		return 1
+	fi
 	return 0
 }
 
@@ -452,6 +550,9 @@ run case_10_the_manifest_is_behavioural
 run case_11_rollback_refuses_a_post_swap_backup
 run case_12_rollback_restores_bytes_and_keeps_the_port_era_store
 run case_13_backup_does_not_publish_a_bad_restore_point
+run case_14_backup_root_must_live_outside_the_store
+run case_15_engine_lock_naming_a_live_pid_is_refused
+run case_16_a_non_empty_wal_is_a_refusal_not_a_delete
 
 printf 'wall time: %ss\n' "$SECONDS"
 if [ "$ok" -eq "$total" ]; then

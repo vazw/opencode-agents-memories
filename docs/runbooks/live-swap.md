@@ -341,6 +341,9 @@ in `docs/evidence/live-swap-2026-10-30/backup-restore.md`; `rsync` is **not inst
 the `rsync -a --delete` form in the PRD is replaced by move-aside + `cp -a` (equivalent, and it cannot
 leave stale files behind).
 
+`scripts/live-swap.sh --rollback` runs this sequence and verifies the chosen backup's
+`MANIFEST.sha256` (§5) **before** it writes anything; a backup that fails that check is not restored.
+
 ## 13. Export → import: the DR / portability route, not the primary swap
 
 `~/.opencode-mem/exports/opencode-agents-memory-20261030T151445Z.json` (1,547,433 B, sha256

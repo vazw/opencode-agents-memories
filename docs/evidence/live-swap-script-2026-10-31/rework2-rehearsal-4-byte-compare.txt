@@ -1,0 +1,18 @@
+# Independent byte compare (not the script diff -r), rework-2
+$ sha256sum over backup/data and restored data (path-relative, sorted)
+backup_files=60 restored_files=60
+data/: every file hashes identically (0 differing)
+
+$ cmp both config files
+opencode.jsonc identical
+opencode-mem.jsonc identical
+
+# the port-era store was moved aside intact (data.port-20261031T081446Z-2)
+aside_metadata_user_version=2
+aside_shard_project_03b7931d97d0837c_shard_0.db_user_version=3
+/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/backups/data.port-20261031T081446Z-2/port-era.txt
+
+# the restored store is back at v1/v2 with no marker
+restored_metadata_user_version=1
+restored_shard_user_version=2
+no port-era marker

@@ -1,0 +1,40 @@
+# §4.4 / security gate mandate 3 — --from accepts only a dated backup stamp
+# (review-1 measured `--from ../evil` restoring configs from <backup-root>/../evil)
+$ ./scripts/live-swap.sh --rollback --rehearse R --yes --from ../evil
+live-swap: --from must be a backup stamp like 20261030T175230Z (got: ../evil)
+rc=2
+
+$ ./scripts/live-swap.sh --rollback --rehearse R --yes --from ..
+live-swap: --from must be a backup stamp like 20261030T175230Z (got: ..)
+rc=2
+
+$ ./scripts/live-swap.sh --rollback --rehearse R --yes --from /
+live-swap: --from must be a backup stamp like 20261030T175230Z (got: /)
+rc=2
+
+$ ./scripts/live-swap.sh --rollback --rehearse R --yes --from /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/backups/20261031T081446Z
+live-swap: --from must be a backup stamp like 20261030T175230Z (got: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/backups/20261031T081446Z)
+rc=2
+
+$ ./scripts/live-swap.sh --rollback --rehearse R --yes --from 20261031T081446Z/../evil
+live-swap: --from must be a backup stamp like 20261030T175230Z (got: 20261031T081446Z/../evil)
+rc=2
+
+$ ./scripts/live-swap.sh --rollback --rehearse R --yes --from evil
+live-swap: --from must be a backup stamp like 20261030T175230Z (got: evil)
+rc=2
+
+$ ./scripts/live-swap.sh --rollback --rehearse R --yes --from 20261332T999999Z
+[2026-10-31T08:16:40Z] rehearsal: the live OpenCode process check is skipped (scratch store: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/opencode-mem)
+[2026-10-31T08:16:40Z] rehearsal note: OpenCode is running (pid 12998 25843); nothing live is written
+[2026-10-31T08:16:40Z] live-swap.sh mode=rollback store=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/opencode-mem backups=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/backups commit=807a739
+live-swap: backup not found: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/backups/20261332T999999Z
+rc=1
+
+# a real stamp is still accepted far enough to reach the backup state
+$ ./scripts/live-swap.sh --rollback --rehearse R --yes --from 20260101T000000Z
+[2026-10-31T08:16:40Z] rehearsal: the live OpenCode process check is skipped (scratch store: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/opencode-mem)
+[2026-10-31T08:16:40Z] rehearsal note: OpenCode is running (pid 12998 25843); nothing live is written
+[2026-10-31T08:16:40Z] live-swap.sh mode=rollback store=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/opencode-mem backups=/home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/backups commit=807a739
+live-swap: backup not found: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework2-rehearsal/backups/20260101T000000Z
+rc=1
