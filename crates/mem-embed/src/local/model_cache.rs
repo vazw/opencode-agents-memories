@@ -187,19 +187,43 @@ fn declared_position_value(model: &str, key: &str, container: &serde_json::Value
 /// the tokenizer's special-token count and the optional configured override.
 ///
 /// `Ok(None)` means unbounded. The override is never clamped: it is refused
-/// loudly when it exceeds a declared limit. Without an override, a declaration
-/// that cannot hold its own template (`declared <= specials + 1`) is refused at
-/// load rather than producing a `[SEP]`-only vector; otherwise the cap is
+/// loudly when it exceeds a declared limit. A cap that cannot keep both
+/// boundary special tokens is refused at load on **both** paths — a configured
+/// override below `specials + 1` (a configured cap must keep both specials plus
+/// a content token, so a configured 2 is refused and `cap == 2` stays
+/// model-only), and a declaration below `specials + 2` when no override is set.
+/// Every configuration-reachable cap therefore keeps both boundary special
+/// tokens, and a configured one keeps a content token too, so no configuration
+/// yields a `[SEP]`-only vector. Otherwise the cap is the override, or
 /// `declared - specials`.
 ///
 /// The signature carries no model id (this is a pure policy function); the
-/// refusal names `config.json`, the source of the declaration, and both
+/// refusals name their source (`config.json` / `embeddingMaxTokens`) and both
 /// numbers.
 pub fn effective_max_tokens(
     declared: Option<usize>,
     special_tokens: usize,
     configured: Option<u32>,
 ) -> Result<Option<usize>, EmbedError> {
+    if let Some(configured) = configured
+        && (configured as usize) < special_tokens + 1
+    {
+        return Err(EmbedError::ModelLoad {
+            model: "embeddingMaxTokens".to_string(),
+            message: format!(
+                "{}; raise embeddingMaxTokens to at least {}, or unset it",
+                cap_refusal(
+                    "configured",
+                    configured as usize,
+                    &format!(
+                        "both boundary special tokens plus a content token (needs at least {} tokens)",
+                        special_tokens + 1
+                    )
+                ),
+                special_tokens + 1
+            ),
+        });
+    }
     match (declared, configured) {
         (Some(model_limit), Some(configured)) => {
             let configured_usize = configured as usize;
@@ -213,15 +237,20 @@ pub fn effective_max_tokens(
         }
         (None, Some(configured)) => Ok(Some(configured as usize)),
         (Some(model_limit), None) => {
-            if model_limit <= special_tokens + 1 {
+            if model_limit < special_tokens + 2 {
                 return Err(EmbedError::ModelLoad {
                     model: "config.json".to_string(),
                     message: format!(
-                        "the cached config.json declares {model_limit} token positions, which \
-                         cannot hold the tokenizer's {special_tokens} special tokens plus at \
-                         least one content token (needs at least {}); provision a model with a \
-                         larger position limit",
-                        special_tokens + 1
+                        "the cached config.json declares {model_limit} token positions, so {}; \
+                         provision a model with a larger position limit",
+                        cap_refusal(
+                            "derived",
+                            model_limit.saturating_sub(special_tokens),
+                            &format!(
+                                "both boundary special tokens (needs at least {} positions)",
+                                special_tokens + 2
+                            )
+                        )
                     ),
                 });
             }
@@ -229,6 +258,17 @@ pub fn effective_max_tokens(
         }
         (None, None) => Ok(None),
     }
+}
+
+/// The sentence both refusals share: the resolved cap would be `cap` token(s),
+/// and that cannot keep what this lane needs. Each arm supplies its own
+/// requirement — the configured arm needs both boundary special tokens **plus a
+/// content token** (an operator can always pick that, so a configured cap of 2
+/// is refused), the derived arm needs both boundary special tokens only, which
+/// is why `cap == 2` stays reachable by a model declaring exactly
+/// `specials + 2` positions. The arithmetic differs; the rule does not.
+fn cap_refusal(kind: &str, cap: usize, requirement: &str) -> String {
+    format!("the {kind} cap would be {cap} token(s), which cannot keep {requirement}")
 }
 
 /// The cache-relative weights file for a dtype, or `None` for

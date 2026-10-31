@@ -291,8 +291,25 @@ fn test_effective_cap_refuses_a_limit_that_cannot_hold_its_specials() {
         panic!("expected ModelLoad, got {error:?}")
     };
     assert!(
-        message.contains('3') && message.contains('2'),
-        "the message names both numbers: {message}"
+        message.contains("the cached config.json declares 3 token positions"),
+        "the message names the declaration: {message}"
+    );
+    assert!(
+        message.contains(
+            "the derived cap would be 1 token(s), which cannot keep both boundary special tokens \
+             (needs at least 4 positions)"
+        ),
+        "the derived-cap framing states the binding requirement, not specials + 1: {message}"
+    );
+    assert!(
+        !message.contains("needs at least 3"),
+        "the old off-by-one advice (the value it refuses) must be gone: {message}"
+    );
+
+    assert_eq!(
+        effective_max_tokens(Some(4), 2, None).expect("specials + 2 is the degenerate pair"),
+        Some(2),
+        "cap == 2 stays reachable, but only through a model declaring exactly specials + 2 positions"
     );
 }
 
@@ -314,6 +331,59 @@ fn test_effective_cap_honours_an_override_under_the_limit() {
     assert_eq!(
         effective_max_tokens(Some(8192), 2, Some(1024)).expect("override under the limit"),
         Some(1024)
+    );
+}
+
+#[test]
+fn test_effective_cap_refuses_an_override_that_cannot_hold_its_specials() {
+    for configured in [1, 2] {
+        let error = effective_max_tokens(Some(8192), 2, Some(configured))
+            .expect_err("a configured cap below specials + 1 is refused at load");
+        let EmbedError::ModelLoad { message, .. } = &error else {
+            panic!("expected ModelLoad for embeddingMaxTokens {configured}, got {error:?}")
+        };
+        assert!(
+            message.contains(&format!(
+                "the configured cap would be {configured} token(s), which cannot keep both \
+                 boundary special tokens plus a content token (needs at least 3 tokens)"
+            )),
+            "the configured cap is refused with the same derived-cap rule: {message}"
+        );
+        assert!(
+            message.contains("raise embeddingMaxTokens to at least 3"),
+            "the remedy is named: {message}"
+        );
+    }
+
+    assert_eq!(
+        effective_max_tokens(Some(8192), 2, Some(3)).expect("specials + 1 is the floor"),
+        Some(3),
+        "the floor itself is accepted, so the refusal is not off by one"
+    );
+}
+
+#[test]
+fn test_effective_cap_refuses_an_override_under_an_undeclared_limit() {
+    for configured in [1, 2] {
+        let error = effective_max_tokens(None, 2, Some(configured)).expect_err(
+            "an unknown-limit model cannot be configured into a specials-only cap either",
+        );
+        let EmbedError::ModelLoad { message, .. } = &error else {
+            panic!("expected ModelLoad for embeddingMaxTokens {configured}, got {error:?}")
+        };
+        assert!(
+            message.contains(&format!(
+                "the configured cap would be {configured} token(s), which cannot keep both \
+                 boundary special tokens plus a content token (needs at least 3 tokens)"
+            )),
+            "one rule, no declaration or not: {message}"
+        );
+    }
+
+    assert_eq!(
+        effective_max_tokens(None, 2, Some(3)).expect("the floor is accepted"),
+        Some(3),
+        "above the floor the override stays the only bound"
     );
 }
 
@@ -391,6 +461,31 @@ async fn test_configured_cap_overrides_the_declared_limit() {
         stats.dropped_tokens,
         2_002 - 6,
         "ignoring the override would drop 2_002 - 62"
+    );
+}
+
+#[tokio::test]
+async fn test_configured_cap_that_cannot_hold_its_specials_fails_the_load() {
+    // Declares 64 positions, so only the configured cap can refuse this model.
+    let cache = fixture_cache(
+        "input-limits-configured-floor",
+        r#"{"model_type":"tiny","max_position_embeddings":64}"#,
+    );
+    let embedder = fixture_embedder(&cache, Some(2));
+
+    let error = embedder
+        .warmup()
+        .await
+        .expect_err("a specials-only configured cap must refuse the load, not warm up");
+    assert!(
+        matches!(error, EmbedError::ModelLoad { .. }),
+        "the refusal is a load error (the service gate turns it into WarmupFailed): {error:?}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("the configured cap would be 2 token(s)"),
+        "the load failure carries the configured-cap framing: {error}"
     );
 }
 

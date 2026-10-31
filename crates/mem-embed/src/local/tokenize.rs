@@ -46,9 +46,11 @@ pub struct TokenizedInput {
 /// length as `ids`. `dropped_tokens = old_len - new_len` (`0` when
 /// `old_len <= max_tokens`), and a second pass at the same cap is a no-op.
 ///
-/// `max_tokens == 2` is the documented degenerate pair (`[CLS][SEP]`):
-/// unreachable from configuration (the loader refuses a declared limit that
-/// cannot hold its own specials) but valid and mask-consistent if reached.
+/// `max_tokens == 2` is the documented degenerate pair (`[CLS][SEP]`, no
+/// content token). Configuration reaches it only through a model that declares
+/// exactly `specials + 2` positions: the loader refuses a declaration below
+/// that, and refuses a configured cap below `specials + 1`, so no configured
+/// value can produce it. It stays valid and mask-consistent if reached.
 pub fn truncate_tokenized(input: TokenizedInput, max_tokens: usize) -> TokenizedInput {
     let max_tokens = max_tokens.max(1);
     let len = input.ids.len();
