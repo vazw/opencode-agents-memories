@@ -399,6 +399,12 @@ capture, health), each terminated by `\n`. Its bytes are the framing oracle for 
      live `.engine.lock` — so the pid-liveness rule is meaningful.
   2. **JS wrapper:** when there is no engine or an incompatible engine, it writes the status
      file recording **its own** pid.
+- **One wrapper write per host process (issue 82).** The wrapper keeps its bridge state in a
+  process-global registry keyed by the resolved storage root, so sibling plugin generations
+  share one child; the first `degrade` for a root writes the file and a sibling never writes
+  it. When a child exits with code **75** (`ENGINE_LOCK_LOST`), the wrapper leaves the
+  engine's own line — which names the **holder** — untouched for however long the child
+  takes to exit; the decision reads the child's recorded exit, never a fixed delay.
 - The owner never deletes a status it did not write; a reader treats the file as degraded
   only while the named pid is alive.
 - The status file is a status **report** only. It is not a second-instance policy: whether a
@@ -412,6 +418,16 @@ When the engine is absent, fails to start, speaks an incompatible protocol, or c
 executed for the host's platform/arch, the plugin still loads and memory is disabled — with
 (a) a structured warning on stderr naming the cause, and (b) the status file above. A
 silently memoryless plugin is worse than a loud one.
+
+### One unexpected death, one restart (issue 82)
+
+A child that dies after the handshake resets the bridge to cold; the next call spawns
+exactly **one** replacement. A second unexpected death degrades and latches until the host
+restarts (`MAX_AUTO_RESTARTS = 1`, never reset), so a crashing engine cannot become a crash
+loop. A controlled shutdown never counts as a crash, and a stale `close` from a replaced
+child can neither tear down the replacement nor vote on a later handshake. The restart is an
+**in-process** recovery only: the engine lock still makes a second process a loser, and a
+`75` exit still leaves the holder's line intact.
 
 The wrapper resolves the engine at `engine/<platform>-<arch>/opencode-agents-memory` inside the
 package, by `process.platform` / `process.arch`. There is **no** download fallback, no JS

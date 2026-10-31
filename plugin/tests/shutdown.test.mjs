@@ -36,14 +36,14 @@ test("test_shutdown_source_rules", () => {
       'process.off("SIGINT", shutdownHandler)',
       'process.off("SIGTERM", shutdownHandler)',
       "process.kill(process.pid, sig",
-      "for (const t of shutdownTimers) clearTimeout(t)",
-      "await awaitCaptureDrain()",
+      "for (const t of state.shutdownTimers) clearTimeout(t)",
+      "await awaitCaptureDrain(state)",
     ];
     for (const needle of mustContain) {
       assert.ok(text.includes(needle), `${rel}: missing required source form: ${needle}`);
     }
-    assert.match(text, /const shutdownTimers = \[\];/, `${rel}: shutdownTimers must be an array`);
-    assert.ok(text.includes("pendingCaptures"), `${rel}: pendingCaptures counter must exist`);
+    assert.match(text, /shutdownTimers: \[\],/, `${rel}: shutdownTimers must be an array`);
+    assert.ok(text.includes("state.pendingCaptures"), `${rel}: pendingCaptures counter must exist`);
     assert.ok(
       !text.includes("process.exit("),
       `${rel}: wrapper must never call process.exit`

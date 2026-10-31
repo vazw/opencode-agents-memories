@@ -1,13 +1,15 @@
 // W5.2 shared test harness for the staged-package cases. NOT a test file:
 // `node --test` only matches `*.test.mjs`, so this module has no cases of its
-// own — its correctness is proved by its eight users: `v2-plugin-adapter.test.mjs`
+// own — its correctness is proved by its nine users: `v2-plugin-adapter.test.mjs`
 // and `compaction-v2-inheritance.test.mjs` (`mode: "v2"`),
 // `wrapper-toast.test.mjs` (`mode: "v1"`), `compaction-hook.test.mjs`
 // (`mode: "v1-compaction"`), `compaction-capability.test.mjs`
 // (`mode: "v1-compaction"`, the capability gate), `memory-tools.test.mjs`
 // (`mode: "v2-tool"` for the recall case and `mode: "v2-memory-tool"` for the
-// issue-70 wave-2 cases), `skills-bridge.test.mjs` (`mode: "v2-skills"`) and
-// `v2-compaction-hook.test.mjs` (`mode: "v2-compaction"`).
+// issue-70 wave-2 cases), `skills-bridge.test.mjs` (`mode: "v2-skills"`),
+// `v2-compaction-hook.test.mjs` (`mode: "v2-compaction"`) and
+// `inject-query.test.mjs` (`mode: "v1-compaction"`, issue 50's query params).
+// `shared-bridge.test.mjs` (issue 82) adds `mode: "shared-bridge"`.
 //
 // Why a subprocess and not an import: `plugin/src/plugin.js` spawns the engine
 // with piped stdio and no `detached`/`unref` (`:365-368`), and the stub exits
@@ -79,11 +81,21 @@ export function stageStubEngine(pkgDir, {
   // method → {code, message, data}: answers that method with a JSON-RPC error
   // whose `data` survives to the wrapper (the issue-70 wave-2 T22 knob).
   wireErrors = {},
+  // Issue 82 knobs (additive; every existing user leaves them unset):
+  // die after answering `n` non-hello requests (the dead-child restart case);
+  diesAfterRequests = null,
+  // write the real loser line to `path` at t≈0, answer nothing, exit 75 after
+  // `exitDelayMs` (the slow-exit holder-pid case).
+  loserStatus = null,
+  // Issue 82 lifecycle records (spawned/exited) default to a sidecar so the
+  // existing raw-log readers keep seeing wire messages only; the shared-bridge
+  // driver points this AT the request log (the plan's literal shape).
+  lifecycleLogPath = null,
 }) {
   const dir = path.join(pkgDir, "engine", `${process.platform}-${process.arch}`);
   fs.mkdirSync(dir, { recursive: true });
   const binPath = path.join(dir, "opencode-agents-memory");
-  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, wireErrors }), {
+  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath: lifecycleLogPath ?? requestLogPath + ".lifecycle" }), {
     mode: 0o755,
   });
   fs.chmodSync(binPath, 0o755);
@@ -93,8 +105,8 @@ export function stageStubEngine(pkgDir, {
 // Static body (no template interpolation inside the script beyond CONFIG):
 // answers the canned protocol-1.0.0 results, records its own pid, exits on
 // SIGTERM or stdin EOF.
-function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, wireErrors }) {
-  const config = JSON.stringify({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, wireErrors });
+function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath }) {
+  const config = JSON.stringify({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath });
   const blocks = JSON.stringify({
     restore:
       "## Restored Session Memory\n\n### Memory 1\nRetries are capped at three\n\nTags: project, opencode-mem\n\n### Memory 2\nDeploys go through the staging gate first\n\nTags: project, opencode-mem\n\n",
@@ -107,20 +119,42 @@ function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabiliti
 const CONFIG = ${config};
 const BLOCKS = ${blocks};
 import fs from "node:fs";
-const { injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, wireErrors } = CONFIG;
+const { injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath } = CONFIG;
 // Issue 70 wave 1's nine wire methods; appended to the hello's advertised set
 // only when the capability object advertises the same key.
 const TOOL_METHODS = ["add", "search", "forget", "list", "profile", "list-shards", "migrate", "export", "import"];
 function logLine(object) {
   try { fs.appendFileSync(requestLogPath, JSON.stringify(object) + "\\n"); } catch {}
 }
+function lifecycleLine(object) {
+  try { fs.appendFileSync(lifecycleLogPath, JSON.stringify(object) + "\\n"); } catch {}
+}
+// Issue 82: every exit path appends its pid first, so a test can wait for the
+// child to be gone before racing the next call.
+let exiting = false;
+function exitNow(code) {
+  if (exiting) return;
+  exiting = true;
+  lifecycleLine({ exited: process.pid });
+  process.exit(code);
+}
+lifecycleLine({ spawned: process.pid, argv: process.argv });
+// The genuine lock loser: write the engine's own line (naming the HOLDER) and
+// exit 75 after the configured delay, answering nothing.
+if (loserStatus) {
+  try {
+    fs.writeFileSync(loserStatus.path, "degraded: engine lock held (pid=" + loserStatus.holderPid + ", ts=" + loserStatus.ts + ")\\n");
+  } catch {}
+  setTimeout(() => exitNow(75), loserStatus.exitDelayMs);
+}
 try {
   // The capability record is part of the manifest so a case can prove what
   // this stub actually ADVERTISED (the wire log holds requests, not answers).
   fs.writeFileSync(manifestPath, JSON.stringify({ pid: process.pid, argv: process.argv, env: process.env, capabilities }, null, 2) + "\\n");
 } catch {}
-process.on("SIGTERM", () => process.exit(0));
+process.on("SIGTERM", () => exitNow(0));
 let buffer = "";
+let answered = 0;
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
   buffer += chunk;
@@ -134,11 +168,22 @@ process.stdin.on("data", (chunk) => {
     try { parsed = JSON.parse(line); } catch { continue; }
     logLine({ got: parsed });
     const reply = respond(parsed);
-    if (reply) process.stdout.write(JSON.stringify(reply) + "\\n");
+    if (!reply) continue;
+    const out = JSON.stringify(reply) + "\\n";
+    if (typeof diesAfterRequests === "number" && parsed && parsed.method !== "hello") {
+      answered += 1;
+      if (answered >= diesAfterRequests) {
+        process.stdout.write(out, () => exitNow(1));
+        continue;
+      }
+    }
+    process.stdout.write(out);
   }
 });
-process.stdin.on("end", () => process.exit(0));
+process.stdin.on("end", () => exitNow(0));
 function respond(parsed) {
+  // The loser answers nothing: the wrapper's hello bound is the only way out.
+  if (loserStatus) return null;
   const id = parsed && parsed.id !== undefined ? parsed.id : null;
   const method = parsed && parsed.method;
   // Read inside the generated body (never from the harness's own scope).
@@ -281,7 +326,7 @@ function respond(parsed) {
   }
   const reply = { id, jsonrpc: "2.0", result };
   if (method === "shutdown") {
-    process.stdout.write(JSON.stringify(reply) + "\\n", () => process.exit(0));
+    process.stdout.write(JSON.stringify(reply) + "\\n", () => exitNow(0));
     return null;
   }
   return reply;
@@ -353,7 +398,12 @@ function readWire() {
   const messages = [];
   for (const line of text.split("\\n")) {
     if (!line.trim()) continue;
-    try { messages.push(JSON.parse(line).got); } catch {}
+    try {
+      const got = JSON.parse(line).got;
+      // Spawn/exit records are not wire messages; keep them out of the
+      // sequence every existing case counts.
+      if (got !== undefined) messages.push(got);
+    } catch {}
   }
   return messages;
 }
@@ -883,6 +933,145 @@ if (mode === "v2-skills") {
   const helloCount = wire.filter((message) => message && message.method === "hello").length;
   writeRecord({ adds, updates, removes, disposed, catalogueRequests, helloCount, consoleErrors, elapsedMs });
   process.exit(0);
+}
+
+if (mode === "shared-bridge") {
+  // Issue 82: reproduce the host's loader exactly. registerHooks mirrors
+  // packages/plugin/src/source.node.ts: when the PARENT carries a generation
+  // marker, every local specifier it resolves is rewritten with that marker.
+  // A cache-busted second import therefore yields a second whole graph — the
+  // entry module AND its relative imports — not just a second entry.
+  const { registerHooks } = await import("node:module");
+  const GENERATION_MARKER = /__fixture_generation=(\\d+)/;
+  registerHooks({
+    resolve(specifier, context, nextResolve) {
+      const resolved = nextResolve(specifier, context);
+      const marker = GENERATION_MARKER.exec(context.parentURL ?? "");
+      if (marker === null || !resolved.url.startsWith("file:")) return resolved;
+      const url = new URL(resolved.url);
+      url.searchParams.set("__fixture_generation", marker[1]);
+      return { url: url.href, shortCircuit: true };
+    },
+  });
+
+  function readLog() {
+    let text = "";
+    try { text = fs.readFileSync(process.env.STUB_LOG, "utf8"); } catch { return []; }
+    const entries = [];
+    for (const line of text.split("\\n")) {
+      if (!line.trim()) continue;
+      try { entries.push(JSON.parse(line)); } catch {}
+    }
+    return entries;
+  }
+
+  function makeCtx(added) {
+    return {
+      location: { directory: fixture.location, project: { directory: fixture.location } },
+      session: { hook: async () => {} },
+      event: {
+        subscribe: async function* ({ signal }) {
+          if (signal.aborted) return;
+          await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+        },
+      },
+      tool: {
+        transform: async (callback) => {
+          await callback({ add: (tool) => added.push(tool) });
+          return { dispose: async () => {} };
+        },
+      },
+      rpc: {
+        register: async () => ({ events: { emit: async () => {} } }),
+      },
+    };
+  }
+
+  const baseUrl = pathToFileURL(path.join(pkgDir, "dist", "plugin.js")).href;
+  const added1 = [];
+  const ctx1 = makeCtx(added1);
+  const gen1 = await import(baseUrl + "?__fixture_generation=1");
+
+  async function callShards(tool, sessionID) {
+    const result = await tool.execute({ mode: "list-shards" }, { sessionID });
+    return JSON.parse(result.content);
+  }
+  function memoryTool(added) {
+    const tool = added.find((entry) => entry.name === "memory");
+    if (tool === undefined) throw new Error("the memory tool was not registered");
+    return tool;
+  }
+
+  const answers = [];
+  const roots = fixture.variant === "roots";
+  // The roots case needs generation 1's first call BEFORE the env switch, so
+  // the first child keeps the first root; generation 2 then lives on the second.
+  if (roots) {
+    await gen1.setup(ctx1);
+    answers.push(await callShards(memoryTool(added1), "ses-1"));
+    process.env.OPENCODE_MEM_STORAGE_ROOT = fixture.secondRoot;
+  }
+
+  const added2 = [];
+  const ctx2 = makeCtx(added2);
+  const gen2 = await import(baseUrl + "?__fixture_generation=2");
+  if (fixture.concurrent === true) {
+    await Promise.all([gen1.setup(ctx1), gen2.setup(ctx2)]);
+  } else {
+    if (!roots) await gen1.setup(ctx1);
+    await gen2.setup(ctx2);
+  }
+
+  const tool1 = memoryTool(added1);
+  const tool2 = memoryTool(added2);
+
+  if (fixture.variant === "dead-child") {
+    for (let index = 0; index < 3; index += 1) {
+      answers.push(await callShards(index % 2 === 0 ? tool1 : tool2, "ses-" + (index + 1)));
+      const spawned = readLog().filter((entry) => entry.spawned !== undefined);
+      const lastSpawn = spawned[spawned.length - 1];
+      if (lastSpawn === undefined) continue;
+      // The stub logs exited BEFORE process.exit, so the log line alone is
+      // not proof the OS has reaped it; wait for the pid to be gone (which is
+      // also when the wrapper's close event has run) before the next call.
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        const logged = readLog().some((entry) => entry.exited === lastSpawn.spawned);
+        let gone = false;
+        try {
+          process.kill(lastSpawn.spawned, 0);
+        } catch (error) {
+          gone = error.code === "ESRCH";
+        }
+        if (logged && gone) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    }
+  } else if (!roots) {
+    answers.push(await callShards(tool1, "ses-1"));
+    answers.push(await callShards(tool2, "ses-2"));
+  } else {
+    answers.push(await callShards(tool2, "ses-2"));
+  }
+
+  const log = readLog();
+  const spawned = log
+    .filter((entry) => entry.spawned !== undefined)
+    .map((entry) => ({ pid: entry.spawned, argv: entry.argv }));
+  writeRecord({
+    pid: process.pid,
+    helloCount: log.filter((entry) => entry.got && entry.got.method === "hello").length,
+    spawned,
+    exited: log.filter((entry) => entry.exited !== undefined).map((entry) => entry.exited),
+    answers,
+  });
+  // End via the plugin's own SIGTERM path (it reaps the child); with no
+  // handler installed the default disposition ends the process directly. The
+  // timer keeps the loop alive across the handler's async teardown — without
+  // it an empty loop trips Node's unsettled-top-level-await exit (13) before
+  // the signal is re-delivered.
+  process.kill(process.pid, "SIGTERM");
+  await new Promise((resolve) => setTimeout(resolve, 5000));
 }
 
 throw new Error("unknown driver mode: " + mode);

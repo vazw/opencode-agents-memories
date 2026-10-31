@@ -14,6 +14,16 @@
 //   - host credentials never reach the child (not in argv, env or stderr);
 //   - teardown re-delivers the received signal after cleanup; the wrapper
 //     never terminates the host process itself.
+//
+// Issue 82: the host evaluates this module once per instance/location inside
+// one server process, and each evaluation gets its own module graph. The
+// mutable bridge state is therefore a process-global registry keyed by the
+// resolved storage root (`globalThis[Symbol.for("opencode-mem.bridge.v1")]`):
+// one child and one handshake serve every sibling (D-31), while the engine
+// lock stays the unchanged cross-PROCESS guard (D-39). The registry holds DATA
+// only — no functions — so a later generation runs its own code against the
+// shared state; the one process signal handler installed at the first spawn
+// walks the registry rather than holding a state.
 
 import pkg from "../package.json" with { type: "json" };
 import { spawn } from "node:child_process";
@@ -45,6 +55,10 @@ const SHUTDOWN_RESPONSE_TIMEOUT_MS = 2000;
 const CAPTURE_DRAIN_MAX_MS = 2000;
 const CAPTURE_DRAIN_POLL_MS = 50;
 const REQUEST_TIMEOUT_MS = 15000;
+// Issue 82: the handshake bound, and the one-auto-restart budget (never reset,
+// so a second unexpected death latches degraded instead of crash-looping).
+const HELLO_TIMEOUT_MS = 5000;
+const MAX_AUTO_RESTARTS = 1;
 // Compaction is on the host's critical path: a wedged engine must not stall it
 // for the 15 s default. Both compaction calls pass this explicitly.
 const COMPACTION_REQUEST_TIMEOUT_MS = 2000;
@@ -228,9 +242,9 @@ export function shortError(err) {
 // <storage_root>/status recording its OWN pid. Never deletes a status file it
 // did not write (indeed: it never deletes a status file at all).
 
-function writeStatusFile(reason) {
+function writeStatusFile(state, reason) {
   try {
-    const root = storageRoot();
+    const root = state.root;
     mkdirSync(root, { recursive: true });
     const ts = new Date().toISOString();
     let line = "degraded: " + reason + " (pid=" + process.pid + ", ts=" + ts + ")";
@@ -241,47 +255,98 @@ function writeStatusFile(reason) {
   }
 }
 
-function degrade(reason) {
-  if (bridgeState === "degraded") return false;
-  bridgeState = "degraded";
-  engineCompatible = false;
+// `writeStatus: false` is the lock-loser path (D6): the engine wrote the line
+// naming the HOLDER, and the wrapper must not replace it with its own pid.
+function degrade(state, reason, { writeStatus = true } = {}) {
+  if (state.bridgeState === "degraded") return false;
+  state.bridgeState = "degraded";
+  state.engineCompatible = false;
   writeStructured("warn", "degraded", { reason });
-  writeStatusFile(reason);
+  if (writeStatus) writeStatusFile(state, reason);
   return true;
 }
 
-// ── bridge state ────────────────────────────────────────────────────────
-// cold: no engine resolved yet (none may exist — fail-open).
+// ── bridge registry (issue 82) ──────────────────────────────────────────
+// Keyed by the resolved storage root: one engine per store per process is
+// D-31's "one engine process serves every session of a host". A second root in
+// the same process legitimately gets a second child; the key is never the
+// package path (two package copies on one root would create a guaranteed
+// loser) and never the host directory (one engine per project against one
+// store).
+//
+// The record holds DATA only: a function or closure here would pin the first
+// generation's module until the host restarts.
 
-const pendingResponses = new Map(); // id → { resolve, reject, timer }
-const shutdownTimers = [];
-let bridgeState = "cold"; // cold | installed | degraded
-let startingInstance = null;
-let child = null;
-let childClosed = null;
-let childListenersInstalled = false;
-let engineCompatible = false;
-let engineCapabilities = null;   // hello.result.capabilities, or null when absent/unusable
-let engineProtocolLine = null;   // hello.result.protocol, for the mismatch line
-const CAPABILITY_GAPS_LOGGED = new Set();  // one line per capability per process
+const BRIDGE_REGISTRY_KEY = Symbol.for("opencode-mem.bridge.v1");
+
+// cold: no engine resolved yet (none may exist — fail-open).
+function createBridgeState(root) {
+  return {
+    root,
+    bridgeState: "cold", // cold | installed | degraded
+    child: null,
+    childClosed: null,
+    childExit: null, // { pid, code, signal } | null — the CURRENT child's exit
+    startingInstance: null,
+    pendingResponses: new Map(), // id → { resolve, reject, timer }
+    lineBuffer: "",
+    requestCounter: 1, // ids: "hello-1", then "capture-2", ...
+    engineCompatible: false,
+    engineCapabilities: null, // hello.result.capabilities, or null when absent/unusable
+    engineProtocolLine: null, // hello.result.protocol, for the mismatch line
+    capabilityGapsLogged: new Set(), // one line per capability per process
+    pendingCaptures: 0,
+    shuttingDown: false,
+    shutdownTimers: [],
+    autoRestarts: 0,
+  };
+}
+
+// A foreign or corrupted value at the key is replaced; a same-version record
+// is reused. The version lives in the symbol, so a future bridge version can
+// never read this one.
+function bridgeRegistry() {
+  let registry = globalThis[BRIDGE_REGISTRY_KEY];
+  if (!registry || !(registry.states instanceof Map)) {
+    registry = { states: new Map(), handlersInstalled: false };
+    globalThis[BRIDGE_REGISTRY_KEY] = registry;
+  }
+  return registry;
+}
+
+function bridgeStateFor(root) {
+  const registry = bridgeRegistry();
+  let state = registry.states.get(root);
+  if (state === undefined) {
+    state = createBridgeState(root);
+    registry.states.set(root, state);
+  }
+  return state;
+}
+
+// Resolved at every call: OPENCODE_MEM_STORAGE_ROOT is read then, so a
+// generation created before an env switch still targets its own root.
+function bridge() {
+  return bridgeStateFor(path.resolve(storageRoot()));
+}
+
+// Per generation, deliberately NOT shared: one agent's session id, prompt →
+// capture ids and toast dedupe must not bleed into another's captures or
+// silence another's warnings.
 let capturedSessionId = null;
-let pendingCaptures = 0;
-let requestCounter = 1; // ids: "hello-1", then "capture-2", ...
 // Process-unique prompt part ids: `Date.now()` collides on a back-to-back pair.
 let compactionPartCounter = 0;
-let shuttingDownFlag = false;
-let lineBuffer = "";
 
 function currentSessionId() {
   return capturedSessionId ?? ("oc-bridge-" + process.pid);
 }
 
-function rejectPending(reason) {
-  for (const [, entry] of pendingResponses) {
+function rejectPending(state, reason) {
+  for (const [, entry] of state.pendingResponses) {
     clearTimeout(entry.timer);
     entry.reject(new Error(reason));
   }
-  pendingResponses.clear();
+  state.pendingResponses.clear();
 }
 
 function wireRequest(method, params, id) {
@@ -289,21 +354,21 @@ function wireRequest(method, params, id) {
   return serializeRequest(method, params, existingSessionId, id);
 }
 
-function callChild(method, params, id, timeoutMs = REQUEST_TIMEOUT_MS) {
-  if (child === null) {
+function callChild(state, method, params, id, timeoutMs = REQUEST_TIMEOUT_MS) {
+  if (state.child === null) {
     return Promise.reject(new Error("bridge not connected"));
   }
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      pendingResponses.delete(id);
+      state.pendingResponses.delete(id);
       reject(new Error(method + " timed out"));
     }, timeoutMs);
-    pendingResponses.set(id, { resolve, reject, timer });
+    state.pendingResponses.set(id, { resolve, reject, timer });
     try {
-      child.stdin.write(wireRequest(method, params, id));
+      state.child.stdin.write(wireRequest(method, params, id));
     } catch (err) {
       clearTimeout(timer);
-      pendingResponses.delete(id);
+      state.pendingResponses.delete(id);
       reject(err);
     }
   });
@@ -335,8 +400,13 @@ function protocolCompatible(engineProtocol) {
 // with the ordinary chat block, which the hooks would append — a silent
 // double count. The handshake's flag is the only signal: absent means no-op,
 // never "send it and inspect the answer".
+function engineCapabilityIn(state, name) {
+  return state.engineCapabilities !== null && state.engineCapabilities[name] === true;
+}
+
+// Public wrapper: no other module sees the state object.
 function engineCapability(name) {
-  return engineCapabilities !== null && engineCapabilities[name] === true;
+  return engineCapabilityIn(bridge(), name);
 }
 
 // The handshake must have happened before the flag can be read (the first hook
@@ -345,23 +415,23 @@ function engineCapability(name) {
 async function compactionCapability() {
   if (!(await ensureStarted())) return false;
   if (engineCapability("compaction")) return true;
-  logCapabilityGap("compaction");
+  logCapabilityGap(bridge(), "compaction");
   return false;
 }
 
 // One fixed-field line per capability per process: `capability_missing` is
 // diagnostic, never a per-call log, and it carries no memory content.
-function logCapabilityGap(capability) {
-  if (CAPABILITY_GAPS_LOGGED.has(capability)) return;
-  CAPABILITY_GAPS_LOGGED.add(capability);
+function logCapabilityGap(state, capability) {
+  if (state.capabilityGapsLogged.has(capability)) return;
+  state.capabilityGapsLogged.add(capability);
   logWarn("engine.capability_missing", {
     capability,
-    engine_protocol: engineProtocolLine ?? "unknown",
+    engine_protocol: state.engineProtocolLine ?? "unknown",
     min_protocol: MIN_PROTOCOL,
   });
 }
 
-function handleWireLine(rawLine) {
+function handleWireLine(state, rawLine) {
   const line = rawLine.trim();
   if (line.length === 0) return;
   let message;
@@ -373,13 +443,13 @@ function handleWireLine(rawLine) {
     logWarn("engine.stdout_unparseable_line", { bytes: Buffer.byteLength(line) });
     return;
   }
-  const entry = message && typeof message === "object" ? pendingResponses.get(message.id) : undefined;
+  const entry = message && typeof message === "object" ? state.pendingResponses.get(message.id) : undefined;
   if (entry === undefined) {
     logWarn("engine.unexpected_message", { id: typeof message?.id === "string" ? message.id : null });
     return;
   }
   clearTimeout(entry.timer);
-  pendingResponses.delete(message.id);
+  state.pendingResponses.delete(message.id);
   if (message.error) {
     // The nine tool methods put their refusal in `error.data.reason` (§4); a
     // code-only reject would drop the wrapper's own answer and turn a real
@@ -396,23 +466,47 @@ function handleWireLine(rawLine) {
   }
 }
 
-function childClosedPromise() {
-  if (childClosed !== null) return childClosed;
-  const active = child;
+// Shutdown path: cached per state so a close that already fired is not waited
+// on twice. The handshake uses childClosedFor (bound to the child THIS attempt
+// spawned), never state.child, which a stale close may have replaced.
+function childClosedPromise(state) {
+  if (state.childClosed !== null) return state.childClosed;
+  const active = state.child;
   if (active === null) return Promise.resolve(null);
-  childClosed = new Promise((resolve) => {
+  state.childClosed = new Promise((resolve) => {
     active.once("close", (code, signal) => resolve({ code, signal }));
     active.once("error", () => resolve({ code: active.exitCode, signal: null }));
   });
-  return childClosed;
+  return state.childClosed;
 }
 
-function teardownChild(reason) {
-  const active = child;
-  child = null;
-  engineCapabilities = null;
-  engineProtocolLine = null;
-  rejectPending(reason);
+// Attempt-bound close wait used by the handshake: it never reads state.child,
+// so a stale close of a previous child cannot decide this attempt. Resolves
+// null when the bound elapses; the timer is always cleared.
+function childClosedFor(childProcess, timeoutMs = HELLO_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    let timer = null;
+    const finish = (value) => {
+      if (timer !== null) clearTimeout(timer);
+      childProcess.removeListener("close", onClose);
+      resolve(value);
+    };
+    const onClose = (code, signal) => finish({ code, signal });
+    if (childProcess.exitCode !== null || childProcess.signalCode !== null) {
+      finish({ code: childProcess.exitCode, signal: childProcess.signalCode });
+      return;
+    }
+    timer = setTimeout(() => finish(null), timeoutMs);
+    childProcess.once("close", onClose);
+  });
+}
+
+function teardownChild(state, reason) {
+  const active = state.child;
+  state.child = null;
+  state.engineCapabilities = null;
+  state.engineProtocolLine = null;
+  rejectPending(state, reason);
   if (active !== null) {
     try {
       active.stdout.removeAllListeners("data");
@@ -426,18 +520,43 @@ function teardownChild(reason) {
   }
 }
 
+// One child's close handler. The identity check is load-bearing: a stale close
+// must never tear down — or vote on — the replacement child. `childExit` is
+// recorded only after it passes, carrying the pid so a later handshake can
+// prove the exit belongs to the child it spawned.
+//
+// The first unexpected death resets the state to cold (the next call re-spawns
+// once, single-flight); a second one latches degraded. `autoRestarts` is never
+// reset, so an engine that keeps dying cannot become a crash loop.
+function retireChild(state, closing, code, signal) {
+  if (state.child !== closing) return;
+  state.childExit = { pid: closing.pid, code, signal };
+  if (state.shuttingDown) return;
+  // A death before install belongs to startBridge's catch; this branch owns
+  // only a child that had completed the handshake.
+  if (state.bridgeState !== "installed") return;
+  teardownChild(state, "engine exited");
+  state.autoRestarts += 1;
+  if (state.autoRestarts <= MAX_AUTO_RESTARTS) {
+    state.bridgeState = "cold";
+    logWarn("engine.exited", { code, signal, restarts: state.autoRestarts });
+  } else {
+    degrade(state, "engine exited unexpectedly (code=" + code + ", signal=" + signal + ")");
+  }
+}
+
 // Installs the engine child, performs the D-43 handshake and the §2 protocol
 // compatibility gate. Any failure degrades (fail-open), never throws.
-async function startBridge() {
+async function startBridge(state) {
   const execPath = engineExecutablePath();
   if (!existsSync(execPath)) {
-    degrade("no engine for " + process.platform + "-" + process.arch);
+    degrade(state, "no engine for " + process.platform + "-" + process.arch);
     return false;
   }
   try {
     accessSync(execPath, constants.X_OK);
   } catch {
-    degrade("engine not executable for " + process.platform + "-" + process.arch);
+    degrade(state, "engine not executable for " + process.platform + "-" + process.arch);
     return false;
   }
 
@@ -445,83 +564,113 @@ async function startBridge() {
     stdio: ["pipe", "pipe", "pipe"],
     env: childEnvironment(),
   });
-  child = childProcess;
-  childClosed = null;
+  state.child = childProcess;
+  state.childClosed = null;
+  state.childExit = null;
+  state.lineBuffer = "";
 
   childProcess.stdout.setEncoding("utf8");
   childProcess.stdout.on("data", (chunk) => {
-    lineBuffer += chunk;
-    let index = lineBuffer.indexOf("\n");
+    state.lineBuffer += chunk;
+    let index = state.lineBuffer.indexOf("\n");
     while (index >= 0) {
-      const line = lineBuffer.slice(0, index);
-      lineBuffer = lineBuffer.slice(index + 1);
-      index = lineBuffer.indexOf("\n");
-      handleWireLine(line);
+      const line = state.lineBuffer.slice(0, index);
+      state.lineBuffer = state.lineBuffer.slice(index + 1);
+      index = state.lineBuffer.indexOf("\n");
+      handleWireLine(state, line);
     }
   });
 
   childProcess.once("error", (err) => {
-    if (bridgeState === "cold" || bridgeState === "starting") {
-      degrade("engine spawn failed: " + shortError(err));
+    if (state.bridgeState === "cold") {
+      degrade(state, "engine spawn failed: " + shortError(err));
     }
   });
 
   childProcess.once("close", (code, signal) => {
-    if (shuttingDownFlag) return;
-    // Unexpected engine death mid-life: degrade loudly, fail open, let the
-    // next hook event attempt a fresh start.
-    if (bridgeState === "installed") {
-      degrade("engine exited unexpectedly (code=" + code + ", signal=" + signal + ")");
-      teardownChild("engine exited");
-    }
+    retireChild(state, childProcess, code, signal);
   });
 
   installSignalHandlers();
 
   try {
     const hello = await callChild(
+      state,
       "hello",
       { client: CLIENT_NAME, min_protocol: MIN_PROTOCOL, protocol: PROTOCOL },
-      "hello-" + requestCounter++,
-      5000
+      "hello-" + state.requestCounter++,
+      HELLO_TIMEOUT_MS
     );
     const engineProtocol = hello && typeof hello.protocol === "string" ? hello.protocol : null;
     if (engineProtocol === null || !protocolCompatible(engineProtocol)) {
-      degrade("engine protocol " + String(engineProtocol) + " incompatible (need major " + semverParts(PROTOCOL)[0] + ", floor " + MIN_PROTOCOL + ")");
-      teardownChild("incompatible engine");
+      degrade(state, "engine protocol " + String(engineProtocol) + " incompatible (need major " + semverParts(PROTOCOL)[0] + ", floor " + MIN_PROTOCOL + ")");
+      teardownChild(state, "incompatible engine");
       return false;
     }
     const capabilities = hello !== null && typeof hello === "object" ? hello.capabilities : null;
-    engineCapabilities =
+    state.engineCapabilities =
       capabilities !== null && typeof capabilities === "object" && !Array.isArray(capabilities)
         ? capabilities
         : null;
-    engineProtocolLine = engineProtocol;
-    engineCompatible = true;
-    bridgeState = "installed";
+    state.engineProtocolLine = engineProtocol;
+    state.engineCompatible = true;
+    state.bridgeState = "installed";
     return true;
   } catch (err) {
-    degrade("engine did not answer hello: " + shortError(err));
-    teardownChild("handshake failed");
+    // Issue 82 (D6): a genuine lock loser exits 75 after writing the engine's
+    // own holder-pid status line, and the wrapper must not replace it with its
+    // own pid. Decide from the exit of the child THIS attempt spawned — never
+    // from a fixed delay, and never from state.child, which a stale close may
+    // have replaced. The pid check is load-bearing: today a `75` exit also
+    // latches degraded, so no later child can exist and a stale record is
+    // unobservable; the one-restart rule removes that latch, and a previous
+    // child's code must never decide a later handshake.
+    let recorded = state.childExit;
+    if (recorded === null || recorded.pid !== childProcess.pid) {
+      recorded = await childClosedFor(childProcess, HELLO_TIMEOUT_MS);
+    }
+    if (recorded !== null && recorded.code === 75) {
+      degrade(state, "engine lock held by another process", { writeStatus: false });
+    } else {
+      degrade(state, "engine did not answer hello: " + shortError(err));
+    }
+    teardownChild(state, "handshake failed");
     return false;
   }
 }
 
-async function ensureStarted() {
-  if (bridgeState === "installed" && engineCompatible) return true;
-  if (bridgeState === "degraded") return false;
-  if (startingInstance === null) {
-    startingInstance = startBridge().finally(() => {
-      startingInstance = null;
+async function ensureStartedIn(state) {
+  if (state.bridgeState === "installed" && state.engineCompatible) return true;
+  if (state.bridgeState === "degraded") return false;
+  // Node sets exitCode/signalCode before `close` is processed. A call in that
+  // window would write into a dead pipe and fail for no reason, so treat the
+  // child as gone now and let the retirement budget decide cold vs degraded.
+  if (state.child !== null && (state.child.exitCode !== null || state.child.signalCode !== null)) {
+    retireChild(state, state.child, state.child.exitCode, state.child.signalCode);
+    if (state.bridgeState === "degraded") return false;
+  }
+  if (state.startingInstance === null) {
+    state.startingInstance = startBridge(state).finally(() => {
+      state.startingInstance = null;
     });
   }
-  return startingInstance;
+  return state.startingInstance;
 }
 
-async function sendRequest(method, params, timeoutMs = REQUEST_TIMEOUT_MS) {
-  const started = await ensureStarted();
+async function sendRequestIn(state, method, params, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const started = await ensureStartedIn(state);
   if (!started) throw new Error("memory degraded (fail-open): no compatible engine");
-  return callChild(method, params, method + "-" + requestCounter++, timeoutMs);
+  return callChild(state, method, params, method + "-" + state.requestCounter++, timeoutMs);
+}
+
+// Public wrappers: tools.js, skills.js and v2/* keep their existing call
+// shapes; every one resolves the state for the current storage root.
+function ensureStarted() {
+  return ensureStartedIn(bridge());
+}
+
+function sendRequest(method, params, timeoutMs = REQUEST_TIMEOUT_MS) {
+  return sendRequestIn(bridge(), method, params, timeoutMs);
 }
 
 // Issue 69: the engine owns the skill catalogue. A pre-69 engine omits the
@@ -552,15 +701,15 @@ export async function readSkillCatalogue(projectId) {
 // Fire-and-forget capture (§3): the ack carries no durability guarantee in
 // W5.1; an error is logged once and never blindly retried. pendingCaptures is
 // the counter the shutdown drain waits on.
-function fireCapture(payload) {
-  pendingCaptures += 1;
+function fireCapture(state, payload) {
+  state.pendingCaptures += 1;
   void (async () => {
     try {
-      await sendRequest("capture", payload, 10000);
+      await sendRequestIn(state, "capture", payload, 10000);
     } catch (err) {
       logWarn("capture.failed", { message: shortError(err) });
     } finally {
-      pendingCaptures = Math.max(0, pendingCaptures - 1);
+      state.pendingCaptures = Math.max(0, state.pendingCaptures - 1);
     }
   })();
 }
@@ -666,84 +815,100 @@ function extractText(node) {
 
 // ── shutdown (§5, D-45) ─────────────────────────────────────────────────
 // The wrapper never terminates the host process itself: it drops its own
-// handlers, drains pending captures, asks the engine to shut down, escalates
-// SIGTERM → SIGKILL on a schedule, reaps the child, and finally re-delivers
-// the received signal so the host's default disposition applies.
+// handlers once, drains pending captures, asks every state's engine to shut
+// down, escalates SIGTERM → SIGKILL on a schedule, reaps the children, and
+// finally re-delivers the received signal so the host's default disposition
+// applies. One handler pair per process walks the registry (issue 82).
 
 function shutdownHandler(sig) {
   process.off("SIGINT", shutdownHandler);
   process.off("SIGTERM", shutdownHandler);
-  void runShutdown(sig);
+  bridgeRegistry().handlersInstalled = false;
+  void shutdownAll(sig);
+}
+
+// Closes every state, then re-delivers the signal ONCE. Uses the registry, not
+// a captured state, so children added by later generations are closed too.
+function shutdownAll(sig) {
+  const states = [...bridgeRegistry().states.values()];
+  return Promise.all(states.map((state) => runShutdown(state))).then(
+    () => process.kill(process.pid, sig),
+    () => process.kill(process.pid, sig)
+  );
 }
 
 function installSignalHandlers() {
-  if (childListenersInstalled) return;
-  childListenersInstalled = true;
+  const registry = bridgeRegistry();
+  if (registry.handlersInstalled) return;
+  registry.handlersInstalled = true;
   process.on("SIGINT", shutdownHandler);
   process.on("SIGTERM", shutdownHandler);
 }
 
-async function awaitCaptureDrain() {
+async function awaitCaptureDrain(state) {
   const startedAt = Date.now();
-  while (pendingCaptures > 0 && Date.now() - startedAt < CAPTURE_DRAIN_MAX_MS) {
+  while (state.pendingCaptures > 0 && Date.now() - startedAt < CAPTURE_DRAIN_MAX_MS) {
     await new Promise((resolve) => setTimeout(resolve, CAPTURE_DRAIN_POLL_MS));
   }
 }
 
-function scheduleEscalation() {
-  shutdownTimers.push(
+function scheduleEscalation(state) {
+  state.shutdownTimers.push(
     setTimeout(() => {
-      if (child !== null && child.exitCode === null) child.kill("SIGTERM");
+      if (state.child !== null && state.child.exitCode === null) state.child.kill("SIGTERM");
     }, SHUTDOWN_TERM_AFTER_MS)
   );
-  shutdownTimers.push(
+  state.shutdownTimers.push(
     setTimeout(() => {
-      if (child !== null && child.exitCode === null) child.kill("SIGKILL");
+      if (state.child !== null && state.child.exitCode === null) state.child.kill("SIGKILL");
     }, SHUTDOWN_TERM_AFTER_MS + SHUTDOWN_KILL_AFTER_MS)
   );
 }
 
-async function runShutdown(sig) {
-  for (const t of shutdownTimers) clearTimeout(t);
-  shutdownTimers.length = 0;
-  shuttingDownFlag = true;
+async function runShutdown(state) {
+  for (const t of state.shutdownTimers) clearTimeout(t);
+  state.shutdownTimers.length = 0;
+  state.shuttingDown = true;
   try {
     // Drain in-flight fire-and-forget captures before the engine stops.
-    await awaitCaptureDrain();
+    await awaitCaptureDrain(state);
   } catch {
     // drain is best-effort
   }
-  if (child !== null) {
-    if (engineCompatible) {
+  if (state.child !== null) {
+    if (state.engineCompatible) {
       try {
+        // D2: the request carries a PROCESS-scoped id. One child serves every
+        // agent, and the engine's shutdown ignores session_id, so a sibling's
+        // session id would be the wrong value to send.
         await callChild(
+          state,
           "shutdown",
-          { session_id: currentSessionId() },
-          "shutdown-" + requestCounter++,
+          { session_id: "oc-bridge-" + process.pid },
+          "shutdown-" + state.requestCounter++,
           SHUTDOWN_RESPONSE_TIMEOUT_MS
         );
       } catch {
         // engine silent — the escalation timers below still apply
       }
     }
-    scheduleEscalation();
+    scheduleEscalation(state);
     const outcome = await Promise.race([
-      childClosedPromise(),
+      childClosedPromise(state),
       new Promise((resolve) => setTimeout(() => resolve(null), SHUTDOWN_KILL_AFTER_MS * 2)),
     ]);
-    for (const t of shutdownTimers) clearTimeout(t);
-    shutdownTimers.length = 0;
+    for (const t of state.shutdownTimers) clearTimeout(t);
+    state.shutdownTimers.length = 0;
     // Reap: the child that reached this point exited (code !== null) or was
     // killed by signal; after the SIGKILL escalation only a code 0 / null
     // pair / force-kill outcome is possible.
     logInfo("child_reaped", {
-      pid: child.pid,
-      exit_code: outcome ? outcome.code : child.exitCode,
+      pid: state.child.pid,
+      exit_code: outcome ? outcome.code : state.child.exitCode,
       signal: outcome ? outcome.signal : null,
     });
-    teardownChild("shutdown complete");
+    teardownChild(state, "shutdown complete");
   }
-  process.kill(process.pid, sig);
 }
 
 // Upstream applyStructuredOutputAgentConfig (src/index.ts:277): the least-
@@ -1021,7 +1186,7 @@ export const server = async function server(input) {
         metadata,
       };
       if (hostProjectId !== null) payload.project_id = hostProjectId;
-      fireCapture(payload);
+      fireCapture(bridge(), payload);
     } catch (err) {
       logWarn("session.idle.capture_failed", { message: shortError(err) });
     }
@@ -1114,7 +1279,7 @@ export async function setup(ctx) {
       ensureStarted,
       capability: (method) => {
         if (engineCapability(method)) return true;
-        logCapabilityGap(method);
+        logCapabilityGap(bridge(), method);
         return false;
       },
       send: (method, params) => sendRequest(method, params, MEMORY_TOOL_REQUEST_TIMEOUT_MS),

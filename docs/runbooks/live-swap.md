@@ -248,6 +248,31 @@ Those shared-memory files are derived and rebuilt on the next open. **Never** re
 non-empty `*.db-wal` to fix an open. The clean control (ordered shutdown → immediate reopen) opened
 first try; this recovery was measured on the poisoned store (see the import report §6).
 
+## 9b. Multi-instance check (issue 82)
+
+One host process evaluates the plugin once per instance/location, so one run can load the local
+plugin several times while every instance must drive the **same** engine. Check all three facts
+together:
+
+```sh
+# 1. the run loaded the local plugin at least twice (measured 26 pre-fix)
+grep 'msg="loading plugin" id=/home/vaz/Code/Personal/Rust/opencode-agents-memory/plugin' \
+  ~/.local/share/opencode/log/opencode.log | wc -l        # expected: ≥ 2 in one run
+
+# 2. one engine serves the shared store, whatever the load count
+ps -eo pid=,args= | grep -c '[o]pencode-agents-memory --storage-root /home/vaz/.opencode-mem/data'
+#   expected: 1
+
+# 3. that engine's parent is the host process itself (the one-process premise, D1)
+ps -o ppid= -p "$(pgrep -f '[o]pencode-agents-memory --storage-root /home/vaz/.opencode-mem/data' | head -1)"
+#   expected: the opencode host pid
+```
+
+If fact 3 fails — the engine's parent is not the host — the one-process premise is wrong for this
+host: stop, record the measurement, and reopen the socket-service alternative (the plan's Step 10
+does not paper over it). Facts 1 and 2 alone hold pre-fix as well; fact 3 plus the §10 two-workspace
+`list-shards` answer are the discriminators.
+
 ## 10. Verification battery
 
 Each check with the value it must produce. `/api/skill` and `/api/plugin` are the **OpenCode host**
@@ -255,8 +280,8 @@ endpoints, not the port's web server.
 
 | # | check | how | expected |
 |---|---|---|---|
-| 1 | handshake | `memory` tool `mode:"help"`, or `hello` over the bridge | `engine_version 0.1.0`, protocol `1.0.0`, capabilities `add, compaction, export, import, list, list-shards, migrate, profile, search, skills, standalone, web`; `help` returns nine commands with `unavailable: []` |
-| 2 | health | `memory` tool `mode:"list-shards"` (or the RPC) | `success:true`; `storagePath` = `~/.opencode-mem/data`; 22 shards; `current 1 / linked 20 / orphaned 1` |
+| 1 | handshake | `memory` tool `mode:"help"` in **two different workspaces** (two agent instances/locations), or `hello` over the bridge | **both** answer: `engine_version 0.1.0`, protocol `1.0.0`, capabilities `add, compaction, export, import, list, list-shards, migrate, profile, search, skills, standalone, web`; `help` returns nine commands with `unavailable: []`. Pre-fix the second workspace answered `engine_unavailable` (issue 82). |
+| 2 | health | `memory` tool `mode:"list-shards"` in **both workspaces** (or the RPC) | both `success:true`; `storagePath` = `~/.opencode-mem/data`; 22 shards; `current 1 / linked 20 / orphaned 1`. The second workspace is the fix's live discriminator: pre-fix it answers `engine_unavailable`. |
 | 3 | direct tool | ask the model to call `memory` with `options.codemode: false` (the tool is exposed directly, not via `execute`) | one direct `memory` call in the session, `success:true` — the tool lane was proven on 2026-10-30 in podman (11 calls, cost 0) |
 | 4 | skill listed | `curl -s http://127.0.0.1:<host-port>/api/skill` | list contains `opencode-mem.memory-usage` (`"path": ".../plugin/skills/memory-usage/SKILL.md"`); poll for it — a cold start answers `[]` first |
 | 5 | skill used | ask a model to load `opencode-mem.memory-usage` and follow it | the skill tool returns its 2,781-byte body and the answer applies it |

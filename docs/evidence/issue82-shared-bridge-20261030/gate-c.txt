@@ -1,0 +1,14 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.58s
+     Running tests/engine_lock.rs (target/debug/deps/engine_lock-01d92f5f2a6ab322)
+
+running 7 tests
+test test_engine_lock_acquire_release ... ok
+test test_engine_lock_corrupt_file_recovered ... ok
+test test_engine_lock_body_is_read_live_lock_parseable ... ok
+test test_engine_lock_stale_dead_pid_recovered ... ok
+test test_engine_lock_live_holder_is_loser ... ok
+test test_status_file_loser_does_not_mask_owner ... ok
+test test_engine_lock_loser_reports_lock_lost ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

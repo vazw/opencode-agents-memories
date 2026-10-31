@@ -1,0 +1,1 @@
+{"level":"warn","component":"opencode-mem-plugin","event":"degraded","reason":"engine lock held by another process"}

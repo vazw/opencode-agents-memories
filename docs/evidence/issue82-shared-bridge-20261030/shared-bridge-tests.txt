@@ -1,0 +1,14 @@
+✔ test_two_imports_in_one_process_spawn_one_engine_and_both_answer (105.590762ms)
+✔ test_v2_two_generations_share_the_same_engine_child (96.457703ms)
+✔ test_two_storage_roots_in_one_process_get_two_children (133.135572ms)
+✔ test_sibling_generations_write_the_status_file_at_most_once (56.070021ms)
+✔ test_a_genuine_engine_lock_loser_keeps_the_holder_pid_in_status (5065.24777ms)
+✔ test_a_dead_child_restarts_once_then_degrades_once (202.240034ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5736.064805
