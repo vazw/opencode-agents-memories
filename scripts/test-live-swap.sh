@@ -9,7 +9,7 @@
 # read-only (`rev-parse`).
 #
 # Usage: bash scripts/test-live-swap.sh
-# Exit:  0 when all 17 cases pass, 1 otherwise.
+# Exit:  0 when all 18 cases pass, 1 otherwise.
 set -uo pipefail
 
 SECONDS=0
@@ -22,7 +22,7 @@ swap=$repo_root/scripts/live-swap.sh
 plugin=$repo_root/plugin
 work=$repo_root/.tmp/scratch/live-swap-selftest
 ok=0
-total=17
+total=18
 case_reason=
 case_out=
 
@@ -579,6 +579,48 @@ case_17_rollback_refuses_a_backup_that_does_not_verify() {
 	return 0
 }
 
+case_18_a_pre_reembed_backup_wal_does_not_block_the_backup() {
+	mkrehearsal prebaks || { bfail 'fixture setup failed'; return 1; }
+	mkdir -p "$r/opencode-mem/data/projects"
+	# The engine's own pre-reembed copy (crates/mem-store: reembed_scope leaves
+	# `<shard>.db.pre-reembed-<pid>-<ts>.bak` plus a non-empty `.bak-wal` INSIDE
+	# data/). It is the engine's artifact, not a torn copy: it must be excluded
+	# from the WAL scan and never deleted.
+	local bak=$r/opencode-mem/data/projects/project_aaaaaaaaaaaaaaaa_shard_0.db.pre-reembed-1-2
+	printf 'pre-reembed wal bytes\n' >"$bak.bak-wal"
+	printf 'pre-reembed copy\n' >"$bak.bak"
+	invoke --backup --rehearse "$r" --yes
+	if [ "$case_rc" -ne 0 ]; then
+		bfail "a *.pre-reembed-*.bak-wal must not block the backup (rc 0), got $case_rc: $case_out"
+		return 1
+	fi
+	if [ ! -f "$r/backups/LATEST" ]; then
+		bfail 'the backup published no restore point'
+		return 1
+	fi
+	if [ ! -f "$bak.bak-wal" ] || [ ! -f "$bak.bak" ]; then
+		bfail 'the backup deleted the engine backup — it must only be excluded from the scan'
+		return 1
+	fi
+	# The exclusion must not widen: a genuine non-empty *.db-wal is still a
+	# refusal, and it is still not deleted.
+	printf 'stale wal bytes, never deleted\n' >"$r/opencode-mem/data/projects/stale.db-wal"
+	invoke --backup --rehearse "$r" --yes
+	if [ "$case_rc" -ne 1 ]; then
+		bfail "a genuine non-empty *.db-wal must still be refused (rc 1), got $case_rc"
+		return 1
+	fi
+	if ! printf '%s' "$case_out" | grep -qF 'non-empty *.db-wal'; then
+		bfail 'the refusal does not name the non-empty *.db-wal'
+		return 1
+	fi
+	if [ ! -f "$r/opencode-mem/data/projects/stale.db-wal" ]; then
+		bfail 'the refusal deleted the non-empty WAL — the non-negotiable is broken'
+		return 1
+	fi
+	return 0
+}
+
 run() {
 	local fn=$1
 	case_reason=
@@ -611,6 +653,7 @@ run case_14_backup_root_must_live_outside_the_store
 run case_15_engine_lock_naming_a_live_pid_is_refused
 run case_16_a_non_empty_wal_is_a_refusal_not_a_delete
 run case_17_rollback_refuses_a_backup_that_does_not_verify
+run case_18_a_pre_reembed_backup_wal_does_not_block_the_backup
 
 printf 'wall time: %ss\n' "$SECONDS"
 if [ "$ok" -eq "$total" ]; then

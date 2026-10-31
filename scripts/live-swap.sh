@@ -627,7 +627,9 @@ store_counts() {
 
 wal_state() {
 	local nonempty='' sidecars=''
-	nonempty=$(count_lines "$(find "$DATA_DIR" -type f -name '*-wal' -size +0c 2>/dev/null | sort)")
+	# The engine's own pre-reembed copies (*.pre-reembed-*.bak-wal) live inside
+	# data/ and are excluded: they are its artifact, not a torn copy.
+	nonempty=$(count_lines "$(find "$DATA_DIR" -type f -name '*-wal' ! -name '*.pre-reembed-*' -size +0c 2>/dev/null | sort)")
 	sidecars=$(count_lines "$(find "$DATA_DIR" -type f \( -name '*-shm' -o -name '*-tshm' \) 2>/dev/null | sort)")
 	printf 'nonempty_wal=%s derived_sidecars=%s' "$nonempty" "$sidecars"
 }
@@ -662,9 +664,9 @@ checkpoint_store() {
 	log "removing the derived *-shm / *-tshm sidecars (rebuilt on the next open, §3)"
 	find "$DATA_DIR" -type f \( -name '*-shm' -o -name '*-tshm' \) -delete ||
 		die "cannot remove the derived sidecars in $DATA_DIR (§3)"
-	left=$(count_lines "$(find "$DATA_DIR" -type f -name '*-wal' -size +0c | sort)")
+	left=$(count_lines "$(find "$DATA_DIR" -type f -name '*-wal' ! -name '*.pre-reembed-*' -size +0c | sort)")
 	if [ "$left" -ne 0 ]; then
-		die "$left non-empty *.db-wal file(s) remain after the checkpoint — a torn copy is likely; NOT deleting them (§3)"
+		die "$left non-empty *.db-wal file(s) remain after the checkpoint — a torn copy is likely; NOT deleting them (§3). (*.pre-reembed-*.bak-wal, the engine's own copies from a re-embed, are not counted)"
 	fi
 	log "checkpoint done: ${#dbs[@]} databases, failures=$failures, non-empty WAL=0, sidecars removed"
 	if [ "$failures" -ne 0 ]; then

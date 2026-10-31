@@ -9,6 +9,12 @@
 #
 #   * it refuses to write the live store or config while OpenCode (or the
 #     store's engine) is running, and prints every destructive step first;
+#   * --provision is a writing mode too: the provisioner's default invocation
+#     canonicalises the store's nomic tokenizer IN PLACE, so it takes the same
+#     stop check as --swap and --rollback;
+#   * it refuses an engine built before the cache root moved into the store:
+#     that binary reads <tmpfs>/.opencode-mem-onnx and finds no model in
+#     <storagePath>/.cache, so the re-embed fails AFTER the config edit;
 #   * it never opens a live database: metadata.db / shard DBs are copied
 #     ({db,-wal}) into a work dir and only the copy is queried, and it asserts
 #     the live root gained no new path (a live -shm is the hazard);
@@ -19,7 +25,8 @@
 #     owns the copy and the tokenizer canonicalisation;
 #   * a mid-run re-embed failure is reported as what it is: some scopes on the
 #     old model, the store refusing reads for those with a typed
-#     ShardModelMismatch, and an exact resume command.
+#     ShardModelMismatch, an exact resume command, and the engine rebuild that
+#     resume needs.
 #
 # It never starts OpenCode, never edits the runbook, never runs a git command
 # that writes, and never writes the live root unless the mode says so.
@@ -257,22 +264,28 @@ MODES
               tokenizer in the copy, never in --source), then verify the pinned
               weights sha256 and byte count and refuse on a mismatch.
               Idempotent, and no longer needed after a reboot: the cache is
-              not in /tmp.
+              not in /tmp. A WRITING mode: its default invocation (source ==
+              destination) canonicalises the store's nomic tokenizer in place,
+              so it refuses while OpenCode or the store's engine runs.
 
   --swap      The cutover, in this order:
                 1. refuse while OpenCode or the engine runs,
-                2. --backup (one dated restore point),
-                3. --provision,
-                4. copy opencode-mem.jsonc to .pre-model-swap-<TS>, then set
+                2. refuse an engine built before the cache root moved into the
+                   store (it reads /tmp and cannot find the model),
+                3. read the scope list from a COPY of metadata.db (a copy that
+                   cannot be read aborts here, before anything is written),
+                4. --backup (one dated restore point),
+                5. --provision,
+                6. copy opencode-mem.jsonc to .pre-model-swap-<TS>, then set
                    embeddingModel and embeddingDtype IN PLACE: one string on
                    one line, plus one inserted line if no active
                    embeddingDtype exists. Comments, commas and layout are
                    untouched; embeddingPooling / embeddingDimensions are
                    refused if active (an explicit key beats the e5 preset);
-                5. enumerate the container tags from a COPY of metadata.db and
-                   run `--mode=reembed-scope` once per tag, printing each exit
+                7. run `--mode=reembed-scope` once per tag, printing each exit
                    code; the first failure stops the run and prints the resume
-                   command. Already-migrated scopes short-circuit.
+                   command and the engine rebuild it needs. Already-migrated
+                   scopes short-circuit.
               It does NOT start OpenCode: you do, then run --verify.
               One scope failing is not "almost fine": the scopes not yet
               re-embedded still hold the old model and the store answers reads
@@ -299,7 +312,13 @@ MODES
                   min figure is unverified), and
                   until each scope finishes the store refuses reads for it.
               Both restore the config byte-identically from
-              .pre-model-swap-<TS> and print the re-provision command.
+              .pre-model-swap-<TS> and canonicalise the restored nomic
+              tokenizer in place (the upstream cache is v1.0, which this
+              engine's reader rejects), then print the re-provision command.
+              A default --rollback needs --from when more than one
+              adopt-<stamp>.info exists: a resumed --swap writes a second
+              record whose restore point is the mid-migration store, so
+              "newest" is not the record you want.
 
 OPTIONS
   --yes                Do not ask; you have already read the plan.
@@ -342,10 +361,13 @@ OPTIONS
 SEQUENCE (the owner's run, OpenCode stopped)
   1. quit OpenCode
   2. adopt-embedding-model.sh --dry-run      read the plan and the checks
-  3. adopt-embedding-model.sh --swap --yes   backup, provision, config, re-embed
-  4. rebuild + re-stage the engine           cd <repo> && bash plugin/scripts/stage-engine.sh
-                                             (the cache root is compiled in: without this the
-                                             engine still reads the old /tmp path)
+  3. rebuild + re-stage the engine           cd <repo> &&
+                                               rm -rf plugin/engine/<os>-<arch>/web-ui/dist &&
+                                               bash plugin/scripts/stage-engine.sh
+                                             (the cache root is compiled in: a staged engine
+                                             from before this change still reads the old /tmp
+                                             path, and --swap refuses it)
+  4. adopt-embedding-model.sh --swap --yes   backup, provision, config, re-embed
   5. start OpenCode
   6. adopt-embedding-model.sh --verify       identity, canaries, cache, RSS
   7. keep the backup for a week; --rollback if a rollback trigger fires
@@ -525,6 +547,19 @@ resolve_paths() {
 	resolve_storage_path
 }
 
+# engine_stage_dir — the directory stage-engine.sh writes into. A custom
+# --engine (a build tree, a rehearsal fake) has no staged bundle beside it, so
+# the rebuild command names the repo's staged package instead.
+engine_stage_dir() {
+	local dir=''
+	dir=$(dirname -- "$ENGINE_BIN")
+	case $ENGINE_BIN in
+	"$REPO_ROOT"/plugin/engine/*) ;;
+	*) dir=$(dirname -- "$(default_engine_path)") ;;
+	esac
+	printf '%s' "$dir"
+}
+
 default_engine_path() {
 	local os='' arch='' machine=''
 	case $(uname -s) in
@@ -557,6 +592,20 @@ require_config() {
 
 require_engine() {
 	[ -x "$ENGINE_BIN" ] || die "engine binary not found or not executable: $ENGINE_BIN (stage it with plugin/scripts/stage-engine.sh, or pass --engine)"
+}
+
+# The cache root is compiled in (crates/mem-bridge/src/composition.rs,
+# `local_cache_root` = <storagePath>/.cache). An engine built before that change
+# still bakes the tmpfs path and reads <tmpdir>/.opencode-mem-onnx, so it finds
+# no model even when <store>/.cache is fully provisioned — measured: the staged
+# package answered rc 74 at scope 1 of 22 AFTER the config had been flipped,
+# while the fresh build re-embedded the same scope from the same store (rc 0).
+# The check is a single grep (8 ms) and runs before the first write.
+require_engine_reads_store_cache() {
+	[ -x "$ENGINE_BIN" ] || die "engine binary not found or not executable: $ENGINE_BIN (stage it with plugin/scripts/stage-engine.sh, or pass --engine)"
+	if LC_ALL=C grep -q 'opencode-mem-onnx' "$ENGINE_BIN"; then
+		die "$ENGINE_BIN is an engine from before the cache-root change: it resolves ${TMPDIR:-/tmp}/.opencode-mem-onnx and finds no model in $CACHE_ROOT. Rebuild and re-stage it FIRST, then re-run — nothing has been written: rm -rf $(engine_stage_dir)/web-ui/dist && bash $REPO_ROOT/plugin/scripts/stage-engine.sh"
+	fi
 }
 
 # ── target resolution (the dimension guard) ───────────────────────────────
@@ -809,14 +858,23 @@ enumerate_scopes() {
 }
 
 # scope_shard_db <tag> — the live absolute path of that scope's active shard,
-# from the metadata copy.
+# from the metadata copy. The stored `db_path` is re-anchored by BASENAME under
+# `<scope>s/`, exactly as the engine's own reader does
+# (ShardManager::resolve_stored_path): the registry writer emits
+# `project/<file>` while the file lives in `projects/<file>` (measured: a
+# re-embed rewrote 22 rows from `projects/…` to `project/…` and the file did
+# not move), so joining the row verbatim under the data dir points at nothing.
 scope_shard_db() {
-	local tag=$1 dir=$WORK_RUN/metadata copy='' rel=''
+	local tag=$1 dir=$WORK_RUN/metadata copy='' row='' scope='' rel='' base=''
 	copy=$dir/metadata.db
 	[ -f "$copy" ] || return 1
-	rel=$(sqlite3 "$copy" "SELECT db_path FROM shards WHERE '${tag}' = '$(container_tag_prefix)_' || scope || '_' || scope_hash AND is_active = 1 LIMIT 1;" 2>/dev/null)
-	[ -n "$rel" ] || return 1
-	printf '%s/%s' "$DATA_DIR" "$rel"
+	row=$(sqlite3 "$copy" "SELECT scope || '|' || db_path FROM shards WHERE '${tag}' = '$(container_tag_prefix)_' || scope || '_' || scope_hash AND is_active = 1 LIMIT 1;" 2>/dev/null)
+	[ -n "$row" ] || return 1
+	scope=${row%%|*}
+	rel=${row#*|}
+	base=${rel##*/}
+	[ -n "$base" ] || return 1
+	printf '%s/%ss/%s' "$DATA_DIR" "$scope" "$base"
 }
 
 # shard_identity <copied-shard-db> — model, dimensions, fingerprint.
@@ -838,6 +896,10 @@ tokenizer_version_of() {
 
 cache_root() { printf '%s' "$CACHE_ROOT"; }
 cache_model_dir() { printf '%s/%s' "$CACHE_ROOT" "$TARGET_MODEL"; }
+# The pre-adoption model's directory: what a rollback restores and has to
+# canonicalise (cache_model_dir names the e5 target and is the wrong directory
+# to report after a rollback).
+baseline_cache_model_dir() { printf '%s/%s' "$CACHE_ROOT" "$BASELINE_MODEL"; }
 
 # ── --backup: delegate, do not re-implement ───────────────────────────────
 make_backup() {
@@ -1046,9 +1108,9 @@ With embeddingApiUrl + embeddingApiKey set, the engine never loads a local ONNX 
 	if [ "$removed" -ne "$expected_removed" ] || [ "$added" -ne "$expected_added" ]; then
 		die "the edit would change $removed line(s) and add $added (expected $expected_removed / $expected_added) — refusing; nothing edited"
 	fi
-	# The commented alternatives must still be there, byte for byte.
-	grep -qF '// "embeddingPooling": "mean",' "$tmp" || grep -qF 'embeddingPooling' "$tmp" ||
-		ck_warn 'no commented embeddingPooling line in the config — nothing to preserve, but note the file is not the shipped template'
+	# Comments are pinned by the counts above: a comment edit would change the
+	# removed/added line counts, so no separate "the comment survived" check is
+	# needed (the one that used to sit here could only ever warn).
 
 	chmod "$(stat -c %a "$config")" "$tmp"
 	mv -f "$tmp" "$config" || die "cannot replace $config"
@@ -1119,34 +1181,60 @@ run_reembed_scope() {
 	return "$rc"
 }
 
+# print_reembed_resume <failed-tag> <migrated-count> [remaining...]
+# The migrated count is what makes the first sentence true: at the measured
+# failure (a stale engine at scope 1 of 22) ZERO scopes were on the new model
+# and the block claimed "the scopes already listed above are on e5".
 print_reembed_resume() {
-	local failed=$1
-	shift
+	local failed=$1 migrated=$2
+	shift 2
 	local -a remaining=("$@")
+	local -a resume=(--swap --yes)
+	local scope_tag=$failed
 	printf '\n== STOPPED ==\n'
-	printf 'scope %s failed. The scopes already listed above are on %s; every scope\n' "$failed" "$TARGET_MODEL"
-	printf 'not listed above still holds %s vectors. The store answers reads for those\n' "$BASELINE_MODEL"
-	printf 'scopes with a typed ShardModelMismatch — that is the designed refusal, not corruption,\n'
-	printf 'and it is NOT "almost fine": search in those workspaces fails until they are re-embedded.\n'
+	if [ "$migrated" -gt 0 ]; then
+		printf 'scope %s failed. The %s scope(s) already listed above are on %s;\n' \
+			"$failed" "$migrated" "$TARGET_MODEL"
+		printf 'every scope not listed above still holds %s vectors. The store answers\n' "$BASELINE_MODEL"
+	else
+		printf 'scope %s failed and NO scope has been migrated — the store is unchanged\n' "$failed"
+		printf '(every scope still holds %s vectors). The store answers\n' "$BASELINE_MODEL"
+	fi
+	printf 'reads for those scopes with a typed ShardModelMismatch — that is the designed refusal,\n'
+	printf 'not corruption, and it is NOT "almost fine": search in those workspaces fails until\n'
+	printf 'they are re-embedded.\n'
 	if [ "${#remaining[@]}" -gt 0 ]; then
 		printf 'not yet attempted (%s): %s\n' "${#remaining[@]}" "${remaining[*]}"
 	fi
-	printf '\nresume (backup, provision and the config edit are idempotent; migrated scopes\nshort-circuit without embedding anything):\n'
-	printf '  %s --swap --yes\n' "$SCRIPT_PATH"
-	printf '  # or only the remaining tags, one at a time:\n'
-	if [ "${#remaining[@]}" -gt 0 ]; then
-		printf '  %s --swap --yes --scope %s\n' "$SCRIPT_PATH" "${remaining[0]}"
-	else
-		printf '  %s --swap --yes --scope %s\n' "$SCRIPT_PATH" "$failed"
+	if [ -n "$REHEARSE_ROOT" ]; then
+		resume+=(--rehearse "$REHEARSE_ROOT")
 	fi
+	if [ "${#remaining[@]}" -gt 0 ]; then
+		scope_tag=${remaining[0]}
+	fi
+	printf '\nSTEP 1 — rebuild + re-stage the engine (the cache root is compiled in; a stale\n'
+	printf 'engine fails every scope the same way):\n'
+	printf '  rm -rf %s/web-ui/dist && bash %s/plugin/scripts/stage-engine.sh\n' \
+		"$(engine_stage_dir)" "$REPO_ROOT"
+	printf '  LC_ALL=C grep -c opencode-mem-onnx %s   # must print 0\n' "$ENGINE_BIN"
+	printf '\nSTEP 2 — resume (backup, provision and the config edit are idempotent; migrated\nscopes short-circuit without embedding anything):\n'
+	printf '  %s %s\n' "$SCRIPT_PATH" "${resume[*]}"
+	printf '  # or only the remaining tags, one at a time:\n'
+	printf '  %s %s --scope %s\n' "$SCRIPT_PATH" "${resume[*]}" "$scope_tag"
 }
 
+# reembed_all <tags-file> — one re-embed per container tag, stopping at the
+# first failure. The tag list is enumerated by run_swap_mode BEFORE its first
+# write, so a metadata copy that cannot be read aborts before the backup and
+# the config edit; a process substitution here (`< <(enumerate_scopes)`)
+# discarded that status and turned a failed copy into "no active scopes".
 reembed_all() {
+	local tags_file=$1
 	local -a tags=() remaining=() selected=()
 	local tag='' i=0 rc=0 before=''
 	heading 're-embed every scope (one process per container tag)'
 	before=$(live_paths_snapshot)
-	mapfile -t tags < <(enumerate_scopes)
+	mapfile -t tags <"$tags_file"
 	assert_no_new_live_paths "$before" 1
 	if [ "${#tags[@]}" -eq 0 ]; then
 		ck_warn 'no active shard rows in metadata.db — nothing to re-embed (is this the store root?)'
@@ -1167,7 +1255,7 @@ reembed_all() {
 		run_reembed_scope "$tag" || rc=$?
 		if [ "$rc" -ne 0 ]; then
 			remaining=("${selected[@]:i+1}")
-			print_reembed_resume "$tag" "${remaining[@]}"
+			print_reembed_resume "$tag" "$i" "${remaining[@]}"
 			final_summary "$rc"
 		fi
 	done
@@ -1195,27 +1283,64 @@ write_adopt_info() {
 
 final_summary() {
 	local rc=${1:-0}
+	local cache_dir='' cache_model=''
+	local pre_files='' pre_bytes=''
 	heading 'summary'
 	printf '  backup path     : %s\n' "${BACKUP_ROOT}/${BACKUP_TS:-<none>}"
 	printf '  config copy     : %s\n' "${CONFIG_COPY:-<none>}"
 	printf '  rollback        : %s --rollback --yes --from %s\n' "$SCRIPT_PATH" "${STAMP:-<stamp>}"
-	if [ -f "$(cache_model_dir)/$TARGET_WEIGHTS" ]; then
-		printf '  model cache     : %s   (under the store: disk-backed, survives a reboot)\n' "$(cache_model_dir)"
+	# After a rollback the engine reads the pre-adoption model again, so the e5
+	# directory is not the cache to report (it was moved aside with the store).
+	if [ "$MODE" = rollback ]; then
+		cache_dir=$(baseline_cache_model_dir)
+		cache_model=$BASELINE_MODEL
 	else
-		printf '  model cache     : <absent> — %s --provision   (only needed if the cache is missing)\n' "$SCRIPT_PATH"
+		cache_dir=$(cache_model_dir)
+		cache_model=$TARGET_MODEL
+	fi
+	if [ -f "$cache_dir/onnx/model_quantized.onnx" ] || [ -f "$cache_dir/onnx/model.onnx" ]; then
+		printf '  model cache     : %s   (%s, under the store: disk-backed, survives a reboot)\n' "$cache_dir" "$cache_model"
+	else
+		printf '  model cache     : <absent> for %s — %s --provision\n' "$cache_model" "$SCRIPT_PATH"
 	fi
 	if [ -e "${TMPDIR:-/tmp}/.opencode-mem-onnx" ]; then
 		printf '  reclaim the old tmpfs cache (the engine no longer reads it):\n'
 		printf '    find %s/.opencode-mem-onnx -depth -delete\n' "${TMPDIR:-/tmp}"
 	fi
+	# The engine writes one .bak + .bak-wal per re-embedded scope INSIDE data/
+	# (crates/mem-store). live-swap's checkpoint ignores them; they are the
+	# owner's to delete once --verify passes.
+	pre_files=$(find "$DATA_DIR" -type f -name '*pre-reembed*' | wc -l | tr -d ' ')
+	if [ "$pre_files" -gt 0 ]; then
+		pre_bytes=$(find "$DATA_DIR" -type f -name '*pre-reembed*' -printf '%s\n' | awk '{ total += $1 } END { printf "%d", total + 0 }')
+		printf '  engine backups  : %s pre-reembed file(s), %s B under %s — one per re-embedded scope; delete them once --verify passes:\n' \
+			"$pre_files" "$pre_bytes" "$DATA_DIR"
+		printf '    find %s -name "*pre-reembed*" -depth -delete\n' "$DATA_DIR"
+	fi
 	printf '  log             : %s\n' "${LOG_FILE:-<stdout only>}"
-	printf '\n  episodic.db: agent_sessions.embedding is NEVER re-embedded. Rows written\n'
-	printf '  before this adoption keep nomic-space vectors beside the new e5-space ones\n'
-	printf '  (same 768 width, so nothing errors — the similarity is just meaningless for\n'
-	printf '  those rows). Search over episodic consolidation is affected; memory\n'
-	printf '  search over the project shards is not.\n'
+	printf '\n  episodic.db: agent_sessions.embedding is NEVER re-embedded.\n'
+	case $MODE:$CONFIG_ONLY in
+	swap:*)
+		printf '  Rows written before this adoption keep nomic-space vectors beside the new\n'
+		printf '  e5-space ones (same 768 width, so nothing errors — the similarity is just\n'
+		printf '  meaningless for those rows). Search over episodic consolidation is affected;\n'
+		printf '  memory search over the project shards is not.\n'
+		;;
+	rollback:1)
+		printf '  The config is back on nomic, but the rows written during the e5 window keep\n'
+		printf '  e5-space vectors (same 768 width, so nothing errors — the similarity for\n'
+		printf '  those rows is meaningless once the shards are re-embedded with nomic).\n'
+		;;
+	*)
+		printf '  The restored store is the pre-adoption backup: it carries no e5 rows. Rows\n'
+		printf '  written after that backup are in the moved-aside store, not in the live one.\n'
+		;;
+	esac
 	if [ "$rc" -ne 0 ]; then
 		printf '\n  the run stopped (rc %s) — see the STOPPED block above for what is and is not migrated.\n' "$rc"
+		printf '  rebuild + re-stage the engine before resuming: the cache root is compiled in.\n'
+		printf '    rm -rf %s/web-ui/dist && bash %s/plugin/scripts/stage-engine.sh\n' \
+			"$(engine_stage_dir)" "$REPO_ROOT"
 		exit "$rc"
 	fi
 	if [ "$FAILS" -ne 0 ]; then
@@ -1248,6 +1373,14 @@ dry_run() {
 	if [ -x "$ENGINE_BIN" ]; then
 		ck_ok "engine: $ENGINE_BIN"
 		ck_info "engine sha256=$(sha256_of "$ENGINE_BIN")"
+		# Pending, never FAIL: the dry-run is step 2 of the runbook and the
+		# rebuild is step 3, so a FAIL here would make the documented order
+		# start red.
+		if LC_ALL=C grep -q 'opencode-mem-onnx' "$ENGINE_BIN"; then
+			ck_pending "the engine at $ENGINE_BIN predates the cache-root change (it resolves ${TMPDIR:-/tmp}/.opencode-mem-onnx) — rebuild + re-stage it BEFORE --swap: rm -rf $(engine_stage_dir)/web-ui/dist && bash $REPO_ROOT/plugin/scripts/stage-engine.sh"
+		else
+			ck_ok 'the engine carries the store cache root (no baked tmpfs path)'
+		fi
 	else
 		ck_fail "no executable engine at $ENGINE_BIN (pass --engine, or stage it with plugin/scripts/stage-engine.sh)"
 	fi
@@ -1379,29 +1512,35 @@ dry_run() {
 		local before=''
 		before=$(live_paths_snapshot)
 		make_work_dir 1
-		mapfile -t tags < <(enumerate_scopes || true)
+		# Capture the status: a process substitution discards it, and a failed
+		# copy then reads as "active scopes=0" (measured: exit 0, no FAIL).
+		if ! enumerate_scopes >"$WORK_RUN/tags"; then
+			ck_fail 'cannot enumerate the active scopes from the metadata copy — is the store readable?'
+		else
+			mapfile -t tags <"$WORK_RUN/tags"
+			ck_info "active scopes=${#tags[@]} (the re-embed runs once per tag)"
+			if [ "${#tags[@]}" -gt 0 ]; then
+				ck_info "first tag: ${tags[0]}"
+			fi
+			if [ "${#tags[@]}" -eq 0 ]; then
+				ck_warn 'metadata.db has no active shard rows — nothing would be re-embedded'
+			fi
+		fi
 		assert_no_new_live_paths "$before" 0
-		ck_info "active scopes=${#tags[@]} (the re-embed runs once per tag)"
-		if [ "${#tags[@]}" -gt 0 ]; then
-			ck_info "first tag: ${tags[0]}"
-		fi
-		if [ "${#tags[@]}" -eq 0 ]; then
-			ck_warn 'metadata.db has no active shard rows — nothing would be re-embedded'
-		fi
 	else
 		ck_fail "no $DATA_DIR/metadata.db — cannot enumerate the scopes"
 	fi
 
 	heading 'planned actions (nothing here runs during --dry-run)'
 	plan "quit OpenCode; confirm with pgrep -af opencode"
+	plan "rebuild + re-stage the engine FIRST: rm -rf $(engine_stage_dir)/web-ui/dist && bash $REPO_ROOT/plugin/scripts/stage-engine.sh (the cache root is compiled in; --swap refuses a stale engine)"
 	plan "$LIVE_SWAP --backup --store $STORE_ROOT --config-dir $CONFIG_DIR --backup-root $BACKUP_ROOT --yes"
 	plan "sh $PROVISIONER --model $TARGET_MODEL --weights $TARGET_WEIGHTS --source $SOURCE_DIR --cache-root $CACHE_ROOT"
 	plan "verify weights sha256 = $TARGET_WEIGHTS_SHA256 and $TARGET_WEIGHTS_BYTES B"
 	plan "cp -a $CONFIG_DIR/opencode-mem.jsonc <same>.pre-model-swap-<TS>"
 	plan "set \"embeddingModel\": \"$TARGET_MODEL\" and \"embeddingDtype\": \"$TARGET_DTYPE\" in place (1 replaced line + 1 inserted line at most)"
 	plan "$ENGINE_BIN --mode=reembed-scope --scope <each of ${#tags[@]} tags> --storage-root $DATA_DIR"
-	plan 'stop at the first non-zero exit and print the resume command'
-	plan 'rebuild + re-stage the engine: cd <repo> && bash plugin/scripts/stage-engine.sh (the cache root is compiled in)'
+	plan 'stop at the first non-zero exit and print the resume command plus the engine rebuild it needs'
 	plan "start OpenCode, then $SCRIPT_PATH --verify"
 	plan "$SCRIPT_PATH --rollback --yes --from <stamp>   (the rollback path is rehearsed, not improvised)"
 
@@ -1435,6 +1574,11 @@ run_backup_mode() {
 run_provision_mode() {
 	resolve_target
 	require_engine
+	# A writing mode: the provisioner's default invocation canonicalises the
+	# store's nomic tokenizer IN PLACE (measured: tokenizer.json 1.0 -> 2.0
+	# through a sibling temp file + mv), so it needs the same guards as --swap.
+	require_store
+	require_stopped
 	begin_writing_log
 	STAMP=$(utc_stamp)
 	provision
@@ -1447,18 +1591,27 @@ run_swap_mode() {
 	require_store
 	require_config
 	require_engine
+	require_engine_reads_store_cache
 	resolve_target
 	require_stopped
 	begin_writing_log
 	STAMP=$(utc_stamp)
 	make_work_dir 0
 
-	local store_bytes=''
+	local store_bytes='' before=''
 	store_bytes=$(dir_bytes "$STORE_ROOT")
 	log "swap: target=$TARGET_MODEL dtype=$TARGET_DTYPE dims=$TARGET_DIMS store=$STORE_ROOT ($store_bytes B)"
 	printf '\nthis runs, in order: backup -> provision -> config edit -> re-embed per scope.\n'
 	printf 'it does NOT start OpenCode; you do, then you run --verify.\n'
 	printf 'every step prints what it will do before it does it.\n'
+	# Read the scope list from a COPY of metadata.db before the first write: a
+	# copy that cannot be read must abort here, not after the backup and the
+	# config flip (measured: it used to read as "no active scopes" and exit 0).
+	before=$(live_paths_snapshot)
+	if ! enumerate_scopes >"$WORK_RUN/tags"; then
+		die 'cannot enumerate the active scopes from the metadata copy — refusing (nothing was written: no backup, no config edit, no re-embed)'
+	fi
+	assert_no_new_live_paths "$before" 1
 	confirm "checkpoint+back up $STORE_ROOT, provision $TARGET_MODEL q8, set embeddingModel/embeddingDtype in $CONFIG_DIR/opencode-mem.jsonc, then re-embed every active scope against the stopped store"
 	if [ "$CONFIRMED" -ne 1 ]; then
 		log 'the owner declined; nothing was written'
@@ -1469,16 +1622,15 @@ run_swap_mode() {
 	provision
 	edit_config "$STAMP"
 	write_adopt_info
-	reembed_all
+	reembed_all "$WORK_RUN/tags"
 
 	heading 'next'
-	printf '\n  STEP 1 — REBUILD + RE-STAGE THE ENGINE. The cache root is compiled in\n'
-	printf '  (crates/mem-bridge/src/composition.rs, local_cache_root). Without this the\n'
-	printf '  engine you start still reads the old path and finds no model:\n'
-	printf '    cd %s && bash plugin/scripts/stage-engine.sh\n' "$REPO_ROOT"
-	printf '\n  STEP 2 — start OpenCode, then run:\n    %s --verify\n' "$SCRIPT_PATH"
+	printf '\n  STEP 1 — start OpenCode.\n'
+	printf '\n  STEP 2 — then run:\n    %s --verify\n' "$SCRIPT_PATH"
 	printf 'the engine loads %s from %s and search/add work against the\n' "$TARGET_MODEL" "$(cache_model_dir)"
 	printf 're-embedded shards. The config change is the only thing that flips the model.\n'
+	printf 'if you have not rebuilt + re-staged the engine since the cache-root change, do\n'
+	printf 'that first (the sequence puts it before --swap for exactly this reason).\n'
 	final_summary 0
 }
 
@@ -1504,10 +1656,16 @@ run_verify_mode() {
 	heading 'verify — after OpenCode started'
 
 	local -a tags=()
-	local verify_before=''
+	local verify_before='' enum_ok=1
 	make_work_dir 1
 	verify_before=$(live_paths_snapshot)
-	mapfile -t tags < <(enumerate_scopes || true)
+	# Capture the status (a process substitution discards it): a failed copy is
+	# not "the store has no active scopes".
+	if ! enumerate_scopes >"$WORK_RUN/tags"; then
+		enum_ok=0
+		ck_fail 'cannot enumerate the active scopes from the metadata copy — is the store readable?'
+	fi
+	mapfile -t tags <"$WORK_RUN/tags"
 	assert_no_new_live_paths "$verify_before" 0
 	local first_tag=${tags[0]:-}
 	local -a delegate=(--verify --store "$STORE_ROOT" --config-dir "$CONFIG_DIR" --backup-root "$BACKUP_ROOT")
@@ -1548,7 +1706,9 @@ run_verify_mode() {
 	refresh_procs
 	local pid=''
 	pid=$(engine_pids_for_store | head -n 1)
-	if [ -z "$first_tag" ]; then
+	if [ "$enum_ok" -eq 0 ]; then
+		ck_info 'the shard identity read is skipped: the scope enumeration failed (see the FAIL above)'
+	elif [ -z "$first_tag" ]; then
 		ck_fail 'no active scope in metadata.db — cannot read a shard identity'
 	else
 		shard=$(scope_shard_db "$first_tag" || true)
@@ -1660,13 +1820,33 @@ run_verify_mode() {
 	fi
 }
 
+# print_nomic_cache_note — what a rollback says about the pre-adoption cache.
+# It names the BASELINE directory (cache_model_dir is the e5 target) and states
+# the condition that is actually true: the file is present and non-canonical,
+# not missing.
+print_nomic_cache_note() {
+	printf 'the nomic cache is at %s; its tokenizer.json was the upstream v1.0 form,\n' "$(baseline_cache_model_dir)"
+	printf 'which this engine cannot read — this rollback ran the provisioner to canonicalise\n'
+	printf 'it in place (see the [ ok ]/[warn] line above). If that step failed, run:\n'
+	printf '  sh %s --model %s --source %s --cache-root %s\n' \
+		"$PROVISIONER" "$BASELINE_MODEL" "$(baseline_cache_model_dir)" "$CACHE_ROOT"
+}
+
 # ── --rollback ────────────────────────────────────────────────────────────
 resolve_adopt_info() {
-	local info=''
+	local info='' count=''
 	if [ -n "$FROM_TS" ]; then
 		info=$BACKUP_ROOT/adopt-$FROM_TS.info
 		[ -f "$info" ] || die "no adoption record at $info — --from takes the stamp --swap printed (the backup stamp is different)"
 	else
+		# Never guess a restore point by "newest": a resumed --swap writes a
+		# second record whose backup_ts is the MID-migration store while
+		# config_copy stays the first run's nomic config (measured: a default
+		# rollback restored an e5 shard under a nomic config).
+		count=$(find "$BACKUP_ROOT" -maxdepth 1 -type f -name 'adopt-*.info' | wc -l | tr -d ' ')
+		if [ "$count" -gt 1 ]; then
+			die "$count adoption records under $BACKUP_ROOT — pass --from <stamp> (the one the --swap you mean printed). A resumed run writes a second record whose restore point is the mid-migration store, so \"newest\" is not the record you want."
+		fi
 		info=$(find "$BACKUP_ROOT" -maxdepth 1 -type f -name 'adopt-*.info' 2>/dev/null | sort | tail -n 1 || true)
 		[ -n "$info" ] || die "no adoption record under $BACKUP_ROOT (adopt-<stamp>.info) — nothing to roll back"
 	fi
@@ -1699,6 +1879,42 @@ restore_config() {
 	fi
 	ck_ok "config restored byte-identically from $target"
 	log "restored $config from $target"
+}
+
+# canonicalise_restored_nomic_cache — the restored nomic cache is the upstream
+# plugin's artifact: tokenizer.json v1.0, which this engine's reader rejects
+# (crates/mem-embed/src/local/tokenize.rs: "accepts canonical tokenizer.json
+# v2.0 only"). Measured after a default rollback without this step: rc 74,
+# "tokenizer version '1.0' is not `2.0`". The provisioner's default invocation
+# is this cache, so it canonicalises the restored file in place (sibling temp
+# file + mv). A failure here is a warning, not a rollback failure: the store is
+# already restored.
+canonicalise_restored_nomic_cache() {
+	local dir='' version='' out='' rc=0
+	dir=$(baseline_cache_model_dir)
+	if [ ! -f "$dir/tokenizer.json" ]; then
+		ck_warn "no $BASELINE_MODEL cache in the restored store ($dir) — provision it before starting OpenCode: sh $PROVISIONER"
+		return 0
+	fi
+	version=$(tokenizer_version_of "$dir/tokenizer.json")
+	if [ "$version" = 2.0 ]; then
+		ck_ok "the restored $BASELINE_MODEL tokenizer is already the canonical v2.0 form ($dir)"
+		return 0
+	fi
+	log "canonicalising the restored $BASELINE_MODEL tokenizer (version ${version:-unknown} -> 2.0) in place"
+	out=$(sh "$PROVISIONER" --model "$BASELINE_MODEL" --source "$dir" --cache-root "$CACHE_ROOT" 2>&1) || rc=$?
+	if [ "$rc" -ne 0 ]; then
+		printf '%s\n' "$out" | tail -n 20 >&2
+		ck_warn "the provisioner failed (rc $rc) — $dir/tokenizer.json is still version ${version:-unknown}, which this engine cannot read. Run: sh $PROVISIONER --model $BASELINE_MODEL --source $dir --cache-root $CACHE_ROOT"
+		return 0
+	fi
+	version=$(tokenizer_version_of "$dir/tokenizer.json")
+	if [ "$version" = 2.0 ]; then
+		ck_ok "the restored $BASELINE_MODEL tokenizer is now the canonical v2.0 form ($dir)"
+	else
+		ck_warn "the provisioner reported success but $dir/tokenizer.json reads version ${version:-unknown}, not 2.0"
+	fi
+	return 0
 }
 
 run_rollback_mode() {
@@ -1739,9 +1955,15 @@ run_rollback_mode() {
 			exit 130
 		fi
 		restore_config
+		canonicalise_restored_nomic_cache
 		local -a tags=()
 		make_work_dir 0
-		mapfile -t tags < <(enumerate_scopes || true)
+		# Capture the status: a failed copy used to print an empty command list
+		# and exit 0 (measured).
+		if ! enumerate_scopes >"$WORK_RUN/tags"; then
+			die 'cannot enumerate the active scopes from the metadata copy — refusing (the config is restored; no per-scope re-embed command list was produced)'
+		fi
+		mapfile -t tags <"$WORK_RUN/tags"
 		heading 'next (config-only rollback)'
 		printf 'the config is back on %s, but every shard still carries %s vectors.\n' "$BASELINE_MODEL" "$TARGET_MODEL"
 		printf 'the store refuses reads per scope until that scope is re-embedded. Run, one at a time:\n'
@@ -1750,8 +1972,7 @@ run_rollback_mode() {
 			printf '  %s --mode=reembed-scope --scope %s --storage-root %s\n' "$ENGINE_BIN" "$tag" "$DATA_DIR"
 		done
 		printf '\n(or take the default route next time: it restores the backed-up store in minutes)\n'
-		printf 'the nomic cache came back with the backup (%s); if it is missing, run: sh %s\n' \
-		"$(cache_model_dir)" "$PROVISIONER"
+		print_nomic_cache_note
 		final_summary 0
 		return 0
 	fi
@@ -1785,11 +2006,11 @@ run_rollback_mode() {
 	else
 		ck_fail 'the restored data/ differs from the backup — inspect before starting OpenCode'
 	fi
+	canonicalise_restored_nomic_cache
 	heading 'next'
 	printf 'start OpenCode; the engine reads %s from the restored store identity.\n' "$BASELINE_MODEL"
 	printf 'the pre-adoption store is at: %s   (keep it; delete it yourself once you are sure)\n' "$aside"
-	printf 'the nomic cache came back with the backup (%s); if it is missing, run: sh %s\n' \
-		"$(cache_model_dir)" "$PROVISIONER"
+	print_nomic_cache_note
 	final_summary 0
 }
 

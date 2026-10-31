@@ -15,7 +15,7 @@
 # --rehearse pins every path under the scratch root.
 #
 # Usage: bash scripts/test-adopt-embedding-model.sh
-# Exit:  0 when all 20 cases pass, 1 otherwise.
+# Exit:  0 when all 30 cases pass, 1 otherwise.
 set -uo pipefail
 
 SECONDS=0
@@ -28,7 +28,7 @@ adopt=${ADOPT:-$repo_root/scripts/adopt-embedding-model.sh}
 provisioner=$repo_root/scripts/provision-onnx-cache.sh
 work=$repo_root/.tmp/scratch/adopt-selftest
 ok=0
-total=20
+total=30
 case_reason=
 case_out=
 case_rc=0
@@ -96,6 +96,14 @@ write_config_active_dtype() {
 write_config_active_pooling() {
 	write_config_fixture "$1"
 	sed -i 's|^    // "embeddingPooling": "mean",$|    "embeddingPooling": "mean",|' "$1"
+}
+
+# The same file with an ACTIVE remote embedding lane (the refusal branch): with
+# embeddingApiUrl + embeddingApiKey set the engine never loads a local model,
+# so the adoption would rename the remote model and report success.
+write_config_active_api() {
+	write_config_fixture "$1"
+	sed -i 's|^    "webServerEnabled": true,$|    "embeddingApiUrl": "https://api.example.invalid/v1",\n    "embeddingApiKey": "test-key",\n    "webServerEnabled": true,|' "$1"
 }
 
 # Byte-exact expected result of the insertion branch.
@@ -258,6 +266,86 @@ invoke() {
 	case_out=$(TMPDIR="$r/tmp" "$adopt" "$@" 2>&1)
 	case_rc=$?
 	return 0
+}
+
+# invoke_with_path <path-prefix> <args...> — invoke with a prepended PATH (the
+# sqlite3 wrapper seam).
+invoke_with_path() {
+	local path_prefix=$1
+	shift
+	case_out=$(TMPDIR="$r/tmp" PATH="$path_prefix:$PATH" "$adopt" "$@" 2>&1)
+	case_rc=$?
+	return 0
+}
+
+# write_failing_sqlite <dir> — a sqlite3 that fails only for the metadata COPY
+# ($WORK_RUN/metadata/metadata.db) and delegates everything else. A chmod 000 on
+# the live metadata.db is the wrong seam: the delegated backup's integrity check
+# catches it first.
+write_failing_sqlite() {
+	local dir=$1 real=''
+	real=$(command -v sqlite3) || return 1
+	mkdir -p "$dir" || return 1
+	cat >"$dir/sqlite3" <<SH
+#!/bin/bash
+case \$1 in
+*/metadata/metadata.db)
+	printf 'simulated EACCES on the metadata copy\n' >&2
+	exit 1
+	;;
+esac
+exec "$real" "\$@"
+SH
+	chmod +x "$dir/sqlite3"
+}
+
+# write_stub_provisioner <path> — the one behaviour the rollback path needs from
+# scripts/provision-onnx-cache.sh: canonicalise the RESTORED nomic tokenizer in
+# place and report it. The real canonicaliser rebuilds a Rust helper (~35 s) and
+# cannot parse a fixture tokenizer; its v1.0 -> v2.0 behaviour is measured in
+# .tmp/progress/adopt-embedding-model.debug-1.md §1.5, and its CLI shape is
+# pinned by cases 19/20.
+write_stub_provisioner() {
+	cat >"$1" <<'SH'
+#!/bin/sh
+set -eu
+MODEL=Xenova/nomic-embed-text-v1
+CACHE_ROOT=$HOME/.opencode-mem/data/.cache
+WEIGHTS=onnx/model.onnx
+while [ $# -gt 0 ]; do
+	case $1 in
+	--cache-root)
+		CACHE_ROOT=$2
+		shift 2
+		;;
+	--model)
+		MODEL=$2
+		shift 2
+		;;
+	--weights)
+		WEIGHTS=$2
+		shift 2
+		;;
+	*)
+		shift
+		;;
+	esac
+done
+DEST=$CACHE_ROOT/$MODEL
+[ -f "$DEST/tokenizer.json" ] || {
+	printf 'stub provisioner: no tokenizer at %s\n' "$DEST/tokenizer.json" >&2
+	exit 1
+}
+printf '{"version":"2.0"}\n' >"$DEST/tokenizer.json.new.$$"
+mv -f "$DEST/tokenizer.json.new.$$" "$DEST/tokenizer.json"
+printf 'cache_root=%s\n' "$CACHE_ROOT"
+printf 'model=%s\n' "$MODEL"
+printf 'model_dir=%s\n' "$DEST"
+printf 'tokenizer_version=2.0\n'
+printf 'model_onnx_bytes=%s\n' "$(wc -c <"$DEST/$WEIGHTS")"
+printf 'model_onnx_sha256=%s\n' "$(sha256sum "$DEST/$WEIGHTS" | cut -d' ' -f1)"
+SH
+	chmod +x "$1"
 }
 
 # swap_args — the standard rehearsal --swap invocation.
@@ -563,7 +651,14 @@ case_11_a_mid_run_failure_stops_and_prints_the_resume() {
 	case $case_out in *'not yet attempted (1): opencode_project_cccccccccccccccc'*) ;; *) bfail 'the STOPPED block does not name the remaining scope'; return 1 ;; esac
 	case $case_out in *'ShardModelMismatch'*) ;; *) bfail 'the STOPPED block does not state the typed refusal the store will answer'; return 1 ;; esac
 	case $case_out in *'resume'*) ;; *) bfail 'no resume command was printed'; return 1 ;; esac
-	case $case_out in *'--swap --yes --scope opencode_project_cccccccccccccccc'*) ;; *) bfail 'the resume command does not name the remaining scope'; return 1 ;; esac
+	# The resume command must be runnable: the remaining scope, and the flags
+	# actually in use — a rehearsal operator copy-pasting a command without
+	# --rehearse would hit the live store.
+	case $case_out in *'--swap --yes'*) ;; *) bfail 'the resume command does not say --swap --yes'; return 1 ;; esac
+	case $case_out in *'--scope opencode_project_cccccccccccccccc'*) ;; *) bfail 'the resume command does not name the remaining scope'; return 1 ;; esac
+	case $case_out in *"--rehearse $r"*) ;; *) bfail 'the resume command dropped --rehearse'; return 1 ;; esac
+	# And it must state the rebuild the resume needs.
+	case $case_out in *'stage-engine.sh'*) ;; *) bfail 'the STOPPED block does not print the engine rebuild'; return 1 ;; esac
 	if [ "$(wc -l <"$r/engine.log" | tr -d ' ')" -ne 2 ]; then
 		bfail 'the re-embed did not stop at the failing scope (expected 2 engine calls)'
 		return 1
@@ -826,6 +921,353 @@ case_20_provisioner_default_output_shape_is_unchanged() {
 	return 0
 }
 
+# ── cases: the review-1 rework (F8, F6, F1, F9, F7, P1, P2, P3, pre-reembed) ─
+case_21_a_stale_engine_is_refused_before_the_config_edit() {
+	mkrehearsal stale || { bfail 'fixture setup failed'; return 1; }
+	# An engine from before the cache-root change: it still bakes the tmpfs path
+	# and reads /tmp/.opencode-mem-onnx (measured on the staged package:
+	# LC_ALL=C grep -c opencode-mem-onnx = 1, and it exits 74 at scope 1 of 22
+	# AFTER the config was flipped).
+	{
+		cat "$r/bin/opencode-agents-memory"
+		printf '# opencode-mem-onnx\n'
+	} >"$r/bin/stale-engine"
+	chmod +x "$r/bin/stale-engine"
+	local before=''
+	before=$(sha_tree "$r/config")
+	invoke --swap --rehearse "$r" --yes \
+		--source "$r/source" --engine "$r/bin/stale-engine" \
+		--weights-sha256 "$(fake_sha)" --weights-bytes "$(fake_bytes)"
+	if [ "$case_rc" -ne 1 ]; then
+		bfail "an engine from before the cache-root change must be refused (rc 1), got $case_rc"
+		return 1
+	fi
+	case $case_out in *'cache-root change'*) ;; *) bfail 'the refusal does not name the cache-root change'; return 1 ;; esac
+	case $case_out in *'stage-engine.sh'*) ;; *) bfail 'the refusal does not print the rebuild command'; return 1 ;; esac
+	if [ "$(sha_tree "$r/config")" != "$before" ]; then
+		bfail 'the refused run edited the config — the guard must fire before the first write'
+		return 1
+	fi
+	if [ -e "$r/backups/LATEST" ]; then
+		bfail 'the refused run took a backup before refusing'
+		return 1
+	fi
+	return 0
+}
+
+case_22_a_failed_scope_enumeration_is_refused() {
+	mkrehearsal enumfail || { bfail 'fixture setup failed'; return 1; }
+	write_failing_sqlite "$r/binpath" || { bfail 'cannot write the sqlite3 wrapper'; return 1; }
+	# 1. --swap: refuse before the first write. The old shape (mapfile in a
+	# process substitution) read a failed copy as "no active scopes" and exited
+	# 0 with the config already flipped to e5 and 0 of 3 scopes migrated.
+	local before=''
+	before=$(sha_tree "$r/config")
+	swap_args
+	invoke_with_path "$r/binpath" "${SWAP_ARGS[@]}"
+	if [ "$case_rc" -ne 1 ]; then
+		bfail "a failed metadata copy must refuse the swap (rc 1), got $case_rc"
+		return 1
+	fi
+	case $case_out in *'cannot enumerate the active scopes from the metadata copy'*) ;; *) bfail 'the refusal does not name the enumeration'; return 1 ;; esac
+	if [ "$(sha_tree "$r/config")" != "$before" ]; then
+		bfail 'the refused swap edited the config — the enumeration must run before the first write'
+		return 1
+	fi
+	if [ -e "$r/backups/LATEST" ]; then
+		bfail 'the refused swap took a backup before enumerating'
+		return 1
+	fi
+	# 2. --dry-run: a FAIL line, not "active scopes=0" with exit 0.
+	invoke_with_path "$r/binpath" --rehearse "$r" --source "$r/source" \
+		--engine "$r/bin/opencode-agents-memory" \
+		--weights-sha256 "$(fake_sha)" --weights-bytes "$(fake_bytes)"
+	if [ "$case_rc" -ne 3 ]; then
+		bfail "a dry-run whose metadata copy fails must exit 3, got $case_rc"
+		return 1
+	fi
+	case $case_out in *'[FAIL] cannot enumerate the active scopes from the metadata copy'*) ;; *) bfail 'the dry-run does not report the enumeration as a FAIL'; return 1 ;; esac
+	case $case_out in
+	*'active scopes=0'*) bfail 'the dry-run still reports "active scopes=0" for a failed copy'; return 1 ;;
+	esac
+	# 3. --config-only rollback: refuse instead of printing an empty command list.
+	invoke "${SWAP_ARGS[@]}"
+	if [ "$case_rc" -ne 0 ]; then
+		bfail "the swap failed: $case_out"
+		return 1
+	fi
+	local info='' stamp=''
+	info=$(find "$r/backups" -maxdepth 1 -name 'adopt-*.info' | sort | tail -n 1)
+	stamp=$(sed -n 's/^stamp=//p' "$info")
+	invoke_with_path "$r/binpath" --rollback --rehearse "$r" --yes --from "$stamp" --config-only
+	if [ "$case_rc" -ne 1 ]; then
+		bfail "a config-only rollback whose metadata copy fails must refuse (rc 1), got $case_rc"
+		return 1
+	fi
+	case $case_out in *'cannot enumerate the active scopes from the metadata copy'*) ;; *) bfail 'the rollback refusal does not name the enumeration'; return 1 ;; esac
+	return 0
+}
+
+case_23_provision_is_a_writing_mode() {
+	mkrehearsal provguard || { bfail 'fixture setup failed'; return 1; }
+	start_fake_engine || { bfail 'the fake engine did not start'; return 1; }
+	invoke --provision --rehearse "$r" --yes --source "$r/source" \
+		--engine "$r/bin/opencode-agents-memory" \
+		--weights-sha256 "$(fake_sha)" --weights-bytes "$(fake_bytes)"
+	stop_fake_engine
+	if [ "$case_rc" -ne 1 ]; then
+		bfail "a provision while an engine holds the store must be refused (rc 1), got $case_rc"
+		return 1
+	fi
+	case $case_out in *'engine is still running'*) ;; *) bfail 'the refusal does not name the running engine'; return 1 ;; esac
+	if [ -e "$r/opencode-mem/data/.cache" ]; then
+		bfail 'the refused provision wrote the cache (the default invocation canonicalises the live tokenizer in place)'
+		return 1
+	fi
+	# require_store: a missing store root is refused, not provisioned into.
+	invoke --provision --yes --store "$r/missing" --config-dir "$r/config" \
+		--backup-root "$r/backups-missing" --engine "$r/bin/opencode-agents-memory" \
+		--source "$r/source" --weights-sha256 "$(fake_sha)" --weights-bytes "$(fake_bytes)"
+	if [ "$case_rc" -ne 1 ]; then
+		bfail "a provision against a missing store must be refused (rc 1), got $case_rc"
+		return 1
+	fi
+	case $case_out in *'store root not found'*) ;; *) bfail 'the refusal does not name the missing store'; return 1 ;; esac
+	return 0
+}
+
+case_24_rollback_canonicalises_the_restored_nomic_tokenizer() {
+	mkrehearsal nomiccache || { bfail 'fixture setup failed'; return 1; }
+	# The upstream plugin's nomic cache: tokenizer.json v1.0, which the port's
+	# reader rejects (crates/mem-embed/src/local/tokenize.rs:31-37). It comes
+	# back with the backup, so a rollback that only restores leaves the engine
+	# answering rc 74 until someone runs the provisioner (measured).
+	local nomic=$r/opencode-mem/data/.cache/Xenova/nomic-embed-text-v1
+	mkdir -p "$nomic/onnx"
+	printf '{"version":"1.0","model":{"type":"WordPiece"}}\n' >"$nomic/tokenizer.json"
+	printf 'nomic-fp32-weights\n' >"$nomic/onnx/model.onnx"
+	swap_args
+	invoke "${SWAP_ARGS[@]}"
+	if [ "$case_rc" -ne 0 ]; then
+		bfail "the swap failed: $case_out"
+		return 1
+	fi
+	local info='' stamp=''
+	info=$(find "$r/backups" -maxdepth 1 -name 'adopt-*.info' | sort | tail -n 1)
+	stamp=$(sed -n 's/^stamp=//p' "$info")
+	# The rollback runs through a tree whose provisioner is a stub (see
+	# write_stub_provisioner); the swap above ran the real one.
+	local tree=$work/nomiccache-tree
+	find "$tree" -depth -delete 2>/dev/null
+	mkdir -p "$tree/scripts"
+	cp -a "$adopt" "$tree/scripts/adopt-embedding-model.sh"
+	ln -s "$repo_root/scripts/live-swap.sh" "$tree/scripts/live-swap.sh"
+	write_stub_provisioner "$tree/scripts/provision-onnx-cache.sh"
+	case_out=$(TMPDIR="$r/tmp" "$tree/scripts/adopt-embedding-model.sh" \
+		--rollback --rehearse "$r" --yes --from "$stamp" 2>&1)
+	case_rc=$?
+	if [ "$case_rc" -ne 0 ]; then
+		bfail "the rollback failed: $case_out"
+		return 1
+	fi
+	local line=''
+	line=$(printf '%s\n' "$case_out" | grep -m1 'nomic cache')
+	if [ -z "$line" ]; then
+		bfail 'the rollback does not mention the restored nomic cache'
+		return 1
+	fi
+	case $line in
+	*"$nomic"*) ;;
+	*) bfail "the nomic-cache line does not name $nomic: $line"; return 1 ;;
+	esac
+	case $line in
+	*multilingual-e5-base*) bfail "the nomic-cache line names the e5 directory: $line"; return 1 ;;
+	esac
+	case $line in
+	*'if it is missing'*) bfail 'the nomic-cache line still states the false condition ("if it is missing")'; return 1 ;;
+	esac
+	if ! grep -q '"version": *"2.0"' "$nomic/tokenizer.json"; then
+		bfail "the restored tokenizer was not canonicalised: $(cat "$nomic/tokenizer.json")"
+		return 1
+	fi
+	return 0
+}
+
+case_25_the_live_sidecar_detector_fires() {
+	mkrehearsal sidecar || { bfail 'fixture setup failed'; return 1; }
+	# assert_no_new_live_paths is pinned directly. A behavioural fixture cannot
+	# fire without holding a live connection open across the snapshot (measured:
+	# a WAL DB opened and closed leaves no -shm/-wal), which is timing-dependent.
+	local stripped=$work/sidecar-adopt.sh
+	sed 's/^main "\$@"$//' "$adopt" >"$stripped" || { bfail 'cannot strip the entry point'; return 1; }
+	local out='' rc=0
+	out=$(
+		{
+			# shellcheck disable=SC1090
+			. "$stripped"
+			DATA_DIR=$r/opencode-mem/data
+			before=$(live_paths_snapshot)
+			: >"$DATA_DIR/metadata.db-shm"
+			assert_no_new_live_paths "$before" 0
+			printf 'the detector did not fire\n'
+		} 2>&1
+	)
+	rc=$?
+	if [ "$rc" -ne 1 ]; then
+		bfail "a new live -shm must abort the read (rc 1), got $rc: $out"
+		return 1
+	fi
+	case $out in *'a live DB was opened'*) ;; *) bfail 'the refusal does not say a live DB was opened'; return 1 ;; esac
+	return 0
+}
+
+case_26_a_remote_embedding_endpoint_is_refused() {
+	mkrehearsal remoteapi write_config_active_api || { bfail 'fixture setup failed'; return 1; }
+	local before=''
+	before=$(sha_tree "$r/config")
+	swap_args
+	invoke "${SWAP_ARGS[@]}"
+	if [ "$case_rc" -ne 1 ]; then
+		bfail "an active embeddingApiUrl must be refused (rc 1), got $case_rc"
+		return 1
+	fi
+	case $case_out in *'remote embedding endpoint'*) ;; *) bfail 'the refusal does not name the remote endpoint'; return 1 ;; esac
+	if [ "$(sha_tree "$r/config")" != "$before" ]; then
+		bfail 'the refused edit wrote the config'
+		return 1
+	fi
+	return 0
+}
+
+case_27_a_work_dir_inside_the_store_is_refused() {
+	mkrehearsal workinside || { bfail 'fixture setup failed'; return 1; }
+	invoke --store "$r/opencode-mem" --config-dir "$r/config" \
+		--backup-root "$r/backups" --work "$r/opencode-mem/work"
+	if [ "$case_rc" -ne 1 ]; then
+		bfail "a --work dir inside the store root must be refused (rc 1), got $case_rc"
+		return 1
+	fi
+	case $case_out in *'must live OUTSIDE the store root'*) ;; *) bfail 'the refusal does not name the containment rule'; return 1 ;; esac
+	return 0
+}
+
+case_28_the_engine_pre_reembed_backups_do_not_block_the_next_backup() {
+	mkrehearsal prebaks || { bfail 'fixture setup failed'; return 1; }
+	swap_args
+	invoke "${SWAP_ARGS[@]}" --scope opencode_project_aaaaaaaaaaaaaaaa
+	if [ "$case_rc" -ne 0 ]; then
+		bfail "the first swap failed: $case_out"
+		return 1
+	fi
+	sleep 1
+	# reembed_scope leaves one .bak + .bak-wal per re-embedded scope INSIDE
+	# data/ (measured: 630 KB for the live shard). live-swap's checkpoint
+	# refused on any non-empty *-wal there, so the printed resume command was
+	# not runnable after a partial migration.
+	local bak=$r/opencode-mem/data/projects/project_aaaaaaaaaaaaaaaa_shard_0.db.pre-reembed-1-2
+	printf 'pre-reembed wal bytes\n' >"$bak.bak-wal"
+	printf 'pre-reembed copy\n' >"$bak.bak"
+	invoke "${SWAP_ARGS[@]}" --scope opencode_project_bbbbbbbbbbbbbbbb
+	if [ "$case_rc" -ne 0 ]; then
+		bfail "the engine's own pre-reembed backups blocked the second swap: $case_out"
+		return 1
+	fi
+	case $case_out in *'[ ok ] restore point:'*) ;; *) bfail 'the second swap published no restore point'; return 1 ;; esac
+	if [ ! -f "$bak.bak-wal" ]; then
+		bfail 'the backup deleted the engine backup — it must only be excluded from the scan'
+		return 1
+	fi
+	return 0
+}
+
+case_29_a_default_rollback_with_two_adoption_records_is_refused() {
+	mkrehearsal tworecords || { bfail 'fixture setup failed'; return 1; }
+	swap_args
+	invoke "${SWAP_ARGS[@]}"
+	if [ "$case_rc" -ne 0 ]; then
+		bfail "the swap failed: $case_out"
+		return 1
+	fi
+	local info='' stamp='' backup_ts='' config_copy=''
+	info=$(find "$r/backups" -maxdepth 1 -name 'adopt-*.info' | sort | tail -n 1)
+	stamp=$(sed -n 's/^stamp=//p' "$info")
+	backup_ts=$(sed -n 's/^backup_ts=//p' "$info")
+	config_copy=$(sed -n 's/^config_copy=//p' "$info")
+	# A resume run writes a SECOND record whose backup_ts is the mid-migration
+	# store while config_copy stays the first run's nomic config, so "newest" is
+	# the wrong restore point (measured: an e5 shard under a nomic config).
+	{
+		printf 'stamp=%s\n' 20991231T000000Z
+		printf 'backup_ts=%s\n' "$backup_ts"
+		printf 'config_copy=%s\n' "$config_copy"
+		printf 'model=Xenova/multilingual-e5-base\n'
+	} >"$r/backups/adopt-20991231T000000Z.info"
+	local before=''
+	before=$(sha_tree "$r/opencode-mem")
+	invoke --rollback --rehearse "$r" --yes
+	if [ "$case_rc" -ne 1 ]; then
+		bfail "a default rollback with two adoption records must be refused (rc 1), got $case_rc"
+		return 1
+	fi
+	case $case_out in *'--from'*) ;; *) bfail 'the refusal does not tell the owner to pass --from'; return 1 ;; esac
+	if [ "$(sha_tree "$r/opencode-mem")" != "$before" ]; then
+		bfail 'the refused rollback still restored a store'
+		return 1
+	fi
+	# --from still works, and restores the record it names.
+	invoke --rollback --rehearse "$r" --yes --from "$stamp"
+	if [ "$case_rc" -ne 0 ]; then
+		bfail "--rollback --from must still work: $case_out"
+		return 1
+	fi
+	return 0
+}
+
+case_30_a_singular_stored_path_still_resolves() {
+	mkrehearsal singular || { bfail 'fixture setup failed'; return 1; }
+	# The registry writer stores `project/<file>` while the file lives in
+	# `projects/<file>` (measured after a re-embed: 22 rows rewritten, no file
+	# moved). The engine's reader re-anchors by basename; a --verify that joins
+	# the row verbatim reports "no shard db" for a shard that is right there.
+	sqlite3 "$r/opencode-mem/data/metadata.db" \
+		"UPDATE shards SET db_path = 'project/project_aaaaaaaaaaaaaaaa_shard_0.db' WHERE scope_hash = 'aaaaaaaaaaaaaaaa';" ||
+		{ bfail 'cannot rewrite the fixture db_path'; return 1; }
+	mkdir -p "$r/work/metadata" || { bfail 'cannot create the work metadata dir'; return 1; }
+	cp -a "$r/opencode-mem/data/metadata.db" "$r/work/metadata/metadata.db" ||
+		{ bfail 'cannot copy the fixture metadata'; return 1; }
+	local stripped=$work/singular-adopt.sh
+	sed 's/^main "\$@"$//' "$adopt" >"$stripped" || { bfail 'cannot strip the entry point'; return 1; }
+	local out='' rc=0
+	out=$(
+		{
+			# shellcheck disable=SC1090
+			. "$stripped"
+			# consumed by the sourced scope_shard_db / container_tag_prefix
+			# shellcheck disable=SC2034
+			CONFIG_DIR=$r/config
+			# shellcheck disable=SC2034
+			DATA_DIR=$r/opencode-mem/data
+			# shellcheck disable=SC2034
+			WORK_RUN=$r/work
+			scope_shard_db opencode_project_aaaaaaaaaaaaaaaa
+		} 2>&1
+	)
+	rc=$?
+	if [ "$rc" -ne 0 ]; then
+		bfail "scope_shard_db failed (rc $rc): $out"
+		return 1
+	fi
+	if [ "$out" != "$r/opencode-mem/data/projects/project_aaaaaaaaaaaaaaaa_shard_0.db" ]; then
+		bfail "scope_shard_db returned $out, not the file the engine would open"
+		return 1
+	fi
+	if [ ! -f "$out" ]; then
+		bfail "scope_shard_db points at a file that does not exist: $out"
+		return 1
+	fi
+	return 0
+}
+
 # ── runner ────────────────────────────────────────────────────────────────
 run() {
 	local fn=$1
@@ -862,6 +1304,16 @@ run case_17_a_malformed_from_stamp_is_rejected
 run case_18_rollback_refuses_a_running_engine
 run case_19_provisioner_variant_and_external_data
 run case_20_provisioner_default_output_shape_is_unchanged
+run case_21_a_stale_engine_is_refused_before_the_config_edit
+run case_22_a_failed_scope_enumeration_is_refused
+run case_23_provision_is_a_writing_mode
+run case_24_rollback_canonicalises_the_restored_nomic_tokenizer
+run case_25_the_live_sidecar_detector_fires
+run case_26_a_remote_embedding_endpoint_is_refused
+run case_27_a_work_dir_inside_the_store_is_refused
+run case_28_the_engine_pre_reembed_backups_do_not_block_the_next_backup
+run case_29_a_default_rollback_with_two_adoption_records_is_refused
+run case_30_a_singular_stored_path_still_resolves
 
 printf 'wall time: %ss\n' "$SECONDS"
 if [ "$ok" -eq "$total" ]; then
