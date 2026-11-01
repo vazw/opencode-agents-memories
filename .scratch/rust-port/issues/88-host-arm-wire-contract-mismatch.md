@@ -1,12 +1,12 @@
-# 88 — host arm fails with `errorKind:protocol`: the live host wraps session creation in `{"data":{…}}` and the client reads a bare `{id}`
+# 88 — host arm fails with `errorKind:protocol`: three documented wire-contract mismatches (create envelope, prompt route, prompt reply)
 
-Status: ready-for-agent — 2026-11-01. Evidence levels are stated per claim, because an earlier revision
-of this file — and a commit correcting it — both over-claimed. The *response envelope* is **READ** from the
-2.2.5 OpenAPI sample (`.tmp/openapi.json`, untracked, fetched 2026-11-01T09:44; responses carry a `data`
-property). The *live failure* is **MEASURED** (`errorKind:"protocol"` on the host arm). The body recorded
-in-tree as `MEASURED_2_2_5_CREATE_BODY` is **NOT a capture**: it is synthetic (see below), so the
-*failure's location* is **unconfirmed**. Work modifies `crates/mem-ai/src/provider/opencode_host.rs`
-(`create_session`), re-points that row, and renames the constant.
+Status: ready-for-agent — 2026-11-01. Evidence levels are stated per claim, because two earlier revisions of
+this file — and a commit correcting one of them — over-claimed in both directions. The 2.2.5 **spec** is
+**READ** (`.tmp/openapi.json`, untracked, fetched 2026-11-01T09:44; it declares the create and prompt routes
+and their envelopes). The *live failure* is **MEASURED** (`errorKind:"protocol"` on the host arm). The body
+recorded in-tree as `MEASURED_2_2_5_CREATE_BODY` is **NOT a capture** (synthetic, see below). No runtime
+exchange has ever been captured, so every shape below is documentation, not observation. Work modifies
+`crates/mem-ai/src/provider/opencode_host.rs`, re-points the pin, and renames the constant.
 
 ## What is missing
 
@@ -37,23 +37,25 @@ constant `MEASURED_2_2_5_CREATE_BODY`, but its values are placeholders — `"pro
 documented schema, not a captured response. The green test at `:135` therefore pins the *port's behaviour
 against an assumed shape*, which is useful, but no live create response has ever been captured.
 
-**Consequently the failure's location is unconfirmed.** `Protocol` is returned both by a create-parse
-failure and by `parse_prompt_response` when the model answers prose, so the live `errorKind:"protocol"`
-does not by itself prove create is the step that fails. This is why the fix below is **tolerance, not
-substitution**: accepting both shapes is correct whichever one the host sends, and it needs no confirmed
-locus. A captured create transcript is what would confirm the locus, and is an acceptance criterion.
+**The prompt step is mismatched too — documented, not inferred.** The same sample declares
+`POST /api/session/{sessionID}/generate` (required body `{"prompt": string}`) and
+`GET /api/session/{sessionID}/message`. The port POSTs to `/session/{id}/message`
+(`crates/mem-ai/src/provider/opencode_host.rs:394`, error label at `:408`). A POST to a GET-only route cannot
+succeed. `/generate` answers `{"data":{"text": string}}` — a JSON object, **not** a stream, which is exactly
+the non-streaming shape `585956d`'s structured call already assumes.
 
-Neither side is simply "wrong": upstream's TypeScript client runs inside the host and reads through the SDK
-wrapper, which unwraps `data` (`readSdkData`, `example/opencode-mem/src/services/ai/opencode-provider.ts:771-786`);
-the raw HTTP body is the envelope. A client speaking to the raw `/api` must unwrap it. An earlier revision
-of this issue asserted the opposite — that the shape was "not the finding" — which was wrong; this
-paragraph is the correction.
+**Correction to the previous revision of this file.** That revision said `/generate` "appears nowhere in this
+tree or in `example/`" and withdrew the claim. That search was true of the tree and of `example/`, and false
+of the host spec, which is what actually governs the wire. The withdrawal is withdrawn. What is still true:
+no captured exchange proves any of these shapes at runtime, and no Rust code in this tree references
+`/generate`.
 
-**What is NOT measured — do not act on it.** A `/generate` endpoint appears nowhere in this tree or in
-`example/` (the only `generate` hit there is the word `generateDiff` in a comment), so the claim that prompt
-generation moved to `/generate` is withdrawn. `:385-410` is `prompt_session` only (`delete_session` starts
-at `:412`). Whether the prompt and structured-output steps also mismatch **cannot be observed until session
-creation succeeds** — do not rewrite them on speculation.
+**The failure's location is unconfirmed — and no longer load-bearing.** `Protocol` is returned both by a
+create-parse failure and by `parse_prompt_response` when the model answers prose, so the live
+`errorKind:"protocol"` does not by itself name the step. But two of the three steps are documented-broken
+independently of each other, so the fix does not need the locus: **tolerate both create shapes**, and **call
+the documented prompt route** (substitution, since a GET-only route cannot accept a POST). A captured
+transcript is what converts this file's READ columns into MEASURED ones.
 
 
 **Why `reason` cannot discriminate.** The log shows `errorKind:protocol` with `reason:summarizer_failed`,
@@ -68,10 +70,10 @@ therefore **here**, not in `capture.rs`: give `Protocol` its own label.
 
 ## What would settle the rest
 
-The envelope is documented and the synthetic sample is replaced by tolerance, so create no longer depends
-on which shape arrives. What is still open is what happens **after** creation succeeds — the prompt body and
-the structured-output reply — and, for the record, whether create was ever the failing step. One captured
-live exchange for each closes it. Until then, only the create step may be changed.
+`create_session` is correct under either shape once it tolerates the envelope, and the prompt call moves to
+the route the spec declares. What is still open is whether any of it behaves as documented at runtime —
+one captured live exchange for create and one for the prompt close that. The structured-output reply shape
+is the last unknown, and the spec gives it (`{"data":{"text":…}}`).
 
 Separately, the same observation closes the one real gap in issue 83's case: the engine logs a fixed reason
 label and throws away the error text (`capture.rs:799`).
@@ -80,29 +82,33 @@ label and throws away the error text (`capture.rs:799`).
 
 - `create_session` accepts both `{"data":{…}}` and a bare `{id}`, so the client is correct whichever shape
   the host sends — no locus confirmation is needed for the fix to be sound.
+- `prompt_session` POSTs to `/session/{id}/generate` with `{"prompt": …}` and reads `{"data":{"text":…}}`,
+  instead of POSTing to the GET-only `/session/{id}/message`.
 - The constant that says `MEASURED` is renamed to say what it is: a schema-derived sample.
-- The downstream prompt body is verified against a captured exchange before any change to it is made —
-  no rewriting on speculation.
 - The failure is reported as a named, field-carrying reason rather than a generic `summarizer_failed` —
   an operator must be able to tell "the host changed its shape" from "the model returned prose". The
   mapping site is `classify_provider_error` (`capture_prompt.rs:339-356`).
 - The sample is promoted into `docs/evidence/` labelled by what it is (`READ`, not `MEASURED`), with host
-  version and date, and a recorded path to upgrade it once a real transcript exists.
+  version, date and **how it was obtained**, and a recorded path to upgrade it once a real transcript exists.
 
 ## Acceptance criteria
 
 - [ ] `create_session` accepts `{"data":{…}}` **and** still parses a bare `{id}`, so it is correct whichever
       shape the live host sends.
-- [ ] The green pin that asserts the 2.2.5 dead-letter is re-pointed: the create step now succeeds, and
-      the row asserts the **next** failure or success rather than the protocol error at creation.
+- [ ] `prompt_session` uses `POST /session/{id}/generate` with a `{"prompt": …}` body and decodes
+      `{"data":{"text":…}}`; no code path POSTs to `/session/{id}/message` any more.
+- [ ] The green pin that asserts the 2.2.5 dead-letter is re-pointed: create and prompt now both succeed
+      against the recorded shapes, and the row asserts the **next** observable step rather than a protocol
+      error at creation.
 - [ ] The constant named `MEASURED_2_2_5_CREATE_BODY` is renamed to reflect that it is a schema-derived
       sample: its values are placeholders (`prj_1`, `input:10`, `created:1`) and `ses_2_2_5` appears in no
       captured artifact. A name that asserts an evidence level it does not have is the defect being fixed.
 - [ ] The sample lives under `docs/evidence/` labelled `READ` (not `MEASURED`) with host version, date and
-      its source, and the file states what would upgrade it: one captured live create transcript.
+      how it was fetched, and the file states what would upgrade it: one captured live exchange.
 - [ ] A wire-shape mismatch produces a distinct named reason, not `summarizer_failed` — pinned by a row
       on `classify_provider_error`, with prose replies still classified as prose.
-- [ ] Nothing is claimed about the prompt or structured-output steps until a pair for each is captured.
+- [ ] No test fixture claims to be a host transcript when it is a schema sample; the ledger and the evidence
+      README both say which columns are READ and which are MEASURED.
 
 
 ## Parent
@@ -128,8 +134,7 @@ summary exists.
 carrying it went live at 16:45 on 2026-11-01. Before that, the same dead letters came from the manual
 arm's parse failure (issue 84).
 
-**Evidence-level correction, 2026-11-01T11:40Z (this file's second, and mine, not an agent's).** An earlier
-revision of this issue called `MEASURED_2_2_5_CREATE_BODY` 'recorded verbatim' from the live host, and
+**Evidence-level correction, 2026-11-01T11:40Z (this file's second, and mine, not an agent's).** An earlierrevision of this issue called `MEASURED_2_2_5_CREATE_BODY` 'recorded verbatim' from the live host, and
 commit `8c6bfb2` restated it as MEASURED. Re-derived against the artifact: the constant's values are
 placeholders — `"projectID":"prj_1"`, `"tokens":{"input":10,"output":20}`, `"time":{"created":1,"updated":2}`,
 `"directory":"/tmp"` — and `ses_2_2_5` occurs **zero** times in the 2.2.5 OpenAPI sample
@@ -138,3 +143,13 @@ schema. The correct ledger is therefore: envelope **READ** from the spec; live f
 failure **locus unconfirmed**, because `Protocol` is also what a prose reply produces. The over-claim was
 inferring an evidence level from a constant's *name* — which is exactly the defect class this issue set
 exists to fix, so it is recorded here rather than quietly edited away.
+
+**`/generate` reversal, 2026-11-01T11:52Z (this file's third correction, mine again).** The previous revision
+withdrew the `/generate` claim on a search of this tree and of `example/` — true of both, and irrelevant,
+because the host spec is what governs the wire. The 2.2.5 sample declares
+`POST /api/session/{sessionID}/generate` with required body `{"prompt": string}` answering
+`{"data":{"text": string}}`, and declares `/api/session/{sessionID}/message` as **GET only**. The port
+(`:394`) POSTs to `/message`, so the prompt step cannot succeed either way. Two lessons are recorded rather
+than smoothed over: a negative search result is evidence about the search, not about the host; and the
+spec was sitting in `.tmp/` untracked, unread, while three revisions argued about shapes it states.
+The scope therefore widened from create-only to the three documented mismatches.
