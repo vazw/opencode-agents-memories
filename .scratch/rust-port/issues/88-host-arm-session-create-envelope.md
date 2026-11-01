@@ -1,9 +1,12 @@
 # 88 — host arm fails with `errorKind:protocol`: the live host wraps session creation in `{"data":{…}}` and the client reads a bare `{id}`
 
-Status: ready-for-agent — 2026-11-01 (the create-step mismatch is MEASURED: the live body is recorded
-in-tree as `MEASURED_2_2_5_CREATE_BODY` (`crates/mem-bridge/tests/host_capture_e2e.rs:30`, added in
-`d3f4e07`) and pinned by a green test that asserts the dead-letter. Work will modify
-`crates/mem-ai/src/provider/opencode_host.rs` (`create_session`) and re-point that row.)
+Status: ready-for-agent — 2026-11-01. Evidence levels are stated per claim, because an earlier revision
+of this file — and a commit correcting it — both over-claimed. The *response envelope* is **READ** from the
+2.2.5 OpenAPI sample (`.tmp/openapi.json`, untracked, fetched 2026-11-01T09:44; responses carry a `data`
+property). The *live failure* is **MEASURED** (`errorKind:"protocol"` on the host arm). The body recorded
+in-tree as `MEASURED_2_2_5_CREATE_BODY` is **NOT a capture**: it is synthetic (see below), so the
+*failure's location* is **unconfirmed**. Work modifies `crates/mem-ai/src/provider/opencode_host.rs`
+(`create_session`), re-points that row, and renames the constant.
 
 ## What is missing
 
@@ -19,15 +22,26 @@ HEAD `13e0014`; the tree has since moved to `585956d`, which is **not** staged).
 new information: before the re-stage the same log line appeared with the manual arm and was a *parse*
 failure; on the host arm a protocol error points at the exchange itself.
 
-**The create-step mismatch, MEASURED.** The live host answers `POST {origin}/api/session` with the envelope
+**The create-step mismatch: envelope READ, instance synthetic, locus unconfirmed.**
 
-```json
-{"data":{"id":"ses_…","projectID":"…", …}}
-```
+The 2.2.5 OpenAPI sample documents that responses carry a `data` property
+(`.tmp/openapi.json`, untracked under gitignored `.tmp/`), which is the same wrapping upstream's TypeScript
+client unwraps through `readSdkData` (`example/opencode-mem/src/services/ai/opencode-provider.ts:771-786`);
+a client speaking to raw `/api` must unwrap it. The port's `create_session`
+(`crates/mem-ai/src/provider/opencode_host.rs:355-383`, URL built at `:360`) reads a bare `{id}`.
 
-recorded verbatim as `MEASURED_2_2_5_CREATE_BODY` (`crates/mem-bridge/tests/host_capture_e2e.rs:30`), while
-the port's `create_session` (`crates/mem-ai/src/provider/opencode_host.rs:355-383`, URL built at `:360`)
-reads a bare `{id}`. Every capture therefore stops at session creation and is classified `Protocol`.
+**The recorded body is not wire evidence.** `crates/mem-bridge/tests/host_capture_e2e.rs:30` names the
+constant `MEASURED_2_2_5_CREATE_BODY`, but its values are placeholders — `"projectID":"prj_1"`,
+`"tokens":{"input":10,"output":20}`, `"time":{"created":1,"updated":2}`, `"directory":"/tmp"` — and
+`ses_2_2_5` appears zero times in the OpenAPI sample. It is a hand-authored instance built from the
+documented schema, not a captured response. The green test at `:135` therefore pins the *port's behaviour
+against an assumed shape*, which is useful, but no live create response has ever been captured.
+
+**Consequently the failure's location is unconfirmed.** `Protocol` is returned both by a create-parse
+failure and by `parse_prompt_response` when the model answers prose, so the live `errorKind:"protocol"`
+does not by itself prove create is the step that fails. This is why the fix below is **tolerance, not
+substitution**: accepting both shapes is correct whichever one the host sends, and it needs no confirmed
+locus. A captured create transcript is what would confirm the locus, and is an acceptance criterion.
 
 Neither side is simply "wrong": upstream's TypeScript client runs inside the host and reads through the SDK
 wrapper, which unwraps `data` (`readSdkData`, `example/opencode-mem/src/services/ai/opencode-provider.ts:771-786`);
@@ -54,33 +68,40 @@ therefore **here**, not in `capture.rs`: give `Protocol` its own label.
 
 ## What would settle the rest
 
-The create-step body is captured; the envelope is known. What is still open is what happens **after**
-creation succeeds — the prompt body and the structured-output reply. One captured pair for each of those
-closes it. Until then, only the create step may be changed.
+The envelope is documented and the synthetic sample is replaced by tolerance, so create no longer depends
+on which shape arrives. What is still open is what happens **after** creation succeeds — the prompt body and
+the structured-output reply — and, for the record, whether create was ever the failing step. One captured
+live exchange for each closes it. Until then, only the create step may be changed.
 
 Separately, the same observation closes the one real gap in issue 83's case: the engine logs a fixed reason
 label and throws away the error text (`capture.rs:799`).
 
 ## What lands
 
-- `create_session` accepts the host's `{"data":{…}}` envelope (and still tolerates a bare `{id}`, so the
-  client is not broken against a host that does not wrap).
+- `create_session` accepts both `{"data":{…}}` and a bare `{id}`, so the client is correct whichever shape
+  the host sends — no locus confirmation is needed for the fix to be sound.
+- The constant that says `MEASURED` is renamed to say what it is: a schema-derived sample.
 - The downstream prompt body is verified against a captured exchange before any change to it is made —
   no rewriting on speculation.
 - The failure is reported as a named, field-carrying reason rather than a generic `summarizer_failed` —
   an operator must be able to tell "the host changed its shape" from "the model returned prose". The
   mapping site is `classify_provider_error` (`capture_prompt.rs:339-356`).
-- The recorded exchange is promoted from a test constant into `docs/evidence/` with host version and date.
+- The sample is promoted into `docs/evidence/` labelled by what it is (`READ`, not `MEASURED`), with host
+  version and date, and a recorded path to upgrade it once a real transcript exists.
 
 ## Acceptance criteria
 
-- [ ] `create_session` unwraps `{"data":{…}}` from the live host and still parses a bare `{id}`.
+- [ ] `create_session` accepts `{"data":{…}}` **and** still parses a bare `{id}`, so it is correct whichever
+      shape the live host sends.
 - [ ] The green pin that asserts the 2.2.5 dead-letter is re-pointed: the create step now succeeds, and
       the row asserts the **next** failure or success rather than the protocol error at creation.
-- [ ] The recorded pair (create, and — once reachable — the prompt) lives under `docs/evidence/` with
-      host version and date, not only as a test constant.
+- [ ] The constant named `MEASURED_2_2_5_CREATE_BODY` is renamed to reflect that it is a schema-derived
+      sample: its values are placeholders (`prj_1`, `input:10`, `created:1`) and `ses_2_2_5` appears in no
+      captured artifact. A name that asserts an evidence level it does not have is the defect being fixed.
+- [ ] The sample lives under `docs/evidence/` labelled `READ` (not `MEASURED`) with host version, date and
+      its source, and the file states what would upgrade it: one captured live create transcript.
 - [ ] A wire-shape mismatch produces a distinct named reason, not `summarizer_failed` — pinned by a row
-      on `classify_provider_error`.
+      on `classify_provider_error`, with prose replies still classified as prose.
 - [ ] Nothing is claimed about the prompt or structured-output steps until a pair for each is captured.
 
 
@@ -106,3 +127,14 @@ summary exists.
 **Not a regression:** the host arm was selected only from `eb2edd9` onwards, and the staged binary
 carrying it went live at 16:45 on 2026-11-01. Before that, the same dead letters came from the manual
 arm's parse failure (issue 84).
+
+**Evidence-level correction, 2026-11-01T11:40Z (this file's second, and mine, not an agent's).** An earlier
+revision of this issue called `MEASURED_2_2_5_CREATE_BODY` 'recorded verbatim' from the live host, and
+commit `8c6bfb2` restated it as MEASURED. Re-derived against the artifact: the constant's values are
+placeholders — `"projectID":"prj_1"`, `"tokens":{"input":10,"output":20}`, `"time":{"created":1,"updated":2}`,
+`"directory":"/tmp"` — and `ses_2_2_5` occurs **zero** times in the 2.2.5 OpenAPI sample
+(`.tmp/openapi.json`, untracked, fetched 09:44). It is a hand-authored instance built from the documented
+schema. The correct ledger is therefore: envelope **READ** from the spec; live failure **MEASURED**;
+failure **locus unconfirmed**, because `Protocol` is also what a prose reply produces. The over-claim was
+inferring an evidence level from a constant's *name* — which is exactly the defect class this issue set
+exists to fix, so it is recorded here rather than quietly edited away.
