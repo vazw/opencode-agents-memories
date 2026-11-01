@@ -13,6 +13,7 @@
 //!   permissions, bounded reads, path-only error messages.
 
 pub mod error;
+pub mod host_auth;
 pub mod internal_capture;
 pub mod opencode_host;
 pub mod registry;
@@ -24,6 +25,7 @@ pub mod secret_resolver;
 pub mod provider_trait;
 
 pub use error::{ProviderError, ProviderErrorKind};
+pub use host_auth::{HostAuthorization, Zeroizing};
 pub use internal_capture::{
     INTERNAL_CAPTURE_SESSION_TITLE, InternalCaptureSessions, UNTRACK_GRACE,
     is_internal_capture_session_title,

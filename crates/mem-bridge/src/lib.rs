@@ -14,6 +14,8 @@ pub mod cross_tier;
 pub mod db_lane;
 pub mod engine;
 pub mod error_map;
+pub mod host_endpoint;
+pub mod host_provider;
 pub mod inject;
 pub mod jsonrpc;
 pub mod project_scope;

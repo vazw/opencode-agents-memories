@@ -341,7 +341,12 @@ async fn test_layer_wraps_registry_provider() {
     let mut registry = ProviderRegistry::new(Arc::new(StaticSecretResolver::new()));
     let created = registry
         .register_builtin()
-        .create(&ProviderConfig::OpenCodeHost(OpenCodeHostConfig::default()))
+        .create(&ProviderConfig::OpenCodeHost(OpenCodeHostConfig {
+            // Explicit: the factory validates the base URL, and the default is
+            // deliberately empty (not dialable).
+            base_url: "http://127.0.0.1:4096".to_owned(),
+            ..OpenCodeHostConfig::default()
+        }))
         .expect("the built-in host factory should build");
 
     let wrapped = layer().wrap(created);

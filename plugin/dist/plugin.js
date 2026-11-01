@@ -199,6 +199,11 @@ function childEnvironment() {
   for (const name of [
     "PATH",
     "HOME",
+    // Host transport wave: the engine resolves the live host's service file
+    // from `$XDG_STATE_HOME/opencode/service.json`. Dropping this variable makes
+    // the child fall back to `$HOME/.local/state`, which is a DIFFERENT answer
+    // whenever the host was started with a custom state home.
+    "XDG_STATE_HOME",
     "TMPDIR",
     "LANG",
     "LC_ALL",

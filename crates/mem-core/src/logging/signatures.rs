@@ -75,6 +75,24 @@ pub const FAILED_TO_LOAD_SKILLS: &str = "Failed to load skills for OpenCode regi
 /// payload `reason` is one of the existing fixed constants).
 pub const AUTO_CAPTURE_FINAL_ERROR: &str = "Auto-capture final error";
 
+/// `Auto-capture provider ready`. Emitted by
+/// `mem_bridge::host_provider::LazyHostProvider` once per SUCCESSFUL host
+/// resolution: payload `{ baseUrl, hostVersion?, providerId }`.
+///
+/// Deliberately NOT a web `NAMED_ERROR_BUCKETS` member: the stats classifier
+/// matches bucket/counter prefixes and this line starts with none.
+pub const AUTO_CAPTURE_PROVIDER_READY: &str = "Auto-capture provider ready";
+
+/// `Auto-capture provider unavailable`. Emitted once per FAILED host
+/// resolution: payload `{ reason, hostVersion? }` where `reason` is one of the
+/// ten `mem_bridge::host_endpoint::HostWiringError` strings.
+pub const AUTO_CAPTURE_PROVIDER_UNAVAILABLE: &str = "Auto-capture provider unavailable";
+
+/// `Auto-capture provider failed`. Emitted once per summarizer failure (the
+/// capture drain's provider leg): payload `{ captureId, reason, errorKind,
+/// status? }` — never prompt content, never the provider's message.
+pub const AUTO_CAPTURE_PROVIDER_FAILED: &str = "Auto-capture provider failed";
+
 /// `Compaction handler error` bucket. Emitted by `mem_bridge::inject`
 /// (`InjectService::compaction_leg`) exactly once for any read failure after
 /// the disabled/session-id guards. The payload carries the session id and a

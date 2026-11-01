@@ -208,35 +208,18 @@ pub async fn build_composed_runtime(
         store_config.clone(),
     )));
 
-    // The capture summarizer: provider-backed when a provider reaches the
-    // composition root (the OpenCode host transport is composed there). With
-    // no injected provider, the root builds the OpenCode host adapter over
-    // the documented default base URL (`127.0.0.1:4096`, model `inherit`);
-    // a host that is not answering fails closed (retry/dead-letter) — it
-    // never hangs the request path.
-    let provider = match provider {
-        Some(provider) => Some(provider),
-        None => {
-            let host = mem_ai::provider::opencode_host::OpenCodeHostConfig {
-                provider_id: config
-                    .opencode_provider
-                    .clone()
-                    .unwrap_or_else(|| "opencode".to_string()),
-                model: config
-                    .opencode_model
-                    .clone()
-                    .unwrap_or_else(|| "inherit".to_string()),
-                variant: config.opencode_variant.clone(),
-                ..Default::default()
-            };
-            Some(
-                Arc::new(mem_ai::provider::opencode_host::OpenCodeHostProvider::new(
-                    host,
-                    Arc::new(mem_ai::provider::opencode_host::ReqwestHostTransport::new()),
-                )) as Arc<dyn mem_ai::provider::AiProvider>,
-            )
-        }
-    };
+    // The capture summarizer: provider-backed ONLY when a provider reaches the
+    // composition root. With `provider: None` this root composes NO host
+    // adapter: resolving the live host needs the env/probe/clock/transport
+    // seams and the resolved `opencodeBaseUrl`, which the engine owns (it
+    // passes the `LazyHostProvider` in). Fabricating one here would dial a
+    // guessed port — the exact failure this wave removes — so `None` is
+    // preserved and the capture path fails closed with the named
+    // `capture_provider_unavailable` reason.
+    //
+    // Consequence, recorded: with `provider: None` consolidation falls back to
+    // `UnavailableMilestoneSummarizer` (below). That is the tests / degraded
+    // composition path; production always passes the lazy provider.
     // D-52-4/D-52-7: the capture summarizer's provider, post-wrap. `wrap`
     // allocates and returns `Arc<PrivacyFilterProvider>` — an `Arc::new(..)`
     // around it would be `Arc<Arc<_>>` and would not coerce to

@@ -259,3 +259,31 @@ async fn test_composed_runtime_hands_the_resolved_privacy_config_to_capture() {
     let _ = std::fs::remove_dir_all(&root);
     let _ = std::fs::remove_dir_all(&home);
 }
+
+// ---------------------------------------------------------------------------
+// Host transport wave — composition must not fabricate a host provider
+// ---------------------------------------------------------------------------
+
+/// With no injected provider, composition must NOT build an OpenCode host
+/// adapter at a guessed port: it cannot resolve the live host (that needs the
+/// env/probe/clock/transport seams and the resolved config, which the engine
+/// owns). `None` fails the capture path closed with the named
+/// `capture_provider_unavailable` reason instead of dialling `127.0.0.1:4096`.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_composition_never_fabricates_a_capture_provider() {
+    let root = temp_dir("composition-none-provider");
+    let home = temp_dir("composition-none-provider-home");
+    let config = load_config(&root, &home);
+
+    let runtime = build_composed_runtime(&root, &config, Arc::new(NoopEmbedder), None)
+        .await
+        .expect("the runtime composes");
+    assert!(
+        runtime.provider.is_none(),
+        "composition fabricated a host adapter from FIXTURE state"
+    );
+
+    drop(runtime);
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&home);
+}

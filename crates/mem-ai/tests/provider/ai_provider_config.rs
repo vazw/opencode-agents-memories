@@ -19,8 +19,11 @@ fn registry() -> ProviderRegistry {
 }
 
 fn host_config(model: &str) -> OpenCodeHostConfig {
+    // Explicit: `Default::default()` is deliberately NOT dialable (empty base
+    // URL), so every test names the endpoint it dials.
     OpenCodeHostConfig {
         model: model.to_owned(),
+        base_url: "http://127.0.0.1:4096".to_owned(),
         ..OpenCodeHostConfig::default()
     }
 }
@@ -67,7 +70,10 @@ fn test_provider_config_timeout() {
 async fn test_connected_provider_refresh() {
     let transport = Arc::new(ReqwestHostTransport::new());
     let provider = Arc::new(OpenCodeHostProvider::new(
-        OpenCodeHostConfig::default(),
+        OpenCodeHostConfig {
+            base_url: "http://127.0.0.1:4096".to_owned(),
+            ..OpenCodeHostConfig::default()
+        },
         transport,
     ));
 

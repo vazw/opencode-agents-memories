@@ -249,6 +249,17 @@ pub fn normalize_opencode_variant(value: Option<&Value>) -> Option<String> {
     }
 }
 
+/// Blank/whitespace `opencodeBaseUrl` values are unset, so a stray empty string
+/// never becomes a base URL the resolver would have to reject.
+pub fn normalize_opencode_base_url(value: Option<&str>) -> Option<String> {
+    let trimmed = value?.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
+}
+
 /// `memoryTemperature`: number → [`MemoryTemperature::Value`], `false` →
 /// [`MemoryTemperature::Disabled`], anything else → key-named error.
 pub fn normalize_memory_temperature(

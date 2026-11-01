@@ -1928,6 +1928,7 @@ name = "mem-ai"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "futures",
  "mem-core",
  "mem-embed",
@@ -1959,6 +1960,8 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "url",
+ "zeroize",
 ]
 
 [[package]]

@@ -12,9 +12,10 @@ pub use normalize::{
     normalize_auto_capture_max_context_bytes, normalize_auto_cleanup_retention_days,
     normalize_embedding_dimensions, normalize_embedding_dtype, normalize_embedding_max_tokens,
     normalize_episodic_consolidation_age_days, normalize_injection_markers,
-    normalize_memory_temperature, normalize_opencode_timeout_ms, normalize_opencode_variant,
-    normalize_ttl_fallback_days, normalize_user_profile_auto_cleanup_interval,
-    outer_structured_output_timeout_ms, render_json_value, render_number, resolve_secret_value,
+    normalize_memory_temperature, normalize_opencode_base_url, normalize_opencode_timeout_ms,
+    normalize_opencode_variant, normalize_ttl_fallback_days,
+    normalize_user_profile_auto_cleanup_interval, outer_structured_output_timeout_ms,
+    render_json_value, render_number, resolve_secret_value,
 };
 pub use schema::{
     AutoCaptureProviderMode, AutoCaptureProviderSettings, AutoCaptureProviderStatus, ChatMessage,
@@ -464,6 +465,7 @@ impl Config {
             opencode_provider: file.opencode_provider,
             opencode_model: file.opencode_model,
             opencode_variant: normalize_opencode_variant(file.opencode_variant.as_ref()),
+            opencode_base_url: normalize_opencode_base_url(file.opencode_base_url.as_deref()),
             opencode_timeout_ms: normalize_opencode_timeout_ms(file.opencode_timeout_ms.as_ref()),
             auto_capture_provider_status,
             ai_session_retention_days: file

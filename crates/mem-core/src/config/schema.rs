@@ -371,6 +371,10 @@ pub struct FileConfig {
     pub opencode_provider: Option<String>,
     pub opencode_model: Option<String>,
     pub opencode_variant: Option<Value>,
+    /// Operator override for the host's `{origin}/api` base. When set it wins
+    /// over `~/.local/state/opencode/service.json`'s origin, and the service
+    /// file is then consulted for credentials ONLY.
+    pub opencode_base_url: Option<String>,
     pub opencode_timeout_ms: Option<Value>,
     pub ai_session_retention_days: Option<u32>,
     pub web_server_enabled: Option<bool>,
@@ -684,6 +688,9 @@ pub struct Config {
     pub opencode_provider: Option<String>,
     pub opencode_model: Option<String>,
     pub opencode_variant: Option<String>,
+    /// Resolved `opencodeBaseUrl`: a non-blank loopback `http(s)` base the
+    /// engine dials instead of the discovered origin (`None` = discover).
+    pub opencode_base_url: Option<String>,
     pub opencode_timeout_ms: u64,
     pub auto_capture_provider_status: AutoCaptureProviderStatus,
 

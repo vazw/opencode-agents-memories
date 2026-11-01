@@ -277,6 +277,30 @@ fn test_opencode_variant_blank_values_treated_as_unset() {
 }
 
 #[test]
+fn test_opencode_base_url_reads_from_the_project_file() {
+    let env = Env::new();
+    let config = run_ok(
+        None,
+        Some(r#"{"opencodeBaseUrl": "http://127.0.0.1:5000"}"#),
+        &env,
+    );
+    assert_eq!(
+        config.opencode_base_url.as_deref(),
+        Some("http://127.0.0.1:5000")
+    );
+}
+
+#[test]
+fn test_opencode_base_url_blank_is_unset() {
+    let env = Env::new();
+    let config = run_ok(None, Some(r#"{"opencodeBaseUrl": "   "}"#), &env);
+    assert_eq!(config.opencode_base_url, None);
+
+    let config = run_ok(None, None, &env);
+    assert_eq!(config.opencode_base_url, None);
+}
+
+#[test]
 fn test_opencode_timeout_parsed_with_clamping_and_default() {
     let env = Env::new();
     let cases: [(Option<&str>, u64); 7] = [

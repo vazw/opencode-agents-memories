@@ -6,9 +6,13 @@
 //! episodic extension (`files_touched`, `completed_work`, `decisions`,
 //! `open_threads`) is accepted and parsed when present.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use mem_embed::embedder::BoxFuture;
+
+use mem_ai::provider::{ProviderError, ProviderErrorKind};
+
+use mem_core::sync::lock_or_recover;
 
 use mem_episodic::record::{Decision, WorkItem, WorkKind};
 
@@ -63,6 +67,19 @@ pub const CAPTURE_OUTPUT_SCHEMA: &str = r#"{
   "required": ["summary", "type", "tags"]
 }"#;
 
+/// One NAMED summarizer failure: the closed capture reason plus the provider
+/// classification. `error_kind` is a [`ProviderErrorKind`] label and `status`
+/// the HTTP status, when the failure came from a response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SummarizerFailure {
+    /// One of the seven capture reasons, or a host-resolution reason.
+    pub reason: &'static str,
+    /// `ProviderErrorKind::as_str()` label.
+    pub error_kind: &'static str,
+    /// HTTP status when the host answered.
+    pub status: Option<u16>,
+}
+
 /// The summarizer seam for captures: `context` is the bounded markdown
 /// context (or the raw transcript when the wrapper sent none). The
 /// implementation runs OFF the serial DB lane.
@@ -71,6 +88,15 @@ pub trait CaptureSummarizer: Send + Sync {
         &'a self,
         context: &'a str,
     ) -> BoxFuture<'a, Result<CaptureSummaryOutput, mem_episodic::error::EpisodicError>>;
+
+    /// The failure of the LAST `summarize` call, when it failed on the provider.
+    ///
+    /// A JSON/parse failure reports `None`: the record is cleared on entry, so
+    /// a stale provider reason can never name a later parse failure. Defaulted
+    /// (never required) so non-provider implementations stay unchanged.
+    fn last_failure(&self) -> Option<SummarizerFailure> {
+        None
+    }
 }
 
 /// Parses one raw provider output into the structured result.
@@ -269,6 +295,8 @@ pub struct ProviderCaptureSummarizer {
     provider: Arc<dyn mem_ai::provider::AiProvider>,
     model: String,
     max_context_bytes: usize,
+    /// The last provider failure; cleared on entry to every `summarize`.
+    last_failure: Mutex<Option<SummarizerFailure>>,
 }
 
 impl ProviderCaptureSummarizer {
@@ -281,7 +309,31 @@ impl ProviderCaptureSummarizer {
             provider,
             model: model.into(),
             max_context_bytes,
+            last_failure: Mutex::new(None),
         }
+    }
+}
+
+/// Classify one provider failure onto the closed capture reason set.
+///
+/// Only three outcomes: an auth rejection, a host-resolution reason carried in
+/// a `Config` message, or the default `summarizer_failed`.
+pub fn classify_provider_error(error: &ProviderError) -> SummarizerFailure {
+    let reason =
+        if error.kind == ProviderErrorKind::Auth || matches!(error.status, Some(401) | Some(403)) {
+            "host_auth_rejected"
+        } else if error.kind == ProviderErrorKind::Config {
+            crate::host_endpoint::HostWiringError::all()
+                .into_iter()
+                .find(|candidate| candidate.reason() == error.message)
+                .map_or("summarizer_failed", |candidate| candidate.reason())
+        } else {
+            "summarizer_failed"
+        };
+    SummarizerFailure {
+        reason,
+        error_kind: error.kind.as_str(),
+        status: error.status,
     }
 }
 
@@ -291,6 +343,8 @@ impl CaptureSummarizer for ProviderCaptureSummarizer {
         context: &'a str,
     ) -> BoxFuture<'a, Result<CaptureSummaryOutput, mem_episodic::error::EpisodicError>> {
         Box::pin(async move {
+            // Entry clear: a failure record belongs to ONE attempt only.
+            *lock_or_recover(&self.last_failure) = None;
             use mem_episodic::futures::StreamExt;
             let schema_json = CAPTURE_OUTPUT_SCHEMA;
             let user_prompt = crate::capture_context::build_bounded_summary_prompt(
@@ -319,6 +373,8 @@ impl CaptureSummarizer for ProviderCaptureSummarizer {
                         }
                     }
                     Err(error) => {
+                        *lock_or_recover(&self.last_failure) =
+                            Some(classify_provider_error(&error));
                         return Err(mem_episodic::error::EpisodicError::Summary {
                             message: format!("capture summarizer provider failed: {error}"),
                         });
@@ -327,5 +383,9 @@ impl CaptureSummarizer for ProviderCaptureSummarizer {
             }
             parse_capture_output(&text)
         })
+    }
+
+    fn last_failure(&self) -> Option<SummarizerFailure> {
+        *lock_or_recover(&self.last_failure)
     }
 }

@@ -49,6 +49,39 @@
 - **shutdown pipeline** — ordered teardown: web stop wrapped in ~1 s, DB flush
   ≤ 500 ms, total < 2 s (D-45); stdio EOF and standalone signals both converge on it.
 
+**Host wiring (ADR-0027 — transport, NOT the wire contract):**
+
+- **host endpoint / service file** — the live OpenCode host records itself in
+  `$XDG_STATE_HOME/opencode/service.json` (`0600`: `{id, url, pid, password,
+  version}`; `XDG_STATE_HOME` absent ⇒ `$HOME/.local/state`). `host_endpoint`
+  resolves `{origin}/api` plus a basic-auth credential, over ONE read+parse
+  helper that wraps the password in `Zeroizing` immediately after the
+  deserialize. Ten closed reasons (`host_override_invalid`,
+  `state_dir_unknown`, `service_file_missing`/`unreadable`/`malformed`,
+  `host_pid_dead`, `host_pid_recycled`, `host_url_unsupported`,
+  `host_url_not_loopback`, `host_model_unresolved`), each with exactly one
+  pinning input in `tests/host_endpoint.rs`.
+- **two branches** — an `opencodeBaseUrl` override is branch A (the file is
+  then credential-only: same-origin credentials only, no liveness probe); the
+  file is branch B (liveness, then start-time recycling, then URL shape, then
+  credentials, then the model ref). `"inherit"` is never forwarded.
+- **`LazyHostProvider`** — resolve on use, cache on success, clear on ANY inner
+  error (a foreign listener on a recycled port answers `401`/`404`/junk, never
+  `Network`). `warm()` is the startup probe and never caches a failure. Model
+  and provider come from the wiring, so the prompt body names a real model and
+  the create body still carries none.
+- **transport vs wire wave** — this layer reaches the host; it does not make a
+  capture persist. The 2.2.5 host answers `{data: Session.Info}`, prompts at
+  `…/{id}/generate` and has no `StructuredOutput`, so a capture today fails
+  with a NAMED `protocol`/`http-status` reason. That contract is the wire
+  wave's (ADR-0027's handoff).
+- **named failures** — `Auto-capture provider ready` (`baseUrl`,
+  `hostVersion?`, `providerId`), `Auto-capture provider unavailable`
+  (`reason`, `hostVersion?`) and `Auto-capture provider failed` (`captureId`,
+  `reason`, `errorKind`, `status?`); the retry-exhausted dead-letter payload
+  carries `reason` plus `errorKind`/`status` when present, so no capture dies
+  anonymously.
+
 **Deferred register rows (orchestrator; W6.2 owns `docs/agents/testing.md`):**
 the `-32002` code row, the exit-code-75 row, the status-file-format row.
 

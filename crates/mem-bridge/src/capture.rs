@@ -7,7 +7,8 @@ use std::sync::atomic::Ordering;
 
 use mem_core::logging::log;
 use mem_core::logging::signatures::{
-    AUTO_CAPTURE_FINAL_ERROR, AUTO_CAPTURE_MEMORY_PERSISTED, AUTO_CAPTURE_SKIPPED,
+    AUTO_CAPTURE_FINAL_ERROR, AUTO_CAPTURE_MEMORY_PERSISTED, AUTO_CAPTURE_PROVIDER_FAILED,
+    AUTO_CAPTURE_SKIPPED,
 };
 use mem_core::scope::Scope;
 use mem_core::sha256;
@@ -760,10 +761,16 @@ impl CaptureService {
             .unwrap_or_default();
         let scope = match self.scope_resolver.resolve(&params.project_id) {
             Ok(scope) => scope,
-            Err(_) => return self.retryable_or_dead(entry).await,
+            Err(_) => {
+                return self
+                    .retryable_or_dead(entry, Failure::of("scope_unresolved"))
+                    .await;
+            }
         };
         let Some((summary, tags)) = summary_with_extracted_tags(&params) else {
-            return self.retryable_or_dead(entry).await;
+            return self
+                .retryable_or_dead(entry, Failure::of("summary_missing"))
+                .await;
         };
         // A caller-supplied summary carries no upstream `type` and no
         // provider extension: the documented default type and an empty
@@ -788,7 +795,9 @@ impl CaptureService {
             .await
             .is_err()
         {
-            return self.retryable_or_dead(entry).await;
+            return self
+                .retryable_or_dead(entry, Failure::of("episodic_write_failed"))
+                .await;
         }
 
         // W8a: enqueue the vault feeder (fire-and-forget) after a successful
@@ -834,7 +843,10 @@ impl CaptureService {
                 log_tier1_deferred(entry, reason);
                 EntryOutcome::Deferred
             }
-            Err(CaptureWriterError::Failed(_)) => self.retryable_or_dead(entry).await,
+            Err(CaptureWriterError::Failed(_)) => {
+                self.retryable_or_dead(entry, Failure::of("tier1_write_failed"))
+                    .await
+            }
         }
     }
 
@@ -852,7 +864,11 @@ impl CaptureService {
         // corrupt payload: fail closed as a consumed attempt).
         let scope = match self.scope_resolver.resolve(&params.project_id) {
             Ok(scope) => scope,
-            Err(_) => return self.retryable_or_dead(entry).await,
+            Err(_) => {
+                return self
+                    .retryable_or_dead(entry, Failure::of("scope_unresolved"))
+                    .await;
+            }
         };
 
         // 2. Private content is stripped from every free text BEFORE any
@@ -898,7 +914,11 @@ impl CaptureService {
         // 3. Context + summary construction — OFF the serial DB lane.
         let output = match self.assemble_summary(&params, transcript.as_deref()).await {
             Ok(output) => output,
-            Err(_) => return self.retryable_or_dead(entry).await,
+            Err(_) => {
+                let failure = self.summarizer_failure();
+                log_provider_failed(entry, failure);
+                return self.retryable_or_dead(entry, failure).await;
+            }
         };
         let (summary, memory_type, tags, extension) = match output {
             CaptureSummaryOutput::Skip(reason) => {
@@ -928,7 +948,9 @@ impl CaptureService {
             .await
             .is_err()
         {
-            return self.retryable_or_dead(entry).await;
+            return self
+                .retryable_or_dead(entry, Failure::of("episodic_write_failed"))
+                .await;
         }
 
         // W8a: enqueue the vault feeder (fire-and-forget) after a successful
@@ -977,13 +999,42 @@ impl CaptureService {
                 log_tier1_deferred(entry, reason);
                 EntryOutcome::Deferred
             }
-            Err(CaptureWriterError::Failed(_)) => self.retryable_or_dead(entry).await,
+            Err(CaptureWriterError::Failed(_)) => {
+                self.retryable_or_dead(entry, Failure::of("tier1_write_failed"))
+                    .await
+            }
+        }
+    }
+
+    /// The NAMED cause of the failure about to be recorded.
+    ///
+    /// Every retry site names itself; only the summarizer leg consults the
+    /// summarizer's own record, because only it can classify a provider error.
+    fn summarizer_failure(&self) -> Failure {
+        let Some(summarizer) = self.summarizer.as_ref() else {
+            return Failure::of("capture_provider_unavailable");
+        };
+        match summarizer.last_failure() {
+            Some(failure) => Failure {
+                reason: failure.reason,
+                error_kind: Some(failure.error_kind),
+                status: failure.status,
+            },
+            // A JSON/parse failure: no provider classification belongs to it.
+            None => Failure::of("summarizer_failed"),
         }
     }
 
     /// A consumed retryable failure; the fifth consumed attempt
     /// dead-letters the entry to the episodic-only terminal state.
-    async fn retryable_or_dead(&self, entry: &mem_episodic::inbox::InboxEntry) -> EntryOutcome {
+    ///
+    /// `failure` names the cause; it is carried into the dead-letter payload so
+    /// no capture ever dies anonymously.
+    async fn retryable_or_dead(
+        &self,
+        entry: &mem_episodic::inbox::InboxEntry,
+        failure: Failure,
+    ) -> EntryOutcome {
         let attempts_after = self
             .inbox
             .bump_attempts(&entry.capture_id)
@@ -997,14 +1048,22 @@ impl CaptureService {
                 "capture",
                 serde_json::json!({ "capture_id": entry.capture_id, "project_id": entry.project_id }),
             );
+            let mut data = serde_json::json!({
+                "captureId": &entry.capture_id,
+                "projectId": &entry.project_id,
+                "attempts": attempts_after,
+                "outcome": "dead_lettered",
+                "reason": failure.reason,
+            });
+            if let Some(error_kind) = failure.error_kind {
+                data["errorKind"] = serde_json::json!(error_kind);
+            }
+            if let Some(status) = failure.status {
+                data["status"] = serde_json::json!(status);
+            }
             log(
                 &format!("{AUTO_CAPTURE_FINAL_ERROR} after {attempts_after} attempts"),
-                Some(&serde_json::json!({
-                    "captureId": &entry.capture_id,
-                    "projectId": &entry.project_id,
-                    "attempts": attempts_after,
-                    "outcome": "dead_lettered",
-                })),
+                Some(&data),
             );
             EntryOutcome::Dead
         } else {
@@ -1246,6 +1305,44 @@ impl CaptureService {
             }),
         }
     }
+}
+
+/// The named cause of one consumed capture failure.
+///
+/// `reason` is one of the seven fixed capture reasons (or a host-resolution
+/// reason carried through the summarizer); `error_kind`/`status` are present
+/// only when a provider answered — never free text, never prompt content.
+#[derive(Debug, Clone, Copy)]
+struct Failure {
+    reason: &'static str,
+    error_kind: Option<&'static str>,
+    status: Option<u16>,
+}
+
+impl Failure {
+    const fn of(reason: &'static str) -> Self {
+        Self {
+            reason,
+            error_kind: None,
+            status: None,
+        }
+    }
+}
+
+/// One `Auto-capture provider failed` line per summarizer failure (every
+/// attempt, not only the terminal one).
+fn log_provider_failed(entry: &mem_episodic::inbox::InboxEntry, failure: Failure) {
+    let mut data = serde_json::json!({
+        "captureId": &entry.capture_id,
+        "reason": failure.reason,
+    });
+    if let Some(error_kind) = failure.error_kind {
+        data["errorKind"] = serde_json::json!(error_kind);
+    }
+    if let Some(status) = failure.status {
+        data["status"] = serde_json::json!(status);
+    }
+    log(AUTO_CAPTURE_PROVIDER_FAILED, Some(&data));
 }
 
 /// Envelope plumbing of enqueue errors for the engine's `-32002` mapping.

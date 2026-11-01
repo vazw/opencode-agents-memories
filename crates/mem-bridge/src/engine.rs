@@ -1206,6 +1206,35 @@ fn capture_validator(request: &Request) -> Option<Response> {
     }
 }
 
+/// Build the production host provider: a [`LazyHostProvider`] over the resolved
+/// config and the real seams.
+///
+/// The transport is a PARAMETER on purpose: the override/lazy rows are
+/// falsifiable only because a recording mock can see what the engine would
+/// dial. `run_in_runtime` passes [`mem_ai::provider::ReqwestHostTransport`].
+///
+/// [`LazyHostProvider`]: crate::host_provider::LazyHostProvider
+pub fn engine_host_provider(
+    config: &mem_core::config::Config,
+    env: Arc<dyn mem_core::env::EnvSource + Send + Sync>,
+    probe: Arc<dyn mem_store::platform::ProcessProbe>,
+    clock: Arc<dyn crate::host_endpoint::ProcessClock>,
+    transport: Arc<dyn mem_ai::provider::HostTransport>,
+) -> Arc<crate::host_provider::LazyHostProvider> {
+    Arc::new(crate::host_provider::LazyHostProvider::new(
+        crate::host_provider::HostResolverDeps {
+            override_url: config.opencode_base_url.clone(),
+            provider_id: config.opencode_provider.clone(),
+            model_id: config.opencode_model.clone(),
+            variant: config.opencode_variant.clone(),
+            env,
+            probe,
+            clock,
+            transport,
+        },
+    ))
+}
+
 /// The `run` body, testable with injected signals and any stream pair.
 ///
 /// `core_config` is the resolved `mem_core::Config` loaded SYNCHRONOUSLY by
@@ -1223,6 +1252,9 @@ pub async fn run_in_runtime(
     // The exclusive lifetime lock FIRST: a loser never opens the DB.
     let probe: Arc<dyn mem_store::platform::ProcessProbe> =
         Arc::new(mem_store::platform::SystemProcessProbe);
+    // `acquire_outcome` consumes the probe; the host provider needs its own
+    // handle (same probe, one allocation).
+    let host_probe = probe.clone();
     let lock = acquire_outcome(&config.storage_root, probe);
 
     // The production composition root: every W5.3 service over the resolved
@@ -1236,11 +1268,25 @@ pub async fn run_in_runtime(
     // them into `ApiServices::production(...)`. The engine lock is still
     // acquired first (§B3), and a composition failure still launches the web
     // server with `deps: None` — the existing degrade path.
+    // The host provider is composed HERE, once, over the resolved config and
+    // the real seams: composition never fabricates one. `warm()` performs the
+    // single startup resolution, so the log carries either the resolved base
+    // plus `service.json`'s version or the named resolution reason — never an
+    // anonymous dead-letter later on.
+    let host_provider = engine_host_provider(
+        &core_config,
+        Arc::new(mem_core::env::ProcessEnv),
+        host_probe,
+        Arc::new(crate::host_endpoint::SystemProcessClock),
+        Arc::new(mem_ai::provider::ReqwestHostTransport::new()),
+    );
+    let _ = host_provider.warm();
+
     let composed = match crate::composition::build_composed_runtime(
         &config.storage_root,
         &core_config,
         crate::composition::embedder_from_config(&core_config),
-        None,
+        Some(host_provider.clone() as Arc<dyn mem_ai::provider::AiProvider>),
     )
     .await
     {

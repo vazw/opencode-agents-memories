@@ -24,6 +24,7 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use crate::provider::error::{ProviderError, ProviderErrorKind};
+use crate::provider::host_auth::HostAuthorization;
 use crate::provider::internal_capture::{INTERNAL_CAPTURE_SESSION_TITLE, InternalCaptureSessions};
 use crate::provider::provider_trait::{
     AiProvider, AiProviderStructured, BoxFuture, CompletionStream, sealed,
@@ -54,11 +55,17 @@ pub struct OpenCodeHostConfig {
     /// Model id (`"inherit"` defers to the host's recent model).
     pub model: String,
     /// OpenCode server base URL.
+    ///
+    /// Defaults to the EMPTY string, which is not dialable: production always
+    /// passes a resolved `{origin}/api` (see `mem_bridge::host_endpoint`). A
+    /// compiled-in port would silently target whatever listens on `4096`.
     pub base_url: String,
     /// Optional reasoning variant forwarded to the session prompt.
     pub variant: Option<String>,
     /// Optional working directory forwarded as a query param.
     pub directory: Option<String>,
+    /// Basic-auth credential for the host (`{origin}/api` requires it).
+    pub authorization: Option<HostAuthorization>,
     /// Request budget enforced on every host call.
     pub timeout: Duration,
     /// Client-side structured-output step budget.
@@ -72,9 +79,10 @@ impl Default for OpenCodeHostConfig {
         Self {
             provider_id: "opencode".to_owned(),
             model: "inherit".to_owned(),
-            base_url: "http://127.0.0.1:4096".to_owned(),
+            base_url: String::new(),
             variant: None,
             directory: None,
+            authorization: None,
             timeout: Duration::from_millis(STRUCTURED_OUTPUT_TIMEOUT_MS),
             max_steps: STRUCTURED_OUTPUT_MAX_STEPS,
             retry_count: STRUCTURED_OUTPUT_DEFAULT_RETRY_COUNT,
@@ -128,6 +136,11 @@ pub struct HostRequest {
     pub timeout: Duration,
     /// Cancellation signal propagated into the transport.
     pub cancellation: CancellationToken,
+    /// Basic-auth credential for the host, when one was resolved.
+    ///
+    /// The derive is safe: [`HostAuthorization`]'s own `Debug` is redacted, so
+    /// this struct can never print the password (nor its base64 header).
+    pub authorization: Option<HostAuthorization>,
 }
 
 /// Raw host response.
@@ -175,6 +188,14 @@ impl HostTransport for ReqwestHostTransport {
             let mut builder = client
                 .request(request.method.reqwest(), &request.url)
                 .timeout(request.timeout);
+            if let Some(authorization) = &request.authorization {
+                // A zeroizing `String` outlives the builder call; reqwest owns
+                // the copied `HeaderValue` for the request only.
+                builder = builder.header(
+                    reqwest::header::AUTHORIZATION,
+                    authorization.header_value().as_str(),
+                );
+            }
             if let Some(body) = &request.body {
                 builder = builder.json(body);
             }
@@ -262,6 +283,7 @@ impl HostState {
             body,
             timeout: budget,
             cancellation: cancellation.clone(),
+            authorization: self.config.authorization.clone(),
         };
         tokio::select! {
             biased;
@@ -718,43 +740,60 @@ fn decode_json(response: &HostResponse, label: &str) -> Result<Value, ProviderEr
     })
 }
 
+/// The `GET /api/config` documents (measured 2.2.5 shape: a top-level ARRAY of
+/// `Config.Entry`, each with `type: "document"`).
+fn config_documents(value: &Value) -> &[Value] {
+    value.as_array().map(Vec::as_slice).unwrap_or(&[])
+}
+
+/// The providers a config document declares (`info.providers`, an OBJECT keyed
+/// by provider id) — one iterator entry per (provider id, provider document).
+fn config_providers(entry: &Value) -> &serde_json::Map<String, Value> {
+    static EMPTY: std::sync::OnceLock<serde_json::Map<String, Value>> = std::sync::OnceLock::new();
+    entry
+        .get("info")
+        .and_then(|info| info.get("providers"))
+        .and_then(Value::as_object)
+        .unwrap_or_else(|| EMPTY.get_or_init(serde_json::Map::new))
+}
+
 fn provider_ids(value: &Value) -> Vec<String> {
-    value
-        .get("providers")
-        .and_then(Value::as_array)
-        .map(|providers| {
-            providers
-                .iter()
-                .filter_map(|provider| provider.get("id").and_then(Value::as_str))
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default()
+    let mut ids = Vec::new();
+    for entry in config_documents(value)
+        .iter()
+        .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("document"))
+    {
+        for provider_id in config_providers(entry).keys() {
+            if !ids.contains(provider_id) {
+                ids.push(provider_id.clone());
+            }
+        }
+    }
+    ids
 }
 
 fn models_from_config(value: &Value) -> Vec<ModelInfo> {
     let mut models = Vec::new();
-    let Some(providers) = value.get("providers").and_then(Value::as_array) else {
-        return models;
-    };
-    for provider in providers {
-        let provider_id = provider
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
-        let Some(entries) = provider.get("models").and_then(Value::as_object) else {
-            continue;
-        };
-        for (model_id, model) in entries {
-            let id = model
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or(model_id)
-                .to_owned();
-            let mut info = ModelInfo::new(id, provider_id.clone());
-            info.display_name = model.get("name").and_then(Value::as_str).map(str::to_owned);
-            models.push(info);
+    for entry in config_documents(value)
+        .iter()
+        .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("document"))
+    {
+        for (provider_id, provider) in config_providers(entry) {
+            let Some(entries) = provider.get("models").and_then(Value::as_object) else {
+                continue;
+            };
+            for (model_id, model) in entries {
+                // Live entries can carry only `{"disabled":…}`: fall back to
+                // the object key, and KEEP the entry rather than skipping it.
+                let id = model
+                    .get("modelID")
+                    .and_then(Value::as_str)
+                    .unwrap_or(model_id)
+                    .to_owned();
+                let mut info = ModelInfo::new(id, provider_id.clone());
+                info.display_name = model.get("name").and_then(Value::as_str).map(str::to_owned);
+                models.push(info);
+            }
         }
     }
     models
@@ -915,7 +954,14 @@ mod tests {
         assert_eq!(config.timeout, Duration::from_millis(90_000));
         assert_eq!(config.max_steps, STRUCTURED_OUTPUT_MAX_STEPS);
         assert_eq!(config.retry_count, STRUCTURED_OUTPUT_DEFAULT_RETRY_COUNT);
-        assert_eq!(config.base_url, "http://127.0.0.1:4096");
+        // The default base URL is deliberately NOT dialable: production passes
+        // a resolved `{origin}/api`, and a compiled-in port would silently
+        // target whatever listens on it.
+        assert_eq!(config.base_url, "");
+        assert_eq!(
+            config.validate().unwrap_err().kind,
+            ProviderErrorKind::Config
+        );
     }
 
     #[test]
