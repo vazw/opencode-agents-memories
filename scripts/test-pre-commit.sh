@@ -8,7 +8,7 @@
 # (`rev-parse`, `ls-files`).
 #
 # Usage: bash scripts/test-pre-commit.sh
-# Exit:  0 when all 16 cases pass, 1 otherwise.
+# Exit:  0 when all 17 cases pass, 1 otherwise.
 set -uo pipefail
 
 SECONDS=0
@@ -515,7 +515,14 @@ case_14_hook_does_not_modify_the_tree() {
 case_15_webui_change_runs_both_webui_gates() {
     mk_repo || return 1
     mk_workspace "$repo" || return 1
-    mkdir -p "$repo/web-ui/src"
+    mkdir -p "$repo/web-ui/src" "$repo/web-ui/scripts"
+    # The class-coverage gate is a prerequisite of the web-ui phase; its own
+    # behaviour is case 17, so this fixture carries a passing stub and the two
+    # clippy gates stay the thing under test.
+    cat > "$repo/web-ui/scripts/check-class-coverage.mjs" <<'JS'
+// Fixture stub: case 17 exercises the real gate.
+process.exit(0);
+JS
     cat > "$repo/web-ui/Cargo.toml" <<'MANIFEST'
 [workspace]
 [package]
@@ -611,6 +618,46 @@ case_16_docs_name_the_installed_configuration() {
     return 0
 }
 
+case_17_webui_css_change_names_the_missing_hook() {
+    mk_repo || return 1
+    # The fixture carries the REAL Rust sources (181 emitted tokens) and the
+    # post-wave stylesheet with exactly one rule deleted (`.tag-row`), so the
+    # case must red on the missing-hook check — never on the ratchet and never
+    # on a fixture that drifted from the tree it certifies.
+    mkdir -p "$repo/web-ui/scripts" "$repo/web-ui/public"
+    cp -R "$repo_root/web-ui/src" "$repo/web-ui/src" || {
+        fail "cannot copy web-ui/src into the fixture"
+        return 1
+    }
+    cp "$repo_root/web-ui/scripts/check-class-coverage.mjs" "$repo/web-ui/scripts/" || {
+        fail "cannot copy the coverage gate into the fixture"
+        return 1
+    }
+    cp "$repo_root/web-ui/public/styles.css" "$repo/web-ui/public/styles.css" || {
+        fail "cannot copy the stylesheet into the fixture"
+        return 1
+    }
+    grep -q '^\.tag-row {' "$repo/web-ui/public/styles.css" || {
+        fail "the fixture stylesheet has no .tag-row rule to delete"
+        return 1
+    }
+    sed -i '/^\.tag-row {$/,/^}$/d' "$repo/web-ui/public/styles.css"
+    git -C "$repo" add web-ui/public/styles.css web-ui/scripts/check-class-coverage.mjs
+    run_commit "$repo" "case 17 coverage gate"
+    [ "$commit_rc" -ne 0 ] || {
+        fail "the commit was accepted although one class hook has no CSS rule"
+        return 1
+    }
+    assert_contains "FAIL class coverage" || return 1
+    assert_contains "MISSING tag-row" || return 1
+    assert_contains "missing=1" || return 1
+    assert_contains "emitted=181" || return 1
+    # A fixture carrying the pre-wave stylesheet or a stale source tree would
+    # trip the ratchet instead, which is the wrong reason to pass this case.
+    assert_not_contains "below the ratchet" || return 1
+    return 0
+}
+
 # --- runner ----------------------------------------------------------------
 
 ok=0
@@ -648,11 +695,12 @@ run case_13_commit_from_subdirectory_is_gated
 run case_14_hook_does_not_modify_the_tree
 run case_15_webui_change_runs_both_webui_gates
 run case_16_docs_name_the_installed_configuration
+run case_17_webui_css_change_names_the_missing_hook
 
 printf 'wall time: %ss\n' "$SECONDS"
-if [ "$ok" -eq 16 ]; then
-    printf 'PASS %d/16\n' "$ok"
+if [ "$ok" -eq 17 ]; then
+    printf 'PASS %d/17\n' "$ok"
 else
-    printf 'FAIL %d/16\n' "$ok"
+    printf 'FAIL %d/17\n' "$ok"
     exit 1
 fi

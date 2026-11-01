@@ -24,6 +24,7 @@ use crate::agents::AgentsPanel;
 use crate::api::auth::{AuthContext, read_marker_token};
 use crate::api::envelope::{ApiEnvelope, ApiError};
 use crate::api_request::{self, RequestSpec};
+use crate::confirm::{ConfirmEvent, ConfirmGate, ConfirmState, confirm_next, dispatch};
 use crate::core_screens::{MemoriesPanel, ProfilePanel, SettingsPanel, StatsPanel, TagsPanel};
 use crate::export_import::ExportImportPanel;
 use crate::nav::ScreenState;
@@ -99,8 +100,8 @@ pub fn HomePanel() -> impl IntoView {
         <section class="home-panel" data-testid="home-panel">
             <h2>"OpenCode Memory Explorer"</h2>
             <p>
-                "This is the app shell. The navigation lists every screen; \
-                 each one is owned by a wave and says so on its own panel."
+                "Browse the memories, prompts and skills stored for this project. \
+                 Pick a screen from the navigation."
             </p>
         </section>
     }
@@ -294,6 +295,7 @@ pub fn SessionHistoryPanel() -> impl IntoView {
     let project_id = RwSignal::new(String::new());
     let rows = RwSignal::new(Vec::<SessionRow>::new());
     let error = RwSignal::new(None::<String>);
+    let confirm = RwSignal::new(ConfirmState::default());
     let auth = AuthContext {
         local_token: read_marker_token(),
         basic: None,
@@ -302,6 +304,8 @@ pub fn SessionHistoryPanel() -> impl IntoView {
     let reload = Callback::new({
         let auth = auth.clone();
         move |_: ()| {
+            // A timeline refresh invalidates any arm.
+            confirm.set(confirm_next(&confirm.get_untracked(), ConfirmEvent::Cancel).state);
             let project = project_id.get_untracked();
             if project.is_empty() {
                 rows.set(Vec::new());
@@ -312,18 +316,26 @@ pub fn SessionHistoryPanel() -> impl IntoView {
         }
     });
 
-    let delete = Callback::new(move |session_id: String| {
-        let project = project_id.get_untracked();
+    // The only path from a confirmed gate to the network.
+    let run_delete = Callback::new({
         let auth = auth.clone();
-        leptos::task::spawn_local(async move {
-            match delete_session(&project, &session_id, &auth).await {
-                Ok(()) => {
-                    error.set(None);
-                    reload.run(());
+        move |session_id: String| {
+            let project = project_id.get_untracked();
+            let auth = auth.clone();
+            leptos::task::spawn_local(async move {
+                let result = delete_session(&project, &session_id, &auth).await;
+                // `Finished` on EVERY exit path: success, HTTP error, transport
+                // error. A transient failure must not kill the row's Delete.
+                confirm.set(confirm_next(&confirm.get_untracked(), ConfirmEvent::Finished).state);
+                match result {
+                    Ok(()) => {
+                        error.set(None);
+                        reload.run(());
+                    }
+                    Err(failure) => error.set(Some(failure.to_string())),
                 }
-                Err(failure) => error.set(Some(failure.to_string())),
-            }
-        });
+            });
+        }
     });
 
     Effect::new(move |_| {
@@ -341,7 +353,7 @@ pub fn SessionHistoryPanel() -> impl IntoView {
         <section class="session-history" data-testid="session-history">
             <h2>"Session history"</h2>
             <p class="session-hint">
-                "Sessions are project-scoped. Paste the project id the harness printed."
+                "Sessions are project-scoped. Enter a project id to list its timeline."
             </p>
             <div class="session-controls">
                 <input
@@ -350,7 +362,7 @@ pub fn SessionHistoryPanel() -> impl IntoView {
                     type="text"
                     class="project-input"
                     data-testid="project-input"
-                    placeholder="demo-project"
+                    placeholder="project id"
                     prop:value=move || project_id.get()
                     on:input=move |event| project_id.set(event_target_value(&event))
                 />
@@ -378,7 +390,7 @@ pub fn SessionHistoryPanel() -> impl IntoView {
                         .get()
                         .into_iter()
                         .map(|row| {
-                            let id = row.id.clone();
+                            let row_id = row.id.clone();
                             let orphaned = row.orphaned;
                             view! {
                                 <li class="session-row" data-testid="session-row">
@@ -396,14 +408,56 @@ pub fn SessionHistoryPanel() -> impl IntoView {
                                                 </span>
                                             }
                                         })}
-                                    <button
-                                        type="button"
-                                        class="session-delete"
-                                        data-testid="delete-session"
-                                        on:click=move |_| delete.run(id.clone())
-                                    >
-                                        "Delete"
-                                    </button>
+                                    {move || {
+                                        let armed = confirm.get().pending.as_deref()
+                                            == Some(row_id.as_str());
+                                        if armed {
+                                            let on_confirm = Callback::new(move |_: ()| {
+                                                if let Some(run_id) = dispatch(
+                                                    confirm,
+                                                    ConfirmEvent::Confirm,
+                                                ) {
+                                                    run_delete.run(run_id);
+                                                }
+                                            });
+                                            let on_cancel = Callback::new(move |_: ()| {
+                                                confirm
+                                                    .set(
+                                                        confirm_next(
+                                                            &confirm.get_untracked(),
+                                                            ConfirmEvent::Cancel,
+                                                        )
+                                                            .state,
+                                                    );
+                                            });
+                                            view! {
+                                                <ConfirmGate on_confirm=on_confirm on_cancel=on_cancel/>
+                                            }
+                                                .into_any()
+                                        } else {
+                                            let ask_id = row_id.clone();
+                                            view! {
+                                                <button
+                                                    type="button"
+                                                    class="session-delete"
+                                                    data-testid="delete-session"
+                                                    on:click=move |_| {
+                                                        confirm
+                                                            .set(
+                                                                confirm_next(
+                                                                    &confirm.get_untracked(),
+                                                                    ConfirmEvent::Ask(ask_id.clone()),
+                                                                )
+                                                                    .state,
+                                                            );
+                                                    }
+                                                >
+                                                    "Delete"
+                                                </button>
+                                            }
+                                                .into_any()
+                                        }
+                                    }}
                                 </li>
                             }
                         })

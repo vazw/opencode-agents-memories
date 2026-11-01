@@ -3,7 +3,7 @@
 //! Four pure functions carry the whole view: [`roster`] folds the milestone
 //! projection into one row per contributing agent (distinct milestone count,
 //! latest source stamp, the display name from the latest source),
-//! [`agents_view`] maps an optional outcome onto the five render states,
+//! [`agents_view`] maps an optional outcome onto the six render states,
 //! [`format_window`] formats a milestone's time window, and [`agent_detail`]
 //! produces the per-agent drill-down (milestones newest first, each carrying its
 //! server-reported source count and the facts it promoted, deduped by fact id).
@@ -226,22 +226,29 @@ fn display_name_for(agent_id: &str, milestones: &[MilestoneDto]) -> String {
 /// What the milestone fetch hands the panel.
 ///
 /// `Unavailable` is the documented 501 absent-service degrade (D-38), not an
-/// error; only `Failed` means the request itself failed.
+/// error; `NeedsProject` is the pre-input state — there is no project id yet,
+/// so nothing was asked and nothing failed — and only `Failed` means the
+/// request itself failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentsOutcome {
     /// Data arrived.
     Loaded(Vec<MilestoneDto>),
     /// The build has no data path (the documented degraded state).
     Unavailable,
+    /// No project id has been entered yet (the mount state, not an error).
+    NeedsProject,
     /// The request itself failed.
     Failed(String),
 }
 
-/// The five arms the panel renders.
+/// The six arms the panel renders.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentsView {
-    /// Before any outcome exists (the pre-outcome state).
+    /// Before any outcome exists (the terminal pre-outcome state only — the
+    /// mount always produces an outcome).
     Loading,
+    /// No project id yet: prompt for one, in the informational shape.
+    NeedsProject,
     /// A loaded scope with no contributing agents.
     Empty,
     /// The documented degraded state, carrying its fixed copy.
@@ -269,6 +276,7 @@ pub fn agents_view(outcome: Option<&AgentsOutcome>) -> AgentsView {
             }
         }
         Some(AgentsOutcome::Unavailable) => AgentsView::Unavailable(AGENTS_UNAVAILABLE_MESSAGE),
+        Some(AgentsOutcome::NeedsProject) => AgentsView::NeedsProject,
         Some(AgentsOutcome::Failed(message)) => AgentsView::Failed(message.clone()),
     }
 }
@@ -283,6 +291,10 @@ pub const AGENTS_UNAVAILABLE_MESSAGE: &str = "Agent attribution is not available
 
 /// The empty-scope copy: an empty scope is the empty state, not an error.
 pub const AGENTS_EMPTY_MESSAGE: &str = "No contributing agents in this project yet.";
+
+/// The pre-input copy: names the actual next step, promises no picker.
+pub const AGENTS_NEEDS_PROJECT_MESSAGE: &str =
+    "Enter a project id above to list this project's agent roster.";
 
 /// The `data-testid` of the loading note.
 pub const AGENTS_LOADING_TESTID: &str = "agents-loading";
@@ -311,6 +323,9 @@ pub const AGENTS_FACT_TESTID: &str = "agents-fact";
 /// The `data-testid` of one roster row button.
 pub const AGENTS_ROW_TESTID: &str = "agents-row";
 
+/// The `data-testid` of the pre-input prompt.
+pub const AGENTS_PROMPT_TESTID: &str = "agents-prompt";
+
 /// The class of the loading note.
 pub const AGENTS_LOADING_CLASS: &str = "agents-loading";
 
@@ -337,6 +352,41 @@ pub const AGENTS_FACT_CLASS: &str = "agents-fact";
 
 /// The class of one roster row button.
 pub const AGENTS_ROW_CLASS: &str = "agents-row";
+
+/// The class of the pre-input prompt (muted/dashed: nothing failed).
+pub const AGENTS_PROMPT_CLASS: &str = "agents-prompt";
+
+/// What the panel does when it mounts at a search string.
+///
+/// The regression this type exists to prevent is a mount that produces **no**
+/// state at all: the panel then stays on `Loading` forever (the shipped B2
+/// bug). Every mount yields an outcome — a fetch or a prompt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MountAction {
+    /// The project id to seed the input with (empty when none was given).
+    pub project: String,
+    /// Whether to issue the one milestones request.
+    pub fetch: bool,
+    /// The pre-input notice, when the route carried no project id.
+    pub notice: Option<String>,
+}
+
+/// The mount's one action for a URL search string: `""` prompts, `?project=p1`
+/// seeds and fetches.
+pub fn mount_action(search: &str) -> MountAction {
+    match initial_project(search) {
+        Some(project) => MountAction {
+            project,
+            fetch: true,
+            notice: None,
+        },
+        None => MountAction {
+            project: String::new(),
+            fetch: false,
+            notice: Some(AGENTS_NEEDS_PROJECT_MESSAGE.to_string()),
+        },
+    }
+}
 
 // ---------------------------------------------------------------------------
 // The drill-down
@@ -532,9 +582,9 @@ pub fn AgentsPanel() -> impl IntoView {
         move |_: ()| {
             let project = project_id.get_untracked();
             if project.is_empty() {
-                outcome.set(Some(AgentsOutcome::Failed(
-                    "Enter a project id to load the agent roster".to_string(),
-                )));
+                // One source of truth for the pre-input copy: the same constant
+                // the mount prompt renders.
+                outcome.set(Some(AgentsOutcome::NeedsProject));
                 return;
             }
             let auth = auth.clone();
@@ -544,14 +594,19 @@ pub fn AgentsPanel() -> impl IntoView {
         }
     });
 
+    // The mount is unconditional: with no `?project=` it renders the prompt
+    // (`NeedsProject`), never the terminal `Loading` state.
     Effect::new(move |_| {
-        if let Some(id) = initial_project(
+        let action = mount_action(
             &web_sys::window()
                 .and_then(|w| w.location().search().ok())
                 .unwrap_or_default(),
-        ) {
-            project_id.set(id);
+        );
+        project_id.set(action.project);
+        if action.fetch {
             reload.run(());
+        } else if action.notice.is_some() {
+            outcome.set(Some(AgentsOutcome::NeedsProject));
         }
     });
 
@@ -566,7 +621,7 @@ pub fn AgentsPanel() -> impl IntoView {
                     type="text"
                     class="project-input"
                     data-testid="agents-project-input"
-                    placeholder="demo-project"
+                    placeholder="project id"
                     prop:value=move || project_id.get()
                     on:input=move |event| project_id.set(event_target_value(&event))
                 />
@@ -583,6 +638,12 @@ pub fn AgentsPanel() -> impl IntoView {
                 AgentsView::Loading => view! {
                     <p class=AGENTS_LOADING_CLASS data-testid=AGENTS_LOADING_TESTID>
                         "Loading agents…"
+                    </p>
+                }
+                    .into_any(),
+                AgentsView::NeedsProject => view! {
+                    <p class=AGENTS_PROMPT_CLASS data-testid=AGENTS_PROMPT_TESTID>
+                        {AGENTS_NEEDS_PROJECT_MESSAGE}
                     </p>
                 }
                     .into_any(),

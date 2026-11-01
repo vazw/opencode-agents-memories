@@ -155,6 +155,15 @@ body {
   color: var(--accent);
 }
 
+/* The active route. The inset bar is a shape signal, so the state survives
+ * monochrome; leptos' `A` emits `aria-current="page"` on the current route. */
+.app-nav a[aria-current="page"] {
+  background: var(--bg);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
 .nav-badge {
   font-size: 0.7rem;
   text-transform: uppercase;
@@ -168,6 +177,53 @@ body {
 .app-main {
   grid-area: main;
   padding: 1.5rem;
+}
+
+/* ---------------------------------------------------------------------------
+ * Base control layer (C1)
+ *
+ * Unstyled controls render OS chrome that ignores the theme. This layer must
+ * never outrank a component rule, so it is wrapped in `:where()` — zero
+ * specificity, structurally unable to repaint `.maintenance-action` or any
+ * future component rule. It sits before the first component block so a tie
+ * goes to the component.
+ * ------------------------------------------------------------------------- */
+
+:where(button) {
+  font: inherit;
+  color: inherit;
+  padding: 0.35rem 0.8rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+
+:where(button):hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+:where(button):disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+:where(input[type="text"], input[type="search"], textarea, select) {
+  font: inherit;
+  color: inherit;
+  padding: 0.45rem 0.6rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+}
+
+:where(input[type="checkbox"]) {
+  accent-color: var(--accent);
+}
+
+:where(button, input, textarea, select, a):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .home-panel,
@@ -205,6 +261,36 @@ body {
 
 .unknown-route p {
   color: var(--muted);
+}
+
+/* ---------------------------------------------------------------------------
+ * Shared primitives
+ *
+ * `.visually-hidden` is the screen-reader-only clipping recipe: the Stats
+ * counter labels are the only visible symptom when it is missing, but every
+ * label it wraps is read by assistive tech instead of painted.
+ *
+ * `.panel-loading` is the one loading note five panels render (Memories, Tags,
+ * Profile, Settings, Skills) — one rule, five screens.
+ * ------------------------------------------------------------------------- */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.panel-loading {
+  margin: 0.75rem 0;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 /* ---------------------------------------------------------------------------
@@ -365,8 +451,22 @@ body {
   }
 
   .app-nav {
+    padding: 0.5rem 0.75rem;
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  /* A wrapping strip, not a ten-item stack: at 486 CSS px the stack was the
+   * whole first viewport. No new Rust state, no hidden destinations. */
+  .app-nav ul {
+    flex-flow: row wrap;
+    gap: 0.25rem;
+  }
+
+  .app-nav a {
+    flex: 0 1 auto;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.9rem;
   }
 }
 
@@ -511,6 +611,17 @@ body {
   border-radius: 0.25rem;
 }
 
+/* The pre-input state: nothing failed, the user has not typed an id yet, so it
+ * takes the informational (muted/dashed) shape, never the error bar. */
+.agents-prompt {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 0.25rem;
+}
+
 .agents-error {
   margin-top: 0.75rem;
   padding: 0.5rem 0.75rem;
@@ -558,4 +669,873 @@ body {
 
 .agents-milestone {
   margin-top: 0.5rem;
+}
+
+/* ---------------------------------------------------------------------------
+ * Tags (W6.7)
+ *
+ * `.tag-row` is a flex row with a gap: the label, the raw tag and the project
+ * path previously concatenated with no separator, which made the screen
+ * unreadable. No markup change — the gap is the fix. Long tags
+ * (`opencode_project_<16 hex>`) get `overflow-wrap: anywhere` so a row cannot
+ * scroll the page sideways.
+ * ------------------------------------------------------------------------- */
+
+.tags-panel {
+  max-width: 64rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.tags-panel h2 {
+  margin-top: 0;
+  font-size: 1.15rem;
+}
+
+.tags-reload {
+  margin-bottom: 0.75rem;
+}
+
+.tags-empty {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 0.25rem;
+}
+
+.tags-error {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--warn-text);
+  border-left: 3px solid var(--warn-border);
+}
+
+.tag-group {
+  margin-top: 1rem;
+}
+
+.tag-group h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.tag-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.tag-label {
+  font-weight: 600;
+}
+
+.tag-code,
+.tag-path {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.tag-path {
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------------------
+ * Memories (W6.7)
+ *
+ * A row is three bands: meta, the memory body (full width, never clamped —
+ * hiding stored memory text is silent data loss), then the row's actions.
+ * `max-width: 72ch` bounds the line length; nothing truncates.
+ * ------------------------------------------------------------------------- */
+
+.memories-panel {
+  max-width: 64rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.memories-panel h2 {
+  margin-top: 0;
+  font-size: 1.15rem;
+}
+
+.memories-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.memories-search {
+  flex: 1 1 18rem;
+}
+
+.memories-tag-filter {
+  flex: 0 1 14rem;
+}
+
+.memories-reload {
+  flex: 0 0 auto;
+}
+
+.memories-action-error {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  color: var(--warn-text);
+  border-left: 3px solid var(--warn-border);
+}
+
+.memories-empty {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 0.25rem;
+}
+
+.memories-error {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--warn-text);
+  border-left: 3px solid var(--warn-border);
+}
+
+.memories-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.memories-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.memories-prev,
+.memories-next {
+  flex: 0 0 auto;
+}
+
+.memories-count {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.memory-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 0.25rem 0.75rem;
+  align-items: baseline;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.memory-row:hover {
+  background: var(--bg);
+}
+
+.memory-kind {
+  grid-row: 1;
+  grid-column: 1;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.memory-content {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  max-width: 72ch;
+  overflow-wrap: anywhere;
+}
+
+.memory-tags {
+  grid-row: 1;
+  grid-column: 3;
+  color: var(--muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.memory-created {
+  grid-row: 1;
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.memory-pinned {
+  grid-row: 1;
+  grid-column: 4;
+  justify-self: end;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.75rem;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.memory-pin {
+  grid-row: 3;
+  grid-column: 3;
+  justify-self: end;
+}
+
+.memory-delete {
+  grid-row: 3;
+  grid-column: 4;
+  justify-self: end;
+}
+
+/* ---------------------------------------------------------------------------
+ * Profile (W6.7)
+ * ------------------------------------------------------------------------- */
+
+.profile-panel {
+  max-width: 64rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.profile-panel h2 {
+  margin-top: 0;
+  font-size: 1.15rem;
+}
+
+.profile-reload {
+  margin-bottom: 0.75rem;
+}
+
+.profile-section {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.profile-section h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.profile-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.profile-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.15rem 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.profile-description {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+}
+
+.profile-category,
+.profile-steps {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.profile-steps {
+  justify-self: end;
+}
+
+.profile-name {
+  font-weight: 600;
+}
+
+.profile-user {
+  color: var(--muted);
+}
+
+.profile-version,
+.profile-analyzed {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.profile-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  align-items: baseline;
+}
+
+.profile-missing {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 0.25rem;
+}
+
+.profile-error {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--warn-text);
+  border-left: 3px solid var(--warn-border);
+}
+
+/* ---------------------------------------------------------------------------
+ * Settings (W6.7)
+ *
+ * The status `<dl>` is a two-column grid — the same shape as
+ * `.maintenance-report` — so "By type" stops being one 60-pair paragraph. The
+ * `dd` stays a comma-joined string; chips/table are out of this wave.
+ * ------------------------------------------------------------------------- */
+
+.settings-panel {
+  max-width: 64rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.settings-panel h2 {
+  margin-top: 0;
+  font-size: 1.15rem;
+}
+
+.settings-reload {
+  margin-bottom: 0.75rem;
+}
+
+.settings-status {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+}
+
+.settings-status dt {
+  color: var(--muted);
+}
+
+.settings-status dd {
+  margin: 0;
+}
+
+.settings-error {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--warn-text);
+  border-left: 3px solid var(--warn-border);
+}
+
+/* ---------------------------------------------------------------------------
+ * Stats (this wave)
+ *
+ * The tables are what make the collapsed columns readable (padding + collapse);
+ * `.stats-bar` carries the height and the colour — it previously had a width
+ * only, so every counter bar was invisible. The five panels above must not
+ * change: no rule here overrides them.
+ * ------------------------------------------------------------------------- */
+
+.stats-panel {
+  max-width: 72rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.stats-panel h2 {
+  margin-top: 0;
+  font-size: 1.15rem;
+}
+
+.stats-reload {
+  margin-bottom: 0.75rem;
+}
+
+.stats-section {
+  margin-top: 1.5rem;
+}
+
+.stats-section h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.stats-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.stats-card {
+  padding: 0.75rem 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+}
+
+.stats-card h3 {
+  margin: 0 0 0.25rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stats-card-value {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-card-meta {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-generated {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+}
+
+.stats-daily,
+.stats-shards {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-daily th,
+.stats-daily td,
+.stats-shards th,
+.stats-shards td {
+  padding: 0.35rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.stats-daily thead th,
+.stats-shards thead th {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.stats-day th {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.stats-counter {
+  min-width: 8rem;
+}
+
+.stats-count {
+  display: block;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-bar {
+  display: block;
+  height: 0.5rem;
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+.stats-no-errors {
+  color: var(--muted);
+}
+
+.stats-errors-cell {
+  max-width: 14rem;
+}
+
+.stats-buckets summary {
+  cursor: pointer;
+}
+
+.stats-bucket {
+  color: var(--warn-text);
+  font-size: 0.85rem;
+}
+
+.stats-empty {
+  color: var(--muted);
+}
+
+.stats-error {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--warn-text);
+  border-left: 3px solid var(--warn-border);
+}
+
+.stats-daily-error {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 0.25rem;
+}
+
+.stats-shard-row td p {
+  margin: 0;
+}
+
+.stats-shard-error {
+  color: var(--warn-text);
+  font-size: 0.85rem;
+}
+
+.stats-hash {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+.stats-mismatch {
+  color: var(--warn-text);
+  font-size: 0.8rem;
+}
+
+.stats-stale {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.stats-file-ok {
+  color: var(--muted);
+}
+
+/* A distinct shape, not just a colour: missing is a left bar. */
+.stats-file-missing {
+  padding-left: 0.5rem;
+  color: var(--warn-text);
+  border-left: 3px solid var(--warn-border);
+}
+
+.stats-profile-counts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.1rem 0.5rem;
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+}
+
+.stats-profile-counts dt {
+  color: var(--muted);
+}
+
+.stats-profile-counts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-profile-prompts,
+.stats-profile-version,
+.stats-profile-analyzed {
+  margin: 0.15rem 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.stats-profile-empty {
+  margin: 0.25rem 0;
+  color: var(--muted);
+}
+
+.stats-profile-error {
+  color: var(--warn-text);
+  font-size: 0.85rem;
+}
+
+.stats-profile-warning {
+  margin: 0.25rem 0;
+  color: var(--warn-text);
+  font-size: 0.85rem;
+}
+
+/* ---------------------------------------------------------------------------
+ * Sessions (W6.3)
+ *
+ * `.project-input` is shared with Agents, so it is styled here once.
+ * ------------------------------------------------------------------------- */
+
+.session-history {
+  max-width: 64rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.session-history h2 {
+  margin-top: 0;
+  font-size: 1.15rem;
+}
+
+.session-hint {
+  color: var(--muted);
+}
+
+.session-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.project-input {
+  flex: 1 1 14rem;
+  max-width: 22rem;
+}
+
+.load-sessions {
+  flex: 0 0 auto;
+}
+
+.session-error {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--warn-text);
+  border-left: 3px solid var(--warn-border);
+}
+
+.session-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 0.25rem 0.75rem;
+  align-items: baseline;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.session-id {
+  grid-row: 1;
+  grid-column: 1;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.session-agent {
+  grid-row: 1;
+  grid-column: 2;
+  font-weight: 600;
+}
+
+.session-summary {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+}
+
+.session-created {
+  grid-row: 1;
+  grid-column: 3;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-delete {
+  grid-row: 3;
+  grid-column: 4;
+  justify-self: end;
+}
+
+.orphaned-badge {
+  grid-row: 1;
+  grid-column: 4;
+  justify-self: end;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 999px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Agents — the rest of the roster hooks (W6.6)
+ * ------------------------------------------------------------------------- */
+
+.agents-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.agents-agent-name {
+  font-weight: 600;
+}
+
+.agents-milestone-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.agents-detail {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+/* The panel's one primary action. */
+.load-agents {
+  flex: 0 0 auto;
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+ * Skills — the remaining hooks (W6.5)
+ *
+ * Regression watch: `.skill-form input[type="text"]` and `.skill-form textarea`
+ * are the rules that already make this panel look finished. The new
+ * `.skill-form-*` hooks must add to them, never replace their
+ * padding/background/border values.
+ * ------------------------------------------------------------------------- */
+
+.skills-empty {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 0.25rem;
+}
+
+.skill-create {
+  margin-bottom: 0.5rem;
+}
+
+.skill-edit,
+.skill-delete {
+  flex: 0 0 auto;
+}
+
+.skill-save {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.skill-cancel {
+  color: var(--muted);
+  background: transparent;
+}
+
+.skill-form-name,
+.skill-form-description,
+.skill-form-content {
+  display: block;
+  width: 100%;
+  margin: 0;
+}
+
+.skill-form-autoinvoke,
+.skill-form-enabled {
+  margin: 0 0.4rem 0 0;
+  accent-color: var(--accent);
+}
+
+/* The `Planned` notice's endpoint list. The seam is kept on purpose: the
+ * `ScreenState::Planned` arm, `nav-badge` and `planned-notice` are documented
+ * by `routes.rs` and imported by `tests/shell.rs`, so this closes the last
+ * unwired hook rather than deleting a path. */
+.planned-endpoints {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+/* ---------------------------------------------------------------------------
+ * Delete confirmation (U11)
+ *
+ * The armed row renders this inline gate in place of its Delete button, in all
+ * three destructive surfaces (memory, session, skill). The `grid-column` lets
+ * it span a `.memory-row` / `.session-row` grid; it has no effect inside the
+ * skill rows' flex layout. The confirm button is emphasised, the cancel is a
+ * ghost — the two choices are never the same shape.
+ * ------------------------------------------------------------------------- */
+
+.confirm-gate {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.35rem 0.6rem;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 0.25rem;
+}
+
+.confirm-gate-text {
+  color: var(--warn-text);
+  font-size: 0.85rem;
+}
+
+.confirm-gate-confirm {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.confirm-gate-cancel {
+  color: var(--muted);
+  background: transparent;
 }

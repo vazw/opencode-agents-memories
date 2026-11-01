@@ -132,7 +132,7 @@ Verify the gate itself with:
 ```sh
 bash -n .githooks/pre-commit && bash -n scripts/test-pre-commit.sh
 shellcheck .githooks/pre-commit scripts/test-pre-commit.sh
-bash scripts/test-pre-commit.sh     # 16 behavioural cases in throwaway repos; prints PASS 16/16 on success
+bash scripts/test-pre-commit.sh     # 17 behavioural cases in throwaway repos; prints PASS 17/17 on success
 ```
 
 See `docs/adr/0016-pre-commit-gate.md` for the decisions, costs and limitations.
