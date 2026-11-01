@@ -28,6 +28,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use mem_episodic::store::EpisodicStore;
@@ -205,6 +206,10 @@ pub struct Engine {
     /// and never touch storage; `hello`/`health`/`shutdown` are unchanged. The
     /// legacy `recall` shape needs no runtime (it reads nothing).
     runtime: Option<Arc<EngineRuntime>>,
+    /// Step 7's startup-replay completion signal, watched by the FIRST
+    /// `inject` (see [`Engine::schedule_startup_drain`]). `None` when no drain
+    /// was scheduled: the fixture engines and a degraded composition.
+    startup_drain: Option<watch::Receiver<bool>>,
 }
 
 /// The dependency-bearing runtime: composed ONCE by the engine root
@@ -231,6 +236,7 @@ impl Engine {
             shutting_down: Arc::new(AtomicBool::new(false)),
             live_tasks: Arc::new(AtomicUsize::new(0)),
             runtime: None,
+            startup_drain: None,
         }
     }
 
@@ -559,6 +565,15 @@ impl Engine {
             Some(runtime) => runtime,
             None => return empty_inject(request, self.elapsed_ms()),
         };
+        // Step 7's ordering: the startup replay must complete before the first
+        // `inject` reads. A completed signal resolves this immediately, so a
+        // later `inject` neither re-waits nor triggers another drain.
+        if let Some(drain) = &self.startup_drain {
+            let mut drain = drain.clone();
+            // `Err` means the drain task is gone without signalling: nothing
+            // left to wait for, and the durable inbox still holds its rows.
+            let _ = drain.wait_for(|completed| *completed).await;
+        }
         let inject_params: InjectParams =
             serde_json::from_value(request.params.clone()).unwrap_or_default();
         match runtime.inject.assemble(&inject_params).await {
@@ -721,6 +736,27 @@ impl Engine {
     /// no-live-tasks library oracle.
     pub fn live_tasks(&self) -> Arc<AtomicUsize> {
         Arc::clone(&self.live_tasks)
+    }
+
+    /// Schedules Step 7's durable replay BEHIND the handshake.
+    ///
+    /// The drain must never gate `hello`: the wrapper's deadline is 5 s
+    /// (`plugin/src/plugin.js:60`), while a queued backlog costs one provider
+    /// call per entry and a self-hosted model takes 5–30 s each (measured:
+    /// 90 s+ of no handshake, plugin degraded to no-engine). It therefore runs
+    /// in a tracked task, and the FIRST `inject` awaits the completion signal
+    /// stored here — the ordering Step 7 actually needs. Once the value is
+    /// `true`, every later `inject` resolves immediately: no re-wait, no
+    /// re-run. A drain failure is discarded exactly as before, and a task
+    /// dropped before signalling closes the channel, which the wait treats as
+    /// complete — an injector is never wedged on a dead drain.
+    pub fn schedule_startup_drain(&mut self, capture: Arc<CaptureService>) {
+        let (completed, receiver) = watch::channel(false);
+        self.startup_drain = Some(receiver);
+        self.spawn_tracked(async move {
+            let _ = capture.drain_once().await;
+            let _ = completed.send(true);
+        });
     }
 
     /// Spawns an internal lifecycle task and tracks it in the counter, so a
@@ -1442,7 +1478,7 @@ pub async fn run_in_runtime(
         ..EngineConfig::default()
     };
 
-    let engine = match &composed {
+    let mut engine = match &composed {
         Some(runtime) => {
             // The ONE production assembly path (issue 70): every service and
             // the portability FACTORY are consulted here.
@@ -1451,20 +1487,20 @@ pub async fn run_in_runtime(
         None => Engine::new(engine_config),
     };
 
-    // The startup capture drain stays AWAITED before the stdio loop: Step 7
-    // requires durable replay to complete before the first `inject` reads.
-    // The Q8 consolidation lifecycle is SCHEDULED, not awaited: the startup
-    // tick scans up to 64 projects and awaits an LLM summarizer per project,
-    // while the plugin's `hello` handshake is timeout-bounded — so awaiting it
-    // here would let an aged store push the handshake past that deadline and
-    // degrade the plugin to no-engine. Injection stays correct meanwhile: the
-    // tick's RAII guard sets `consolidation_active` for the duration of every
-    // `Consolidator::run`, which makes `InjectService` skip ONLY the tier-1
-    // leg (blueprint Step 9). Consequence, by design: the first `inject` after
-    // launch may run before promoted facts exist and may skip the tier-1 leg
-    // while a tick is in flight (ADR-0008 D-W5.3-8).
+    // The startup capture drain is SCHEDULED, never awaited before the stdio
+    // loop: Step 7 requires durable replay to complete before the first
+    // `inject` reads, and that is where it is awaited now. Awaiting it HERE
+    // held the `hello` handshake through every queued provider call — with a
+    // self-hosted model (5–30 s per call) the wrapper's 5 s deadline expired
+    // and the whole memory tool degraded. The Q8 consolidation lifecycle is
+    // scheduled for the same reason: its startup tick awaits an LLM per
+    // project, and injection stays correct meanwhile because the tick's RAII
+    // guard sets `consolidation_active`, which makes `InjectService` skip
+    // ONLY the tier-1 leg (blueprint Step 9). Consequence, by design: the
+    // first `inject` after launch may run before promoted facts exist and may
+    // skip the tier-1 leg while a tick is in flight (ADR-0008 D-W5.3-8).
     if let Some(runtime) = &composed {
-        let _ = runtime.capture.drain_once().await;
+        engine.schedule_startup_drain(runtime.capture.clone());
         let scheduler = Arc::new(ConsolidationScheduler::new(
             runtime.store.clone(),
             runtime.scope_resolver.clone(),
