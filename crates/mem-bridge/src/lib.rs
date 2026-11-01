@@ -18,6 +18,7 @@ pub mod host_endpoint;
 pub mod host_provider;
 pub mod inject;
 pub mod jsonrpc;
+pub mod manual_provider;
 pub mod project_scope;
 pub mod purge;
 pub mod reap;

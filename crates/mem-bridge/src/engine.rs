@@ -1235,6 +1235,42 @@ pub fn engine_host_provider(
     ))
 }
 
+/// The capture provider the engine hands to composition.
+///
+/// Precedence (owner ruling 2026-11-01, ADR-0028): a COMPLETE manual block
+/// (`memoryModel` + `memoryApiUrl` + `memoryApiKey`, or just the key for the
+/// preset providers) wins, because filling it in is the operator naming an
+/// endpoint; otherwise the OpenCode host provider applies, which is the
+/// transport path this crate resolves lazily.
+///
+/// A CLAIMED-but-unusable manual block fails closed (`None`) with the named
+/// reason on the log: quietly using another provider would hide a typo in the
+/// endpoint the operator asked for.
+pub fn engine_capture_provider(
+    config: &mem_core::config::Config,
+    host_provider: Arc<crate::host_provider::LazyHostProvider>,
+) -> Option<Arc<dyn mem_ai::provider::AiProvider>> {
+    match crate::manual_provider::manual_capture_provider(config) {
+        Ok(Some(provider)) => {
+            crate::host_provider::log_provider_ready(
+                config.memory_api_url.as_deref().unwrap_or_default(),
+                None,
+                config.memory_provider.as_str(),
+            );
+            Some(provider)
+        }
+        Ok(None) => {
+            // The host path: one startup resolution, whichever way it lands.
+            let _ = host_provider.warm();
+            Some(host_provider as Arc<dyn mem_ai::provider::AiProvider>)
+        }
+        Err(reason) => {
+            crate::host_provider::log_provider_unavailable(reason, None);
+            None
+        }
+    }
+}
+
 /// The `run` body, testable with injected signals and any stream pair.
 ///
 /// `core_config` is the resolved `mem_core::Config` loaded SYNCHRONOUSLY by

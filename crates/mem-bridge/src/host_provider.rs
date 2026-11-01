@@ -97,19 +97,7 @@ impl LazyHostProvider {
         ) {
             Ok(wiring) => wiring,
             Err(failure) => {
-                log_fields(
-                    AUTO_CAPTURE_PROVIDER_UNAVAILABLE,
-                    &[
-                        ("reason", Value::String(failure.error.reason().to_owned())),
-                        (
-                            "hostVersion",
-                            failure
-                                .host_version
-                                .as_deref()
-                                .map_or(Value::Null, |version| Value::String(version.to_owned())),
-                        ),
-                    ],
-                );
+                log_provider_unavailable(failure.error.reason(), failure.host_version.as_deref());
                 return Err(failure.error);
             }
         };
@@ -128,19 +116,10 @@ impl LazyHostProvider {
             },
             deps.transport.clone(),
         ));
-        log_fields(
-            AUTO_CAPTURE_PROVIDER_READY,
-            &[
-                ("baseUrl", Value::String(wiring.base_url)),
-                (
-                    "hostVersion",
-                    wiring
-                        .host_version
-                        .as_deref()
-                        .map_or(Value::Null, |version| Value::String(version.to_owned())),
-                ),
-                ("providerId", Value::String(wiring.provider_id)),
-            ],
+        log_provider_ready(
+            &wiring.base_url,
+            wiring.host_version.as_deref(),
+            &wiring.provider_id,
         );
         *write_or_recover(&self.state.cache) = Some(provider.clone());
         Ok(provider)
@@ -230,6 +209,39 @@ impl AiProvider for LazyHostProvider {
             }
         })
     }
+}
+
+/// `Auto-capture provider ready` — one line per successful resolution.
+///
+/// `baseUrl` is omitted when empty (a preset manual provider fills its own
+/// endpoint), `hostVersion` when the version is unreadable.
+pub(crate) fn log_provider_ready(base_url: &str, host_version: Option<&str>, provider_id: &str) {
+    log_fields(
+        AUTO_CAPTURE_PROVIDER_READY,
+        &[
+            (
+                "baseUrl",
+                optional_str(Some(base_url).filter(|url| !url.is_empty())),
+            ),
+            ("hostVersion", optional_str(host_version)),
+            ("providerId", Value::String(provider_id.to_owned())),
+        ],
+    );
+}
+
+/// `Auto-capture provider unavailable` — one line per failed resolution.
+pub(crate) fn log_provider_unavailable(reason: &str, host_version: Option<&str>) {
+    log_fields(
+        AUTO_CAPTURE_PROVIDER_UNAVAILABLE,
+        &[
+            ("reason", Value::String(reason.to_owned())),
+            ("hostVersion", optional_str(host_version)),
+        ],
+    );
+}
+
+fn optional_str(value: Option<&str>) -> Value {
+    value.map_or(Value::Null, |value| Value::String(value.to_owned()))
 }
 
 /// One log line: `null` fields are OMITTED (the payload declares optionals

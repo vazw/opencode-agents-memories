@@ -23,13 +23,24 @@ use crate::provider::remote::openai_responses::{
     self as openai_responses, OpenAiResponsesProvider,
 };
 use crate::provider::remote::orcarouter::{self as orcarouter, OrcaRouterProvider};
-use crate::provider::remote::plumbing::{RemoteProviderConfig, ReqwestTransport};
+use crate::provider::remote::plumbing::{HttpTransport, RemoteProviderConfig, ReqwestTransport};
 use crate::provider::secret_resolver::SecretResolver;
 
 /// Constructor signature shared by every remote adapter: the already-validated
 /// config plus the injected secret resolver, yielding a boxed provider.
-type RemoteBuild =
-    fn(RemoteProviderConfig, Arc<dyn SecretResolver>) -> Result<Arc<dyn AiProvider>, ProviderError>;
+///
+/// A boxed closure (not a `fn` pointer) so the HTTP transport can be captured:
+/// [`ProviderRegistry::register_builtin`] captures `reqwest`, and
+/// [`ProviderRegistry::register_builtin_with`] captures whatever the caller
+/// injects.
+type RemoteBuild = Arc<
+    dyn Fn(
+            RemoteProviderConfig,
+            Arc<dyn SecretResolver>,
+        ) -> Result<Arc<dyn AiProvider>, ProviderError>
+        + Send
+        + Sync,
+>;
 
 /// Discriminant for a registered provider kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -197,8 +208,18 @@ impl ProviderRegistry {
         self
     }
 
-    /// Register the built-in providers.
+    /// Register the built-in providers over the production `reqwest` transport.
     pub fn register_builtin(&mut self) -> &mut Self {
+        self.register_builtin_with(Arc::new(ReqwestTransport::new()))
+    }
+
+    /// Register the built-in providers over an INJECTED HTTP transport.
+    ///
+    /// The seam exists so a caller can drive the real factories (real configs,
+    /// real adapters) with a recording transport; production always uses
+    /// [`Self::register_builtin`]. The `opencode-host` provider keeps its own
+    /// [`ReqwestHostTransport`].
+    pub fn register_builtin_with(&mut self, transport: Arc<dyn HttpTransport>) -> &mut Self {
         self.register(
             ProviderKind::OpenCodeHost,
             Arc::new(|config| {
@@ -216,7 +237,10 @@ impl ProviderRegistry {
         );
 
         let resolver = self.resolver.clone();
+        // One handle per factory: each `move` closure consumes its own clone.
+        let remote_transport = transport.clone();
 
+        let transport = remote_transport.clone();
         self.register(
             ProviderKind::Anthropic,
             Self::remote_factory(
@@ -224,15 +248,15 @@ impl ProviderRegistry {
                 ProviderKind::Anthropic,
                 anthropic::PROVIDER_NAME,
                 false,
-                |config, resolver| {
-                    Ok(Arc::new(AnthropicProvider::new(
-                        config,
-                        resolver,
-                        Arc::new(ReqwestTransport::new()),
-                    )) as Arc<dyn AiProvider>)
-                },
+                Arc::new(move |config, resolver| {
+                    Ok(
+                        Arc::new(AnthropicProvider::new(config, resolver, transport.clone()))
+                            as Arc<dyn AiProvider>,
+                    )
+                }),
             ),
         );
+        let transport = remote_transport.clone();
         self.register(
             ProviderKind::OpenAIChat,
             Self::remote_factory(
@@ -240,15 +264,15 @@ impl ProviderRegistry {
                 ProviderKind::OpenAIChat,
                 openai_chat::PROVIDER_NAME,
                 false,
-                |config, resolver| {
-                    Ok(Arc::new(OpenAiChatProvider::new(
-                        config,
-                        resolver,
-                        Arc::new(ReqwestTransport::new()),
-                    )) as Arc<dyn AiProvider>)
-                },
+                Arc::new(move |config, resolver| {
+                    Ok(
+                        Arc::new(OpenAiChatProvider::new(config, resolver, transport.clone()))
+                            as Arc<dyn AiProvider>,
+                    )
+                }),
             ),
         );
+        let transport = remote_transport.clone();
         self.register(
             ProviderKind::OpenAIResponses,
             Self::remote_factory(
@@ -256,15 +280,16 @@ impl ProviderRegistry {
                 ProviderKind::OpenAIResponses,
                 openai_responses::PROVIDER_NAME,
                 false,
-                |config, resolver| {
+                Arc::new(move |config, resolver| {
                     Ok(Arc::new(OpenAiResponsesProvider::new(
                         config,
                         resolver,
-                        Arc::new(ReqwestTransport::new()),
+                        transport.clone(),
                     )) as Arc<dyn AiProvider>)
-                },
+                }),
             ),
         );
+        let transport = remote_transport.clone();
         self.register(
             ProviderKind::Gemini,
             Self::remote_factory(
@@ -272,15 +297,15 @@ impl ProviderRegistry {
                 ProviderKind::Gemini,
                 gemini::PROVIDER_NAME,
                 false,
-                |config, resolver| {
-                    Ok(Arc::new(GeminiProvider::new(
-                        config,
-                        resolver,
-                        Arc::new(ReqwestTransport::new()),
-                    )) as Arc<dyn AiProvider>)
-                },
+                Arc::new(move |config, resolver| {
+                    Ok(
+                        Arc::new(GeminiProvider::new(config, resolver, transport.clone()))
+                            as Arc<dyn AiProvider>,
+                    )
+                }),
             ),
         );
+        let transport = remote_transport.clone();
         self.register(
             ProviderKind::Minimax,
             Self::remote_factory(
@@ -288,15 +313,15 @@ impl ProviderRegistry {
                 ProviderKind::Minimax,
                 minimax::PROVIDER_NAME,
                 true,
-                |config, resolver| {
-                    Ok(Arc::new(MinimaxProvider::new(
-                        config,
-                        resolver,
-                        Arc::new(ReqwestTransport::new()),
-                    )) as Arc<dyn AiProvider>)
-                },
+                Arc::new(move |config, resolver| {
+                    Ok(
+                        Arc::new(MinimaxProvider::new(config, resolver, transport.clone()))
+                            as Arc<dyn AiProvider>,
+                    )
+                }),
             ),
         );
+        let transport = remote_transport.clone();
         self.register(
             ProviderKind::AtlasCloud,
             Self::remote_factory(
@@ -304,15 +329,15 @@ impl ProviderRegistry {
                 ProviderKind::AtlasCloud,
                 atlas_cloud::PROVIDER_NAME,
                 false,
-                |config, resolver| {
-                    Ok(Arc::new(AtlasCloudProvider::new(
-                        config,
-                        resolver,
-                        Arc::new(ReqwestTransport::new()),
-                    )) as Arc<dyn AiProvider>)
-                },
+                Arc::new(move |config, resolver| {
+                    Ok(
+                        Arc::new(AtlasCloudProvider::new(config, resolver, transport.clone()))
+                            as Arc<dyn AiProvider>,
+                    )
+                }),
             ),
         );
+        let transport = remote_transport.clone();
         self.register(
             ProviderKind::OrcaRouter,
             Self::remote_factory(
@@ -320,13 +345,12 @@ impl ProviderRegistry {
                 ProviderKind::OrcaRouter,
                 orcarouter::PROVIDER_NAME,
                 false,
-                |config, resolver| {
-                    Ok(Arc::new(OrcaRouterProvider::new(
-                        config,
-                        resolver,
-                        Arc::new(ReqwestTransport::new()),
-                    )) as Arc<dyn AiProvider>)
-                },
+                Arc::new(move |config, resolver| {
+                    Ok(
+                        Arc::new(OrcaRouterProvider::new(config, resolver, transport.clone()))
+                            as Arc<dyn AiProvider>,
+                    )
+                }),
             ),
         );
 
@@ -365,7 +389,7 @@ impl ProviderRegistry {
                 }
             };
             remote.validate(provider_name, require_base_url)?;
-            build(remote.clone(), resolver.clone())
+            (build)(remote.clone(), resolver.clone())
         })
     }
 

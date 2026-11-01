@@ -82,6 +82,28 @@
   carries `reason` plus `errorKind`/`status` when present, so no capture dies
   anonymously.
 
+**Manual capture provider (ADR-0028 — the documented `memoryProvider` fallback):**
+
+- **manual provider** — `manual_provider` builds a real adapter from
+  `memoryProvider`/`memoryModel`/`memoryApiUrl`/`memoryApiKey` through
+  `ProviderRegistry::create` (no longer a factory with no production caller).
+  The key is the RESOLVED secret, seated in a `StaticSecretResolver` under the
+  synthetic `memoryApiKey` reference and sent per call as
+  `Authorization: Bearer` — never stored on the provider, never logged.
+- **precedence** — a COMPLETE manual block wins over the OpenCode host; with no
+  manual field set the host path (ADR-0027) applies; a CLAIMED but unusable
+  block fails closed with `reason: "memory_provider_unusable"` rather than
+  silently switching provider. `engine_capture_provider` is the single place
+  that decides, and its `Auto-capture provider ready` line names the winner.
+- **divergence, recorded** — `get_auto_capture_provider_status` stays the
+  upstream-parity report (opencode first) and is NOT the wiring's rule; with
+  both blocks configured it reports `OpenCode` while `openai-chat` is live.
+- **`env://` needs the variable in the ENGINE's process** — the wrapper's
+  `childEnvironment()` whitelist does not forward arbitrary variables, so
+  `env://LITELLM_API_KEY` fails at config load with a message naming it
+  (engine exits 70). A `file://` reference works today; a wrapper allowlist
+  knob is a separate security decision.
+
 **Deferred register rows (orchestrator; W6.2 owns `docs/agents/testing.md`):**
 the `-32002` code row, the exit-code-75 row, the status-file-format row.
 
