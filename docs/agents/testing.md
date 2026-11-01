@@ -22,9 +22,12 @@ cd web-ui && node scripts/check-class-coverage.mjs --self-test --min-emitted=181
 - It classifies **every** `class=` site in `web-ui/src/**/*.rs` as literal / const / balanced
   brace block, and treats anything else (a tuple, a closure, `format!(…)`, a lowercase local, a raw
   string) as a **residue** that exits 1. It never skips a carrier form.
-- `--self-test` runs eight embedded fixtures and prints `SELFTEST 8/8`. Fixture 3 is the
+- `--self-test` runs nine embedded fixtures and prints `SELFTEST 9/9`. Fixture 3 is the
   balanced-brace discriminator (a `\{([^}]*)\}` scan yields one of the two branches); fixtures 5–8
-  are the silent-skip discriminators (a literal-only extractor reports 0 residues on all four).
+  are the silent-skip discriminators (a literal-only extractor reports 0 residues on all four);
+  fixture 9 is the *unresolvable identifier inside a block* discriminator — a block that yields one
+  known token and one identifier the const map cannot resolve must still report 1 residue, or a known
+  branch would buy an unknown one a silent pass.
 - Census and triple: `sites=196 literal=181 const=14 brace=1 residue=0` and
   `emitted=181 hooks=181 missing=0 dead=0 unresolved=0`.
 - Arc: the baseline at `81ba4ca` was `sites=187 literal=173 const=13 brace=1 residue=0` /

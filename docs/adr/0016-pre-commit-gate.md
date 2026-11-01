@@ -165,7 +165,9 @@ runs 17 behavioural cases in throwaway repositories under
 outside `.tmp/scratch`. It makes no writes to this repository's index or worktree. Case 17 is
 the `web-ui` class-coverage gate (amended 2026-11-02): it pins the real `web-ui/src` and the
 post-wave stylesheet with `.tag-row` deleted, so the gate must red on the missing hook
-(`missing=1`, `MISSING tag-row`) rather than on the `--min-emitted` ratchet.
+(`missing=1`, `MISSING tag-row`) rather than on the `--min-emitted` ratchet. The gate reads the
+**worktree**, not the index — the same basis as the clippy phase and unlike the rustfmt phase, which
+judges the staged blob — so a partially staged stylesheet is certified from the file on disk.
 
 **D-9 — Toolchain presence is checked before the fast path.** A missing `cargo` or `rustfmt`
 exits 1 naming the tool even for a docs-only commit: a hook that silently degrades to a no-op is

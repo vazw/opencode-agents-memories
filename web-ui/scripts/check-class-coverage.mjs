@@ -91,6 +91,13 @@ function readIdent(source, start) {
   return [source.slice(start, i), i];
 }
 
+/** Whether `start` begins a raw-string delimiter (`"`, `#"`, `##"`, …). */
+function isRawStringStart(source, start) {
+  let i = start;
+  while (source[i] === "#") i += 1;
+  return source[i] === '"';
+}
+
 function splitTokens(text) {
   return text.split(/\s+/).filter(Boolean);
 }
@@ -153,7 +160,7 @@ function scanBlock(source, open, consts) {
     if (UPPER.test(ch) && !IDENT.test(source[i - 1] ?? "")) {
       const [name, next] = readIdent(source, i);
       if (consts.has(name)) tokens.push(...splitTokens(consts.get(name)));
-      else unresolvedIdents.push(name);
+      else unresolvedIdents.push({ name, offset: i });
       i = next;
       continue;
     }
@@ -180,9 +187,11 @@ function extract(source) {
   let modifier = 0;
   let unresolved = 0;
 
-  const finder = /class=/g;
+  let siteCount = 0;
+  const finder = /class\s*=/g;
   for (let match = finder.exec(source); match; match = finder.exec(source)) {
-    const start = skipSpace(source, match.index + "class=".length);
+    siteCount += 1;
+    const start = skipSpace(source, match.index + match[0].length);
     const first = source[start];
 
     if (first === '"') {
@@ -199,6 +208,11 @@ function extract(source) {
       const block = scanBlock(source, start, consts);
       if (block.tokens.length === 0) unresolved += 1;
       for (const token of block.tokens) tokens.add(token);
+      // A known branch must not buy an unknown one a silent pass: an identifier
+      // the const map cannot resolve is a residue, one entry per identifier.
+      for (const ident of block.unresolvedIdents) {
+        residues.push({ form: "ident", raw: ident.name, offset: ident.offset });
+      }
       brace += 1;
       finder.lastIndex = block.next;
       continue;
@@ -231,7 +245,7 @@ function extract(source) {
       const [word, next] = readIdent(source, start);
       if (word === "move") {
         form = "closure";
-      } else if ((word === "r" || word === "br" || word === "cr") && source[next] === '"') {
+      } else if ((word === "r" || word === "br" || word === "cr") && isRawStringStart(source, next)) {
         form = "raw";
       } else {
         let probe = skipSpace(source, next);
@@ -252,7 +266,7 @@ function extract(source) {
 
   return {
     tokens,
-    sites: literal + named + brace,
+    sites: siteCount,
     literal,
     const: named,
     brace,
@@ -345,6 +359,16 @@ const SELF_TESTS = [
     tokens: [],
     residues: 1,
     forms: ["call"],
+  },
+  {
+    // The discriminator for a brace block whose other branch is an identifier
+    // the const map cannot resolve: the token from the known branch must not
+    // buy the unknown one a silent pass.
+    name: "brace-unresolved-ident",
+    source: '<p class={if c { "x" } else { MISSING_CLASS }}>',
+    tokens: ["x"],
+    residues: 1,
+    forms: ["ident"],
   },
 ];
 
