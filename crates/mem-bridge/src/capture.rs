@@ -1309,7 +1309,7 @@ impl CaptureService {
 
 /// The named cause of one consumed capture failure.
 ///
-/// `reason` is one of the seven fixed capture reasons (or a host-resolution
+/// `reason` is one of the fixed capture reasons (or a host-resolution
 /// reason carried through the summarizer); `error_kind`/`status` are present
 /// only when a provider answered — never free text, never prompt content.
 #[derive(Debug, Clone, Copy)]

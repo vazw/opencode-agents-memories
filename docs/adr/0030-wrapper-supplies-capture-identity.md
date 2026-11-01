@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-01
-- **Builds on:** `docs/adr/0027-host-endpoint-discovery.md` (D-27-7: the seven capture reasons),
+- **Builds on:** `docs/adr/0027-host-endpoint-discovery.md` (D-27-7: the capture reasons),
   `docs/adr/0014-*` (D-2: `mem_core::logging::signatures` is the single spelling home).
 - **Owner ruling (2026-11-01):** the wrapper sends the field; the engine keeps strict validation.
 
@@ -38,7 +38,7 @@ anywhere.
    `Auto-capture episodic write failed` (`signatures::AUTO_CAPTURE_EPISODIC_FAILED`), is emitted
    once per failed `commit_episodic` attempt with `{ captureId, projectId, sessionId, agentId,
    errorKind }` plus `field` and a 120-character `detail` for validation errors only. `Failure`
-   stays `Copy` with `&'static str` (D-27-7 fixes the seven reasons). The `detail` precondition was
+   stays `Copy` with `&'static str` (D-27-7 fixes the reasons). The `detail` precondition was
    audited: every `EpisodicError::validation` producer interpolates a constant, a count or a
    length, never a value.
 7. **Placement of the signature.** The constant lives in `signatures.rs` (single spelling home),

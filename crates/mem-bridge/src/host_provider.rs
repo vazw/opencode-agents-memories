@@ -108,7 +108,7 @@ impl LazyHostProvider {
                 provider_id: wiring.provider_id.clone(),
                 // The WIRING's model: the provider ignores
                 // `CompletionRequest.model` and names its own `model_ref()` in
-                // the prompt body.
+                // the CREATE body's `model` field (`Model.Ref`).
                 model: wiring.model_id.clone(),
                 authorization: wiring.authorization,
                 variant: deps.variant.clone(),

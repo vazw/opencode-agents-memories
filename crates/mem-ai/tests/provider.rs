@@ -21,8 +21,13 @@ use std::sync::{Mutex, MutexGuard};
 /// - `opencode_provider::test_opencode_host_complete_streams`
 /// - `opencode_provider::test_opencode_host_structured_output_loop`
 /// - `opencode_provider::test_opencode_host_timeout_config`
+/// - `opencode_provider::test_2_2_5_create_envelope_yields_the_prompt_call`
+/// - `opencode_provider::test_2_2_5_bare_session_id_still_parses`
+/// - `opencode_provider::test_2_2_5_envelope_wins_over_a_bare_id`
+/// - `opencode_provider::test_2_2_5_create_without_any_id_is_a_wire_shape_error`
+/// - `opencode_provider::test_2_2_5_blank_session_id_is_a_wire_shape_error`
 ///
-/// The last three reach the global transitively: `OpenCodeHostProvider::new`
+/// The `complete()` rows reach the global transitively: `OpenCodeHostProvider::new`
 /// clones the global handle and every completion `track`s/`untrack`s it.
 /// Constructing a provider alone only initialises the `OnceLock`;
 /// `InternalCaptureSessions::new` and `with_grace` build their own

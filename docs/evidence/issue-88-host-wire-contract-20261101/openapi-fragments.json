@@ -1,0 +1,452 @@
+{
+  "/api/session#post": {
+    "tags": [
+      "session"
+    ],
+    "operationId": "session.create",
+    "parameters": [],
+    "security": [],
+    "responses": {
+      "200": {
+        "description": "Success",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "data": {
+                  "$ref": "#/components/schemas/Session.Info"
+                }
+              },
+              "required": [
+                "data"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "400": {
+        "description": "InvalidRequestError",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+            }
+          }
+        }
+      },
+      "401": {
+        "description": "UnauthorizedError",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/UnauthorizedErrorEncoded"
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "SessionNotFoundError",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SessionNotFoundErrorEncoded"
+            }
+          }
+        }
+      }
+    },
+    "description": "Create a session at the requested location. A parentID creates a linked child session at its parent's location.",
+    "summary": "Create session",
+    "requestBody": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Session.ID"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "parentID": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Session.ID"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "agent": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Agent.ID"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "model": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Model.Ref"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "location": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Location.PublicRef"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "metadata": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Session.Metadata"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "permissions": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Permission.Ruleset"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": true
+    }
+  },
+  "/api/session/{sessionID}/generate#post": {
+    "tags": [
+      "session"
+    ],
+    "operationId": "session.generate",
+    "parameters": [
+      {
+        "name": "sessionID",
+        "in": "path",
+        "schema": {
+          "$ref": "#/components/schemas/Session.ID"
+        },
+        "required": true
+      }
+    ],
+    "security": [],
+    "responses": {
+      "200": {
+        "description": "SessionGenerateResponse",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SessionGenerateResponse"
+            }
+          }
+        }
+      },
+      "400": {
+        "description": "InvalidRequestError",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+            }
+          }
+        }
+      },
+      "401": {
+        "description": "UnauthorizedError",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/UnauthorizedErrorEncoded"
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "SessionNotFoundError | LocationNotFoundError",
+        "content": {
+          "application/json": {
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SessionNotFoundErrorEncoded"
+                },
+                {
+                  "$ref": "#/components/schemas/LocationNotFoundErrorEncoded"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "503": {
+        "description": "ServiceUnavailableError",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ServiceUnavailableErrorEncoded"
+            }
+          }
+        }
+      }
+    },
+    "description": "Generate transient text from the current session context without mutating session history.",
+    "summary": "Generate text from session context",
+    "requestBody": {
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "prompt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "prompt"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": true
+    }
+  },
+  "/api/session/{sessionID}#delete": {
+    "tags": [
+      "session"
+    ],
+    "operationId": "session.remove",
+    "parameters": [
+      {
+        "name": "sessionID",
+        "in": "path",
+        "schema": {
+          "$ref": "#/components/schemas/Session.ID"
+        },
+        "required": true
+      }
+    ],
+    "security": [],
+    "responses": {
+      "204": {
+        "description": "<No Content>"
+      },
+      "400": {
+        "description": "InvalidRequestError",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+            }
+          }
+        }
+      },
+      "401": {
+        "description": "UnauthorizedError",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/UnauthorizedErrorEncoded"
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "SessionNotFoundError",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SessionNotFoundErrorEncoded"
+            }
+          }
+        }
+      }
+    },
+    "description": "Delete a session and its child sessions.",
+    "summary": "Delete session"
+  },
+  "Session.Info": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "$ref": "#/components/schemas/Session.ID"
+      },
+      "parentID": {
+        "$ref": "#/components/schemas/Session.ID"
+      },
+      "fork": {
+        "type": "object",
+        "properties": {
+          "sessionID": {
+            "$ref": "#/components/schemas/Session.ID"
+          },
+          "boundary": {
+            "$ref": "#/components/schemas/Session.ForkBoundary"
+          }
+        },
+        "required": [
+          "sessionID",
+          "boundary"
+        ],
+        "additionalProperties": false
+      },
+      "projectID": {
+        "$ref": "#/components/schemas/Project.ID"
+      },
+      "agent": {
+        "$ref": "#/components/schemas/Agent.ID"
+      },
+      "model": {
+        "$ref": "#/components/schemas/Model.Ref"
+      },
+      "cost": {
+        "$ref": "#/components/schemas/Money.USD"
+      },
+      "tokens": {
+        "$ref": "#/components/schemas/TokenUsage.Info"
+      },
+      "outcome": {
+        "type": "string",
+        "enum": [
+          "succeeded",
+          "failed",
+          "interrupted"
+        ]
+      },
+      "time": {
+        "type": "object",
+        "properties": {
+          "created": {
+            "type": "number"
+          },
+          "updated": {
+            "type": "number"
+          },
+          "busy": {
+            "type": "number"
+          },
+          "idle": {
+            "type": "number"
+          },
+          "viewed": {
+            "type": "number"
+          },
+          "archived": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "created",
+          "updated"
+        ],
+        "additionalProperties": false
+      },
+      "title": {
+        "type": "string"
+      },
+      "subpath": {
+        "$ref": "#/components/schemas/RelativePath"
+      },
+      "metadata": {
+        "$ref": "#/components/schemas/Session.Metadata"
+      },
+      "permissions": {
+        "$ref": "#/components/schemas/Permission.Ruleset"
+      },
+      "revert": {
+        "$ref": "#/components/schemas/Session.Revert"
+      },
+      "location": {
+        "$ref": "#/components/schemas/Location.PublicRef"
+      }
+    },
+    "required": [
+      "id",
+      "projectID",
+      "cost",
+      "tokens",
+      "time",
+      "location"
+    ],
+    "additionalProperties": false
+  },
+  "SessionGenerateResponse": {
+    "type": "object",
+    "properties": {
+      "data": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "required": [
+      "data"
+    ],
+    "additionalProperties": false
+  },
+  "Model.Ref": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "providerID": {
+        "$ref": "#/components/schemas/Provider.ID"
+      },
+      "variant": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "providerID"
+    ],
+    "additionalProperties": false
+  }
+}

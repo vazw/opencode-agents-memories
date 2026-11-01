@@ -34,7 +34,7 @@ struct RecordedCall {
 }
 
 /// Answers the pre-2.2.5 session protocol (a transport double only — the
-/// measured 2.2.5 shapes are pinned in `mem-ai`'s provider suite) and records
+/// DOCUMENTED 2.2.5 shapes are pinned in `mem-ai`'s provider suite) and records
 /// every call's method/url/body.
 #[derive(Default)]
 struct RecordingTransport {
@@ -89,9 +89,9 @@ impl HostTransport for RecordingTransport {
                     status: 200,
                     body: r#"{"id":"ses_test"}"#.to_owned(),
                 }),
-            HostMethod::Post if request.url.contains("/message") => HostResponse {
+            HostMethod::Post if request.url.contains("/generate") => HostResponse {
                 status: 200,
-                body: r#"{"info":{},"parts":[{"type":"text","text":"ok"}]}"#.to_owned(),
+                body: r#"{"data":{"text":"ok"}}"#.to_owned(),
             },
             HostMethod::Delete => HostResponse {
                 status: 200,
@@ -235,15 +235,27 @@ async fn test_lazy_provider_retries_resolution_after_a_missing_service_file() {
         urls,
         vec![
             "http://127.0.0.1:49374/api/session",
-            "http://127.0.0.1:49374/api/session/ses_test/message",
+            "http://127.0.0.1:49374/api/session/ses_test/generate",
         ]
     );
 
     // The model comes from the WIRING (the provider ignores
-    // `CompletionRequest.model`), and it lands in the PROMPT body.
-    let model = posts[1].body.as_ref().expect("prompt body")["model"].clone();
-    assert_eq!(model["modelID"], "beam-free");
-    assert_eq!(model["providerID"], "opencode-go");
+    // `CompletionRequest.model`), and it lands in the CREATE body's `model`
+    // field — `Model.Ref{id, providerID}` — beside the structured-output agent.
+    let create = posts[0].body.as_ref().expect("create body");
+    assert_eq!(create["model"]["id"], "beam-free");
+    assert_eq!(create["model"]["providerID"], "opencode-go");
+    assert_eq!(create["agent"], "opencode-mem-structured");
+
+    // The prompt carries exactly one key: the route declares only `prompt`.
+    let prompt = posts[1].body.as_ref().expect("prompt body");
+    assert_eq!(
+        prompt
+            .as_object()
+            .map(|body| body.keys().cloned().collect::<Vec<_>>()),
+        Some(vec!["prompt".to_string()]),
+        "the prompt body is one key: {prompt}"
+    );
 }
 
 /// 3b — a successful exchange caches the origin; a later dead pid is irrelevant
@@ -335,9 +347,12 @@ async fn test_any_inner_error_clears_the_cached_origin() {
             status: 404,
             body: String::new(),
         },
+        // A 2xx with no body: `decode_json` maps it to `Protocol`. (Junk JSON
+        // with a 2xx is a SHAPE mismatch and answers `WireShape` instead — that
+        // kind is pinned by the `test_2_2_5_*` rows in `mem-ai`.)
         HostResponse {
             status: 200,
-            body: r#"{"oops":true}"#.to_owned(),
+            body: String::new(),
         },
     ]);
 

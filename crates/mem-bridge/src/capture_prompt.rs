@@ -72,7 +72,7 @@ pub const CAPTURE_OUTPUT_SCHEMA: &str = r#"{
 /// the HTTP status, when the failure came from a response.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SummarizerFailure {
-    /// One of the seven capture reasons, or a host-resolution reason.
+    /// One of the capture reasons, or a host-resolution reason.
     pub reason: &'static str,
     /// `ProviderErrorKind::as_str()` label.
     pub error_kind: &'static str,
@@ -334,12 +334,15 @@ impl ProviderCaptureSummarizer {
 
 /// Classify one provider failure onto the closed capture reason set.
 ///
-/// Only three outcomes: an auth rejection, a host-resolution reason carried in
-/// a `Config` message, or the default `summarizer_failed`.
+/// Four outcomes: an auth rejection, a wire-shape mismatch, a host-resolution
+/// reason carried in a `Config` message, or the default `summarizer_failed`.
+/// The auth branch is FIRST so a rejection can never be re-labelled.
 pub fn classify_provider_error(error: &ProviderError) -> SummarizerFailure {
     let reason =
         if error.kind == ProviderErrorKind::Auth || matches!(error.status, Some(401) | Some(403)) {
             "host_auth_rejected"
+        } else if error.kind == ProviderErrorKind::WireShape {
+            "host_wire_shape_mismatch"
         } else if error.kind == ProviderErrorKind::Config {
             crate::host_endpoint::HostWiringError::all()
                 .into_iter()

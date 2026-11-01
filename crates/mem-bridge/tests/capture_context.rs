@@ -3,8 +3,8 @@
 //! contract for the capture-time budget builders).
 
 use mem_bridge::capture_context::{
+    SCHEMA_ANSWER_INSTRUCTION, SUMMARY_OUTPUT_RESERVE_BYTES, SUMMARY_REQUEST_OVERHEAD_BYTES,
     ToolCallInfo, build_bounded_summary_prompt, build_markdown_context,
-    get_auto_capture_markdown_budget,
 };
 
 /// Upstream: `leaves small contexts unchanged`.
@@ -104,21 +104,65 @@ fn test_auto_capture_context_caps_total_utf8_bytes() {
 
 /// Upstream: `reserves request space for prompts, schemas, and model
 /// output`.
+///
+/// Re-derived: this row used to compose its context through
+/// `build_markdown_context`, whose context is capped at 75 % of `total`, so the
+/// prompt clamp never fired — the assertion could not fail. It now calls the
+/// `pub` function DIRECTLY with a 200 000-byte context, so the clamp always
+/// fires, and asserts the invariant the charge exists to hold:
+///
+/// ```text
+/// system.len() + prompt.len() + OUTPUT_RESERVE + REQUEST_OVERHEAD <= total
+/// ```
+///
+/// Every numeral is evaluated at run time from `len()`, never counted by hand,
+/// so the identity holds for any `system_prompt`.
 #[test]
 fn test_auto_capture_context_reserves_prompt_schema_and_output_space() {
     let total_budget = 131_072;
-    let markdown_budget = get_auto_capture_markdown_budget(total_budget);
-    let context = build_markdown_context(
-        "request",
-        &["A".repeat(total_budget)],
-        &[],
-        None,
-        markdown_budget,
-    );
     let system_prompt = "system instructions";
     let schema = r#"{"type":"object","properties":{"summary":{"type":"string"}}}"#;
-    let user_prompt = build_bounded_summary_prompt(&context, system_prompt, schema, total_budget);
-    assert!(markdown_budget < total_budget);
-    assert!(user_prompt.len() < total_budget);
-    assert!(user_prompt.contains("truncated to autoCaptureMaxContextBytes"));
+    let user_prompt =
+        build_bounded_summary_prompt(&"A".repeat(200_000), system_prompt, schema, total_budget);
+
+    // `<=`, where the old row asserted `<`: this is a RELAXATION of the row, not
+    // a tightening — the charged path lands on equality by construction.
+    let charged = system_prompt.len()
+        + user_prompt.len()
+        + SUMMARY_OUTPUT_RESERVE_BYTES
+        + SUMMARY_REQUEST_OVERHEAD_BYTES;
+    assert!(
+        charged <= total_budget,
+        "the prompt + reserves fit the budget: {charged} > {total_budget}"
+    );
+    assert!(
+        user_prompt.contains("truncated to autoCaptureMaxContextBytes"),
+        "the 200 000-byte context was clamped"
+    );
+}
+
+/// The schema must reach the model even though the route that carries it has no
+/// `format` field: it is appended to the prompt TEXT, after truncation, so only
+/// the conversation is ever cut.
+#[test]
+fn test_bounded_summary_prompt_carries_the_schema_and_the_json_instruction() {
+    let schema = r#"{"type":"object","properties":{"summary":{"type":"string"},"type":{"type":"string"},"tags":{"type":"array"}},"required": ["summary", "type", "tags"]}"#;
+    let prompt =
+        build_bounded_summary_prompt("user: capture this", "system instructions", schema, 131_072);
+    assert!(
+        prompt.contains(r#""required": ["summary", "type", "tags"]"#),
+        "the schema's required list is in the prompt text"
+    );
+    assert!(
+        prompt.contains(SCHEMA_ANSWER_INSTRUCTION),
+        "the schema is a CONTRACT, not a trailing blob"
+    );
+
+    // A conversation large enough to be truncated still carries an intact
+    // schema block: the schema is appended AFTER the clamp.
+    let cut =
+        build_bounded_summary_prompt(&"A".repeat(200_000), "system instructions", schema, 131_072);
+    assert!(cut.contains("truncated to autoCaptureMaxContextBytes"));
+    assert!(cut.ends_with(schema), "the schema block is intact and last");
+    assert!(cut.contains(SCHEMA_ANSWER_INSTRUCTION));
 }

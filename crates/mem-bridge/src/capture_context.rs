@@ -18,6 +18,13 @@ pub const CONTEXT_TRUNCATION_MARKER: &str = "\n[... truncated to autoCaptureMaxC
 /// resolved config default).
 pub const DEFAULT_AUTO_CAPTURE_MAX_CONTEXT_BYTES: usize = 131_072;
 
+/// The instruction that turns the appended schema into an answer contract.
+pub const SCHEMA_ANSWER_INSTRUCTION: &str =
+    "Answer with ONE JSON object that validates against this JSON Schema, and nothing else:";
+
+/// Separates the conversation from the schema block.
+const SCHEMA_SEPARATOR: &str = "\n\n";
+
 /// Upstream `SUMMARY_REQUEST_OVERHEAD_BYTES`.
 pub const SUMMARY_REQUEST_OVERHEAD_BYTES: usize = 1024;
 
@@ -107,29 +114,38 @@ pub fn get_auto_capture_markdown_budget(total_request_bytes: usize) -> usize {
 
 /// Upstream `buildBoundedSummaryPrompt` (`:385-410`): reserve
 /// `min(16,384, floor(total × 0.125))` for model output and subtract the
-/// system-prompt bytes, the (compact JSON) schema bytes, that reserve and
-/// the 1,024 overhead before truncating `context` + suffix.
+/// system-prompt bytes, the schema BLOCK, that reserve and the 1,024 overhead
+/// before truncating `context` + suffix.
+///
+/// The schema block is what this function APPENDS: `SCHEMA_SEPARATOR` +
+/// `SCHEMA_ANSWER_INSTRUCTION` + a newline + the compact JSON. It is charged
+/// exactly as it is spent, which is what keeps
+/// `system + prompt + output_reserve + overhead <= total` true for any
+/// `system_prompt`. The schema goes on AFTER the truncation, so only
+/// `context` is ever cut.
 pub fn build_bounded_summary_prompt(
     context: &str,
     system_prompt: &str,
     schema_json: &str,
     total_request_bytes: usize,
 ) -> String {
-    let schema_bytes = schema_json.len();
+    let schema_block_bytes =
+        SCHEMA_SEPARATOR.len() + SCHEMA_ANSWER_INSTRUCTION.len() + 1 + schema_json.len();
     let output_reserve = usize::min(
         SUMMARY_OUTPUT_RESERVE_BYTES,
         total_request_bytes / 8, // floor(total × 0.125)
     );
     let user_budget = total_request_bytes
         .saturating_sub(system_prompt.len())
-        .saturating_sub(schema_bytes)
+        .saturating_sub(schema_block_bytes)
         .saturating_sub(output_reserve)
         .saturating_sub(SUMMARY_REQUEST_OVERHEAD_BYTES);
-    truncate_to_max_bytes_with_marker(
+    let truncated = truncate_to_max_bytes_with_marker(
         &format!("{context}\n\n{SUMMARY_ANALYSIS_SUFFIX}"),
         user_budget,
         CONTEXT_TRUNCATION_MARKER,
-    )
+    );
+    format!("{truncated}{SCHEMA_SEPARATOR}{SCHEMA_ANSWER_INSTRUCTION}\n{schema_json}")
 }
 
 /// Upstream `buildMarkdownContext` (`:412-514`).

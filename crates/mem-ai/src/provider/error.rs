@@ -30,6 +30,9 @@ pub enum ProviderErrorKind {
     HttpStatus,
     /// The response could not be parsed / did not match the wire contract.
     Protocol,
+    /// The response was valid JSON but did not carry the fields the wire contract
+    /// requires — a SHAPE mismatch, not a parse failure.
+    WireShape,
     /// The provider does not implement the requested capability.
     Unsupported,
     /// Anything else.
@@ -48,6 +51,7 @@ impl ProviderErrorKind {
             Self::RateLimited => "rate-limited",
             Self::HttpStatus => "http-status",
             Self::Protocol => "protocol",
+            Self::WireShape => "wire-shape",
             Self::Unsupported => "unsupported",
             Self::Internal => "internal",
         }

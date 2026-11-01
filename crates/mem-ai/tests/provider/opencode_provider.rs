@@ -5,11 +5,11 @@
 //! timeouts, connected-provider refresh, and the trait-only leakage gate.
 //!
 //! FIXTURE NOTE: the `{"id":…}` / `{"info":…}` create/prompt bodies below are
-//! the PRE-2.2.5 fiction. They stay because they exercise the provider's own
-//! session lifecycle; the live 2.2.5 shapes are pinned by
-//! `test_2_2_5_session_create_response_is_a_named_protocol_error` and by the
-//! measured `/api/config` document-array rows. Rebuilding the lifecycle
-//! fixtures is the wire wave's job.
+//! synthetic. They stay because they exercise the provider's own session
+//! lifecycle; the DOCUMENTED 2.2.5 shapes are pinned by the `test_2_2_5_*` rows
+//! here (from `docs/evidence/issue-88-host-wire-contract-20261101/`) and by the
+//! measured `/api/config` document-array rows. Every such shape is READ from the
+//! API description — no exchange with a live host has ever been captured.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -22,16 +22,29 @@ use mem_ai::provider::{
     StaticSecretResolver, Zeroizing,
 };
 
+/// The sample create body from
+/// `docs/evidence/issue-88-host-wire-contract-20261101/create-body.sample.json`
+/// (`/api/session.post` → `{data: Session.Info}`). Schema-derived: this is what
+/// the document declares, not a captured exchange.
+const SAMPLED_2_2_5_CREATE_BODY: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../docs/evidence/issue-88-host-wire-contract-20261101/create-body.sample.json"
+));
+
 /// Records every host call and synthesises the OpenCode v2 session protocol.
 struct MockTransport {
-    calls: Mutex<Vec<(HostMethod, String)>>,
+    calls: Mutex<Vec<(HostMethod, String, Option<serde_json::Value>)>>,
     /// The credential each request carried (the transport seam's contract).
     authorizations: Mutex<Vec<Option<HostAuthorization>>>,
-    /// When true, `POST .../message` never resolves (agent loop).
-    hang_message: bool,
-    /// When true, the prompt returns `info.structured_output`.
-    structured: bool,
+    /// When true, the prompt call never resolves (agent loop).
+    hang_generate: bool,
+    /// The prompt's `text`, delivered inside the documented
+    /// `{"data":{"text": …}}` envelope.
     text: String,
+    /// A raw prompt reply body, for the rows that pin a WRONG envelope.
+    reply_body: Option<String>,
+    /// The `POST …/session` answer, so a row can pin any create shape.
+    create_body: String,
 }
 
 impl MockTransport {
@@ -39,13 +52,29 @@ impl MockTransport {
         Self {
             calls: Mutex::new(Vec::new()),
             authorizations: Mutex::new(Vec::new()),
-            hang_message: false,
-            structured: false,
+            hang_generate: false,
             text: "hello world".to_owned(),
+            reply_body: None,
+            create_body: r#"{"id":"ses_test"}"#.to_owned(),
         }
     }
 
-    fn calls(&self) -> Vec<(HostMethod, String)> {
+    fn with_create_body(mut self, create_body: &str) -> Self {
+        self.create_body = create_body.to_owned();
+        self
+    }
+
+    fn with_text(mut self, text: &str) -> Self {
+        self.text = text.to_owned();
+        self
+    }
+
+    fn with_reply_body(mut self, reply_body: &str) -> Self {
+        self.reply_body = Some(reply_body.to_owned());
+        self
+    }
+
+    fn calls(&self) -> Vec<(HostMethod, String, Option<serde_json::Value>)> {
         self.calls.lock().unwrap().clone()
     }
 
@@ -56,7 +85,7 @@ impl MockTransport {
     fn deleted(&self) -> bool {
         self.calls()
             .iter()
-            .any(|(method, _)| *method == HostMethod::Delete)
+            .any(|(method, _, _)| *method == HostMethod::Delete)
     }
 }
 
@@ -65,18 +94,19 @@ impl mem_ai::provider::HostTransport for MockTransport {
         &self,
         request: HostRequest,
     ) -> BoxFuture<'static, Result<HostResponse, ProviderError>> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push((request.method, request.url.clone()));
+        self.calls.lock().unwrap().push((
+            request.method,
+            request.url.clone(),
+            request.body.clone(),
+        ));
         self.authorizations
             .lock()
             .unwrap()
             .push(request.authorization.clone());
 
-        if self.hang_message
+        if self.hang_generate
             && request.method == HostMethod::Post
-            && request.url.contains("/message")
+            && request.url.contains("/generate")
         {
             return Box::pin(std::future::pending());
         }
@@ -84,25 +114,17 @@ impl mem_ai::provider::HostTransport for MockTransport {
         let response = match request.method {
             HostMethod::Post if request.url.ends_with("/session") => HostResponse {
                 status: 200,
-                body: r#"{"id":"ses_test"}"#.to_owned(),
+                body: self.create_body.clone(),
             },
-            HostMethod::Post if request.url.contains("/message") => {
-                if self.structured {
-                    HostResponse {
-                        status: 200,
-                        body: r#"{"info":{"structured_output":{"topic":"auth","count":3}},"parts":[]}"#
-                            .to_owned(),
-                    }
-                } else {
-                    HostResponse {
-                        status: 200,
-                        body: format!(
-                            r#"{{"info":{{}},"parts":[{{"type":"text","text":{}}}]}}"#,
-                            serde_json::to_string(&self.text).unwrap()
-                        ),
-                    }
-                }
-            }
+            HostMethod::Post if request.url.contains("/generate") => HostResponse {
+                status: 200,
+                body: self.reply_body.clone().unwrap_or_else(|| {
+                    format!(
+                        r#"{{"data":{{"text":{}}}}}"#,
+                        serde_json::to_string(&self.text).expect("the reply text encodes")
+                    )
+                }),
+            },
             HostMethod::Delete => HostResponse {
                 status: 200,
                 body: "true".to_owned(),
@@ -161,9 +183,10 @@ async fn test_opencode_host_complete_streams() {
 #[tokio::test]
 async fn test_opencode_host_structured_output_loop() {
     let _gate = crate::lock_global_capture();
-    let mut mock = MockTransport::new();
-    mock.structured = true;
-    let transport = Arc::new(mock);
+    // The documented reply carries the structured value as TEXT inside the
+    // `{"data":{"text": …}}` envelope; the shared parser strips one fence.
+    let transport =
+        Arc::new(MockTransport::new().with_text("```json\n{\"topic\":\"auth\",\"count\":3}\n```"));
     let provider = OpenCodeHostProvider::new(host_config(), transport.clone());
 
     // Structured completion returns the parsed JSON schema value.
@@ -208,7 +231,7 @@ async fn test_opencode_host_structured_output_loop() {
 async fn test_opencode_host_timeout_config() {
     let _gate = crate::lock_global_capture();
     let mut mock = MockTransport::new();
-    mock.hang_message = true;
+    mock.hang_generate = true;
     let transport = Arc::new(mock);
 
     let config = OpenCodeHostConfig {
@@ -399,76 +422,291 @@ async fn test_models_from_config_read_the_config_document_array() {
     );
 }
 
-/// The 2.2.5 create response is `{"data": Session.Info}` — the pre-2.2.5 port
-/// looks for a top-level `id`, so the failure is a NAMED `Protocol` error. This
-/// row pins the transport layer AND the wire mismatch; the wire wave deletes it
-/// when it decodes `data`.
-#[tokio::test]
-async fn test_2_2_5_session_create_response_is_a_named_protocol_error() {
-    struct MeasuredTransport {
-        calls: Mutex<Vec<(HostMethod, String, Option<HostAuthorization>)>>,
-    }
-
-    impl mem_ai::provider::HostTransport for MeasuredTransport {
-        fn send(
-            &self,
-            request: HostRequest,
-        ) -> BoxFuture<'static, Result<HostResponse, ProviderError>> {
-            self.calls.lock().unwrap().push((
-                request.method,
-                request.url.clone(),
-                request.authorization.clone(),
-            ));
-            // Copied from `.tmp/openapi.json` (`/api/session.post` →
-            // `{data: Session.Info}`; required: id, projectID, cost, tokens,
-            // time, location).
-            let response = HostResponse {
-                status: 200,
-                body: r#"{"data":{"id":"ses_2_2_5","projectID":"prj_1","cost":0,"tokens":{"input":10,"output":20,"reasoning":0,"cache":{"read":0,"write":0}},"time":{"created":1,"updated":2},"location":{"directory":"/tmp"}}}"#
-                    .to_owned(),
-            };
-            Box::pin(std::future::ready(Ok(response)))
-        }
-    }
-
-    let _gate = crate::lock_global_capture();
-    let transport = Arc::new(MeasuredTransport {
-        calls: Mutex::new(Vec::new()),
-    });
-    let config = OpenCodeHostConfig {
-        base_url: "http://127.0.0.1:49374/api".to_owned(),
+/// Config carrying the credential the host requires on every `{origin}/api`
+/// request.
+fn authorized_host_config() -> OpenCodeHostConfig {
+    OpenCodeHostConfig {
         authorization: Some(HostAuthorization::basic_from_owned(
             "opencode",
             Zeroizing::new("s3cret".to_string()),
         )),
         ..host_config()
-    };
-    let provider = OpenCodeHostProvider::new(config, transport.clone());
+    }
+}
+
+/// The first chunk of one completion: `run()` completes (create → prompt →
+/// delete) before any chunk is yielded, so this also flushes every call.
+async fn first_chunk(
+    provider: &OpenCodeHostProvider,
+    request: CompletionRequest,
+) -> Result<serde_json::Value, ProviderError> {
+    provider.complete(request).next().await.expect("one chunk")
+}
+
+/// Row 1 — AC1: the documented create envelope descends to the prompt call.
+///
+/// The previous row (`test_2_2_5_session_create_response_is_a_named_protocol_error`)
+/// pinned the BUG: `{"data":{"id":…}}` decoded as "no session id". Its still-true
+/// claims — the create URL, the credential on the create, and "no prompt without
+/// a session id" — are inherited here and by row 5.
+#[tokio::test]
+async fn test_2_2_5_create_envelope_yields_the_prompt_call() {
+    let _gate = crate::lock_global_capture();
+    let transport = Arc::new(MockTransport::new().with_create_body(SAMPLED_2_2_5_CREATE_BODY));
+    let provider = OpenCodeHostProvider::new(authorized_host_config(), transport.clone());
 
     let mut stream = provider.complete(plain_request());
-    let first = stream
-        .next()
-        .await
-        .expect("the flattened error is the stream's first chunk")
-        .expect_err("2.2.5's create response is not the port's shape");
-    assert_eq!(first.kind, ProviderErrorKind::Protocol);
-    assert!(
-        first.message.contains("no session id"),
-        "the reason names the missing session id: {}",
-        first.message
-    );
+    while stream.next().await.is_some() {}
 
-    let calls = transport.calls.lock().unwrap().clone();
-    assert_eq!(calls.len(), 1, "one create, no prompt without a session id");
+    let calls = transport.calls();
+    assert_eq!(calls.len(), 3, "create + prompt + delete: {calls:?}");
     assert_eq!(calls[0].0, HostMethod::Post);
     assert_eq!(calls[0].1, "http://127.0.0.1:49374/api/session");
+    assert!(
+        calls[1].1.contains("/session/ses_2_2_5/"),
+        "the envelope's id reaches the prompt call: {calls:?}"
+    );
+    assert_eq!(calls[2].0, HostMethod::Delete);
+
+    // The credential rides every request, starting with the create.
     assert_eq!(
-        calls[0]
-            .2
+        transport.authorizations()[0]
             .as_ref()
             .expect("the create carries the credential")
             .header_value()
             .as_str(),
         "Basic b3BlbmNvZGU6czNjcmV0"
+    );
+}
+
+/// Row 2 — the bare shape is PERMANENT live behaviour (pre-2.2.5 hosts dial
+/// fine), so deleting the fall-through reds this row.
+#[tokio::test]
+async fn test_2_2_5_bare_session_id_still_parses() {
+    let _gate = crate::lock_global_capture();
+    let transport = Arc::new(MockTransport::new().with_create_body(r#"{"id":"ses_bare"}"#));
+    let provider = OpenCodeHostProvider::new(host_config(), transport.clone());
+
+    let mut stream = provider.complete(plain_request());
+    while stream.next().await.is_some() {}
+
+    let calls = transport.calls();
+    assert_eq!(calls.len(), 3, "create + prompt + delete: {calls:?}");
+    assert!(
+        calls[1].1.contains("/session/ses_bare/"),
+        "the bare id reaches the prompt call: {calls:?}"
+    );
+}
+
+/// Row 3 — `#[serde(untagged)]` declares the precedence: the ENVELOPE wins over
+/// a sibling bare `id`, so flipping the variant order reds this row.
+#[tokio::test]
+async fn test_2_2_5_envelope_wins_over_a_bare_id() {
+    let _gate = crate::lock_global_capture();
+    let transport = Arc::new(
+        MockTransport::new().with_create_body(r#"{"id":"ses_bare","data":{"id":"ses_nested"}}"#),
+    );
+    let provider = OpenCodeHostProvider::new(host_config(), transport.clone());
+
+    let mut stream = provider.complete(plain_request());
+    while stream.next().await.is_some() {}
+
+    let calls = transport.calls();
+    assert_eq!(calls.len(), 3, "create + prompt + delete: {calls:?}");
+    assert!(
+        calls[1].1.contains("/session/ses_nested/"),
+        "the enveloped id wins: {calls:?}"
+    );
+}
+
+/// Row 4 — a create answer with no id in EITHER shape is a shape mismatch, not
+/// a parse failure; the message names the call and never echoes the body.
+#[tokio::test]
+async fn test_2_2_5_create_without_any_id_is_a_wire_shape_error() {
+    let _gate = crate::lock_global_capture();
+    let transport =
+        Arc::new(MockTransport::new().with_create_body(r#"{"data":{"projectID":"prj_1"}}"#));
+    let provider = OpenCodeHostProvider::new(host_config(), transport.clone());
+
+    let error = first_chunk(&provider, plain_request())
+        .await
+        .expect_err("a create answer without an id cannot prompt");
+    assert_eq!(error.kind, ProviderErrorKind::WireShape);
+    assert!(
+        error.message.contains("session.create"),
+        "the reason names the call: {}",
+        error.message
+    );
+    assert!(
+        !error.message.contains("prj_1"),
+        "the response body is never echoed: {}",
+        error.message
+    );
+    assert_eq!(transport.calls().len(), 1, "no prompt without a session id");
+}
+
+/// Row 5 — a blank id would build `/session//generate`; the guard turns it into
+/// the same named shape error instead.
+#[tokio::test]
+async fn test_2_2_5_blank_session_id_is_a_wire_shape_error() {
+    let _gate = crate::lock_global_capture();
+    let transport = Arc::new(MockTransport::new().with_create_body(r#"{"data":{"id":"   "}}"#));
+    let provider = OpenCodeHostProvider::new(host_config(), transport.clone());
+
+    let error = first_chunk(&provider, plain_request())
+        .await
+        .expect_err("an empty session id cannot prompt");
+    assert_eq!(error.kind, ProviderErrorKind::WireShape);
+    assert!(
+        error.message.contains("blank session id"),
+        "the reason names the blank id: {}",
+        error.message
+    );
+    assert_eq!(transport.calls().len(), 1, "no prompt without a session id");
+}
+
+/// Row 6 — AC2: the prompt goes to the documented route and carries ONLY
+/// `prompt`. The route has no `format` field, so everything else must be gone.
+#[tokio::test]
+async fn test_2_2_5_prompt_posts_to_generate_with_only_a_prompt() {
+    let _gate = crate::lock_global_capture();
+    let transport = Arc::new(MockTransport::new().with_create_body(SAMPLED_2_2_5_CREATE_BODY));
+    let provider = OpenCodeHostProvider::new(host_config(), transport.clone());
+
+    let mut stream = provider.complete(plain_request());
+    while stream.next().await.is_some() {}
+
+    let calls = transport.calls();
+    assert_eq!(calls.len(), 3, "create + prompt + delete: {calls:?}");
+    assert_eq!(
+        calls[1].1, "http://127.0.0.1:49374/api/session/ses_2_2_5/generate",
+        "the prompt takes the documented route"
+    );
+    let body = calls[1].2.as_ref().expect("the prompt carries a JSON body");
+    let keys: Vec<&String> = body
+        .as_object()
+        .expect("the prompt body is an object")
+        .keys()
+        .collect();
+    assert_eq!(keys, vec!["prompt"], "exactly one key: {body}");
+}
+
+/// Row 7 — the model and the structured-output agent travel on the CREATE body,
+/// where `Model.Ref` declares them. Deleting `model_ref()`, keeping the old
+/// `modelID` key, or omitting `agent` all red this row.
+#[tokio::test]
+async fn test_2_2_5_create_body_declares_model_and_agent() {
+    let _gate = crate::lock_global_capture();
+    let transport = Arc::new(MockTransport::new().with_create_body(SAMPLED_2_2_5_CREATE_BODY));
+    let provider = OpenCodeHostProvider::new(host_config(), transport.clone());
+
+    let mut stream = provider.complete(plain_request());
+    while stream.next().await.is_some() {}
+
+    let calls = transport.calls();
+    let body = calls[0].2.as_ref().expect("the create carries a JSON body");
+    assert_eq!(
+        body["model"],
+        serde_json::json!({ "id": "gpt-4o-mini", "providerID": "opencode" }),
+        "`Model.Ref{{id, providerID}}` is the declared shape: {body}"
+    );
+    assert_eq!(
+        body["agent"], "opencode-mem-structured",
+        "the structured-output agent is named on the create: {body}"
+    );
+    assert!(
+        body.get("modelID").is_none(),
+        "the undeclared `modelID` spelling is gone: {body}"
+    );
+
+    // A configured variant is `Model.Ref`'s optional third field.
+    let transport = Arc::new(MockTransport::new().with_create_body(SAMPLED_2_2_5_CREATE_BODY));
+    let provider = OpenCodeHostProvider::new(
+        OpenCodeHostConfig {
+            variant: Some("high".to_string()),
+            ..host_config()
+        },
+        transport.clone(),
+    );
+    let mut stream = provider.complete(plain_request());
+    while stream.next().await.is_some() {}
+    let calls = transport.calls();
+    let body = calls[0].2.as_ref().expect("the create carries a JSON body");
+    assert_eq!(body["model"]["variant"], "high", "{body}");
+}
+
+/// Row 8 — the documented reply envelope carries the structured value as text,
+/// so reading `info.structured_output` reds this row.
+#[tokio::test]
+async fn test_2_2_5_generate_reply_text_carries_the_structured_value() {
+    let _gate = crate::lock_global_capture();
+    let transport =
+        Arc::new(MockTransport::new().with_text("```json\n{\"topic\":\"auth\",\"count\":3}\n```"));
+    let provider = OpenCodeHostProvider::new(host_config(), transport.clone());
+
+    let request = CompletionRequest::new("gpt-4o-mini");
+    let schema = serde_json::json!({
+        "type": "object",
+        "properties": { "topic": { "type": "string" }, "count": { "type": "number" } },
+        "required": ["topic", "count"]
+    });
+    let value = AiProviderStructured::complete_structured(&provider, request, schema)
+        .await
+        .expect("the reply text parses once its fence is stripped");
+    assert_eq!(value["topic"], "auth");
+    assert_eq!(value["count"], 3);
+}
+
+/// Row 9 — a reply that is not the documented envelope is a SHAPE mismatch, so
+/// reporting `Protocol` loses the split between "wrong shape" and "the model
+/// did not answer in JSON".
+#[tokio::test]
+async fn test_2_2_5_generate_reply_without_an_envelope_is_a_wire_shape_error() {
+    let _gate = crate::lock_global_capture();
+    let transport = Arc::new(MockTransport::new().with_reply_body(
+        r#"{"info":{"structured_output":{"topic":"auth","count":3}},"parts":[]}"#,
+    ));
+    let provider = OpenCodeHostProvider::new(host_config(), transport.clone());
+
+    let error = AiProviderStructured::complete_structured(
+        &provider,
+        CompletionRequest::new("gpt-4o-mini"),
+        serde_json::json!({ "type": "object" }),
+    )
+    .await
+    .expect_err("the pre-2.2.5 reply is not the documented envelope");
+    assert_eq!(error.kind, ProviderErrorKind::WireShape);
+    assert!(
+        error.message.contains("data") && error.message.contains("text"),
+        "the reason names the envelope it wanted: {}",
+        error.message
+    );
+}
+
+/// Row 10 — prose is the MODEL's fault, not the wire's: mapping it to
+/// `WireShape` would send an operator hunting a host that is answering fine.
+#[tokio::test]
+async fn test_2_2_5_prose_reply_stays_a_protocol_error() {
+    let _gate = crate::lock_global_capture();
+    let transport = Arc::new(MockTransport::new().with_text("Here is a summary of the work."));
+    let provider = OpenCodeHostProvider::new(host_config(), transport.clone());
+
+    let error = AiProviderStructured::complete_structured(
+        &provider,
+        CompletionRequest::new("gpt-4o-mini"),
+        serde_json::json!({ "type": "object" }),
+    )
+    .await
+    .expect_err("prose is not a structured answer");
+    assert_eq!(error.kind, ProviderErrorKind::Protocol);
+    assert!(
+        error.message.contains("not valid JSON"),
+        "the shared parser's reason survives: {}",
+        error.message
+    );
+    assert!(
+        !error.message.contains("Here is a summary"),
+        "the reply text is never echoed: {}",
+        error.message
     );
 }

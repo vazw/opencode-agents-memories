@@ -148,9 +148,12 @@
 - **`ComposedRuntime.provider` now means "the filtered capture handle"** — anything that
   expected an `AiProvider` there is a compile error by design. The consolidation
   summarizer deliberately keeps the UNWRAPPED `base` (D-52-7).
-- **this does not make capture persist** — the host arm's 2.2.5 wire drift
-  (`errorKind: "protocol"`) and the wrapper's missing `agent_id`
-  (`episodic_write_failed`) are separate defects with their own blueprints.
+- **this does not make capture persist** — the host arm now speaks the DOCUMENTED wire (create decoded
+  in both shapes, the prompt on `/generate` carrying exactly `{"prompt"}`, the reply decoded from
+  `{"data":{"text": …}}`), with the JSON schema appended to the prompt TEXT because that route has no
+  `format` field; a shape mismatch is named `host_wire_shape_mismatch` / `errorKind: "wire-shape"`. What
+  is left is runtime confirmation (no exchange with the live host has ever been captured), the
+  create-request ruleset rebuild (`permission` vs `permissions: Permission.Ruleset`) and `requeue-captures`.
 
 **Deferred register rows (orchestrator; W6.2 owns `docs/agents/testing.md`):**
 the `-32002` code row, the exit-code-75 row, the status-file-format row.

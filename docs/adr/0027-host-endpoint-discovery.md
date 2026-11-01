@@ -7,6 +7,15 @@
   `docs/adr/0021-schema-version-discipline.md` (a newer root refuses to open).
 - **Blueprint:** `blueprint-20261101-0322-host-transport-r7` (sha256 `80d79b2a2446`, `SYS-APPROVED 2026-11-01T10:26Z`),
   after seven gate revisions (`r1`…`r7`).
+- **Amended:** 2026-11-01 (issue 88, the wire wave) — D-27-9 row 1 is DECODED (the `{"data": Session.Info}`
+  envelope, with the bare `{"id": …}` as a permanent `#[serde(untagged)]` fall-through, so a pre-2.2.5 host
+  still dials); rows 3–4 land (`POST …/generate`, body `{"prompt"}`, reply `{"data":{"text"}}`, and
+  `format`/`tools`/`parts` are gone — no code path POSTs `…/message`); row 2 **partially** lands —
+  `model: Model.Ref{id, providerID, variant?}` and `agent: Agent.ID` now travel on the create body, while
+  `permission` is untouched and still a rebuild; handoff items 1 (decode) · 2 · 3 · 4 land, 1's create-body
+  rebuild and 5 (`requeue-captures`) do not. The JSON schema no longer travels as a `format` field: it travels
+  in the prompt TEXT (`capture_context::SCHEMA_ANSWER_INSTRUCTION`). `note_structured_step` had no transport
+  caller before this wave and still has none.
 
 ## Context
 
@@ -104,7 +113,7 @@ Either side unobservable (non-Linux, or a process that vanished mid-read) ⇒ ac
 positive, accepted as conservative: an **orphan engine** (one that outlived its host) rejects the new
 host's pid until the engine restarts.
 
-**D-27-7 — Fail closed with a NAME: ten host reasons, seven capture reasons.**
+**D-27-7 — Fail closed with a NAME: ten host reasons, plus the capture reasons.**
 Host resolution (each with exactly one pinning input; the table is a test):
 
 | Reason | Branch | Pinning input |
@@ -120,49 +129,59 @@ Host resolution (each with exactly one pinning input; the table is a test):
 | `host_url_not_loopback` | A and B | `http://192.168.1.10:49374`; `http://127.0.0.1:49374@evil.example:80` |
 | `host_model_unresolved` | A and B | model unset or the literal `"inherit"` |
 
-Capture: `capture_provider_unavailable`, `summarizer_failed`, `host_auth_rejected`, `scope_unresolved`,
-`episodic_write_failed`, `tier1_write_failed`, `summary_missing`. `summarizer_failed` is the only default;
-a provider error adds `errorKind` (`auth`, `network`, `timeout`, `http-status`, `protocol`, `config`…),
-and a provider-side JSON/parse failure adds none — the summarizer's record is cleared on entry to every
-`summarize`, so a stale reason can never name a later attempt.
+Capture: `capture_provider_unavailable`, `summarizer_failed`, `host_auth_rejected`, `host_wire_shape_mismatch`,
+`scope_unresolved`, `episodic_write_failed`, `tier1_write_failed`, `summary_missing`. `summarizer_failed` is
+the only default; a provider error adds `errorKind` (`auth`, `network`, `timeout`, `http-status`, `protocol`,
+`wire-shape`, `config`…), and a provider-side JSON/parse failure adds none — the summarizer's record is
+cleared on entry to every `summarize`, so a stale reason can never name a later attempt. `wire-shape` means
+the host answered a shape the port cannot read and is never the model's fault; `protocol` covers a reply
+whose TEXT was not JSON. The set grows by APPENDING tokens, never by re-counting a numeral in five places.
 
 **D-27-8 — `opencodeModel: "inherit"` is dropped; the wiring supplies the model.**
-`OpenCodeHostProvider` ignores `CompletionRequest.model` and names its own `model_ref()` in the prompt
-body. An unset or `"inherit"` model fails closed as `host_model_unresolved` instead of forwarding a
-literal the host would reject opaquely. Resolution is the LAST step of both branches, so the error names
-the model, not a host that in fact resolved.
+`OpenCodeHostProvider` ignores `CompletionRequest.model` and names its own `model_ref()` — since the wire
+wave, in the create body's `model` field (`Model.Ref{id, providerID, variant?}`), with `agent` naming the
+structured-output agent registered in `plugin/src/plugin.js:924-933`. An unset or `"inherit"` model fails
+closed as `host_model_unresolved` instead of forwarding a literal the host would reject opaquely. Resolution
+is the LAST step of both branches, so the error names the model, not a host that in fact resolved.
 
 **D-27-9 — Transport and wire are two waves.**
-The host is `2.2.5` and the port speaks the pre-2.2.5 HTTP contract in four measured places:
+The host is `2.2.5` and, as this ADR was written, the port spoke the pre-2.2.5 HTTP contract in four
+**documented** places:
 
 | Break | Label |
 | --- | --- |
-| `POST /api/session` 200 is `{data: Session.Info}` (`required: ["data"]`, `additionalProperties:false`), so the port's `value.get("id")` is always `None` ⇒ a named `Protocol` error | READ, `.tmp/openapi.json` |
-| The create body accepts `permissions: Ruleset` and `model: Model.Ref{id,providerID,variant?}`; the port sends `permission` and no model, so a `400 InvalidRequestError` follows from the strict schema | **INFERRED** — never observed; no live POST was made |
-| `POST /api/session/{id}/message` does not exist (GET only); prompt is `POST /api/session/{id}/generate` → `{data:{text}}` | READ |
-| `StructuredOutput`/`json_schema` occur **0×** in the 440 KB spec | READ |
+| `POST /api/session` 200 is `{data: Session.Info}` (`required: ["data"]`, `additionalProperties:false`), so the port's `value.get("id")` was always `None` ⇒ a named `Protocol` error. **Decoded by the wire wave** (envelope first, bare `{"id": …}` as the fall-through) | READ, `docs/evidence/issue-88-host-wire-contract-20261101/` |
+| The create body accepts `permissions: Ruleset` and `model: Model.Ref{id,providerID,variant?}`; the port sent `permission` and no model, so a `400 InvalidRequestError` FOLLOWS from the strict schema. **The model/agent half landed in the wire wave** (`model: Model.Ref`, `agent: Agent.ID` on the create body); `permission` is untouched, so an undeclared key still rides the create. A 2xx was **MEASURED** for a create body carrying it: `additionalProperties:false` is documentation, not observed rejection | **INFERRED** — the 400 was never observed; the tolerated 2xx was |
+| `POST /api/session/{id}/message` does not exist (GET only); prompt is `POST /api/session/{id}/generate` → `{data:{text}}`. **Landed in the wire wave** | READ |
+| `StructuredOutput`/`json_schema` occur **0×** in the 440 KB spec. **Landed**: the schema travels in the prompt TEXT. `format`/`tools`/`parts` left the wire; the assistant-side error name/data is a recorded loss | READ |
 
-Shipping transport alone therefore yields a **named** `protocol` (or `http-status/400`) dead-letter at
-`POST /api/session` — the correct, diagnosable outcome. **A green transport wave does not mean capture
-works.** No model was added to the create body here: that is the create-body rebuild, and it would have
-flipped a deliberately-pinned fixture row.
+Shipping transport alone therefore yielded a **named** `protocol` (or `http-status/400`) dead-letter at
+`POST /api/session` — the correct, diagnosable outcome. **A green transport wave did not mean capture
+works.** No model was added to the create body in that wave: that was the create-body rebuild, and it
+would have flipped a deliberately-pinned fixture row.
 
 ## The wire-wave handoff (the next blueprint owns all of this)
 
 1. Decode `{data: Session.Info}` (`data.id`) and rebuild the create body on 2.2.5's shape
    (`permissions: [{action, resource, effect}]`, `model: Model.Ref{id, providerID, variant?}`); the first
-   live POST settles the INFERRED 400.
-2. Replace `POST …/message` with `…/generate` (`{data:{text}}`) or `…/experimental/generate/text`.
-3. Drop `format`/`tools`/`parts`; rely on text + the existing `parse_capture_output` fallback.
+   live POST settles the INFERRED 400. — **Half landed** (issue 88): the decode and `model`/`agent` are on
+   the wire; `permissions` is still the undeclared shape, so the create-body rebuild remains open.
+2. Replace `POST …/message` with `…/generate` (`{data:{text}}`) or `…/experimental/generate/text`. —
+   **Landed** on `…/generate`.
+3. Drop `format`/`tools`/`parts`; rely on text + the existing `parse_capture_output` fallback. —
+   **Landed**, with one correction: the schema is not merely dropped, it is appended to the prompt text,
+   so the answer is still schema-bound.
 4. Rebuild `crates/mem-ai/tests/provider/opencode_provider.rs`'s fixtures from `.tmp/openapi.json` and
-   delete `test_2_2_5_session_create_response_is_a_named_protocol_error`.
+   delete `test_2_2_5_session_create_response_is_a_named_protocol_error`. — **Landed**; the row's
+   still-true claims became `test_2_2_5_create_envelope_yields_the_prompt_call`, and the samples live in
+   `docs/evidence/issue-88-host-wire-contract-20261101/`.
 5. Ship `requeue-captures` (`episodic_sql`/`CaptureInbox`/`src/main.rs`/`tests/requeue_cli.rs`/
    `tests/workspace_smoke.rs`). **Dropped from this wave on purpose:** the CLI is useless until capture
-   can reach the host, so it belongs with the wire contract.
+   can reach the host, so it belongs with the wire contract. — **NOT landed**: still the next wave.
 6. Optional: `opencodeModel: "inherit"` via `Config.InfoEncoded.model` (the document array names the
-   default as `"provider/model#variant"` or `{providerID, model, variant}`).
+   default as `"provider/model#variant"` or `{providerID, model, variant}`). — **Not done** (unchanged).
 7. Correct this ADR's direction if the port's fixtures were ever read as "current": the port is the
-   **older** shape; 2.2.5 is current.
+   **older** shape; 2.2.5 is current. — **Done** by the amendment header above.
 
 ## Live verification (owner runbook)
 
@@ -178,16 +197,21 @@ never grep `opencode-mem-$(date -u +%F).log`.
    `Auto-capture provider unavailable` line names the resolution layer instead.
 4. One real chat turn, then `grep -c "Auto-capture provider failed"` (baseline + 1..5) and read the
    reason/errorKind/status from `tail -n 12`.
-5. `errorKind:"protocol"` ⇒ the expected 2.2.5 response-shape mismatch; `http-status`/400 ⇒ the 2.2.5
-   create body; `http-status`/404|405 ⇒ the route moved; `auth`/401 ⇒ credentials **or** a stale origin
-   rebound after a restart (the first attempt after a recycle is misnamed — check `service.json` against
-   `ss -ltn` before touching credentials); `network`/`timeout` ⇒ the resolved origin is not the live one.
+5. `errorKind:"wire-shape"` ⇒ the host answered a shape the port cannot read (a new host minor, not a
+   model problem); `errorKind:"protocol"` ⇒ the reply TEXT was not JSON (the model's miss);
+   `http-status`/400 ⇒ the create body; `http-status`/404|405 ⇒ the route moved; `auth`/401 ⇒ credentials
+   **or** a stale origin rebound after a restart (the first attempt after a recycle is misnamed — check
+   `service.json` against `ss -ltn` before touching credentials); `network`/`timeout` ⇒ the resolved origin
+   is not the live one. **Calibration:** the API description's `additionalProperties:false` is
+   documentation, not runtime behaviour — a 2xx was MEASURED for a create body carrying an undeclared key,
+   so "the spec forbids it" is not evidence that the host rejected anything.
 6. Drain arithmetic: `drain_once` runs **32 rows at startup** and **32 per enqueue** — there is no startup
    loop. The queued rows at attempts 1-4 die over the next 1-5 failed drains, each carrying a named
    reason; the `dead` backlog stays until the wire wave's `requeue-captures` (32 rows per drain).
 7. **Inverted world that closes this wave as not working:** no `Auto-capture provider ready` line at all,
-   or a new `Auto-capture final error` line without `reason`/`errorKind`. A `protocol` or `status:400`
-   outcome is the wire handoff firing correctly, not a failure of this wave.
+   or a new `Auto-capture final error` line without `reason`/`errorKind`. A `wire-shape` outcome is a NAMED
+   mismatch (the diagnosable outcome), not a failure of the transport layer; a capture that persists is the
+   wire wave's acceptance, and unmeasured until one is observed.
 
 ## Consequences
 

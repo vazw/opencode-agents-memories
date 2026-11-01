@@ -7,6 +7,9 @@
   `docs/adr/0008-w53-capture-injection.md` D8 (filter the request, never the reply).
 - **Owner ruling:** the capture summarizer must ask for a schema-bound completion instead of
   repairing seven adapters, so an eighth adapter cannot repeat the defect.
+- **Amended:** 2026-11-01 (issue 88, the wire wave) — D-29-6 restated: the fixtures answer the
+  **documented** wire, which is READ from the API description and has never been captured; the schema
+  still reaches the model, now in the prompt TEXT; the scope guard's item 1 is narrowed to what is left.
 
 ## Context
 
@@ -78,11 +81,21 @@ its own module and its own test. The capture path is guarded regardless, by `Fil
 production caller of `wrap_structured` lands, it must adopt `filter_request_for_delivery` or declare why
 not.
 
-**D-29-6 — The host fixture answers a FUTURE wire.**
-The rows in `crates/mem-bridge/tests/host_capture_provider.rs` fake top-level `{"id": …}` on session
-create and `info.structured_output` on the prompt. The running 2.2.5 host has neither, so those rows
-evidence the WIRING; they are not evidence about the owner's live host, and `host_capture_e2e.rs`
-continues to pin the measured 2.2.5 body dead-lettering with a named reason.
+**D-29-6 — The host fixtures answer the DOCUMENTED wire.**
+The rows in `crates/mem-bridge/tests/host_capture_provider.rs` answer the response shapes the OpenCode HTTP
+API description declares — `{"data": {"id": …}}` on session create and `{"data": {"text": …}}` on the
+prompt — plus the permanent bare `{"id": …}` fall-through. Those shapes are **READ** from
+`docs/evidence/issue-88-host-wire-contract-20261101/`, a schema sample and not a transcript: the rows
+evidence the WIRING, never the owner's live host. `host_capture_e2e.rs` now drives the same sampled bodies
+through the real summarizer and shows a capture reaching persistence **against those documented shapes** —
+which does not establish that the live host answers so.
+
+The schema is not on the wire as a field any more (the `/generate` route declares only `prompt`): it is
+appended to the prompt TEXT by `capture_context::build_bounded_summary_prompt`, under
+`capture_context::SCHEMA_ANSWER_INSTRUCTION`, and charged against the same budget it spends. Two recorded
+losses, both deliberate: `format`/`tools` leave the host arm (superseded by the prompt text), and the
+assistant-side error name/data is no longer surfaced (the documented reply has no field for it; a non-2xx
+is named by its status). No model left the wire — the create body carries `Model.Ref` and `agent`.
 
 ## Consequences
 
@@ -100,14 +113,17 @@ continues to pin the measured 2.2.5 body dead-lettering with a named reason.
 
 ## Scope guard — this change does NOT make capture persist
 
-This ADR fixes the manual/fallback arm's structured output only. Two confirmed defects outside this
-change still block persistence, each with its own blueprint:
+This ADR fixes the manual/fallback arm's structured output only. As amended by the wire wave, what
+remains outside it:
 
-1. **The host arm's 2.2.5 wire drift.** Session create answers `{data: Session.Info}`, the prompt lives
-   at `/api/session/{id}/generate`, and structured output is gone — capture currently fails with
-   `errorKind: "protocol"` on that arm.
+1. **The create-request rebuild.** Session create, the prompt route and the reply are now on the
+   documented wire, and the model/agent travel on the create body — but the port still sends
+   `permission` where the document declares `permissions: Permission.Ruleset`. That is a rebuild, not a
+   rename, and `requeue-captures` is still unshipped. Runtime confirmation that the live host behaves as
+   documented is likewise unmeasured: no exchange has ever been captured.
 2. **The wrapper never sends `agent_id`** (`plugin/src/plugin.js`), and `mem-episodic` rejects an empty
-   one — `episodic_write_failed`.
+   one — `episodic_write_failed`. **Addressed by `95857b7`**; whether that closes persistence live is not
+   measured here.
 
 No sentence in this ADR, and none in the landing commit, may claim that capture resumes end to end
 because of this change.

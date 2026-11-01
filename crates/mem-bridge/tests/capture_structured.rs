@@ -284,3 +284,32 @@ async fn test_capture_summary_parse_failure_sets_no_provider_record() {
         "a parse failure never sets a provider record"
     );
 }
+
+/// Row 11 — the wire-shape mismatch is the one failure a capture can name
+/// itself, and the `else` arm would flatten it to `summarizer_failed` — the
+/// same token a model-side JSON miss produces, so the operator could not tell
+/// "the host answered another shape" from "the model rambled".
+#[test]
+fn test_classify_gives_a_wire_shape_failure_its_own_reason() {
+    let error = ProviderError::new(
+        ProviderErrorKind::WireShape,
+        "session prompt answered without a {\"data\":{\"text\"}} envelope",
+    );
+    let failure = mem_bridge::capture_prompt::classify_provider_error(&error);
+    assert_eq!(failure.reason, "host_wire_shape_mismatch");
+    assert_eq!(failure.error_kind, "wire-shape");
+    assert_eq!(failure.status, None, "no HTTP status was involved");
+}
+
+/// Row 12 — the split is two-sided: mapping EVERY `Protocol` failure onto the
+/// new reason would hide the model-side miss behind a host-shaped name.
+#[test]
+fn test_classify_leaves_a_protocol_failure_unnamed() {
+    let error = ProviderError::new(
+        ProviderErrorKind::Protocol,
+        "structured output was not valid JSON",
+    );
+    let failure = mem_bridge::capture_prompt::classify_provider_error(&error);
+    assert_eq!(failure.reason, "summarizer_failed");
+    assert_eq!(failure.error_kind, "protocol");
+}

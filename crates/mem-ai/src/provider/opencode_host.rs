@@ -3,8 +3,16 @@
 //!
 //! Instead of forging provider HTTP requests ourselves (auth, token refresh,
 //! routing), we delegate to the running OpenCode server: create a transient
-//! least-privilege session, prompt it with a JSON schema (or plain text), and
-//! delete the session so it never pollutes the user's TUI session list.
+//! least-privilege session, ask it for an answer over the documented
+//! `POST …/generate` route, and delete the session so it never pollutes the
+//! user's TUI session list.
+//!
+//! The wire is the DOCUMENTED one (`docs/evidence/issue-88-host-wire-contract-20261101/`),
+//! never a captured exchange: create accepts `{"data": Session.Info}` and a bare
+//! `{"id": …}`; the prompt body is exactly `{"prompt": …}`; the reply is
+//! `{"data":{"text": …}}`. A structured answer is that TEXT parsed by the shared
+//! structured-output parser, and the schema travels inside the prompt text
+//! because the route declares no `format` field.
 //!
 //! Transport is an injected [`HostTransport`] seam — the production
 //! implementation is [`ReqwestHostTransport`]; tests inject an in-memory mock.
@@ -29,6 +37,7 @@ use crate::provider::internal_capture::{INTERNAL_CAPTURE_SESSION_TITLE, Internal
 use crate::provider::provider_trait::{
     AiProvider, AiProviderStructured, BoxFuture, CompletionStream, sealed,
 };
+use crate::provider::remote::structured::parse_structured;
 use crate::provider::request::{CompletionRequest, EmbedRequest, ModelInfo};
 
 /// Stable provider name.
@@ -45,6 +54,11 @@ pub const STRUCTURED_OUTPUT_TIMEOUT_MS: u64 = 90_000;
 pub const STRUCTURED_OUTPUT_MAX_STEPS: u32 = 2;
 
 /// Bound OpenCode schema retries so a bad provider cannot spin forever.
+///
+/// Retained as the value `OpenCodeHostConfig::retry_count` defaults to. Since
+/// the wire wave that count is no longer TRANSMITTED: the documented
+/// `POST …/generate` route declares only `prompt`, so no `format`/`retryCount`
+/// field exists to carry it (ADR-0029 D-29-6's recorded loss).
 pub const STRUCTURED_OUTPUT_DEFAULT_RETRY_COUNT: u32 = 1;
 
 /// Configuration for the host provider.
@@ -60,7 +74,7 @@ pub struct OpenCodeHostConfig {
     /// passes a resolved `{origin}/api` (see `mem_bridge::host_endpoint`). A
     /// compiled-in port would silently target whatever listens on `4096`.
     pub base_url: String,
-    /// Optional reasoning variant forwarded to the session prompt.
+    /// Optional reasoning variant, sent as `Model.Ref.variant` on the create.
     pub variant: Option<String>,
     /// Optional working directory forwarded as a query param.
     pub directory: Option<String>,
@@ -68,9 +82,12 @@ pub struct OpenCodeHostConfig {
     pub authorization: Option<HostAuthorization>,
     /// Request budget enforced on every host call.
     pub timeout: Duration,
-    /// Client-side structured-output step budget.
+    /// Client-side structured-output step budget. Declarative while
+    /// `note_structured_step` has no transport caller (ADR-0027's amendment).
     pub max_steps: u32,
-    /// `format: json_schema` retry count.
+    /// `format: json_schema` retry count, no longer transmitted: the documented
+    /// `/generate` route declares no `format` field. Kept as configuration so a
+    /// caller's value is not silently repurposed.
     pub retry_count: u32,
 }
 
@@ -299,6 +316,16 @@ impl HostState {
     fn session_create_body(&self) -> Value {
         json!({
             "title": INTERNAL_CAPTURE_SESSION_TITLE,
+            // The model and the structured-output agent travel HERE: `model:
+            // Model.Ref` and `agent: Agent.ID` are the create body's declared
+            // fields, while the prompt route declares only `prompt`.
+            "agent": STRUCTURED_OUTPUT_AGENT,
+            "model": self.model_ref(),
+            // Scope guard — NOT a rename. The declared key is `permissions:
+            // Permission.Ruleset` (`Permission.Rule{action, resource, effect}`);
+            // this undeclared shape is tolerated in practice (a 2xx was
+            // MEASURED for it, and `additionalProperties:false` is
+            // documentation, not runtime behaviour). Rewriting it is a rebuild.
             "permission": [
                 { "permission": "*", "pattern": "*", "action": "deny" },
                 { "permission": "StructuredOutput", "pattern": "*", "action": "allow" }
@@ -307,49 +334,17 @@ impl HostState {
         })
     }
 
+    /// The declared `Model.Ref`: `{id, providerID}` plus `variant` when one is
+    /// configured.
     fn model_ref(&self) -> Value {
-        json!({ "providerID": self.config.provider_id, "modelID": self.config.model })
-    }
-
-    fn prompt_body(&self, request: &CompletionRequest, schema: Option<&Value>) -> Value {
-        let system = request
-            .system
-            .clone()
-            .or_else(|| {
-                request
-                    .messages
-                    .iter()
-                    .find(|message| message.role == crate::provider::request::Role::System)
-                    .map(|message| message.content.clone())
-            })
-            .unwrap_or_default();
-        let user_text = request.last_user_message().unwrap_or_default().to_owned();
-
-        let mut body = json!({
-            "model": self.model_ref(),
-            "agent": STRUCTURED_OUTPUT_AGENT,
-            "system": system,
-            "parts": [ { "type": "text", "text": user_text } ],
+        let mut model = json!({
+            "id": self.config.model,
+            "providerID": self.config.provider_id,
         });
-
         if let Some(variant) = &self.config.variant {
-            body["variant"] = json!(variant);
+            model["variant"] = json!(variant);
         }
-
-        match schema {
-            Some(schema) => {
-                body["tools"] = json!({ "*": false, "StructuredOutput": true });
-                body["format"] = json!({
-                    "type": "json_schema",
-                    "schema": schema,
-                    "retryCount": self.config.retry_count,
-                });
-            }
-            None => {
-                body["tools"] = json!({ "*": false });
-            }
-        }
-        body
+        model
     }
 
     async fn create_session(
@@ -368,17 +363,26 @@ impl HostState {
             )
             .await?;
         let value = decode_json(&response, "POST /session")?;
-        let id = value
-            .get("id")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .ok_or_else(|| {
-                ProviderError::new(
-                    ProviderErrorKind::Protocol,
-                    "session.create returned no session id; cannot generate structured output",
-                )
-                .with_provider(PROVIDER_NAME)
-            })?;
+        // serde's message is dropped deliberately: it is unstable and describes
+        // the input (the response body). Fixed text only.
+        let reply: CreateSessionReply = serde_json::from_value(value).map_err(|_| {
+            ProviderError::new(
+                ProviderErrorKind::WireShape,
+                "session.create answered with neither a {\"data\":{\"id\"}} envelope nor a bare {\"id\"}",
+            )
+            .with_provider(PROVIDER_NAME)
+        })?;
+        let id = match reply {
+            CreateSessionReply::Enveloped { data } => data.id,
+            CreateSessionReply::Bare { id } => id,
+        };
+        if id.trim().is_empty() {
+            return Err(ProviderError::new(
+                ProviderErrorKind::WireShape,
+                "session.create returned a blank session id; cannot generate structured output",
+            )
+            .with_provider(PROVIDER_NAME));
+        }
         Ok(id)
     }
 
@@ -391,7 +395,7 @@ impl HostState {
         budget: Duration,
     ) -> Result<PromptOutcome, ProviderError> {
         let url = format!(
-            "{}/session/{}/message{}",
+            "{}/session/{}/generate{}",
             self.base(),
             encode_query_component(session_id),
             self.directory_query()
@@ -400,12 +404,12 @@ impl HostState {
             .transport_send(
                 HostMethod::Post,
                 url,
-                Some(self.prompt_body(request, schema)),
+                Some(prompt_body(request)),
                 cancellation,
                 budget,
             )
             .await?;
-        let value = decode_json(&response, "POST /session/{id}/message")?;
+        let value = decode_json(&response, "POST /session/{id}/generate")?;
         parse_prompt_response(&value, schema.is_some())
     }
 
@@ -543,6 +547,52 @@ impl HostState {
     }
 }
 
+/// The prompt text the documented route takes: `{"prompt": string}` is its
+/// entire body, so the system side is folded in rather than sent separately.
+///
+/// The system prompt is `request.system` when set, else the first system
+/// message; a blank system side contributes nothing (and no separator).
+fn prompt_text(request: &CompletionRequest) -> String {
+    let system = request
+        .system
+        .clone()
+        .or_else(|| {
+            request
+                .messages
+                .iter()
+                .find(|message| message.role == crate::provider::request::Role::System)
+                .map(|message| message.content.clone())
+        })
+        .unwrap_or_default();
+    let user_text = request.last_user_message().unwrap_or_default();
+    if system.trim().is_empty() {
+        return user_text.to_owned();
+    }
+    format!("{system}\n\n{user_text}")
+}
+
+fn prompt_body(request: &CompletionRequest) -> Value {
+    json!({ "prompt": prompt_text(request) })
+}
+
+/// `POST /api/session` answer, in both shapes the port must accept.
+///
+/// The document says 2.2.5 answers `{"data": Session.Info}`; a host that does
+/// not wrap answers a bare `{"id": …}`. `#[serde(untagged)]` declares the
+/// precedence: the ENVELOPE wins, the bare object is the fall-through.
+/// Evidence (READ): docs/evidence/issue-88-host-wire-contract-20261101/
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum CreateSessionReply {
+    Enveloped { data: SessionRef },
+    Bare { id: String },
+}
+
+#[derive(serde::Deserialize)]
+struct SessionRef {
+    id: String,
+}
+
 /// RAII cleanup for the transient session: if the future is dropped before
 /// normal completion (e.g. the stream is dropped), cancel in-flight work and
 /// best-effort delete the session.
@@ -608,111 +658,51 @@ impl PromptOutcome {
     }
 }
 
+/// The documented generate reply: `{"data":{"text": string}}`.
+///
+/// The text is the model's whole answer — the capture JSON, fenced or bare —
+/// or prose when the wire carried no schema to answer to.
 #[derive(serde::Deserialize)]
-struct PromptEnvelope {
-    #[serde(default)]
-    info: Option<AssistantInfo>,
-    #[serde(default)]
-    parts: Option<Vec<Value>>,
+struct GenerateEnvelope {
+    data: GenerateData,
 }
 
 #[derive(serde::Deserialize)]
-struct AssistantInfo {
-    #[serde(default)]
-    structured_output: Option<Value>,
-    #[serde(default)]
-    structured: Option<Value>,
-    #[serde(default)]
-    error: Option<AssistantError>,
+struct GenerateData {
+    text: String,
 }
 
-#[derive(serde::Deserialize)]
-struct AssistantError {
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    data: Option<Value>,
-}
-
+/// Decode the documented reply.
+///
+/// Two failure branches that must stay distinct: a reply that is not this
+/// ENVELOPE is a wire-shape mismatch ([`ProviderErrorKind::WireShape`]), while a
+/// text that is not JSON is the model's own miss and stays
+/// [`ProviderErrorKind::Protocol`] — the shared parser's classification.
 fn parse_prompt_response(
     value: &Value,
     structured_requested: bool,
 ) -> Result<PromptOutcome, ProviderError> {
-    let envelope: PromptEnvelope = serde_json::from_value(value.clone()).map_err(|error| {
+    // serde's message is dropped deliberately: it is unstable and describes the
+    // input (the response body).
+    let envelope: GenerateEnvelope = serde_json::from_value(value.clone()).map_err(|_| {
         ProviderError::new(
-            ProviderErrorKind::Protocol,
-            format!("prompt response was not JSON: {error}"),
+            ProviderErrorKind::WireShape,
+            "session prompt answered without a {\"data\":{\"text\"}} envelope",
         )
         .with_provider(PROVIDER_NAME)
     })?;
-
-    let info = envelope.info.ok_or_else(|| {
-        ProviderError::new(
-            ProviderErrorKind::Protocol,
-            "prompt response missing `info`",
-        )
-        .with_provider(PROVIDER_NAME)
-    })?;
-
-    if let Some(error) = info.error {
-        return Err(ProviderError::new(
-            ProviderErrorKind::Protocol,
-            format!(
-                "opencode reported {}: {}",
-                error.name.as_deref().unwrap_or("error"),
-                format_assistant_error(&error)
-            ),
-        )
-        .with_provider(PROVIDER_NAME));
+    let text = envelope.data.text;
+    if !structured_requested {
+        return Ok(PromptOutcome {
+            structured: None,
+            text: Some(text),
+        });
     }
-
-    let structured = info.structured_output.or(info.structured);
-    if structured_requested && structured.is_none() {
-        return Err(ProviderError::new(
-            ProviderErrorKind::Protocol,
-            "opencode returned no structured output (info.structured_output/info.structured were empty)",
-        )
-        .with_provider(PROVIDER_NAME));
-    }
-
-    let text = envelope.parts.as_deref().map(extract_assistant_text);
-    Ok(PromptOutcome { structured, text })
-}
-
-fn extract_assistant_text(parts: &[Value]) -> String {
-    parts
-        .iter()
-        .filter(|part| part.get("type").and_then(Value::as_str) == Some("text"))
-        .filter_map(|part| part.get("text").and_then(Value::as_str))
-        .collect::<Vec<_>>()
-        .join("\n")
-        .trim()
-        .to_owned()
-}
-
-fn format_assistant_error(error: &AssistantError) -> String {
-    let Some(data) = error.data.as_ref() else {
-        return error.name.clone().unwrap_or_default();
-    };
-    let message = data.get("message").and_then(Value::as_str);
-    let mut safe = serde_json::Map::new();
-    for key in ["statusCode", "providerID", "modelID"] {
-        if let Some(value) = data.get(key)
-            && (value.is_string() || value.is_number() || value.is_boolean())
-        {
-            safe.insert(key.to_owned(), value.clone());
-        }
-    }
-    let details = if safe.is_empty() {
-        String::new()
-    } else {
-        format!("details={}", Value::Object(safe))
-    };
-    match (message, details.is_empty()) {
-        (Some(message), false) => format!("{message}; {details}"),
-        (Some(message), true) => message.to_owned(),
-        (None, _) => details,
-    }
+    let structured = parse_structured(PROVIDER_NAME, &text)?;
+    Ok(PromptOutcome {
+        structured: Some(structured),
+        text: Some(text),
+    })
 }
 
 fn decode_json(response: &HostResponse, label: &str) -> Result<Value, ProviderError> {
@@ -933,7 +923,7 @@ impl AiProviderStructured for OpenCodeHostProvider {
         outcome.structured.ok_or_else(|| {
             ProviderError::new(
                 ProviderErrorKind::Protocol,
-                "opencode returned no structured output (info.structured_output/info.structured were empty)",
+                "the generate reply carried no JSON object",
             )
             .with_provider(PROVIDER_NAME)
         })
@@ -999,20 +989,12 @@ mod tests {
         assert_eq!(estimate_token_count("abcde"), 2);
     }
 
-    #[test]
-    fn assistant_error_details_never_echo_prompt_fields() {
-        let error = AssistantError {
-            name: Some("StructuredOutputError".to_owned()),
-            data: Some(json!({
-                "message": "schema validation failed",
-                "statusCode": 400,
-                "providerID": "anthropic",
-                "prompt": "secret prompt fragment"
-            })),
-        };
-        let rendered = format_assistant_error(&error);
-        assert!(rendered.contains("schema validation failed"));
-        assert!(rendered.contains("\"statusCode\":400"));
-        assert!(!rendered.contains("secret prompt fragment"));
-    }
+    // The deleted row `assistant_error_details_never_echo_prompt_fields` pinned
+    // `format_assistant_error`: the old reply's `info.error.name`/`data` were
+    // rendered with a whitelist and a prompt fragment was never echoed. The
+    // documented reply has no field for an assistant-side error (the assistant
+    // -side error name/data are a RECORDED LOSS, ADR-0029's amendment), so the
+    // types are gone. Its still-true claim — no response body reaches a message
+    // — is inherited by the `test_2_2_5_*` rows' absence assertions (row 4 on
+    // the create body, row 10 on the reply text) and by `decode_json`.
 }

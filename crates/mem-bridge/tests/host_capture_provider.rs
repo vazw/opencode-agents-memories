@@ -1,9 +1,10 @@
 //! The host arm's STRUCTURED path (ADR-0029), pinned over a fake host.
 //!
-//! The fake answers a FUTURE wire — top-level `{"id": …}` on session create and
-//! `info.structured_output` on the prompt — because the running 2.2.5 host has
-//! neither (`CONTEXT.md`, pinned today by `host_capture_e2e.rs`). These rows
-//! evidence the WIRING, never the owner's live host.
+//! The fake answers the **documented** wire: `{"data": {"id": …}}` on session create and
+//! `{"data": {"text": …}}` on the prompt (plus the permanent bare `{"id": …}`
+//! fall-through). Those shapes are READ from
+//! `docs/evidence/issue-88-host-wire-contract-20261101/` — a schema sample, never a
+//! transcript. The rows evidence the WIRING, not the owner's live host.
 //!
 //! Every row is hermetic: `service.json` lives under a temp `XDG_STATE_HOME`,
 //! the liveness probe is a double, and every HTTP call goes through the injected
@@ -29,11 +30,12 @@ use mem_bridge::host_provider::{HostResolverDeps, LazyHostProvider};
 use mem_core::env::EnvSource;
 use mem_episodic::store::EpisodicStore;
 use mem_store::platform::ProcessProbe;
-use mem_store::serde_json::{Value, json};
+use mem_store::serde_json::Value;
 
-/// The structured reply the fake host gives: a valid capture object.
+/// The structured reply the fake host gives: the documented
+/// `{"data":{"text": …}}` envelope, carrying a valid capture object as TEXT.
 const STRUCTURED_REPLY: &str =
-    r#"{"info":{"structured_output":{"summary":"s","type":"task","tags":[]}},"parts":[]}"#;
+    r#"{"data":{"text":"{\"summary\":\"s\",\"type\":\"task\",\"tags\":[]}"}}"#;
 
 struct AliveProbe;
 
@@ -114,7 +116,7 @@ impl HostTransport for FakeHost {
                     }
                 }
             }
-            HostMethod::Post if request.url.contains("/message") => HostResponse {
+            HostMethod::Post if request.url.contains("/generate") => HostResponse {
                 status: 200,
                 body: STRUCTURED_REPLY.to_owned(),
             },
@@ -315,6 +317,9 @@ async fn test_host_capture_persists_against_a_structured_host() {
 
 /// The schema must reach the WIRE, not just the `complete_structured` call:
 /// accepted and then dropped in the prompt body is the same dead-letter.
+///
+/// The documented `/generate` route has no `format` field, so the schema
+/// travels in the prompt TEXT, after the answer instruction.
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_host_prompt_body_carries_the_schema() {
     let state = TestDir::new("host-capture-provider-schema-state");
@@ -338,22 +343,25 @@ async fn test_host_prompt_body_carries_the_schema() {
     let prompt = transport
         .calls()
         .into_iter()
-        .find(|call| call.method == HostMethod::Post && call.url.contains("/message"))
+        .find(|call| call.method == HostMethod::Post && call.url.contains("/generate"))
         .expect("the prompt is sent");
     let body = prompt.body.expect("the prompt carries a JSON body");
-    let schema = &body["format"]["schema"];
-    assert_eq!(
-        body["format"]["type"], "json_schema",
-        "the provider is asked for a schema-bound answer: {body}"
+    let keys: Vec<&String> = body
+        .as_object()
+        .expect("the prompt body is an object")
+        .keys()
+        .collect();
+    assert_eq!(keys, vec!["prompt"], "the route declares one key: {body}");
+
+    let text = body["prompt"]
+        .as_str()
+        .expect("the prompt text is a string");
+    assert!(
+        text.contains(r#""required": ["summary", "type", "tags"]"#),
+        "the capture schema's required list is in the prompt text"
     );
-    let required = schema
-        .get("required")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    assert_eq!(
-        required,
-        vec![json!("summary"), json!("type"), json!("tags")],
-        "the capture schema's required list is on the wire: {body}"
+    assert!(
+        text.contains(mem_bridge::capture_context::SCHEMA_ANSWER_INSTRUCTION),
+        "the schema is presented as an answer contract, not a trailing blob"
     );
 }
