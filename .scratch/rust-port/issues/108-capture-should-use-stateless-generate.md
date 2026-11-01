@@ -123,3 +123,42 @@ one of them filed twice, existed only because we chose the stateful route.
 **The generalisable rule.** Before fixing a field on a request, check whether the request is needed. The
 spec that showed the failing field also listed the routes that make the whole object unnecessary — it was
 in the same 138-path document the whole time.
+
+## Addendum — the request contradicts itself about the reply format
+
+Found while reading upstream's V2 path (2026-11-01). This is the **original** capture failure, still
+present, and it will survive the route change unless it is fixed in the same wave.
+
+The capture request carries two incompatible instructions:
+
+```
+crates/mem-bridge/src/capture_prompt.rs   CAPTURE_SYSTEM_PROMPT, `FORMAT:` section
+                                          "## Request" / "## Outcome"        ← markdown
+crates/mem-bridge/src/capture_context.rs  SCHEMA_ANSWER_INSTRUCTION
+                                          "Answer with ONE JSON object that validates against this JSON
+                                           Schema, and nothing else:"        ← JSON
+```
+
+The schema block is appended to the *user* prompt; the markdown FORMAT is in the *system* prompt. A model
+told both things may emit markdown — which is exactly what was measured on 2026-11-01 as the original
+failure ("the model answers the CAPTURE_SYSTEM_PROMPT markdown FORMAT and `parse_capture_output` (JSON)
+fails"). Switching routes does not touch it.
+
+Upstream's V2 has no such split: `schemaPrompt()` folds the schema **and** a respond-with-only-JSON
+instruction into the single prompt, and the reply is parsed by a lenient scanner (`legacy-client.ts:23-83`)
+— direct JSON, a fenced block, or the last balanced object. Ours currently does `from_str` then a
+trailing-JSON fallback (`capture_prompt.rs:110`, `:290`).
+
+**Required in this wave, not later:**
+- [ ] `CAPTURE_SYSTEM_PROMPT` stops asking for markdown when a JSON schema is supplied — one instruction,
+      in one place, stating JSON-only. If the markdown FORMAT is kept for any caller, the split must be
+      explicit and the schema path must not inherit it.
+- [ ] The parse decision is stated: either match upstream's three lenient shapes (direct / fenced / last
+      balanced object) with a named failure when all three miss, or keep strict parsing and report a fenced
+      reply as a distinct named reason. Silence is not an option — the route has no schema enforcement, so
+      the parser is the only guard.
+- [ ] A test pins the contradiction's absence: one row asserting the assembled request contains no
+      markdown-format instruction when a schema is present.
+
+Note: still unmeasured whether the model complies. This addendum makes non-compliance *visible and
+attributable*; it does not promise compliance.
