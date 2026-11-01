@@ -65,14 +65,17 @@ Full process: `docs/agents/workflow.md`.
 
 ## Current state & stack
 
+Counts below were re-derived 2026-11-01 and are a snapshot: re-run "Verify this file" before quoting any of
+them, and prefer a description over a numeral when the numeral cannot be kept cheaply true.
+
 - Root package `opencode-agents-memory` is the **composition root** over the **12 crates under
   `crates/*`**: `src/main.rs` is sync arg-parse and dispatch (a `purge-session` mode included), `src/lib.rs`
   exposes `web_dist` (`src/web_dist.rs` resolves the built UI), and root `tests/` holds
-  11 workspace-level suites (`tests/workspace_deps.rs` enforces ADR-0001's allowed edges).
+  17 workspace-level suites (`tests/workspace_deps.rs` enforces ADR-0001's allowed edges).
 - Every tracked `Cargo.toml` is `edition = "2024"` (members inherit `[workspace.package]`); `web-ui/` is an
   excluded workspace of its own (Leptos/Thaw CSR, wasm-only, `trunk`-built).
 - `plugin/` is the OpenCode wrapper — plain `node`, no npm/Bun dependency, no lockfile: `plugin/dist/`
-  bundles, 10 `*.test.mjs` files, and `plugin/scripts/stage-engine.sh`, which stages a built engine
+  bundles, 28 `*.test.mjs` files, and `plugin/scripts/stage-engine.sh`, which stages a built engine
   beside the packaged UI under the gitignored `plugin/engine/<platform>-<arch>/`.
 - Dependencies live once in `[workspace.dependencies]`, consumed as `{ workspace = true }`: `turso` 0.8,
   `tokio`, `ort` + `tokenizers`, `axum` 0.8 + `tower-http`, `serde`/`jsonc-parser`, `tracing`, `chrono`,
