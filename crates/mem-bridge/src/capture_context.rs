@@ -19,6 +19,10 @@ pub const CONTEXT_TRUNCATION_MARKER: &str = "\n[... truncated to autoCaptureMaxC
 pub const DEFAULT_AUTO_CAPTURE_MAX_CONTEXT_BYTES: usize = 131_072;
 
 /// The instruction that turns the appended schema into an answer contract.
+///
+/// This is the ONE format authority for the capture lane: the system prompt
+/// carries no format block, so a reply shaped by this instruction (and nothing
+/// contradicting it) is what every caller receives.
 pub const SCHEMA_ANSWER_INSTRUCTION: &str =
     "Answer with ONE JSON object that validates against this JSON Schema, and nothing else:";
 

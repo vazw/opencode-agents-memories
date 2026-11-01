@@ -23,6 +23,13 @@ use crate::capture::{CaptureExtension, CaptureSummaryOutput, SkipReason};
 /// language line resolved by the configured `auto_capture_language`, whose
 /// port default is "English" — upstream's `auto` resolves via a language
 /// detector the port does not yet carry).
+///
+/// It deliberately carries NO format block: its only production reader is
+/// [`ProviderCaptureSummarizer::summarize`], which always supplies the schema,
+/// so the single format instruction is
+/// [`crate::capture_context::SCHEMA_ANSWER_INSTRUCTION`], appended after the
+/// context. A markdown `FORMAT:` block here contradicted it and is what a
+/// schema-free host answered.
 pub const CAPTURE_SYSTEM_PROMPT: &str = "\
 You are a technical memory recorder for a software development project.
 
@@ -33,13 +40,6 @@ RULES:
 4. Include specific file names, functions, technical details
 5. Generate 2-4 technical tags (e.g., \"react\", \"auth\", \"bug-fix\")
 6. You MUST write the summary in English.
-
-FORMAT:
-## Request
-[1-2 sentences: what was requested, in English]
-
-## Outcome
-[1-2 sentences: what was done, include files/functions, in English]
 
 SKIP if: greetings, casual chat, no code/decisions made
 CAPTURE if: code changed, bug fixed, feature added, decision made";

@@ -494,3 +494,44 @@ fn test_108_classify_model_output_is_retryable() {
         "the reply text is never echoed: {detail}"
     );
 }
+
+/// Issue 108 — the request must not contradict itself about format.
+///
+/// `CAPTURE_SYSTEM_PROMPT` used to ask for a markdown `FORMAT:` block while
+/// `SCHEMA_ANSWER_INSTRUCTION` asked for JSON, so a schema-free host answered
+/// markdown. The provider folds `request.system` with the last user message
+/// (`prompt_text`), so that is the exact text asserted here: it carries the
+/// one format instruction and neither markdown heading.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_108_capture_request_never_asks_for_markdown() {
+    let capture = ScriptedCapture::new(Answer::Value(
+        json!({ "summary": "s", "type": "task", "tags": [] }),
+    ));
+    let summarizer = ProviderCaptureSummarizer::new(capture.clone(), MODEL, 131_072);
+
+    summarizer
+        .summarize("user: capture this")
+        .await
+        .expect("the double answers a capture");
+
+    let recorded = capture.recorded();
+    assert_eq!(recorded.len(), 1, "one structured call");
+    let request = &recorded[0].0;
+    // Exactly the fold the provider performs: system side + last user message.
+    let system = request.system.clone().unwrap_or_default();
+    let user = request.last_user_message().unwrap_or_default();
+    let assembled = format!("{system}\n\n{user}");
+
+    assert!(
+        assembled.contains(mem_bridge::capture_context::SCHEMA_ANSWER_INSTRUCTION),
+        "the single format instruction reaches the request"
+    );
+    assert!(
+        !assembled.contains("## Request"),
+        "no markdown FORMAT block survives: {assembled}"
+    );
+    assert!(
+        !assembled.contains("## Outcome"),
+        "no markdown FORMAT block survives: {assembled}"
+    );
+}
