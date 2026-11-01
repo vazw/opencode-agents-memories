@@ -31,14 +31,19 @@ existing adapter already speaks.
 `get_auto_capture_provider_status`'s *manual* arm exactly; only the precedence differs (D-28-3).
 
 **D-28-2 — A CLAIMED block fails closed with a NAME, never a silent switch.**
-"Claimed" = at least one of the three values is non-blank (`memoryProvider` alone cannot say it: it is
-not an `Option` in `Config` and defaults to `openai-chat`). A claimed block that cannot be built — a
-required field missing, an obvious placeholder key (`is_placeholder_api_key`), or the registry rejecting
-the config — yields `reason: "memory_provider_unusable"` on the `Auto-capture provider unavailable` line
-and passes **no** provider to composition, so the capture path reports
-`capture_provider_unavailable`. Quietly using another provider would hide a typo in the endpoint the
-operator asked for. One reason string covers the three inputs on purpose: they share one fix, and the
-line names the layer.
+"Claimed" = `memoryProvider` was **present in the config file** (`Config.memory_provider_claimed`,
+carried from `FileConfig` — the resolved value always exists and defaults to `openai-chat`, so it
+cannot answer this), OR at least one of `memoryModel`/`memoryApiUrl`/`memoryApiKey` is non-blank. A
+claimed block that cannot be built — a required field missing, an obvious placeholder key
+(`is_placeholder_api_key`), or the registry rejecting the config — yields
+`reason: "memory_provider_unusable"` on the `Auto-capture provider unavailable` line and passes **no**
+provider to composition, so the capture path reports `capture_provider_unavailable`. Quietly using
+another provider would hide a typo in the endpoint the operator asked for. One reason string covers
+the three inputs on purpose: they share one fix, and the line names the layer.
+
+Naming `memoryProvider` alone (`"memoryProvider": "anthropic"`, no other field) is therefore a claim:
+it fails closed. It previously fell back to the host silently, because only the three values were
+consulted — the exact quiet fallback this decision exists to prevent.
 
 **D-28-3 — Deliberate divergence from `get_auto_capture_provider_status`'s order.**
 That function is a pinned port of upstream `getAutoCaptureProviderStatus` and answers "opencode branch
@@ -48,6 +53,15 @@ recorded: with both blocks configured, the status report says `Ready { OpenCode 
 provider in use is `openai-chat`. The `Auto-capture provider ready` line's `providerId` is the
 authoritative statement of which one is live; aligning or retiring the status function is a follow-up,
 not a silent change to a ported contract.
+
+**The production path is `run_in_runtime` → `engine_capture_provider` → `build_composed_runtime`.**
+The first landing of this ADR defined the selector but never called it from `run_in_runtime`, which kept
+building, warming and passing the HOST provider: the manual block was dead code and the ready line named
+the host — a mechanism that reads as satisfied but cannot fire. `engine.rs`'s `run_in_runtime` now passes
+the selector's result, and `tests/engine_capture_provider.rs` spawns the built engine over a private
+`HOME` to assert the ready line says `providerId: "openai-chat"` for a manual config (and no host line).
+`get_auto_capture_provider_status` still needs no change, and that claim depends on this wiring: the ready
+line is only authoritative because it is now produced for the provider actually in use.
 
 **D-28-4 — The key rides as a per-call bearer header, never on the struct.**
 `Config.memory_api_key` holds the **resolved** secret. It is seated in a `StaticSecretResolver` under
@@ -62,6 +76,32 @@ over an injected transport; `register_builtin()` is the production spelling (`re
 lets a test drive config → `ProviderConfig` → real adapter → recording transport and assert the endpoint
 and the `Authorization: Bearer` header **without touching the network**. `RemoteBuild` became a boxed
 closure to carry the transport.
+
+**D-28-6 — A cleartext non-loopback endpoint is a NAMED warning, not a refusal (mandate 5).**
+The key is materialised as `Authorization: Bearer <secret>`. Over `http://` to a NON-loopback host any
+observer on the network path can read it and impersonate the owner. The owner's live endpoint
+(`http://10.90.11.16:4000/v1`, a private-LAN LiteLLM proxy) is exactly that case, so refusing it would
+have disabled the one working capture path; the decision is to **report** it: one
+`Auto-capture provider insecure endpoint` line per engine start, payload
+`{ baseUrl, scheme: "http", hint }` with userinfo stripped (`AUTO_CAPTURE_PROVIDER_INSECURE_ENDPOINT`).
+
+Rules:
+- `https://` — allowed, no line.
+- `http://` on a **loopback** host (`127.0.0.0/8`, `::1`, `localhost`) — allowed, no line: that is the
+  documented local-provider case (Ollama-style endpoints), where the credential does not leave the box.
+- `http://` on anything else, with a key attached — allowed **and warned**.
+- An unparsable `memoryApiUrl` is not this predicate's business; the registry rejects what it cannot use.
+
+**Residual risk, accepted and stated:** while that endpoint stays `http://`, the credential is exposed to
+the LAN. Remediation is the owner's: terminate TLS on the proxy, or reach it through a loopback tunnel.
+The follow-up (a hard refusal for non-loopback `http://` once no live config depends on it) is not
+recorded here as done.
+
+**D-28-7 — The ready line logs a SANITIZED endpoint.**
+`memoryApiUrl` is operator input; an embedded `user:pass@` would otherwise be written to the sink
+verbatim (the host arm logs a resolved origin and `HostAuthorization` is redacted). The manual arm logs
+the parsed URL with userinfo cleared, keeping scheme/host/port/path (the diagnosable part, e.g. `/v1`).
+An unparsable value is stripped textually rather than trusted. The key itself is never logged on any arm.
 
 ## Known consequence: `env://` references need the variable in the ENGINE's process
 
@@ -78,14 +118,44 @@ Two routes, both outside this ADR's change:
 2. A wrapper allowlist knob (e.g. `OPENCODE_MEM_CHILD_ENV=LITELLM_API_KEY`) — a deliberate widening of
    the child environment's secret policy, which is why it is not smuggled into this wiring commit.
 
+## Known consequence: a `file://` key must be created `0600` — nothing enforces it
+
+`resolve_secret_value` (`crates/mem-core/src/config/normalize.rs`) reads `file://` (with `~/` expansion)
+and trims the content, but performs **no permission check**: a `0644` key file under a default umask is
+accepted silently. The requirement is the operator's:
+
+```sh
+install -m 600 /dev/stdin ~/.config/litellm-key.txt   # then paste the key, Ctrl-D
+# or: umask 077 && printf '%s' "$KEY" > ~/.config/litellm-key.txt
+```
+
+Follow-up (not this commit): `resolve_secret_value` should refuse a `file://` secret that is group- or
+world-readable (mandate 4/10), naming the path and the mode.
+
+## Known consequence: a `dummy` key proves WIRING only
+
+`"dummy"` is **not** in `PLACEHOLDER_API_KEYS` (`crates/mem-core/src/config/mod.rs`), so
+`LITELLM_API_KEY=dummy` builds a live provider that sends `Authorization: Bearer dummy`. The proxy
+normally answers `401`: the wiring row is then green (`providerId: openai-chat`, a named provider failure
+in the log) while no `Auto-capture memory persisted` line can appear. Only a REAL key can produce a
+persisted capture — that is the acceptance signal, and only the owner can observe it.
+
 ## Verification
 
 - `crates/mem-bridge/tests/memory_provider.rs`: manual wins over a configured host block; unconfigured
-  falls back to the host; a partial block fails closed with `memory_provider_unusable`; the configured
-  `memoryApiUrl` receives the completion with `Authorization: Bearer <key>` and the resolved key never
-  reaches the log; a missing `env://` reference names the variable; every `memoryProvider` value maps to
-  its adapter.
+  falls back to the host; a partial block fails closed with `memory_provider_unusable`; a
+  `memoryProvider`-only claim fails closed the same way; the configured `memoryApiUrl` receives the
+  completion with `Authorization: Bearer <key>` and the resolved key never reaches the log; the ready
+  line strips URL userinfo; a cleartext non-loopback endpoint emits exactly that named line while the
+  loopback/`https` predicate rows stay silent; a missing `env://` reference names the variable; every
+  `memoryProvider` value maps to its adapter.
+- `tests/engine_capture_provider.rs` (root package — `CARGO_BIN_EXE_…` is only defined where the binary
+  is declared): a SPAWNED engine over a private `HOME` whose config names the manual provider logs
+  `providerId: "openai-chat"`, no host ready line, no `memory_provider_unusable`, no key, and exits 0 on
+  stdin EOF. This is the row that pins the production call site; it failed against the pre-rework tree
+  with `Auto-capture provider unavailable {"reason":"service_file_missing"}`.
 - Mutation checks recorded in the handoff: forcing the selector to `None` (host-only) fails 2 rows;
   dropping `api_key_ref` fails the endpoint/credential row.
 - **The end-to-end proof is the first live `Auto-capture memory persisted` line** — only the owner can
-  observe it, and only once the key is reachable in the engine's process (see above).
+  observe it, and only once the key is reachable in the engine's process (see above) and the engine is
+  restaged.

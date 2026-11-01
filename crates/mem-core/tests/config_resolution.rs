@@ -363,6 +363,50 @@ fn test_atlas_cloud_key_from_env_and_manual_ready() {
     );
 }
 
+/// The key's PRESENCE is a separate fact from its resolved value (ADR-0028
+/// D-28-2): `memoryProvider` always resolves (default `openai-chat`), so only
+/// the file layer can say whether the operator named one.
+#[test]
+fn test_memory_provider_key_presence_is_carried_apart_from_its_default() {
+    let absent = run_ok(None, None, &Env::new());
+    assert_eq!(
+        absent.memory_provider,
+        mem_core::config::MemoryProvider::OpenAiChat,
+        "the resolved value defaults"
+    );
+    assert!(
+        !absent.memory_provider_claimed,
+        "an absent memoryProvider is not a claim"
+    );
+
+    let claimed = run_ok(
+        Some(r#"{"memoryProvider": "anthropic"}"#),
+        None,
+        &Env::new(),
+    );
+    assert!(
+        claimed.memory_provider_claimed,
+        "an explicit memoryProvider is a claim"
+    );
+    assert_eq!(
+        claimed.memory_provider,
+        mem_core::config::MemoryProvider::Anthropic
+    );
+
+    // The claim also survives the DEFAULT value being named explicitly: the
+    // operator writing `openai-chat` is still naming a provider.
+    let explicit_default = run_ok(
+        Some(r#"{"memoryProvider": "openai-chat"}"#),
+        None,
+        &Env::new(),
+    );
+    assert!(explicit_default.memory_provider_claimed);
+    assert_eq!(
+        explicit_default.memory_provider,
+        mem_core::config::MemoryProvider::OpenAiChat
+    );
+}
+
 #[test]
 fn test_project_memory_provider_switch_to_atlas_cloud_rejected() {
     let error = run(

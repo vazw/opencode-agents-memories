@@ -678,6 +678,11 @@ pub struct Config {
     pub auto_capture_language: Option<String>,
 
     pub memory_provider: MemoryProvider,
+    /// True when `memoryProvider` was PRESENT in the config file. The resolved
+    /// value always exists (it defaults to `openai-chat`), so only the file
+    /// layer can answer "did the operator name a provider" — the claim bit
+    /// ADR-0028 D-28-2 needs to fail closed instead of quietly using the host.
+    pub memory_provider_claimed: bool,
     pub memory_model: Option<String>,
     pub memory_api_url: Option<String>,
     pub memory_api_key: Option<String>,

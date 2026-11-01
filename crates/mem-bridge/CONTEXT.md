@@ -93,16 +93,29 @@
 - **precedence** — a COMPLETE manual block wins over the OpenCode host; with no
   manual field set the host path (ADR-0027) applies; a CLAIMED but unusable
   block fails closed with `reason: "memory_provider_unusable"` rather than
-  silently switching provider. `engine_capture_provider` is the single place
-  that decides, and its `Auto-capture provider ready` line names the winner.
+  silently switching provider. "Claimed" includes an explicit `memoryProvider`
+  key (carried as `Config.memory_provider_claimed`: the resolved value always
+  exists, so only the file layer can say it was named).
+  `engine_capture_provider` is the single place that decides — and
+  `run_in_runtime` is its production caller, passing the selector's result to
+  `build_composed_runtime`; the host provider is warmed only on the host arm.
+  `tests/engine_capture_provider.rs` (root package) spawns the built engine to
+  pin that call site. Its `Auto-capture provider ready` line names the winner
+  with the endpoint's userinfo stripped.
+- **cleartext endpoints are named** — `http://` to a NON-loopback host while a
+  key is attached emits one `Auto-capture provider insecure endpoint` line
+  (`baseUrl`, `scheme`, `hint`), because the key then rides `Authorization:
+  Bearer` in the open (ADR-0028 D-28-6). Loopback `http://` and every
+  `https://` endpoint stay silent.
 - **divergence, recorded** — `get_auto_capture_provider_status` stays the
   upstream-parity report (opencode first) and is NOT the wiring's rule; with
   both blocks configured it reports `OpenCode` while `openai-chat` is live.
 - **`env://` needs the variable in the ENGINE's process** — the wrapper's
   `childEnvironment()` whitelist does not forward arbitrary variables, so
   `env://LITELLM_API_KEY` fails at config load with a message naming it
-  (engine exits 70). A `file://` reference works today; a wrapper allowlist
-  knob is a separate security decision.
+  (engine exits 70). A `file://` reference works today (create it `0600`: the
+  loader checks no permissions); a wrapper allowlist knob is a separate
+  security decision.
 
 **Deferred register rows (orchestrator; W6.2 owns `docs/agents/testing.md`):**
 the `-32002` code row, the exit-code-75 row, the status-file-format row.

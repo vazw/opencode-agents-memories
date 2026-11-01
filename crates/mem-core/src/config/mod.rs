@@ -456,6 +456,7 @@ impl Config {
             auto_capture_max_context_bytes,
             auto_capture_language: file.auto_capture_language,
             memory_provider,
+            memory_provider_claimed: file.memory_provider.is_some(),
             memory_model: file.memory_model,
             memory_api_url: file.memory_api_url,
             memory_api_key,

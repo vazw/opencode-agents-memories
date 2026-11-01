@@ -18,7 +18,8 @@ use mem_ai::provider::{
 use mem_bridge::host_endpoint::ProcessClock;
 use mem_bridge::host_provider::{HostResolverDeps, LazyHostProvider};
 use mem_bridge::manual_provider::{
-    MEMORY_API_KEY_REF, REASON_UNUSABLE, build_manual_provider, provider_config,
+    MEMORY_API_KEY_REF, REASON_UNUSABLE, build_manual_provider, is_cleartext_non_loopback,
+    provider_config,
 };
 use mem_core::config::{Config, ConfigPaths, MemoryProvider};
 use mem_core::env::EnvSource;
@@ -165,6 +166,14 @@ const PARTIAL_MANUAL: &str = r#"{
   "memoryModel": "qwen3.8-flash-next-uncensored-nothink"
 }"#;
 
+/// `memoryProvider` NAMED and nothing else: a claim with no credentials.
+const PROVIDER_ONLY_CLAIM: &str = r#"{
+  "autoCaptureEnabled": true,
+  "opencodeProvider": "opencode-go",
+  "opencodeModel": "beam-free",
+  "memoryProvider": "anthropic"
+}"#;
+
 /// The manual block, when complete, wins over the OpenCode host.
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_manual_fallback_wins_over_the_opencode_host() {
@@ -225,6 +234,138 @@ async fn test_claimed_but_incomplete_manual_config_fails_closed_with_a_named_rea
     assert!(
         content.contains(&format!("\"reason\":\"{REASON_UNUSABLE}\"")),
         "the failure is named: {content}"
+    );
+}
+/// An EXPLICIT `memoryProvider` alone is a claim (ADR-0028 D-28-2, rework F2):
+/// the operator named a provider, so a missing credential fails closed instead
+/// of quietly dialling the OpenCode host.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_memory_provider_only_claim_fails_closed_with_a_named_reason() {
+    let _ = sink();
+    let home = TestDir::new("memory-provider-claim-home");
+    let state = TestDir::new("memory-provider-claim-state");
+    let config = load_config(home.path(), PROVIDER_ONLY_CLAIM, &[]);
+    assert!(
+        config.memory_provider_claimed,
+        "the key's presence is carried on the resolved config"
+    );
+
+    let provider =
+        mem_bridge::engine::engine_capture_provider(&config, host_provider(state.path()));
+    assert!(
+        provider.is_none(),
+        "an operator who named a provider must never silently get the OpenCode host"
+    );
+
+    let content = sink_text();
+    assert!(
+        content.contains(&format!("\"reason\":\"{REASON_UNUSABLE}\"")),
+        "the failure is named: {content}"
+    );
+}
+
+/// Mandate 5 (ADR-0028 D-28-6): cleartext `http://` to a NON-loopback host is
+/// the insecure case; loopback `http://` (local Ollama-style providers) and
+/// every `https://` endpoint are not.
+#[test]
+fn test_cleartext_non_loopback_predicate() {
+    for insecure in [
+        "http://10.90.11.16:4000/v1",
+        "http://192.168.1.5/v1",
+        "http://litellm.example/v1",
+        "http://[2001:db8::1]:4000/v1",
+    ] {
+        assert!(
+            is_cleartext_non_loopback(insecure),
+            "{insecure} carries a bearer secret in the clear"
+        );
+    }
+    for allowed in [
+        "http://127.0.0.1:4000/v1",
+        "http://127.0.0.1:11434/v1",
+        "http://localhost:11434/v1",
+        "http://LOCALHOST:8000/v1",
+        "http://[::1]:4000/v1",
+        "https://10.90.11.16:4000/v1",
+        "https://litellm.example/v1",
+        "not a url",
+        "",
+    ] {
+        assert!(
+            !is_cleartext_non_loopback(allowed),
+            "{allowed} is not a cleartext non-loopback endpoint"
+        );
+    }
+}
+
+/// The insecure case is named once on a log line, and the line carries no
+/// credential (it logs the origin-shaped URL, not the query/Debug form).
+#[test]
+fn test_cleartext_non_loopback_endpoint_is_named_on_the_log() {
+    let _ = sink();
+    let home = TestDir::new("memory-provider-insecure-home");
+    let config = load_config(
+        home.path(),
+        r#"{
+  "memoryProvider": "openai-chat",
+  "memoryModel": "qwen3.8-flash-next-uncensored-nothink",
+  "memoryApiUrl": "http://10.90.11.16:4000/v1",
+  "memoryApiKey": "sk-dummy-key-do-not-log"
+}"#,
+        &[],
+    );
+
+    let built = build_manual_provider(&config, RecordingTransport::new())
+        .expect("the block still builds: the warning is a report, not a refusal");
+    assert!(built.is_some(), "the operator's endpoint keeps working");
+
+    let content = sink_text();
+    assert!(
+        content.contains(mem_core::logging::signatures::AUTO_CAPTURE_PROVIDER_INSECURE_ENDPOINT),
+        "the cleartext endpoint is named: {content}"
+    );
+    assert!(
+        content.contains("\"baseUrl\":\"http://10.90.11.16:4000/v1\""),
+        "the warning names the endpoint: {content}"
+    );
+    assert!(
+        !content.contains(MEMORY_KEY),
+        "the warning never carries the key"
+    );
+}
+
+/// F6: userinfo in `memoryApiUrl` must never reach the sink — the ready line
+/// logs the sanitized URL, like the host arm's resolved origin.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_ready_line_strips_url_userinfo() {
+    let _ = sink();
+    let home = TestDir::new("memory-provider-userinfo-home");
+    let state = TestDir::new("memory-provider-userinfo-state");
+    // `https://` so this row isolates the redaction from the cleartext warning.
+    let config = load_config(
+        home.path(),
+        r#"{
+  "memoryProvider": "openai-chat",
+  "memoryModel": "qwen3.8-flash-next-uncensored-nothink",
+  "memoryApiUrl": "https://user:pass@litellm.example/v1",
+  "memoryApiKey": "sk-dummy-key-do-not-log"
+}"#,
+        &[],
+    );
+
+    let provider =
+        mem_bridge::engine::engine_capture_provider(&config, host_provider(state.path()))
+            .expect("the complete manual block composes a provider");
+    assert_eq!(provider.name(), "openai-chat");
+
+    let content = sink_text();
+    assert!(
+        content.contains("\"baseUrl\":\"https://litellm.example/v1\""),
+        "the ready line logs the sanitized endpoint: {content}"
+    );
+    assert!(
+        !content.contains("user:pass"),
+        "userinfo never reaches the sink: {content}"
     );
 }
 

@@ -1241,19 +1241,27 @@ pub fn engine_host_provider(
 /// (`memoryModel` + `memoryApiUrl` + `memoryApiKey`, or just the key for the
 /// preset providers) wins, because filling it in is the operator naming an
 /// endpoint; otherwise the OpenCode host provider applies, which is the
-/// transport path this crate resolves lazily.
+/// transport path this crate resolves lazily — and this is the ONLY place it is
+/// warmed, so a manual block never touches `service.json` or `/proc`.
 ///
 /// A CLAIMED-but-unusable manual block fails closed (`None`) with the named
 /// reason on the log: quietly using another provider would hide a typo in the
 /// endpoint the operator asked for.
+///
+/// [`run_in_runtime`] is the production caller: a selector with none is a
+/// mechanism that reads as satisfied but cannot fire (rework F1).
 pub fn engine_capture_provider(
     config: &mem_core::config::Config,
     host_provider: Arc<crate::host_provider::LazyHostProvider>,
 ) -> Option<Arc<dyn mem_ai::provider::AiProvider>> {
     match crate::manual_provider::manual_capture_provider(config) {
         Ok(Some(provider)) => {
+            // F6: the endpoint is operator input; log it with any userinfo
+            // stripped, so the manual arm redacts like the host arm's origin.
             crate::host_provider::log_provider_ready(
-                config.memory_api_url.as_deref().unwrap_or_default(),
+                &crate::manual_provider::sanitized_base_url(
+                    config.memory_api_url.as_deref().unwrap_or_default(),
+                ),
                 None,
                 config.memory_provider.as_str(),
             );
@@ -1305,10 +1313,7 @@ pub async fn run_in_runtime(
     // acquired first (§B3), and a composition failure still launches the web
     // server with `deps: None` — the existing degrade path.
     // The host provider is composed HERE, once, over the resolved config and
-    // the real seams: composition never fabricates one. `warm()` performs the
-    // single startup resolution, so the log carries either the resolved base
-    // plus `service.json`'s version or the named resolution reason — never an
-    // anonymous dead-letter later on.
+    // the real seams: composition never fabricates one.
     let host_provider = engine_host_provider(
         &core_config,
         Arc::new(mem_core::env::ProcessEnv),
@@ -1316,13 +1321,18 @@ pub async fn run_in_runtime(
         Arc::new(crate::host_endpoint::SystemProcessClock),
         Arc::new(mem_ai::provider::ReqwestHostTransport::new()),
     );
-    let _ = host_provider.warm();
+    // The ONE startup decision (ADR-0028): a COMPLETE manual block wins, a
+    // claimed-but-unusable one fails closed, and otherwise this is the host
+    // provider warmed exactly once — inside the selector, so a manual block
+    // never reads `service.json`. Composition receives the SELECTOR's result;
+    // building the host provider above does no I/O on its own.
+    let capture_provider = engine_capture_provider(&core_config, host_provider);
 
     let composed = match crate::composition::build_composed_runtime(
         &config.storage_root,
         &core_config,
         crate::composition::embedder_from_config(&core_config),
-        Some(host_provider.clone() as Arc<dyn mem_ai::provider::AiProvider>),
+        capture_provider,
     )
     .await
     {

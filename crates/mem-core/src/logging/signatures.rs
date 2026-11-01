@@ -1,5 +1,6 @@
 //! The nine structured-log signatures `GET /api/stats` scrapes, as ONE
-//! public spelling for the writer side.
+//! public spelling for the writer side — plus the operator-facing provider
+//! warnings that must never be scraped as a counter or an error bucket.
 //!
 //! The reader (`crates/mem-web/src/api/stats.rs`) keeps its own literals and is
 //! frozen; these constants and that classifier are two spellings of one
@@ -87,6 +88,19 @@ pub const AUTO_CAPTURE_PROVIDER_READY: &str = "Auto-capture provider ready";
 /// resolution: payload `{ reason, hostVersion? }` where `reason` is one of the
 /// ten `mem_bridge::host_endpoint::HostWiringError` strings.
 pub const AUTO_CAPTURE_PROVIDER_UNAVAILABLE: &str = "Auto-capture provider unavailable";
+
+/// `Auto-capture provider insecure endpoint`. Emitted once per engine start
+/// when the configured MANUAL endpoint is cleartext `http://` on a NON-loopback
+/// host while an API key is attached — the key then crosses the network as an
+/// `Authorization: Bearer` header that any observer on the path can read
+/// (mandate 5, ADR-0028 D-28-6). Payload `{ baseUrl, scheme, hint }`, userinfo
+/// stripped; loopback `http://` is the documented local-provider case and emits
+/// nothing.
+///
+/// Deliberately NOT one of the nine scraped signatures above: this module also
+/// holds the writer-side spellings that `GET /api/stats` must ignore, and the
+/// classifier's `NAMED_ERROR_BUCKETS` matches message prefixes (none here).
+pub const AUTO_CAPTURE_PROVIDER_INSECURE_ENDPOINT: &str = "Auto-capture provider insecure endpoint";
 
 /// `Auto-capture provider failed`. Emitted once per summarizer failure (the
 /// capture drain's provider leg): payload `{ captureId, reason, errorKind,
