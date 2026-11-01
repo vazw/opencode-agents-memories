@@ -45,3 +45,8 @@ for f in .scratch/*/issues/*.md; do
   [ -n "$c" ] && printf 'STALE-CLAIM %s: %s\n' "$f" "$c"
 done
 ```
+
+**Anchor every count.** An unanchored `grep 'Status:.*ready-for-agent'` also matches a *quoted* status
+line inside another issue's body — issues 51 and 67 each carry one — so a number taken that way is not a
+measurement. Use the anchored form, `grep -l '^Status:.*ready-for-agent' .scratch/*/issues/*.md | wc -l`,
+which is the pattern the loop above already greps.

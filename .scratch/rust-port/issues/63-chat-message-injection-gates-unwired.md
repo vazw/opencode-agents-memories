@@ -4,6 +4,10 @@ Status: ready-for-agent — 2026-10-27 (premise measured at HEAD `43cb442`; file
 which refused to let a blueprint's "N-A" retire behaviour that is unimplemented rather than inapplicable.
 Brief at the end of this file.)
 
+## Parent
+
+Sequencing parent: issue 94. This issue owns the switch; 85 owns the session-id plumbing it depends on.
+
 ## PREMISE — measured, not inherited
 
 `crates/mem-core` resolves the chat-message configuration and hands it to the engine. **Six resolved keys have
