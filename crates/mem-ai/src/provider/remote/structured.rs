@@ -6,6 +6,20 @@
 //! end, so partial chunks — including a chunk split mid-string or mid-escape —
 //! never panic. A malformed final document surfaces as
 //! [`ProviderErrorKind::Protocol`].
+//!
+//! Two entry points with different strictness, deliberately:
+//!
+//! - [`parse_structured`] / [`StructuredAccumulator::finish`] are **strict**.
+//!   The remote provider adapters use them, and every one of those routes
+//!   enforces `json_schema` server-side, so a reply that is not a bare JSON
+//!   document is a genuine protocol error there. Leniency on those routes is
+//!   unmeasured and would mask a real contract break.
+//! - [`parse_structured_lenient`] is the **three-shape recovery** for routes
+//!   that cannot enforce a schema (the host's stateless generate route). It
+//!   mirrors upstream `legacy-client.ts`'s `parseJson`: direct JSON, then the
+//!   first fenced block, then every balanced top-level object keeping the last
+//!   that parses. A miss is [`ProviderErrorKind::ModelOutput`] — a named,
+//!   retryable outcome rather than an anonymous protocol failure.
 
 use serde_json::Value;
 
@@ -67,11 +81,105 @@ impl StructuredAccumulator {
     }
 }
 
-/// Assemble a single text blob into a JSON value.
+/// Assemble a single text blob into a JSON value, strict (see the module doc).
 pub fn parse_structured(provider: &str, text: &str) -> Result<Value, ProviderError> {
     let mut accumulator = StructuredAccumulator::new();
     accumulator.push(text);
     accumulator.finish(provider)
+}
+
+/// Recover a JSON value from a reply that may be wrapped in prose or fences.
+///
+/// Three shapes, tried in upstream's order (`example/opencode-mem/src/v2/
+/// legacy-client.ts:23-83`): the whole text as JSON, then the first fenced
+/// block, then every balanced top-level `{…}` span (string/escape aware),
+/// keeping the **last** one that parses — models often emit a stub or an
+/// example before the final answer. A miss is a [`ProviderErrorKind::ModelOutput`]
+/// naming all three shapes; the message carries only the reply's byte length.
+pub fn parse_structured_lenient(provider: &str, text: &str) -> Result<Value, ProviderError> {
+    let trimmed = text.trim();
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        return Ok(value);
+    }
+    let fenced = first_fenced_block(trimmed);
+    if let Some(inner) = fenced
+        && let Ok(value) = serde_json::from_str::<Value>(inner)
+    {
+        return Ok(value);
+    }
+    if let Some(value) = last_balanced_object(fenced.unwrap_or(trimmed)) {
+        return Ok(value);
+    }
+    Err(ProviderError::new(
+        ProviderErrorKind::ModelOutput,
+        format!(
+            "structured output matched none of: direct JSON, fenced block, balanced object (reply {} bytes)",
+            text.len()
+        ),
+    )
+    .with_provider(provider))
+}
+
+/// The first ```/```json fenced block's inner text, when the reply has one.
+fn first_fenced_block(text: &str) -> Option<&str> {
+    let open = text.find("```")?;
+    let after_open = &text[open + 3..];
+    let body_start = after_open.find('\n')? + 1;
+    let body = &after_open[body_start..];
+    let close = body.find("```")?;
+    Some(body[..close].trim())
+}
+
+/// Every balanced top-level `{…}` span's last parseable value.
+///
+/// Braces inside JSON strings and escaped quotes are ignored. The search
+/// offset always advances past a closing brace (or stops at an unterminated
+/// object), so termination is guaranteed.
+fn last_balanced_object(text: &str) -> Option<Value> {
+    let bytes = text.as_bytes();
+    let mut last = None;
+    let mut search_from = 0usize;
+    while search_from < bytes.len() {
+        let start = match text[search_from..].find('{') {
+            Some(index) => search_from + index,
+            None => break,
+        };
+        let mut depth = 0usize;
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut end = None;
+        for (cursor, byte) in bytes.iter().enumerate().skip(start) {
+            let byte = *byte;
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            match byte {
+                b'"' => in_string = true,
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(cursor);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(end) = end else { break };
+        if let Ok(value) = serde_json::from_str::<Value>(&text[start..=end]) {
+            last = Some(value);
+        }
+        search_from = end + 1;
+    }
+    last
 }
 
 /// Strip a single leading ```/```json fence and its trailing ``` fence.
@@ -133,5 +241,59 @@ mod tests {
         accumulator.push("é\"}");
         let value = accumulator.finish("p").expect("parses");
         assert_eq!(value["t"], "café");
+    }
+
+    /// The measured 308-byte markdown reply that the 2.2.5 host returned to a
+    /// capture-sized prompt (`.tmp/scratch/probe-stream.out`). Byte count is
+    /// asserted so the fixture cannot silently drift.
+    const MEASURED_MARKDOWN_REPLY: &str = "## Request\nBound the unbounded inject barrier to 2 seconds and add logging for timeout events.\n\n## Outcome\nImplemented `INJECT_BARRIER_BUDGET` and an `AtomicBool` latch in `engine.rs` to enforce the 2-second timeout and log when the barrier is exceeded.\n\n**Tags**: `rust`, `concurrency`, `timeout`, `logging`";
+
+    #[test]
+    fn test_lenient_parse_takes_direct_json() {
+        assert_eq!(
+            MEASURED_MARKDOWN_REPLY.len(),
+            308,
+            "fixture is the measured reply"
+        );
+        let value = parse_structured_lenient("p", "{\"a\":1}").expect("direct JSON parses");
+        assert_eq!(value["a"], 1);
+    }
+
+    #[test]
+    fn test_lenient_parse_recovers_a_fenced_block() {
+        let value = parse_structured_lenient("p", "here you go:\n```json\n{\"a\":1}\n```\n")
+            .expect("fenced block parses");
+        assert_eq!(value["a"], 1);
+    }
+
+    #[test]
+    fn test_lenient_parse_prefers_the_last_balanced_object() {
+        let value = parse_structured_lenient("p", "x {\"a\":1} y {\"summary\":\"real\"}")
+            .expect("a balanced object parses");
+        assert_eq!(value["summary"], "real", "the LAST parseable object wins");
+    }
+
+    #[test]
+    fn test_lenient_parse_miss_names_all_three_shapes() {
+        let error = parse_structured_lenient("p", MEASURED_MARKDOWN_REPLY)
+            .expect_err("prose is not structured output");
+        assert_eq!(error.kind, ProviderErrorKind::ModelOutput);
+        assert!(error.message.contains("direct JSON"), "{}", error.message);
+        assert!(error.message.contains("fenced block"), "{}", error.message);
+        assert!(
+            error.message.contains("balanced object"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("reply 308 bytes"),
+            "{}",
+            error.message
+        );
+        assert!(
+            !error.message.contains("INJECT_BARRIER_BUDGET"),
+            "the reply text must never be echoed: {}",
+            error.message
+        );
     }
 }

@@ -42,4 +42,6 @@ pub use plumbing::{
     completion_from_sse, conversation, decode_json, effective_system_prompt, sse_data_events,
 };
 pub use retry::RetryPolicy;
-pub use structured::{StructuredAccumulator, parse_structured, strip_code_fences};
+pub use structured::{
+    StructuredAccumulator, parse_structured, parse_structured_lenient, strip_code_fences,
+};

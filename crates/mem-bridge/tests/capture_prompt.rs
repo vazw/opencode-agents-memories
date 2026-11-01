@@ -38,8 +38,8 @@ fn test_capture_summary_extraction_schema_and_skip() {
     let blank = parse_capture_output(r#"{"summary": "   ", "type": "bug", "tags": []}"#);
     assert!(blank.is_err(), "empty summary is rejected");
 
-    // (d) The provider wrapped its output in prose: the first balanced
-    // object parses.
+    // (d) The provider wrapped its output in prose: the fenced block parses —
+    // the second of the three shapes.
     let fenced = "Here is the capture:\n```json\n{\"summary\":\"ok\",\"type\":\"feature\",\"tags\":[]}\n```\n";
     let parsed = parse_capture_output(fenced).expect("fenced JSON parses");
     assert!(matches!(parsed, CaptureSummaryOutput::Capture { .. }));

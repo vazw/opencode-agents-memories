@@ -30,6 +30,10 @@ pub enum ProviderErrorKind {
     HttpStatus,
     /// The response could not be parsed / did not match the wire contract.
     Protocol,
+    /// The model's reply carried no structured value under any of the three
+    /// recovery shapes — a named, retryable model-output miss, not a wire
+    /// contract break.
+    ModelOutput,
     /// The response was valid JSON but did not carry the fields the wire contract
     /// requires — a SHAPE mismatch, not a parse failure.
     WireShape,
@@ -51,6 +55,7 @@ impl ProviderErrorKind {
             Self::RateLimited => "rate-limited",
             Self::HttpStatus => "http-status",
             Self::Protocol => "protocol",
+            Self::ModelOutput => "model-output",
             Self::WireShape => "wire-shape",
             Self::Unsupported => "unsupported",
             Self::Internal => "internal",
@@ -153,12 +158,15 @@ impl ProviderError {
             .with_status(status)
     }
 
-    /// Retryable when the failure is transient: 429, 5xx, network, or timeout.
+    /// Retryable when the failure is transient: 429, 5xx, network, timeout, or
+    /// a model-output miss (the model may well produce a parseable reply next
+    /// time).
     pub fn is_retryable(&self) -> bool {
         match self.kind {
             ProviderErrorKind::Network
             | ProviderErrorKind::Timeout
-            | ProviderErrorKind::RateLimited => true,
+            | ProviderErrorKind::RateLimited
+            | ProviderErrorKind::ModelOutput => true,
             ProviderErrorKind::HttpStatus => {
                 matches!(self.status, Some(429) | Some(500..=599))
             }

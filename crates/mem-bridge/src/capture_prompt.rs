@@ -101,22 +101,21 @@ pub trait CaptureSummarizer: Send + Sync {
 
 /// Parses one raw provider output into the structured result.
 ///
-/// Fail-closed: nothing that looks like a capture without a summary parses;
-/// `type: "skip"` short-circuits to Skip regardless of other fields; tags
-/// are normalized (lowercase + trim) and deduplicated.
+/// The text goes through the same three-shape recovery the host's schema-free
+/// generate route needs (direct JSON → fenced block → last balanced object;
+/// `mem_ai::provider::remote::parse_structured_lenient`), so the tree keeps
+/// exactly one scanner. Everything after the decode is the unchanged capture
+/// contract: fail-closed without a summary, `type: "skip"` short-circuits,
+/// tags are normalized (lowercase + trim) and deduplicated.
 pub fn parse_capture_output(
     raw: &str,
 ) -> Result<CaptureSummaryOutput, mem_episodic::error::EpisodicError> {
-    let wrapped = mem_store::serde_json::from_str::<mem_store::serde_json::Value>(raw)
-        .or_else(|_| parse_trailing_json(raw));
-    let value = match wrapped {
-        Ok(value) => value,
-        Err(error) => {
-            return Err(mem_episodic::error::EpisodicError::Summary {
+    let value =
+        mem_ai::provider::remote::parse_structured_lenient("mem-bridge", raw).map_err(|error| {
+            mem_episodic::error::EpisodicError::Summary {
                 message: format!("capture summary JSON parse failed: {error}"),
-            });
-        }
-    };
+            }
+        })?;
     parse_capture_value(value)
 }
 
@@ -267,33 +266,6 @@ fn sanitize_extension_text(raw: &str, max_bytes: usize) -> Option<String> {
         end -= 1;
     }
     Some(trimmed[..end].to_string())
-}
-
-/// Lenient fallback: the first balanced-JSON object in free text.
-fn parse_trailing_json(raw: &str) -> Result<mem_store::serde_json::Value, String> {
-    let bytes = raw.as_bytes();
-    let start = raw.find('{').ok_or("no opening brace")?;
-    let mut depth = 0usize;
-    let mut in_string = false;
-    let mut escaped = false;
-    for (offset, byte) in bytes.iter().enumerate().skip(start) {
-        match (escaped, byte, in_string) {
-            (true, _, _) => escaped = false,
-            (_, b'\\', true) => escaped = true,
-            (_, b'"', false) => in_string = true,
-            (_, b'"', true) => in_string = false,
-            (_, b'{', false) => depth += 1,
-            (_, b'}', false) => {
-                depth -= 1;
-                if depth == 0 {
-                    let candidate = &raw[start..=offset];
-                    return mem_store::serde_json::from_str(candidate).map_err(|e| e.to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-    Err("unbalanced JSON in capture output".to_string())
 }
 
 // ---------------------------------------------------------------------------
