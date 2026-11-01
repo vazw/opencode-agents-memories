@@ -1154,7 +1154,22 @@ export const server = async function server(input) {
     try {
       const started = await ensureStarted();
       if (!started) return;
+      // Project first, then agent: a host that supplies neither gets exactly one
+      // reason (not two) and no host round-trips. No directory => no project_id
+      // => the engine would dead-letter it, so nothing is sent.
+      if (hostProjectId === null) {
+        logWarn("capture.project_unresolved", { session_id: sessionID });
+        return;
+      }
       const client = hostInputRef()?.client;
+      const session = await readSession(client, sessionID);
+      const agentId = await resolveSessionAgent(client, sessionID, session);
+      // Fail closed, no sentinel: a capture row must describe the agent that
+      // produced it. Checked before the transcript fetch, which would be wasted.
+      if (typeof agentId !== "string" || agentId.trim().length === 0) {
+        logWarn("capture.agent_unresolved", { session_id: sessionID });
+        return;
+      }
 
       let userPrompt = null;
       let promptId = null;
@@ -1185,12 +1200,13 @@ export const server = async function server(input) {
       if (promptId !== null) metadata.promptId = promptId;
 
       const payload = {
-        session_id: currentSessionId(),
+        session_id: sessionID,
+        agent_id: agentId,
+        project_id: hostProjectId,
         capture_id: reuseCaptureId(promptId),
         transcript: userPrompt,
         metadata,
       };
-      if (hostProjectId !== null) payload.project_id = hostProjectId;
       fireCapture(bridge(), payload);
     } catch (err) {
       logWarn("session.idle.capture_failed", { message: shortError(err) });

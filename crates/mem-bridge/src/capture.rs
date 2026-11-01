@@ -7,8 +7,8 @@ use std::sync::atomic::Ordering;
 
 use mem_core::logging::log;
 use mem_core::logging::signatures::{
-    AUTO_CAPTURE_FINAL_ERROR, AUTO_CAPTURE_MEMORY_PERSISTED, AUTO_CAPTURE_PROVIDER_FAILED,
-    AUTO_CAPTURE_SKIPPED,
+    AUTO_CAPTURE_EPISODIC_FAILED, AUTO_CAPTURE_FINAL_ERROR, AUTO_CAPTURE_MEMORY_PERSISTED,
+    AUTO_CAPTURE_PROVIDER_FAILED, AUTO_CAPTURE_SKIPPED,
 };
 use mem_core::scope::Scope;
 use mem_core::sha256;
@@ -790,11 +790,11 @@ impl CaptureService {
             Ok(retention) => retention,
             Err(reason) => return self.dead_letter_now(entry, reason).await,
         };
-        if self
+        if let Err(error) = self
             .commit_episodic(&params, &summary, &tags, &extension, &retention)
             .await
-            .is_err()
         {
+            log_episodic_write_failed(entry, &error);
             return self
                 .retryable_or_dead(entry, Failure::of("episodic_write_failed"))
                 .await;
@@ -943,11 +943,11 @@ impl CaptureService {
         };
 
         // 4. Commit 1: the episodic staging row (capture_id-aware upsert).
-        if self
+        if let Err(error) = self
             .commit_episodic(&params, &summary, &tags, &extension, &retention)
             .await
-            .is_err()
         {
+            log_episodic_write_failed(entry, &error);
             return self
                 .retryable_or_dead(entry, Failure::of("episodic_write_failed"))
                 .await;
@@ -1345,6 +1345,49 @@ fn log_provider_failed(entry: &mem_episodic::inbox::InboxEntry, failure: Failure
     log(AUTO_CAPTURE_PROVIDER_FAILED, Some(&data));
 }
 
+/// The `detail` cap, in characters (never bytes: a byte slice panics on a
+/// non-char boundary, and a panicking drain loop is worse than the defect).
+const EPISODIC_DETAIL_CHARS: usize = 120;
+
+fn truncate_detail(message: &str) -> String {
+    message.chars().take(EPISODIC_DETAIL_CHARS).collect()
+}
+
+/// The closed `errorKind` map; `EpisodicError` is `#[non_exhaustive]`, so the
+/// wildcard arm is mandatory.
+fn error_kind_label(error: &EpisodicError) -> &'static str {
+    match error {
+        EpisodicError::Validation { .. } => "validation",
+        EpisodicError::Store(_) => "store",
+        EpisodicError::Embed(_) => "embed",
+        EpisodicError::Conflict => "conflict",
+        EpisodicError::NotFound { .. } => "not_found",
+        EpisodicError::Json { .. } => "json",
+        EpisodicError::Io { .. } => "io",
+        EpisodicError::Summary { .. } => "summary",
+        EpisodicError::CrossTier { .. } => "cross_tier",
+        _ => "other",
+    }
+}
+
+/// One `Auto-capture episodic write failed` line per failed `commit_episodic`
+/// attempt. Only a validation rejection contributes `field` and `detail`: the
+/// other variants' messages are not content-audited.
+fn log_episodic_write_failed(entry: &mem_episodic::inbox::InboxEntry, error: &EpisodicError) {
+    let mut data = serde_json::json!({
+        "captureId": &entry.capture_id,
+        "projectId": &entry.project_id,
+        "sessionId": &entry.session_id,
+        "agentId": &entry.agent_id,
+        "errorKind": error_kind_label(error),
+    });
+    if let EpisodicError::Validation { field, message } = error {
+        data["field"] = serde_json::json!(field);
+        data["detail"] = serde_json::json!(truncate_detail(message));
+    }
+    log(AUTO_CAPTURE_EPISODIC_FAILED, Some(&data));
+}
+
 /// Envelope plumbing of enqueue errors for the engine's `-32002` mapping.
 #[derive(Debug, Clone)]
 pub enum ObjError {
@@ -1585,5 +1628,19 @@ fn episodic_record(
         capture_id: Some(params.capture_id.clone()),
         parent_session_id: parent_row_id,
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_detail;
+
+    /// The 120th byte lands inside `é`: a byte slice panics, a char take does not.
+    #[test]
+    fn test_detail_truncation_never_splits_a_char() {
+        let message = "a".repeat(119) + "é" + &"b".repeat(20);
+        let truncated = truncate_detail(&message);
+        assert_eq!(truncated.chars().count(), 120);
+        assert!(truncated.ends_with('é'));
     }
 }

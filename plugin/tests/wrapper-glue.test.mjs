@@ -147,13 +147,16 @@ const plugin = mod.default;
 const ctx = JSON.parse(fs.readFileSync(process.env.DRIVER_CTX_PATH, "utf8"));
 let client = ctx.client ?? null;
 if (client && typeof client === "object" && client.sessionStub) {
-  const stubData = client.sessionStub.data;
-  client = {
-    session: {
-      messages: async (args) =>
-        args && args.path && args.path.id ? { data: stubData } : { data: [] },
-    },
+  const stub = client.sessionStub;              // bound BEFORE \`client\` is rebound
+  const stubData = stub.data;
+  const session = {
+    messages: async (args) =>
+      args && args.path && args.path.id ? { data: stubData } : { data: [] },
   };
+  if (stub.session) {
+    session.get = async (args) => ({ data: { id: args?.path?.id, ...stub.session } });
+  }
+  client = { session };
 }
 const hooks = await plugin.server({
   client,
@@ -413,7 +416,7 @@ test("test_wrapper_project_id_comes_from_host_directory", { timeout: 60000 }, as
   fs.writeFileSync(driverPath, DRIVER_SOURCE);
   const driverResult = await runDriver(driverPath, [pkgDir], {
     STUB_LOG: requestLogPath,
-    DRIVER_CTX_PATH: writeCtxFile(tmp, { client: { sessionStub: { data: [
+    DRIVER_CTX_PATH: writeCtxFile(tmp, { client: { sessionStub: { session: { agent: "build" }, data: [
       { info: { id: "u1", role: "user" }, parts: [{ type: "text", text: "hello" }] },
       { info: { id: "a1", role: "assistant" }, parts: [{ type: "text", text: "hi" }] },
     ] } }, project: { id: "hostile-project-override" } }),
@@ -451,6 +454,7 @@ test("test_wrapper_captures_session_idle_with_project_id", { timeout: 60000 }, a
     ctx: {
       client: {
         sessionStub: {
+          session: { agent: "build" },
           data: [
             { info: { id: "u1", role: "user" }, parts: [{ type: "text", text: "fix the login bug" }] },
             { info: { id: "a1", role: "assistant" }, parts: [{ type: "text", text: "done — updated the handler" }] },
@@ -481,7 +485,7 @@ test("test_wrapper_captures_session_idle_with_project_id", { timeout: 60000 }, a
 
 test("test_wrapper_reuses_capture_id_for_replayed_idle", { timeout: 60000 }, async () => {
   const wire = await runGlueTest("om-glue-replay-", {
-    ctx: { client: { sessionStub: { data: [
+    ctx: { client: { sessionStub: { session: { agent: "build" }, data: [
       { info: { id: "u1", role: "user" }, parts: [{ type: "text", text: "fix the login bug" }] },
       { info: { id: "a1", role: "assistant" }, parts: [{ type: "text", text: "done" }] },
     ] } } },
@@ -499,7 +503,7 @@ test("test_wrapper_reuses_capture_id_for_replayed_idle", { timeout: 60000 }, asy
 
 test("test_wrapper_injects_on_chat_message_not_session_start", { timeout: 60000 }, async () => {
   const wire = await runGlueTest("om-glue-inject-", {
-    ctx: { client: { sessionStub: { data: [
+    ctx: { client: { sessionStub: { session: { agent: "build" }, data: [
       { info: { id: "u1", role: "user" }, parts: [{ type: "text", text: "prompt" }] },
       { info: { id: "a1", role: "assistant" }, parts: [{ type: "text", text: "response" }] },
     ] } } },

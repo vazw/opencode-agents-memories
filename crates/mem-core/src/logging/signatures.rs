@@ -107,6 +107,17 @@ pub const AUTO_CAPTURE_PROVIDER_INSECURE_ENDPOINT: &str = "Auto-capture provider
 /// status? }` — never prompt content, never the provider's message.
 pub const AUTO_CAPTURE_PROVIDER_FAILED: &str = "Auto-capture provider failed";
 
+/// `Auto-capture episodic write failed`. Emitted by `mem_bridge::capture` at
+/// its two `commit_episodic` call sites (the submitted-summary path and
+/// `process_entry`), once per failed attempt: payload `{ captureId, projectId,
+/// sessionId, agentId, errorKind, field?, detail? }` — `field` and `detail`
+/// only for a validation rejection, `detail` a rendered, length-bounded
+/// message, never a rejected value and never transcript content.
+///
+/// Deliberately NOT one of the nine scraped signatures: the stats classifier
+/// matches counter/bucket prefixes and this line starts with none.
+pub const AUTO_CAPTURE_EPISODIC_FAILED: &str = "Auto-capture episodic write failed";
+
 /// `Compaction handler error` bucket. Emitted by `mem_bridge::inject`
 /// (`InjectService::compaction_leg`) exactly once for any read failure after
 /// the disabled/session-id guards. The payload carries the session id and a

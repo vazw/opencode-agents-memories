@@ -95,7 +95,7 @@ never grants access to another session's rows.
 
 | method | blocking | params | result |
 |---|---|---|---|
-| `capture` | no (fire-and-forget ack) | `session_id` (req), `capture_id` (req), `project_id?`, `agent_id?`, `agent_name?`, `parent_session_id?`, `transcript?`, `summary?`, `metadata?` | `{"accepted":true}` |
+| `capture` | no (fire-and-forget ack) | `session_id` (req), `capture_id` (req), `project_id?`, `agent_id?`, `agent_name?`, `parent_session_id?`, `transcript?`, `summary?`, `metadata?` — a capture **persists only when `agent_id` and `project_id` are present and non-empty** (the engine's validation is strict; an empty one dead-letters) | `{"accepted":true}` |
 | `inject` | **yes** | `session_id` (req), `project_id?`, `agent_id?`, `token_budget?`, `include?` | `{"block":string\|null,"memory_count":int,"tokens":int,"truncated":bool,"handling_ms":int}` |
 | `recall` | no | `session_id` (req); **canonical** when `projectId` is present (camelCase, no unknown keys): `projectId` (req), `mode?` (`"chronological"\|"semantic"\|"filtered"`), `query?` (semantic only), `since?`, `until?`, `lastNSessions?`, `touchedFiles?`, `agentId?`, `sessionId?` (filter key), `includeFullSessions?`; **legacy** otherwise: `query` (req, string), `limit?`, `scope?`, `tags?` (these keys only) | `{"items":[…],"count":int}` |
 | `skills` | **yes** | `project_id` (req); no `session_id` | `{"skills":[{"id":string,"name":string,"path":string,"content":string,"autoinvoke":bool,"description"?:string}]}` |
@@ -231,6 +231,13 @@ W5.1 shipped `capture` and `inject` as **stubs**:
 attempt (D-36, security posture (h)). A collision loses one capture; it never writes a wrong
 row. W5.1 does not implement the recapture/upsert policy (W5.3).
 
+**Producer obligation (ADR-0030).** The wrapper is the producer that resolves a capture's
+identity. `agent_id` comes from `session.get` → `session.agent`, then from the latest
+user/assistant message's `agent`/`mode`; `project_id` is the host directory captured once at
+`server(input)`. An identity that cannot be resolved is **dropped, not sent empty**: the wrapper
+writes the structured-stderr event `capture.agent_unresolved` (or `capture.project_unresolved`)
+with the `session_id` and sends nothing. No sentinel value is substituted.
+
 `handling_ms` in the `inject` result is the engine's own internal handling time (D-35
 defines the bridge-overhead metric against it).
 
@@ -239,8 +246,10 @@ defines the bridge-overhead metric against it).
 OpenCode's plugin callback receives `{ client, project, directory, worktree, $ }`; there is
 no `session_id` on `PluginInput`. Session ids arrive **per hook**: `chat.message` delivers
 `input.sessionID`, and `event` delivers session-scoped ids under
-`input.event.properties`. The wrapper retains the most recent hook-supplied session id and
-uses it for every subsequent request. Before any hook has fired — and for the startup
+`input.event.properties`. The wrapper retains the most recent hook-supplied session id;
+`inject` uses the retained hook id. `capture` stamps the id of the hook that triggered it
+(`session.idle`), because the producer's identity resolution awaits host calls and the retained
+id is process-global. Before any hook has fired — and for the startup
 `health` and teardown `shutdown` — it uses `oc-bridge-<pid>`.
 
 The fixtures `health-request.json` and `shutdown-request.json` carry the fixed literal
