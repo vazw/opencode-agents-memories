@@ -1,10 +1,10 @@
 //! The host arm's STRUCTURED path (ADR-0029), pinned over a fake host.
 //!
-//! The fake answers the **documented** wire: `{"data": {"id": …}}` on session create and
-//! `{"data": {"text": …}}` on the prompt (plus the permanent bare `{"id": …}`
-//! fall-through). Those shapes are READ from
-//! `docs/evidence/issue-88-host-wire-contract-20261101/` — a schema sample, never a
-//! transcript. The rows evidence the WIRING, not the owner's live host.
+//! The fake answers the **documented** wire: one stateless
+//! `POST /api/experimental/generate/text` replying `{"data": {"text": …}}`. That
+//! shape is READ from `docs/evidence/issue-88-host-wire-contract-20261101/` — a
+//! schema sample, never a transcript. The rows evidence the WIRING, not the
+//! owner's live host.
 //!
 //! Every row is hermetic: `service.json` lives under a temp `XDG_STATE_HOME`,
 //! the liveness probe is a double, and every HTTP call goes through the injected
@@ -61,13 +61,13 @@ impl ProcessClock for NoClock {
     }
 }
 
-/// Routes the host protocol: session create, prompt, delete.
+/// Routes the stateless generate route.
 ///
-/// `fail_first_create_from` marks the ONE origin that answers `401` on its first
-/// session create (the recycled-port stranger the cache must not keep).
+/// `refusing_origin` marks the ONE origin that answers `401` on its first
+/// generate call (the recycled-port stranger the cache must not keep).
 struct FakeHost {
     calls: Mutex<Vec<HostRequest>>,
-    creates: AtomicUsize,
+    generates: AtomicUsize,
     refusing_origin: Option<String>,
     refused: AtomicUsize,
 }
@@ -76,7 +76,7 @@ impl FakeHost {
     fn new(refusing_origin: Option<&str>) -> Arc<Self> {
         Arc::new(Self {
             calls: Mutex::new(Vec::new()),
-            creates: AtomicUsize::new(0),
+            generates: AtomicUsize::new(0),
             refusing_origin: refusing_origin.map(str::to_owned),
             refused: AtomicUsize::new(0),
         })
@@ -86,8 +86,8 @@ impl FakeHost {
         self.calls.lock().expect("calls lock").clone()
     }
 
-    fn creates(&self) -> usize {
-        self.creates.load(Ordering::SeqCst)
+    fn generates(&self) -> usize {
+        self.generates.load(Ordering::SeqCst)
     }
 }
 
@@ -102,8 +102,8 @@ impl HostTransport for FakeHost {
             .as_deref()
             .is_some_and(|origin| request.url.starts_with(origin));
         let response = match request.method {
-            HostMethod::Post if request.url.ends_with("/session") => {
-                self.creates.fetch_add(1, Ordering::SeqCst);
+            HostMethod::Post if request.url.ends_with("/experimental/generate/text") => {
+                self.generates.fetch_add(1, Ordering::SeqCst);
                 if refusing && self.refused.fetch_add(1, Ordering::SeqCst) == 0 {
                     HostResponse {
                         status: 401,
@@ -112,18 +112,10 @@ impl HostTransport for FakeHost {
                 } else {
                     HostResponse {
                         status: 200,
-                        body: r#"{"id":"ses_structured"}"#.to_owned(),
+                        body: STRUCTURED_REPLY.to_owned(),
                     }
                 }
             }
-            HostMethod::Post if request.url.contains("/generate") => HostResponse {
-                status: 200,
-                body: STRUCTURED_REPLY.to_owned(),
-            },
-            HostMethod::Delete => HostResponse {
-                status: 200,
-                body: "true".to_owned(),
-            },
             _ => HostResponse {
                 status: 404,
                 body: String::new(),
@@ -251,21 +243,23 @@ async fn test_host_structured_invalidates_the_cache_on_any_error() {
         .await
         .expect("the re-resolved origin answers");
 
-    assert_eq!(transport.creates(), 2, "one session create per attempt");
-    let creates: Vec<String> = transport
+    assert_eq!(transport.generates(), 2, "one generate call per attempt");
+    let generates: Vec<String> = transport
         .calls()
         .into_iter()
-        .filter(|call| call.method == HostMethod::Post && call.url.ends_with("/session"))
+        .filter(|call| {
+            call.method == HostMethod::Post && call.url.ends_with("/experimental/generate/text")
+        })
         .map(|call| call.url)
         .collect();
-    assert_eq!(creates.len(), 2, "{creates:?}");
+    assert_eq!(generates.len(), 2, "{generates:?}");
     assert!(
-        creates[0].contains(":4031"),
-        "the first attempt dialled the stale origin: {creates:?}"
+        generates[0].contains(":4031"),
+        "the first attempt dialled the stale origin: {generates:?}"
     );
     assert!(
-        creates[1].contains(":4032"),
-        "the second attempt re-resolved the host: {creates:?}"
+        generates[1].contains(":4032"),
+        "the second attempt re-resolved the host: {generates:?}"
     );
 }
 
@@ -318,8 +312,8 @@ async fn test_host_capture_persists_against_a_structured_host() {
 /// The schema must reach the WIRE, not just the `complete_structured` call:
 /// accepted and then dropped in the prompt body is the same dead-letter.
 ///
-/// The documented `/generate` route has no `format` field, so the schema
-/// travels in the prompt TEXT, after the answer instruction.
+/// The stateless generate route has no `format` field, so the schema travels
+/// in the prompt TEXT, after the answer instruction.
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_host_prompt_body_carries_the_schema() {
     let state = TestDir::new("host-capture-provider-schema-state");
@@ -343,15 +337,22 @@ async fn test_host_prompt_body_carries_the_schema() {
     let prompt = transport
         .calls()
         .into_iter()
-        .find(|call| call.method == HostMethod::Post && call.url.contains("/generate"))
+        .find(|call| {
+            call.method == HostMethod::Post && call.url.ends_with("/experimental/generate/text")
+        })
         .expect("the prompt is sent");
     let body = prompt.body.expect("the prompt carries a JSON body");
-    let keys: Vec<&String> = body
+    let mut keys: Vec<&String> = body
         .as_object()
         .expect("the prompt body is an object")
         .keys()
         .collect();
-    assert_eq!(keys, vec!["prompt"], "the route declares one key: {body}");
+    keys.sort();
+    assert_eq!(
+        keys,
+        vec!["model", "prompt"],
+        "the route declares exactly these keys: {body}"
+    );
 
     let text = body["prompt"]
         .as_str()

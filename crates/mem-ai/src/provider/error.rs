@@ -3,7 +3,10 @@
 //! Every failure of an [`crate::provider::AiProvider`] is normalised onto this
 //! single type so no provider-specific error type can leak above the trait
 //! boundary (see `test_no_provider_leakage`). The shape is
-//! `{ kind, provider, source }` plus an optional HTTP `status`.
+//! `{ kind, provider, source }` plus an optional HTTP `status`, and — for
+//! failures decoded from a host's declared error body — three machine-readable
+//! fields: the closed class token ([`wire_reason`]), a bounded operator
+//! `detail`, and the host's `retryAfterMs` hint.
 
 use std::fmt;
 
@@ -69,6 +72,51 @@ impl fmt::Display for ProviderErrorKind {
     }
 }
 
+/// The closed class tokens a decoded host failure can carry.
+///
+/// A token is the ONLY input a caller may branch retryability on: messages are
+/// fixed and generic, and `detail` is an operator payload that no decision may
+/// parse. [`ALL`] lets an exhaustive table test pin the set.
+pub mod wire_reason {
+    /// The request body did not match the route's declared schema.
+    pub const INVALID_REQUEST: &str = "invalid-request";
+    /// The host rejected the credential.
+    pub const UNAUTHORIZED: &str = "unauthorized";
+    /// The configured provider id is not known to the host.
+    pub const PROVIDER_NOT_FOUND: &str = "provider-not-found";
+    /// The configured model id is not known to the host.
+    pub const MODEL_NOT_FOUND: &str = "model-not-found";
+    /// The configured location (working directory) is not known to the host.
+    pub const LOCATION_NOT_FOUND: &str = "location-not-found";
+    /// The provider does not support the requested capability for this model.
+    pub const MODEL_UNSUPPORTED: &str = "model-unsupported";
+    /// The upstream provider failed transiently (502, retryable reason).
+    pub const PROVIDER_REQUEST_RETRYABLE: &str = "provider-request-retryable";
+    /// The upstream provider failed terminally (502, terminal reason).
+    pub const PROVIDER_REQUEST_TERMINAL: &str = "provider-request-terminal";
+    /// The host is temporarily unable to serve the request.
+    pub const SERVICE_UNAVAILABLE: &str = "service-unavailable";
+    /// The route is gone: a 404 whose body carries no decodable tag.
+    pub const ROUTE_MOVED: &str = "route-moved";
+    /// A decodable error tag this build does not know.
+    pub const UNRECOGNISED: &str = "unrecognised";
+
+    /// Every token, in declaration order.
+    pub const ALL: [&str; 11] = [
+        INVALID_REQUEST,
+        UNAUTHORIZED,
+        PROVIDER_NOT_FOUND,
+        MODEL_NOT_FOUND,
+        LOCATION_NOT_FOUND,
+        MODEL_UNSUPPORTED,
+        PROVIDER_REQUEST_RETRYABLE,
+        PROVIDER_REQUEST_TERMINAL,
+        SERVICE_UNAVAILABLE,
+        ROUTE_MOVED,
+        UNRECOGNISED,
+    ];
+}
+
 /// The single error type crossing the provider seam.
 #[derive(Debug, thiserror::Error)]
 #[error("{provider} {kind}: {message}")]
@@ -82,6 +130,18 @@ pub struct ProviderError {
     pub message: String,
     /// HTTP status when the failure came from a response.
     pub status: Option<u16>,
+    /// The closed class token, when the failure was decoded from a declared
+    /// error body ([`wire_reason`]).
+    pub wire_reason: Option<&'static str>,
+    /// The host's `retryAfterMs` hint, when it sent one.
+    pub retry_after_ms: Option<u64>,
+    /// Enumerated operator sub-values built at decode time (never the host's
+    /// `message`, never a reply), each bounded to 120 chars.
+    ///
+    /// Boxed string: this error type is returned all over the crate, and the
+    /// three new machine-readable fields would otherwise push it over clippy's
+    /// `result_large_err` threshold.
+    pub detail: Option<Box<str>>,
     /// Underlying cause, when one exists.
     #[source]
     pub source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
@@ -96,6 +156,9 @@ impl ProviderError {
             provider: "mem-ai".to_owned(),
             message: message.into(),
             status: None,
+            wire_reason: None,
+            retry_after_ms: None,
+            detail: None,
             source: None,
         }
     }
@@ -133,6 +196,24 @@ impl ProviderError {
     /// Attach an HTTP status.
     pub fn with_status(mut self, status: u16) -> Self {
         self.status = Some(status);
+        self
+    }
+
+    /// Attach the closed failure class token.
+    pub fn with_wire_reason(mut self, wire_reason: &'static str) -> Self {
+        self.wire_reason = Some(wire_reason);
+        self
+    }
+
+    /// Attach the host's retry-after hint (milliseconds).
+    pub fn with_retry_after(mut self, retry_after_ms: u64) -> Self {
+        self.retry_after_ms = Some(retry_after_ms);
+        self
+    }
+
+    /// Attach the enumerated operator detail.
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into().into_boxed_str());
         self
     }
 

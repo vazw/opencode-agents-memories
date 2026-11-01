@@ -1,16 +1,15 @@
 //! The DOCUMENTED wire, end to end, against the real lazy provider.
 //!
 //! Every shape here is READ from the OpenCode HTTP API description
-//! (`docs/evidence/issue-88-host-wire-contract-20261101/`): create answers
-//! `{"data": Session.Info}`, the prompt goes to `…/generate` with
-//! `{"prompt": …}`, and the reply is `{"data":{"text": …}}`. **No exchange with
-//! a running host has ever been captured**, so the bodies below are
-//! schema-derived samples, and the harness's answers are this file's own — not
-//! host answers.
+//! (`docs/evidence/issue-88-host-wire-contract-20261101/`): ONE stateless
+//! `POST /api/experimental/generate/text` with `{"prompt": …}` (plus `model`)
+//! replying `{"data":{"text": …}}`. **No exchange with a running host has ever
+//! been captured**, so the bodies below are schema-derived samples, and the
+//! harness's answers are this file's own — not host answers.
 //!
 //! What these rows therefore prove is harness behaviour plus wire-independent
-//! facts: the call sequence, the URL path, a one-key body, and the absence of a
-//! `session/{}/message` template. They do not prove the live host behaves so.
+//! facts: the call count, the URL path, the declared body keys, and the absence
+//! of any `session/…` template. They do not prove the live host behaves so.
 
 mod common;
 
@@ -32,18 +31,6 @@ use mem_core::logging::LogSink;
 use mem_episodic::store::EpisodicStore;
 use mem_store::platform::ProcessProbe;
 use serde_json::Value;
-
-/// The sample create body
-/// (`…/create-body.sample.json`: `/api/session.post` → `{data: Session.Info}`;
-/// required: id, projectID, cost, tokens, time, location).
-///
-/// `CARGO_MANIFEST_DIR` is `crates/mem-bridge`, so `/../../docs/…` is the repo's
-/// `docs/`; a bare relative path would resolve to `crates/docs/…`, and a missing
-/// `include_str!` is a compile error.
-const SAMPLED_2_2_5_CREATE_BODY: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/evidence/issue-88-host-wire-contract-20261101/create-body.sample.json"
-));
 
 /// The sample generate reply: the documented `{"data":{"text": …}}` envelope,
 /// carrying the capture JSON as TEXT.
@@ -89,8 +76,7 @@ impl ProcessClock for NoClock {
 /// One `SampledHost` per row: `calls` is the row's own, so no row can observe
 /// another's traffic (each row also owns a distinct capture id).
 struct SampledHost {
-    create_body: &'static str,
-    /// `None` ⇒ the prompt route answers `404`, leaving the route assertion to
+    /// `None` ⇒ the generate route answers `404`, leaving the wire assertion to
     /// the row that pins it.
     reply_body: Option<&'static str>,
     calls: Mutex<Vec<(HostMethod, String, Option<Value>)>>,
@@ -99,15 +85,9 @@ struct SampledHost {
 impl SampledHost {
     fn new() -> Self {
         Self {
-            create_body: SAMPLED_2_2_5_CREATE_BODY,
             reply_body: None,
             calls: Mutex::new(Vec::new()),
         }
-    }
-
-    fn with_create_body(mut self, create_body: &'static str) -> Self {
-        self.create_body = create_body;
-        self
     }
 
     fn with_reply(mut self, reply_body: &'static str) -> Self {
@@ -130,16 +110,9 @@ impl HostTransport for SampledHost {
             request.url.clone(),
             request.body.clone(),
         ));
-        // Both prompt spellings answer, so a route flip is pinned by the row's
-        // URL assertion rather than by this dispatcher falling through to 404.
-        let is_prompt = request.method == HostMethod::Post
-            && (request.url.contains("/generate") || request.url.contains("/message"));
-        let response = if request.method == HostMethod::Post && request.url.ends_with("/session") {
-            HostResponse {
-                status: 200,
-                body: self.create_body.to_owned(),
-            }
-        } else if is_prompt {
+        let response = if request.method == HostMethod::Post
+            && request.url.ends_with("/experimental/generate/text")
+        {
             match self.reply_body {
                 Some(reply_body) => HostResponse {
                     status: 200,
@@ -149,11 +122,6 @@ impl HostTransport for SampledHost {
                     status: 404,
                     body: String::new(),
                 },
-            }
-        } else if request.method == HostMethod::Delete {
-            HostResponse {
-                status: 204,
-                body: String::new(),
             }
         } else {
             HostResponse {
@@ -210,7 +178,7 @@ fn service(dir: &TestDir, summarizer: Arc<dyn CaptureSummarizer>) -> CaptureServ
     )
 }
 
-/// One capture over the sampled create shape, through the real summarizer.
+/// One capture over the sampled generate shape, through the real summarizer.
 ///
 /// `drains` attempts, so the caller controls whether the recorded sequence is
 /// one attempt's (1) or the whole retry ladder's (5, the dead-letter bound).
@@ -241,55 +209,11 @@ async fn run_capture(
     report
 }
 
-/// Row 16 — AC3's re-point: the sampled create envelope descends to the prompt
-/// step and the transient session is deleted.
+/// Row 17 — AC2 on the capture lane: ONE stateless call to the documented route
+/// and its body is exactly `prompt` + `model`.
 ///
-/// Replaces `test_capture_against_the_measured_2_2_5_body_dead_letters_with_a_named_reason`,
-/// which pinned the BUG (a dead-letter at create). This row asserts the call
-/// SEQUENCE — no error kind — so it is stable whether the prompt itself is
-/// answered or not.
-#[mem_store::tokio::test(crate = "mem_store::tokio")]
-async fn test_sampled_2_2_5_create_envelope_reaches_the_prompt_step() {
-    let _ = sink();
-
-    let state = TestDir::new("host-capture-e2e-state");
-    write_service(state.path());
-    let host = Arc::new(SampledHost::new());
-    let summarizer: Arc<dyn CaptureSummarizer> = Arc::new(ProviderCaptureSummarizer::new(
-        Arc::new(HostStructured::new(lazy_provider(
-            state.path(),
-            host.clone(),
-        ))),
-        "beam-free",
-        131_072,
-    ));
-    let dir = TestDir::new("host-capture-e2e-store");
-    let _ = run_capture(
-        summarizer,
-        "019a0000-0000-7f00-8000-00000000c001",
-        "sess-2-2-5",
-        &dir,
-        1,
-    )
-    .await;
-
-    let calls = host.calls();
-    assert_eq!(calls.len(), 3, "create + prompt + delete: {calls:?}");
-    assert_eq!(calls[0].0, HostMethod::Post);
-    assert_eq!(calls[0].1, "http://127.0.0.1:49374/api/session");
-    assert!(
-        calls[1].1.contains("/session/ses_2_2_5/"),
-        "the enveloped id reaches the prompt call: {calls:?}"
-    );
-    assert_eq!(calls[2].0, HostMethod::Delete);
-}
-
-/// Row 17 — AC2 on the capture lane: the prompt takes the documented route and
-/// its body is exactly `{"prompt"}`.
-///
-/// The prompt route is pinned HERE rather than by the harness dispatcher (which
-/// answers both spellings), so keeping `…/message`, or leaving `model`/`agent`/
-/// `format`/`tools` in the prompt body, reds this row.
+/// The route is pinned HERE rather than by the harness dispatcher, so keeping a
+/// session path, or leaving `agent`/`format`/`tools` in the body, reds this row.
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_sampled_2_2_5_prompt_posts_to_generate_with_only_a_prompt() {
     let _ = sink();
@@ -316,27 +240,28 @@ async fn test_sampled_2_2_5_prompt_posts_to_generate_with_only_a_prompt() {
     .await;
 
     let calls = host.calls();
-    assert_eq!(calls.len(), 3, "create + prompt + delete: {calls:?}");
+    assert_eq!(calls.len(), 1, "exactly one stateless call: {calls:?}");
     assert_eq!(
-        calls[1].1, "http://127.0.0.1:49374/api/session/ses_2_2_5/generate",
-        "the prompt takes the documented route: {calls:?}"
+        calls[0].1, "http://127.0.0.1:49374/api/experimental/generate/text",
+        "the call takes the documented route: {calls:?}"
     );
-    let body = calls[1].2.as_ref().expect("the prompt carries a JSON body");
-    let keys: Vec<&String> = body
+    let body = calls[0].2.as_ref().expect("the call carries a JSON body");
+    let mut keys: Vec<&String> = body
         .as_object()
-        .expect("the prompt body is an object")
+        .expect("the body is an object")
         .keys()
         .collect();
-    assert_eq!(keys, vec!["prompt"], "exactly one key: {body}");
+    keys.sort();
+    assert_eq!(keys, vec!["model", "prompt"], "declared keys only: {body}");
 }
 
 /// Row 18 — ACL3's next observable step: over the sampled wire a capture
 /// PERSISTS.
 ///
-/// The reply's text is the capture JSON, so `parse_structured` strips nothing
-/// and `parse_capture_value` turns it into a capture. A reply parser left on the
-/// pre-2.2.5 `info.structured_output` envelope, or a prompt body that is not
-/// `{"prompt"}`, reds this row.
+/// The reply's text is the capture JSON, so `parse_structured_lenient` takes it
+/// directly and `parse_capture_value` turns it into a capture. A reply parser
+/// left on the pre-2.2.5 `info.structured_output` envelope, or a body that is
+/// not `prompt` + `model`, reds this row.
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_sampled_2_2_5_wire_persists_a_capture() {
     let _ = sink();
@@ -369,21 +294,21 @@ async fn test_sampled_2_2_5_wire_persists_a_capture() {
         "the persisted line names this capture and its type: {persisted}"
     );
 
-    // The prompt body carried the schema by now — Step 6's assertion lives in
+    // The prompt body carried the schema by now — that assertion lives in
     // `host_capture_provider.rs`; here the wire facts are the route and the
-    // one-key body.
+    // one-call sequence.
     let calls = host.calls();
-    assert_eq!(calls.len(), 3, "create + prompt + delete: {calls:?}");
+    assert_eq!(calls.len(), 1, "exactly one stateless call: {calls:?}");
     assert_eq!(
-        calls[1].1, "http://127.0.0.1:49374/api/session/ses_2_2_5/generate",
-        "the sampled id reaches the documented prompt route"
+        calls[0].1, "http://127.0.0.1:49374/api/experimental/generate/text",
+        "the call reaches the documented route"
     );
 }
 
 /// Row 19 — AC6: a shape mismatch is NAMED on the terminal line.
 ///
-/// The create answer carries no id in either shape, so every attempt fails with
-/// `WireShape`; the ladder dead-letters at its fifth attempt. The line must name
+/// The generate answer carries `{"data":{}}` (no `text`), so every attempt fails
+/// with `WireShape`; the ladder dead-letters at its fifth attempt. The line must name
 /// the reason and the kind, and must not be flattened to `summarizer_failed` —
 /// the token a model-side JSON miss also produces.
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
@@ -392,7 +317,7 @@ async fn test_capture_names_a_wire_shape_mismatch() {
 
     let state = TestDir::new("host-capture-e2e-wire-shape-state");
     write_service(state.path());
-    let host = Arc::new(SampledHost::new().with_create_body(r#"{"data":{"projectID":"prj_1"}}"#));
+    let host = Arc::new(SampledHost::new().with_reply(r#"{"data":{}}"#));
     let summarizer: Arc<dyn CaptureSummarizer> = Arc::new(ProviderCaptureSummarizer::new(
         Arc::new(HostStructured::new(lazy_provider(
             state.path(),

@@ -1,29 +1,28 @@
 //! `OpenCodeHostProvider` — structured output and streaming completion via the
-//! OpenCode HTTP host (v2 session API).
+//! OpenCode HTTP host's STATELESS generate route.
 //!
-//! Instead of forging provider HTTP requests ourselves (auth, token refresh,
-//! routing), we delegate to the running OpenCode server: create a transient
-//! least-privilege session, ask it for an answer over the documented
-//! `POST …/generate` route, and delete the session so it never pollutes the
-//! user's TUI session list.
+//! The provider makes exactly ONE request per attempt: `POST
+//! {base}/experimental/generate/text` with `{"prompt": …}` and, when a model is
+//! resolved, `{"model": {"id", "providerID", "variant"?}}`. The reply is
+//! `{"data":{"text": …}}`; a structured answer is that TEXT recovered by the
+//! shared three-shape parser ([`parse_structured_lenient`]) and the schema
+//! travels inside the prompt text, because the route declares no `format`
+//! field. No session is created, named, deleted or tracked, so the host's
+//! session list is never touched.
 //!
-//! The wire is the DOCUMENTED one (`docs/evidence/issue-88-host-wire-contract-20261101/`),
-//! never a captured exchange: create accepts `{"data": Session.Info}` and a bare
-//! `{"id": …}`; the prompt body is exactly `{"prompt": …}`; the reply is
-//! `{"data":{"text": …}}`. A structured answer is that TEXT parsed by the shared
-//! structured-output parser, and the schema travels inside the prompt text
-//! because the route declares no `format` field.
+//! The wire is the DOCUMENTED one (`docs/evidence/issue-88-host-wire-contract-20261101/`,
+//! `.tmp/scratch/live-openapi.json`): `requestBody.additionalProperties:false`
+//! with `prompt` required and `model` nullable, no query parameters. Every
+//! non-2xx body is decoded into a closed class token (`wire_reason`) plus a
+//! bounded `detail` built from the declared error fields — never from the
+//! host's `message`, never from a reply.
 //!
 //! Transport is an injected [`HostTransport`] seam — the production
 //! implementation is [`ReqwestHostTransport`]; tests inject an in-memory mock.
-//! Internal capture sessions are tracked so auto-capture never re-captures
-//! them, and the client-side step budget aborts runaway structured-output
-//! loops.
 
-use mem_core::sync::{lock_or_recover, read_or_recover, write_or_recover};
-
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, RwLock};
+use mem_core::sync::{read_or_recover, write_or_recover};
+use std::collections::HashSet;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -31,35 +30,26 @@ use futures::StreamExt;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use crate::provider::error::{ProviderError, ProviderErrorKind};
+use crate::provider::error::{ProviderError, ProviderErrorKind, wire_reason};
 use crate::provider::host_auth::HostAuthorization;
-use crate::provider::internal_capture::{INTERNAL_CAPTURE_SESSION_TITLE, InternalCaptureSessions};
 use crate::provider::provider_trait::{
     AiProvider, AiProviderStructured, BoxFuture, CompletionStream, sealed,
 };
-use crate::provider::remote::structured::parse_structured;
+use crate::provider::remote::structured::parse_structured_lenient;
 use crate::provider::request::{CompletionRequest, EmbedRequest, ModelInfo};
 
 /// Stable provider name.
 pub const PROVIDER_NAME: &str = "opencode-host";
 
-/// Dedicated agent registered via the plugin config hook (step-capped).
-pub const STRUCTURED_OUTPUT_AGENT: &str = "opencode-mem-structured";
+/// The host's stateless generate route, relative to the resolved `/api` base.
+pub const GENERATE_TEXT_PATH: &str = "/experimental/generate/text";
 
 /// Hard ceiling for a single internal structured-output prompt (upstream 90s).
 pub const STRUCTURED_OUTPUT_TIMEOUT_MS: u64 = 90_000;
 
-/// Soft agent step budget: abort client-side after this many `step-start`
-/// parts (upstream 2).
-pub const STRUCTURED_OUTPUT_MAX_STEPS: u32 = 2;
-
-/// Bound OpenCode schema retries so a bad provider cannot spin forever.
-///
-/// Retained as the value `OpenCodeHostConfig::retry_count` defaults to. Since
-/// the wire wave that count is no longer TRANSMITTED: the documented
-/// `POST …/generate` route declares only `prompt`, so no `format`/`retryCount`
-/// field exists to carry it (ADR-0029 D-29-6's recorded loss).
-pub const STRUCTURED_OUTPUT_DEFAULT_RETRY_COUNT: u32 = 1;
+/// Longest `detail` value rendered into a decoded failure (operator payload,
+/// never a decision input).
+const MAX_DETAIL_CHARS: usize = 120;
 
 /// Configuration for the host provider.
 #[derive(Debug, Clone, PartialEq)]
@@ -74,21 +64,12 @@ pub struct OpenCodeHostConfig {
     /// passes a resolved `{origin}/api` (see `mem_bridge::host_endpoint`). A
     /// compiled-in port would silently target whatever listens on `4096`.
     pub base_url: String,
-    /// Optional reasoning variant, sent as `Model.Ref.variant` on the create.
+    /// Optional reasoning variant, sent as `Model.Ref.variant`.
     pub variant: Option<String>,
-    /// Optional working directory forwarded as a query param.
-    pub directory: Option<String>,
     /// Basic-auth credential for the host (`{origin}/api` requires it).
     pub authorization: Option<HostAuthorization>,
     /// Request budget enforced on every host call.
     pub timeout: Duration,
-    /// Client-side structured-output step budget. Declarative while
-    /// `note_structured_step` has no transport caller (ADR-0027's amendment).
-    pub max_steps: u32,
-    /// `format: json_schema` retry count, no longer transmitted: the documented
-    /// `/generate` route declares no `format` field. Kept as configuration so a
-    /// caller's value is not silently repurposed.
-    pub retry_count: u32,
 }
 
 impl Default for OpenCodeHostConfig {
@@ -98,11 +79,8 @@ impl Default for OpenCodeHostConfig {
             model: "inherit".to_owned(),
             base_url: String::new(),
             variant: None,
-            directory: None,
             authorization: None,
             timeout: Duration::from_millis(STRUCTURED_OUTPUT_TIMEOUT_MS),
-            max_steps: STRUCTURED_OUTPUT_MAX_STEPS,
-            retry_count: STRUCTURED_OUTPUT_DEFAULT_RETRY_COUNT,
         }
     }
 }
@@ -131,7 +109,6 @@ impl OpenCodeHostConfig {
 pub enum HostMethod {
     Get,
     Post,
-    Delete,
 }
 
 impl HostMethod {
@@ -139,7 +116,6 @@ impl HostMethod {
         match self {
             Self::Get => reqwest::Method::GET,
             Self::Post => reqwest::Method::POST,
-            Self::Delete => reqwest::Method::DELETE,
         }
     }
 }
@@ -241,17 +217,6 @@ impl HostTransport for ReqwestHostTransport {
 /// Callback used to force one connected-provider refresh before failing.
 pub type ConnectedRefresher = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
 
-/// Result of noting one structured-output step.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StepNote {
-    /// Whether the session is a live internal structured session.
-    pub tracked: bool,
-    /// Steps seen so far.
-    pub steps: u32,
-    /// Whether the client should abort (budget exceeded).
-    pub should_abort: bool,
-}
-
 /// Shared, cheaply-cloneable provider state (so `complete` can own a `'static`
 /// stream).
 #[derive(Clone)]
@@ -260,20 +225,11 @@ struct HostState {
     transport: Arc<dyn HostTransport>,
     connected: Arc<RwLock<HashSet<String>>>,
     refresher: Arc<RwLock<Option<ConnectedRefresher>>>,
-    internal: InternalCaptureSessions,
-    step_counts: Arc<Mutex<HashMap<String, u32>>>,
 }
 
 impl HostState {
     fn base(&self) -> String {
         self.config.base_url.trim_end_matches('/').to_owned()
-    }
-
-    fn directory_query(&self) -> String {
-        match self.config.directory.as_deref() {
-            Some(directory) => format!("?directory={}", encode_query_component(directory)),
-            None => String::new(),
-        }
     }
 
     fn effective_budget(&self, request_timeout: Option<Duration>) -> Duration {
@@ -313,27 +269,6 @@ impl HostState {
         }
     }
 
-    fn session_create_body(&self) -> Value {
-        json!({
-            "title": INTERNAL_CAPTURE_SESSION_TITLE,
-            // The model and the structured-output agent travel HERE: `model:
-            // Model.Ref` and `agent: Agent.ID` are the create body's declared
-            // fields, while the prompt route declares only `prompt`.
-            "agent": STRUCTURED_OUTPUT_AGENT,
-            "model": self.model_ref(),
-            // Scope guard — NOT a rename. The declared key is `permissions:
-            // Permission.Ruleset` (`Permission.Rule{action, resource, effect}`);
-            // this undeclared shape is tolerated in practice (a 2xx was
-            // MEASURED for it, and `additionalProperties:false` is
-            // documentation, not runtime behaviour). Rewriting it is a rebuild.
-            "permission": [
-                { "permission": "*", "pattern": "*", "action": "deny" },
-                { "permission": "StructuredOutput", "pattern": "*", "action": "allow" }
-            ],
-            "metadata": { "opencode-mem": { "internal": true, "purpose": "structured-output" } }
-        })
-    }
-
     /// The declared `Model.Ref`: `{id, providerID}` plus `variant` when one is
     /// configured.
     fn model_ref(&self) -> Value {
@@ -347,129 +282,47 @@ impl HostState {
         model
     }
 
-    async fn create_session(
-        &self,
-        cancellation: &CancellationToken,
-        budget: Duration,
-    ) -> Result<String, ProviderError> {
-        let url = format!("{}/session{}", self.base(), self.directory_query());
-        let response = self
-            .transport_send(
-                HostMethod::Post,
-                url.clone(),
-                Some(self.session_create_body()),
-                cancellation,
-                budget,
-            )
-            .await?;
-        let value = decode_json(&response, "POST /session")?;
-        // serde's message is dropped deliberately: it is unstable and describes
-        // the input (the response body). Fixed text only.
-        let reply: CreateSessionReply = serde_json::from_value(value).map_err(|_| {
-            ProviderError::new(
-                ProviderErrorKind::WireShape,
-                "session.create answered with neither a {\"data\":{\"id\"}} envelope nor a bare {\"id\"}",
-            )
-            .with_provider(PROVIDER_NAME)
-        })?;
-        let id = match reply {
-            CreateSessionReply::Enveloped { data } => data.id,
-            CreateSessionReply::Bare { id } => id,
-        };
-        if id.trim().is_empty() {
-            return Err(ProviderError::new(
-                ProviderErrorKind::WireShape,
-                "session.create returned a blank session id; cannot generate structured output",
-            )
-            .with_provider(PROVIDER_NAME));
+    /// The generate request body.
+    ///
+    /// `additionalProperties:false` is a runtime contract here, so this is
+    /// exactly `prompt` plus `model` when (and only when) a real model is
+    /// resolved: an empty model, the `inherit` sentinel, or a missing provider
+    /// id all omit the key rather than sending a value the host cannot route.
+    fn generate_body(&self, prompt: String) -> Value {
+        let mut body = json!({ "prompt": prompt });
+        let model = self.config.model.trim();
+        let provider_id = self.config.provider_id.trim();
+        if !(model.is_empty() || model == "inherit" || provider_id.is_empty()) {
+            body["model"] = self.model_ref();
         }
-        Ok(id)
+        body
     }
 
-    async fn prompt_session(
-        &self,
-        session_id: &str,
-        request: &CompletionRequest,
-        schema: Option<&Value>,
-        cancellation: &CancellationToken,
-        budget: Duration,
-    ) -> Result<PromptOutcome, ProviderError> {
-        let url = format!(
-            "{}/session/{}/generate{}",
-            self.base(),
-            encode_query_component(session_id),
-            self.directory_query()
-        );
-        let response = self
-            .transport_send(
-                HostMethod::Post,
-                url,
-                Some(prompt_body(request)),
-                cancellation,
-                budget,
-            )
-            .await?;
-        let value = decode_json(&response, "POST /session/{id}/generate")?;
-        parse_prompt_response(&value, schema.is_some())
-    }
-
-    async fn delete_session(&self, session_id: &str, cancellation: &CancellationToken) {
-        let url = format!(
-            "{}/session/{}{}",
-            self.base(),
-            encode_query_component(session_id),
-            self.directory_query()
-        );
-        // Best-effort: failures are intentionally swallowed.
-        let _ = self
-            .transport_send(
-                HostMethod::Delete,
-                url,
-                None,
-                cancellation,
-                self.config.timeout,
-            )
-            .await;
-    }
-
-    /// Full prompt lifecycle with guaranteed cleanup.
-    async fn run(
+    /// One stateless generate call: the entire attempt.
+    async fn generate(
         &self,
         request: CompletionRequest,
-        schema: Option<Value>,
+        structured: bool,
     ) -> Result<PromptOutcome, ProviderError> {
         let cancellation = request.cancellation.clone();
         let budget = self.effective_budget(request.timeout);
-
-        let session_id = self.create_session(&cancellation, budget).await?;
-        self.internal.track(&session_id);
-        // step_counts: diagnostic budget per session; a lost count resets one budget (ADR-0013 D-2 D2-R)
-        lock_or_recover(&self.step_counts).insert(session_id.clone(), 0);
-
-        let mut guard = CleanupGuard::new(self.clone(), session_id.clone(), cancellation.clone());
-        let result = self
-            .prompt_session(
-                &session_id,
-                &request,
-                schema.as_ref(),
+        let url = format!("{}{GENERATE_TEXT_PATH}", self.base());
+        let response = self
+            .transport_send(
+                HostMethod::Post,
+                url,
+                Some(self.generate_body(prompt_text(&request))),
                 &cancellation,
                 budget,
             )
-            .await;
-
-        // Normal path: delete synchronously, then disarm the drop guard.
-        guard.disarm();
-        self.delete_session(&session_id, &cancellation).await;
-        self.internal.untrack(&session_id);
-        // step_counts: single remove at session end (ADR-0013 D-2 D2-R)
-        lock_or_recover(&self.step_counts).remove(&session_id);
-        result
+            .await?;
+        decode_generate_reply(&response, structured)
     }
 
     /// Run one completion and flatten it into value chunks.
     async fn run_chunks(&self, request: CompletionRequest) -> Vec<Result<Value, ProviderError>> {
-        let schema = request.json_schema.clone();
-        match self.run(request, schema).await {
+        let structured = request.json_schema.is_some();
+        match self.generate(request, structured).await {
             Ok(outcome) => outcome.into_chunks(),
             Err(error) => vec![Err(error)],
         }
@@ -526,29 +379,10 @@ impl HostState {
         self.set_connected_providers(provider_ids(&value));
         Ok(())
     }
-
-    fn note_structured_step(&self, session_id: &str) -> StepNote {
-        if !self.internal.is_tracked(session_id) {
-            return StepNote {
-                tracked: false,
-                steps: 0,
-                should_abort: false,
-            };
-        }
-        // step_counts: entry-or-insert then saturating_add(1) (ADR-0013 D-2 D2-R)
-        let mut counts = lock_or_recover(&self.step_counts);
-        let steps = counts.entry(session_id.to_owned()).or_insert(0);
-        *steps = steps.saturating_add(1);
-        StepNote {
-            tracked: true,
-            steps: *steps,
-            should_abort: *steps > self.config.max_steps,
-        }
-    }
 }
 
-/// The prompt text the documented route takes: `{"prompt": string}` is its
-/// entire body, so the system side is folded in rather than sent separately.
+/// The prompt text the route takes: `{"prompt": string}` carries no separate
+/// system field, so the system side is folded in rather than sent separately.
 ///
 /// The system prompt is `request.system` when set, else the first system
 /// message; a blank system side contributes nothing (and no separator).
@@ -571,74 +405,7 @@ fn prompt_text(request: &CompletionRequest) -> String {
     format!("{system}\n\n{user_text}")
 }
 
-fn prompt_body(request: &CompletionRequest) -> Value {
-    json!({ "prompt": prompt_text(request) })
-}
-
-/// `POST /api/session` answer, in both shapes the port must accept.
-///
-/// The document says 2.2.5 answers `{"data": Session.Info}`; a host that does
-/// not wrap answers a bare `{"id": …}`. `#[serde(untagged)]` declares the
-/// precedence: the ENVELOPE wins, the bare object is the fall-through.
-/// Evidence (READ): docs/evidence/issue-88-host-wire-contract-20261101/
-#[derive(serde::Deserialize)]
-#[serde(untagged)]
-enum CreateSessionReply {
-    Enveloped { data: SessionRef },
-    Bare { id: String },
-}
-
-#[derive(serde::Deserialize)]
-struct SessionRef {
-    id: String,
-}
-
-/// RAII cleanup for the transient session: if the future is dropped before
-/// normal completion (e.g. the stream is dropped), cancel in-flight work and
-/// best-effort delete the session.
-struct CleanupGuard {
-    state: HostState,
-    session_id: String,
-    cancellation: CancellationToken,
-    armed: bool,
-}
-
-impl CleanupGuard {
-    fn new(state: HostState, session_id: String, cancellation: CancellationToken) -> Self {
-        Self {
-            state,
-            session_id,
-            cancellation,
-            armed: true,
-        }
-    }
-
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for CleanupGuard {
-    fn drop(&mut self) {
-        if !self.armed {
-            return;
-        }
-        self.state.internal.untrack(&self.session_id);
-        // Cancel the in-flight request, then delete with a fresh token.
-        self.cancellation.cancel();
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let state = self.state.clone();
-            let session_id = self.session_id.clone();
-            handle.spawn(async move {
-                state
-                    .delete_session(&session_id, &CancellationToken::new())
-                    .await;
-            });
-        }
-    }
-}
-
-/// Parsed prompt outcome.
+/// Parsed generate outcome.
 #[derive(Debug, Clone)]
 struct PromptOutcome {
     structured: Option<Value>,
@@ -659,9 +426,6 @@ impl PromptOutcome {
 }
 
 /// The documented generate reply: `{"data":{"text": string}}`.
-///
-/// The text is the model's whole answer — the capture JSON, fenced or bare —
-/// or prose when the wire carried no schema to answer to.
 #[derive(serde::Deserialize)]
 struct GenerateEnvelope {
     data: GenerateData,
@@ -672,22 +436,48 @@ struct GenerateData {
     text: String,
 }
 
-/// Decode the documented reply.
+/// Decode one generate reply: status, then body, then envelope.
+fn decode_generate_reply(
+    response: &HostResponse,
+    structured_requested: bool,
+) -> Result<PromptOutcome, ProviderError> {
+    if !(200..300).contains(&response.status) {
+        // Never echo the response body: it is operator payload only.
+        return Err(decode_generate_failure(response.status, &response.body));
+    }
+    if response.body.trim().is_empty() {
+        return Err(ProviderError::new(
+            ProviderErrorKind::Protocol,
+            format!("POST {GENERATE_TEXT_PATH} returned an empty response body"),
+        )
+        .with_provider(PROVIDER_NAME));
+    }
+    // serde's message is dropped deliberately: it is unstable and describes
+    // the input (the response body).
+    let value: Value = serde_json::from_str(&response.body).map_err(|_| {
+        ProviderError::new(
+            ProviderErrorKind::Protocol,
+            format!("POST {GENERATE_TEXT_PATH} returned a non-JSON body: <redacted response body>"),
+        )
+        .with_provider(PROVIDER_NAME)
+    })?;
+    parse_generate_response(&value, structured_requested)
+}
+
+/// Decode the documented reply body.
 ///
-/// Two failure branches that must stay distinct: a reply that is not this
-/// ENVELOPE is a wire-shape mismatch ([`ProviderErrorKind::WireShape`]), while a
-/// text that is not JSON is the model's own miss and stays
-/// [`ProviderErrorKind::Protocol`] — the shared parser's classification.
-fn parse_prompt_response(
+/// A reply that is not the `{"data":{"text"}}` ENVELOPE is a wire-shape
+/// mismatch ([`ProviderErrorKind::WireShape`]); a text that carries no
+/// structured value is the model's own miss and is named
+/// [`ProviderErrorKind::ModelOutput`] by the shared lenient parser.
+fn parse_generate_response(
     value: &Value,
     structured_requested: bool,
 ) -> Result<PromptOutcome, ProviderError> {
-    // serde's message is dropped deliberately: it is unstable and describes the
-    // input (the response body).
     let envelope: GenerateEnvelope = serde_json::from_value(value.clone()).map_err(|_| {
         ProviderError::new(
             ProviderErrorKind::WireShape,
-            "session prompt answered without a {\"data\":{\"text\"}} envelope",
+            "the generate reply carried no {\"data\":{\"text\"}} envelope",
         )
         .with_provider(PROVIDER_NAME)
     })?;
@@ -698,11 +488,217 @@ fn parse_prompt_response(
             text: Some(text),
         });
     }
-    let structured = parse_structured(PROVIDER_NAME, &text)?;
+    let structured = parse_structured_lenient(PROVIDER_NAME, &text)?;
     Ok(PromptOutcome {
         structured: Some(structured),
         text: Some(text),
     })
+}
+
+/// Decode one non-2xx generate response into a named failure class.
+///
+/// The class token is a closed set ([`wire_reason`]); the message is fixed and
+/// generic per status (`POST <path> failed (<status>)`), so neither the host's
+/// `message` nor the body can reach a log line or a decision. `detail` is
+/// built here from the DECLARED error fields only, each bounded to
+/// [`MAX_DETAIL_CHARS`].
+pub fn decode_generate_failure(status: u16, body: &str) -> ProviderError {
+    let message = format!("POST {GENERATE_TEXT_PATH} failed ({status})");
+    let parsed = serde_json::from_str::<Value>(body)
+        .ok()
+        .filter(Value::is_object);
+    let tagged = parsed.as_ref().and_then(|value| {
+        value
+            .get("_tag")
+            .and_then(Value::as_str)
+            .map(|tag| (tag, value))
+    });
+    let Some((tag, value)) = tagged else {
+        // No `_tag`: on a 404 the route itself is the missing thing.
+        if status == 404 {
+            return ProviderError::new(ProviderErrorKind::Config, message)
+                .with_provider(PROVIDER_NAME)
+                .with_status(status)
+                .with_wire_reason(wire_reason::ROUTE_MOVED)
+                .with_detail(format!("route={GENERATE_TEXT_PATH}"));
+        }
+        return ProviderError::from_status(PROVIDER_NAME, status, message);
+    };
+    let class = tag_class(tag);
+
+    if class.starts_with("InvalidRequest") {
+        let detail = detail_value(value, "field").or_else(|| detail_value(value, "kind"));
+        return wire_failure(
+            ProviderErrorKind::Config,
+            wire_reason::INVALID_REQUEST,
+            status,
+            message,
+            detail,
+        );
+    }
+    if class.starts_with("Unauthorized") {
+        return wire_failure(
+            ProviderErrorKind::Auth,
+            wire_reason::UNAUTHORIZED,
+            status,
+            message,
+            None,
+        );
+    }
+    if class.starts_with("ProviderNotFound") {
+        return wire_failure(
+            ProviderErrorKind::Config,
+            wire_reason::PROVIDER_NOT_FOUND,
+            status,
+            message,
+            detail_pairs(value, &["providerID"]),
+        );
+    }
+    if class.starts_with("ModelNotFound") {
+        return wire_failure(
+            ProviderErrorKind::Config,
+            wire_reason::MODEL_NOT_FOUND,
+            status,
+            message,
+            detail_pairs(value, &["providerID", "modelID"]),
+        );
+    }
+    if class.starts_with("LocationNotFound") {
+        return wire_failure(
+            ProviderErrorKind::Config,
+            wire_reason::LOCATION_NOT_FOUND,
+            status,
+            message,
+            detail_value(value, "location").map(|location| format!("location={location}")),
+        );
+    }
+    if class.starts_with("UnsupportedModel") {
+        return wire_failure(
+            ProviderErrorKind::Config,
+            wire_reason::MODEL_UNSUPPORTED,
+            status,
+            message,
+            detail_pairs(value, &["providerID", "modelID", "capability"]),
+        );
+    }
+    if class.starts_with("ProviderRequest") {
+        return decode_provider_request_failure(status, message, value);
+    }
+    if class.starts_with("ServiceUnavailable") {
+        return wire_failure(
+            ProviderErrorKind::HttpStatus,
+            wire_reason::SERVICE_UNAVAILABLE,
+            status,
+            message,
+            detail_value(value, "service").map(|service| format!("service={service}")),
+        );
+    }
+    // A decodable but unknown tag: never silently a route-move.
+    wire_failure(
+        kind_from_status(status),
+        wire_reason::UNRECOGNISED,
+        status,
+        message,
+        Some(format!("tag={}", bounded_detail(tag))),
+    )
+}
+
+/// `ProviderRequestError` splits into a retryable and a terminal class on the
+/// declared `reason`; absent/unknown reasons stay retryable (a conformant host
+/// cannot omit a required field, and the ladder bounds the cost at five).
+fn decode_provider_request_failure(status: u16, message: String, value: &Value) -> ProviderError {
+    let reason = value.get("reason").and_then(Value::as_str);
+    let terminal = matches!(
+        reason,
+        Some("authentication") | Some("content_filter") | Some("invalid_request")
+    );
+    let token = if terminal {
+        wire_reason::PROVIDER_REQUEST_TERMINAL
+    } else {
+        wire_reason::PROVIDER_REQUEST_RETRYABLE
+    };
+    let mut detail = format!("reason={}", reason.unwrap_or("<absent>"));
+    let retry_after = value.get("retryAfterMs").and_then(Value::as_u64);
+    if !terminal {
+        if let Some(host_status) = value.get("status").and_then(Value::as_u64) {
+            detail.push_str(&format!(";status={host_status}"));
+        }
+        if let Some(ms) = retry_after {
+            detail.push_str(&format!(";retryAfterMs={ms}"));
+        }
+    }
+    let error = wire_failure(
+        ProviderErrorKind::HttpStatus,
+        token,
+        status,
+        message,
+        Some(detail),
+    );
+    match retry_after {
+        Some(ms) => error.with_retry_after(ms),
+        None => error,
+    }
+}
+
+/// Strip one optional `ErrorEncoded`/`Encoded` suffix so both spellings of a
+/// declared tag classify the same way.
+fn tag_class(tag: &str) -> &str {
+    let tag = tag.trim();
+    tag.strip_suffix("ErrorEncoded")
+        .or_else(|| tag.strip_suffix("Encoded"))
+        .unwrap_or(tag)
+}
+
+/// Build one decoded failure: fixed message, closed token, bounded detail.
+fn wire_failure(
+    kind: ProviderErrorKind,
+    token: &'static str,
+    status: u16,
+    message: String,
+    detail: Option<String>,
+) -> ProviderError {
+    let error = ProviderError::new(kind, message)
+        .with_provider(PROVIDER_NAME)
+        .with_status(status)
+        .with_wire_reason(token);
+    match detail {
+        Some(detail) => error.with_detail(detail),
+        None => error,
+    }
+}
+
+fn kind_from_status(status: u16) -> ProviderErrorKind {
+    match status {
+        401 | 403 => ProviderErrorKind::Auth,
+        429 => ProviderErrorKind::RateLimited,
+        _ => ProviderErrorKind::HttpStatus,
+    }
+}
+
+/// `key=value` for one declared string field.
+fn detail_value(value: &Value, key: &str) -> Option<String> {
+    value.get(key).and_then(Value::as_str).map(bounded_detail)
+}
+
+/// `key=value;key=value` for the declared fields that are present.
+fn detail_pairs(value: &Value, keys: &[&str]) -> Option<String> {
+    let pairs: Vec<String> = keys
+        .iter()
+        .filter_map(|key| detail_value(value, key).map(|detail| format!("{key}={detail}")))
+        .collect();
+    if pairs.is_empty() {
+        None
+    } else {
+        Some(pairs.join(";"))
+    }
+}
+
+/// Bound one detail value at a UTF-8 char boundary.
+fn bounded_detail(value: &str) -> String {
+    if value.chars().count() <= MAX_DETAIL_CHARS {
+        return value.to_owned();
+    }
+    value.chars().take(MAX_DETAIL_CHARS).collect()
 }
 
 fn decode_json(response: &HostResponse, label: &str) -> Result<Value, ProviderError> {
@@ -789,20 +785,6 @@ fn models_from_config(value: &Value) -> Vec<ModelInfo> {
     models
 }
 
-/// Minimal percent-encoding for query components (unreserved + `/`).
-fn encode_query_component(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char)
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
-}
-
 /// Conservative token estimate (`ceil(chars / 4)`) used when the host exposes
 /// no token-count endpoint.
 pub fn estimate_token_count(text: &str) -> u32 {
@@ -823,8 +805,6 @@ impl OpenCodeHostProvider {
                 transport,
                 connected: Arc::new(RwLock::new(HashSet::new())),
                 refresher: Arc::new(RwLock::new(None)),
-                internal: InternalCaptureSessions::global().clone(),
-                step_counts: Arc::new(Mutex::new(HashMap::new())),
             },
         }
     }
@@ -863,16 +843,6 @@ impl OpenCodeHostProvider {
     /// Refresh the connected-provider snapshot from `GET /config`.
     pub async fn refresh_connected_providers(&self) -> Result<(), ProviderError> {
         self.state.refresh_connected_providers().await
-    }
-
-    /// Record a `step-start` on an internal structured-output session.
-    pub fn note_structured_step(&self, session_id: &str) -> StepNote {
-        self.state.note_structured_step(session_id)
-    }
-
-    /// True while an internal structured-output session is live.
-    pub fn is_internal_structured_session(&self, session_id: &str) -> bool {
-        self.state.internal.is_tracked(session_id)
     }
 }
 
@@ -917,13 +887,15 @@ impl AiProviderStructured for OpenCodeHostProvider {
     async fn complete_structured(
         &self,
         request: CompletionRequest,
-        json_schema: Value,
+        _json_schema: Value,
     ) -> Result<Value, ProviderError> {
-        let outcome = self.state.run(request, Some(json_schema)).await?;
+        // The route has no `json_schema` enforcement: the schema is already in
+        // the prompt text, and the reply is text, not a schema-bound object.
+        let outcome = self.state.generate(request, true).await?;
         outcome.structured.ok_or_else(|| {
             ProviderError::new(
-                ProviderErrorKind::Protocol,
-                "the generate reply carried no JSON object",
+                ProviderErrorKind::ModelOutput,
+                "the generate reply carried no structured value",
             )
             .with_provider(PROVIDER_NAME)
         })
@@ -942,8 +914,6 @@ mod tests {
     fn default_config_matches_upstream_ceiling() {
         let config = OpenCodeHostConfig::default();
         assert_eq!(config.timeout, Duration::from_millis(90_000));
-        assert_eq!(config.max_steps, STRUCTURED_OUTPUT_MAX_STEPS);
-        assert_eq!(config.retry_count, STRUCTURED_OUTPUT_DEFAULT_RETRY_COUNT);
         // The default base URL is deliberately NOT dialable: production passes
         // a resolved `{origin}/api`, and a compiled-in port would silently
         // target whatever listens on it.
@@ -976,12 +946,6 @@ mod tests {
     }
 
     #[test]
-    fn query_component_encoding_escapes_reserved() {
-        assert_eq!(encode_query_component("a/b c?d"), "a%2Fb%20c%3Fd");
-        assert_eq!(encode_query_component("ses_1"), "ses_1");
-    }
-
-    #[test]
     fn token_estimate_is_ceil_over_four() {
         assert_eq!(estimate_token_count(""), 0);
         assert_eq!(estimate_token_count("a"), 1);
@@ -989,12 +953,135 @@ mod tests {
         assert_eq!(estimate_token_count("abcde"), 2);
     }
 
-    // The deleted row `assistant_error_details_never_echo_prompt_fields` pinned
-    // `format_assistant_error`: the old reply's `info.error.name`/`data` were
-    // rendered with a whitelist and a prompt fragment was never echoed. The
-    // documented reply has no field for an assistant-side error (the assistant
-    // -side error name/data are a RECORDED LOSS, ADR-0029's amendment), so the
-    // types are gone. Its still-true claim — no response body reaches a message
-    // — is inherited by the `test_2_2_5_*` rows' absence assertions (row 4 on
-    // the create body, row 10 on the reply text) and by `decode_json`.
+    fn decode(status: u16, tag: &str, extra: &str) -> ProviderError {
+        let body = format!("{{\"_tag\":\"{tag}\",\"message\":\"x\"{extra}}}");
+        decode_generate_failure(status, &body)
+    }
+
+    /// Every declared `_tag` — both spellings — maps to its closed token, and
+    /// every declared `ProviderRequestError.reason` to one of the two 502
+    /// tokens. Replacing any case with the default reds it.
+    #[test]
+    fn test_wire_error_table_covers_every_declared_generate_failure() {
+        let simple: [(&str, u16, &'static str, ProviderErrorKind); 7] = [
+            (
+                "InvalidRequest",
+                400,
+                wire_reason::INVALID_REQUEST,
+                ProviderErrorKind::Config,
+            ),
+            (
+                "Unauthorized",
+                401,
+                wire_reason::UNAUTHORIZED,
+                ProviderErrorKind::Auth,
+            ),
+            (
+                "ProviderNotFound",
+                404,
+                wire_reason::PROVIDER_NOT_FOUND,
+                ProviderErrorKind::Config,
+            ),
+            (
+                "ModelNotFound",
+                404,
+                wire_reason::MODEL_NOT_FOUND,
+                ProviderErrorKind::Config,
+            ),
+            (
+                "LocationNotFound",
+                404,
+                wire_reason::LOCATION_NOT_FOUND,
+                ProviderErrorKind::Config,
+            ),
+            (
+                "UnsupportedModel",
+                422,
+                wire_reason::MODEL_UNSUPPORTED,
+                ProviderErrorKind::Config,
+            ),
+            (
+                "ServiceUnavailable",
+                503,
+                wire_reason::SERVICE_UNAVAILABLE,
+                ProviderErrorKind::HttpStatus,
+            ),
+        ];
+        for (class, status, token, kind) in simple {
+            for tag in [format!("{class}Error"), format!("{class}ErrorEncoded")] {
+                let error = decode(status, &tag, "");
+                assert_eq!(error.wire_reason, Some(token), "tag {tag}");
+                assert_eq!(error.kind, kind, "tag {tag}");
+                assert_eq!(error.status, Some(status), "tag {tag}");
+                assert_eq!(
+                    error.message,
+                    format!("POST /experimental/generate/text failed ({status})"),
+                    "the message is fixed and generic, tag {tag}"
+                );
+                assert!(
+                    !error.message.contains(&tag),
+                    "the class never leaks into the message"
+                );
+            }
+        }
+
+        let retryable_reasons = ["rate_limit", "overloaded", "provider"];
+        let terminal_reasons = ["authentication", "content_filter", "invalid_request"];
+        for reason in retryable_reasons
+            .iter()
+            .map(|reason| (reason, wire_reason::PROVIDER_REQUEST_RETRYABLE))
+            .chain(
+                terminal_reasons
+                    .iter()
+                    .map(|reason| (reason, wire_reason::PROVIDER_REQUEST_TERMINAL)),
+            )
+        {
+            for tag in ["ProviderRequestError", "ProviderRequestErrorEncoded"] {
+                let error = decode(502, tag, &format!(",\"reason\":\"{}\"", reason.0));
+                assert_eq!(error.wire_reason, Some(reason.1), "reason {}", reason.0);
+                assert_eq!(error.kind, ProviderErrorKind::HttpStatus);
+                assert_eq!(error.status, Some(502));
+                let detail = error.detail.as_deref().expect("a reason detail");
+                assert!(detail.contains(&format!("reason={}", reason.0)), "{detail}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_wire_error_404_without_a_tag_is_route_moved() {
+        for body in [
+            "",
+            "<html><body>not found</body></html>",
+            "{\"message\":\"x\"}",
+        ] {
+            let error = decode_generate_failure(404, body);
+            assert_eq!(error.wire_reason, Some(wire_reason::ROUTE_MOVED), "{body}");
+            assert_eq!(error.kind, ProviderErrorKind::Config);
+            assert_eq!(error.status, Some(404));
+            assert!(
+                error
+                    .detail
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains(GENERATE_TEXT_PATH),
+                "the detail names the path"
+            );
+        }
+    }
+
+    #[test]
+    fn test_wire_error_unknown_tag_is_unrecognised_not_route_moved() {
+        let error = decode_generate_failure(404, r#"{"_tag":"SomethingNewError","message":"x"}"#);
+        assert_eq!(error.wire_reason, Some(wire_reason::UNRECOGNISED));
+        assert_eq!(error.kind, ProviderErrorKind::HttpStatus);
+        assert!(
+            error
+                .detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("tag=SomethingNewError"),
+            "{:?}",
+            error.detail
+        );
+    }
 }

@@ -7,14 +7,13 @@
 //!
 //! - [`ProviderRegistry`] resolves typed [`ProviderConfig`] values into
 //!   `Arc<dyn AiProvider>`, receiving its [`SecretResolver`] by injection.
-//! - [`OpenCodeHostProvider`] implements the seam over the OpenCode HTTP host.
-//! - [`InternalCaptureSessions`] is the process-global loop guard.
+//! - [`OpenCodeHostProvider`] implements the seam over the OpenCode HTTP host's
+//!   stateless generate route.
 //! - [`FileSecretResolver`] is W2.3's file-backed [`SecretResolver`]: strict
 //!   permissions, bounded reads, path-only error messages.
 
 pub mod error;
 pub mod host_auth;
-pub mod internal_capture;
 pub mod opencode_host;
 pub mod registry;
 pub mod remote;
@@ -26,15 +25,10 @@ pub mod provider_trait;
 
 pub use error::{ProviderError, ProviderErrorKind};
 pub use host_auth::{HostAuthorization, Zeroizing};
-pub use internal_capture::{
-    INTERNAL_CAPTURE_SESSION_TITLE, InternalCaptureSessions, UNTRACK_GRACE,
-    is_internal_capture_session_title,
-};
 pub use opencode_host::{
-    ConnectedRefresher, HostMethod, HostRequest, HostResponse, HostTransport, OpenCodeHostConfig,
-    OpenCodeHostProvider, PROVIDER_NAME, ReqwestHostTransport, STRUCTURED_OUTPUT_AGENT,
-    STRUCTURED_OUTPUT_DEFAULT_RETRY_COUNT, STRUCTURED_OUTPUT_MAX_STEPS,
-    STRUCTURED_OUTPUT_TIMEOUT_MS, StepNote, estimate_token_count,
+    ConnectedRefresher, GENERATE_TEXT_PATH, HostMethod, HostRequest, HostResponse, HostTransport,
+    OpenCodeHostConfig, OpenCodeHostProvider, PROVIDER_NAME, ReqwestHostTransport,
+    STRUCTURED_OUTPUT_TIMEOUT_MS, decode_generate_failure, estimate_token_count,
 };
 pub use provider_trait::{AiProvider, AiProviderStructured, BoxFuture, CompletionStream};
 pub use registry::{ProviderConfig, ProviderKind, ProviderRegistry};

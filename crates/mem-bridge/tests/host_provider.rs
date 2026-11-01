@@ -12,6 +12,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use common::TestDir;
+use mem_ai::provider::error::wire_reason;
 use mem_ai::provider::request::{ChatMessage, CompletionRequest};
 use mem_ai::provider::{
     AiProvider, BoxFuture, CompletionStream, HostMethod, HostRequest, HostResponse, HostTransport,
@@ -25,6 +26,7 @@ use mem_store::platform::ProcessProbe;
 use serde_json::Value;
 
 const HOST_PID: u32 = 4242;
+const GENERATE_PATH: &str = "/api/experimental/generate/text";
 
 #[derive(Clone, Debug)]
 struct RecordedCall {
@@ -33,14 +35,14 @@ struct RecordedCall {
     body: Option<Value>,
 }
 
-/// Answers the pre-2.2.5 session protocol (a transport double only — the
+/// Answers the stateless generate route (a transport double only — the
 /// DOCUMENTED 2.2.5 shapes are pinned in `mem-ai`'s provider suite) and records
 /// every call's method/url/body.
 #[derive(Default)]
 struct RecordingTransport {
     calls: Mutex<Vec<RecordedCall>>,
-    /// Scripted `POST …/session` answers; empty ⇒ `{"id":"ses_test"}`.
-    session_responses: Mutex<VecDeque<HostResponse>>,
+    /// Scripted generate answers; empty ⇒ `{"data":{"text":"ok"}}`.
+    generate_responses: Mutex<VecDeque<HostResponse>>,
 }
 
 impl RecordingTransport {
@@ -48,11 +50,11 @@ impl RecordingTransport {
         Arc::new(Self::default())
     }
 
-    fn queue_session(&self, responses: &[HostResponse]) {
+    fn queue_generate(&self, responses: &[HostResponse]) {
         let mut queue = self
-            .session_responses
+            .generate_responses
             .lock()
-            .expect("session responses lock");
+            .expect("generate responses lock");
         queue.clear();
         queue.extend(responses.iter().cloned());
     }
@@ -80,23 +82,15 @@ impl HostTransport for RecordingTransport {
             body: request.body.clone(),
         });
         let response = match request.method {
-            HostMethod::Post if request.url.ends_with("/session") => self
-                .session_responses
+            HostMethod::Post if request.url.ends_with(GENERATE_PATH) => self
+                .generate_responses
                 .lock()
-                .expect("session responses lock")
+                .expect("generate responses lock")
                 .pop_front()
                 .unwrap_or(HostResponse {
                     status: 200,
-                    body: r#"{"id":"ses_test"}"#.to_owned(),
+                    body: r#"{"data":{"text":"ok"}}"#.to_owned(),
                 }),
-            HostMethod::Post if request.url.contains("/generate") => HostResponse {
-                status: 200,
-                body: r#"{"data":{"text":"ok"}}"#.to_owned(),
-            },
-            HostMethod::Delete => HostResponse {
-                status: 200,
-                body: "true".to_owned(),
-            },
             _ => HostResponse {
                 status: 404,
                 body: String::new(),
@@ -227,35 +221,28 @@ async fn test_lazy_provider_retries_resolution_after_a_missing_service_file() {
         "the retried resolution succeeds: {chunks:?}"
     );
 
-    // The POSTs, in order. (The trailing DELETE is `run()`'s cleanup and is not
-    // part of this comparison.)
+    // ONE stateless POST per capture, on the resolved origin.
     let posts = transport.posts();
     let urls: Vec<&str> = posts.iter().map(|call| call.url.as_str()).collect();
-    assert_eq!(
-        urls,
-        vec![
-            "http://127.0.0.1:49374/api/session",
-            "http://127.0.0.1:49374/api/session/ses_test/generate",
-        ]
-    );
+    const GEN_URL: &str = "http://127.0.0.1:49374/api/experimental/generate/text";
+    assert_eq!(urls, vec![GEN_URL]);
 
     // The model comes from the WIRING (the provider ignores
-    // `CompletionRequest.model`), and it lands in the CREATE body's `model`
-    // field — `Model.Ref{id, providerID}` — beside the structured-output agent.
-    let create = posts[0].body.as_ref().expect("create body");
-    assert_eq!(create["model"]["id"], "beam-free");
-    assert_eq!(create["model"]["providerID"], "opencode-go");
-    assert_eq!(create["agent"], "opencode-mem-structured");
-
-    // The prompt carries exactly one key: the route declares only `prompt`.
-    let prompt = posts[1].body.as_ref().expect("prompt body");
-    assert_eq!(
-        prompt
-            .as_object()
-            .map(|body| body.keys().cloned().collect::<Vec<_>>()),
-        Some(vec!["prompt".to_string()]),
-        "the prompt body is one key: {prompt}"
+    // `CompletionRequest.model`), and it lands in the GENERATE body's `model`
+    // field — `Model.Ref{id, providerID}`.
+    let body = posts[0].body.as_ref().expect("generate body");
+    assert_eq!(body["model"]["id"], "beam-free");
+    assert_eq!(body["model"]["providerID"], "opencode-go");
+    assert!(
+        body.get("agent").is_none(),
+        "the route names no agent: {body}"
     );
+    let mut keys: Vec<String> = body
+        .as_object()
+        .map(|body| body.keys().cloned().collect())
+        .unwrap_or_default();
+    keys.sort();
+    assert_eq!(keys, vec!["model".to_string(), "prompt".to_string()]);
 }
 
 /// 3b — a successful exchange caches the origin; a later dead pid is irrelevant
@@ -282,17 +269,21 @@ async fn test_cached_origin_survives_a_successful_exchange() {
         "the cached origin is used without re-resolution: {second:?}"
     );
 
-    let creates: Vec<RecordedCall> = transport
+    let generates: Vec<RecordedCall> = transport
         .posts()
         .into_iter()
-        .filter(|call| call.url.ends_with("/session"))
+        .filter(|call| call.url.ends_with(GENERATE_PATH))
         .collect();
-    assert_eq!(creates.len(), 2, "two captures, two creates: {creates:?}");
+    assert_eq!(
+        generates.len(),
+        2,
+        "two captures, two generates: {generates:?}"
+    );
     assert!(
-        creates
+        generates
             .iter()
-            .all(|call| call.url == "http://127.0.0.1:49374/api/session"),
-        "both creates use the cached origin: {creates:?}"
+            .all(|call| call.url == format!("http://127.0.0.1:49374{GENERATE_PATH}")),
+        "both generates use the cached origin: {generates:?}"
     );
 }
 
@@ -325,8 +316,8 @@ async fn test_warm_reports_the_reason_without_caching_a_failure() {
     assert_eq!(provider.warm(), None);
 }
 
-/// 3d — `Auth`, `HttpStatus` and `Protocol` all clear the cache, so a moved
-/// origin is picked up on the next attempt.
+/// 3d — `Auth`, a decoded host failure and `Protocol` all clear the cache, so a
+/// moved origin is picked up on the next attempt.
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_any_inner_error_clears_the_cached_origin() {
     let state = TestDir::new("lazy-clear-on-error");
@@ -338,7 +329,7 @@ async fn test_any_inner_error_clears_the_cached_origin() {
     let probe = MutableProbe::new(&[HOST_PID]);
     let provider = LazyHostProvider::new(deps(state.path(), transport.clone(), probe));
 
-    transport.queue_session(&[
+    transport.queue_generate(&[
         HostResponse {
             status: 401,
             body: String::new(),
@@ -347,9 +338,7 @@ async fn test_any_inner_error_clears_the_cached_origin() {
             status: 404,
             body: String::new(),
         },
-        // A 2xx with no body: `decode_json` maps it to `Protocol`. (Junk JSON
-        // with a 2xx is a SHAPE mismatch and answers `WireShape` instead — that
-        // kind is pinned by the `test_2_2_5_*` rows in `mem-ai`.)
+        // A 2xx with no body: `decode_generate_reply` maps it to `Protocol`.
         HostResponse {
             status: 200,
             body: String::new(),
@@ -364,12 +353,13 @@ async fn test_any_inner_error_clears_the_cached_origin() {
 
     let status = drain(provider.complete(capture_request())).await;
     let status = status[0].as_ref().expect_err("404");
-    assert_eq!(status.kind, ProviderErrorKind::HttpStatus);
+    assert_eq!(status.kind, ProviderErrorKind::Config);
     assert_eq!(status.status, Some(404));
+    assert_eq!(status.wire_reason, Some(wire_reason::ROUTE_MOVED));
 
     let protocol = drain(provider.complete(capture_request())).await;
     assert_eq!(
-        protocol[0].as_ref().expect_err("junk 200").kind,
+        protocol[0].as_ref().expect_err("empty 200").kind,
         ProviderErrorKind::Protocol
     );
 
@@ -383,13 +373,16 @@ async fn test_any_inner_error_clears_the_cached_origin() {
         chunks.iter().all(Result::is_ok),
         "the moved origin resolves: {chunks:?}"
     );
-    let creates: Vec<RecordedCall> = transport
+    let generates: Vec<RecordedCall> = transport
         .posts()
         .into_iter()
-        .filter(|call| call.url.ends_with("/session"))
+        .filter(|call| call.url.ends_with(GENERATE_PATH))
         .collect();
-    assert_eq!(creates.len(), 4, "{creates:?}");
-    assert_eq!(creates[3].url, "http://127.0.0.1:5002/api/session");
+    assert_eq!(generates.len(), 4, "{generates:?}");
+    assert_eq!(
+        generates[3].url,
+        format!("http://127.0.0.1:5002{GENERATE_PATH}")
+    );
 }
 
 /// R22 — the engine's provider factory honours `opencodeBaseUrl`, and the
@@ -433,11 +426,14 @@ async fn test_engine_host_provider_honours_the_opencode_base_url_override() {
 
     let chunks = drain(provider.complete(capture_request())).await;
     assert!(chunks.iter().all(Result::is_ok), "{chunks:?}");
-    let creates: Vec<RecordedCall> = transport
+    let generates: Vec<RecordedCall> = transport
         .posts()
         .into_iter()
-        .filter(|call| call.url.ends_with("/session"))
+        .filter(|call| call.url.ends_with(GENERATE_PATH))
         .collect();
-    assert_eq!(creates.len(), 1, "{creates:?}");
-    assert_eq!(creates[0].url, "http://127.0.0.1:5099/api/session");
+    assert_eq!(generates.len(), 1, "{generates:?}");
+    assert_eq!(
+        generates[0].url,
+        format!("http://127.0.0.1:5099{GENERATE_PATH}")
+    );
 }
