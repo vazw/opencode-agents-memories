@@ -74,6 +74,19 @@ pub const DEFAULT_WEB_HOST: &str = "127.0.0.1";
 /// Default web bind port (3742; bridge-schema.md §9).
 pub const DEFAULT_WEB_PORT: u16 = 3742;
 
+/// The whole wait the FIRST `inject` may spend on Step 7's startup replay.
+///
+/// `serve_stdio` is strictly serial, so a pending `inject` holds the whole
+/// loop: an unbounded wait behind a queued backlog (one provider call per
+/// entry, 5–30 s per self-hosted call) pushes the first injection AND
+/// everything queued behind it past the wrapper's `REQUEST_TIMEOUT_MS = 15000`
+/// (`plugin/src/plugin.js:57`). On expiry the read proceeds and the engine says
+/// so by name; durability is untouched (`dequeue` never deletes — only
+/// `mark_done` does), so the per-capture fire-and-forget drain replays the rows
+/// anyway. The cost of expiry is therefore a possibly-stale FIRST read, never a
+/// lost capture.
+pub const INJECT_BARRIER_BUDGET: Duration = Duration::from_secs(2);
+
 // ---------------------------------------------------------------------------
 // Structured stderr (mandate 2)
 // ---------------------------------------------------------------------------
@@ -206,10 +219,15 @@ pub struct Engine {
     /// and never touch storage; `hello`/`health`/`shutdown` are unchanged. The
     /// legacy `recall` shape needs no runtime (it reads nothing).
     runtime: Option<Arc<EngineRuntime>>,
-    /// Step 7's startup-replay completion signal, watched by the FIRST
+    /// Step 7's startup-replay completion signal, watched ONCE by the FIRST
     /// `inject` (see [`Engine::schedule_startup_drain`]). `None` when no drain
     /// was scheduled: the fixture engines and a degraded composition.
     startup_drain: Option<watch::Receiver<bool>>,
+    /// Whether the barrier above was already consulted. The wait is bounded
+    /// ([`INJECT_BARRIER_BUDGET`]) and ONE-SHOT: a settled barrier — completed,
+    /// dead or expired — never re-waits a later `inject`, and its one named
+    /// warn is never re-emitted per request.
+    startup_barrier_settled: AtomicBool,
 }
 
 /// The dependency-bearing runtime: composed ONCE by the engine root
@@ -237,6 +255,7 @@ impl Engine {
             live_tasks: Arc::new(AtomicUsize::new(0)),
             runtime: None,
             startup_drain: None,
+            startup_barrier_settled: AtomicBool::new(false),
         }
     }
 
@@ -565,14 +584,41 @@ impl Engine {
             Some(runtime) => runtime,
             None => return empty_inject(request, self.elapsed_ms()),
         };
-        // Step 7's ordering: the startup replay must complete before the first
-        // `inject` reads. A completed signal resolves this immediately, so a
-        // later `inject` neither re-waits nor triggers another drain.
-        if let Some(drain) = &self.startup_drain {
+        // Step 7's ordering, BOUNDED: the startup replay is awaited ONCE, for
+        // at most `INJECT_BARRIER_BUDGET`. `serve_stdio` is serial, so an
+        // unbounded wait here held the whole loop and a backlog pushed the
+        // first inject past the wrapper's 15 s deadline — failing the very read
+        // the barrier was added to fix. Past the budget the read proceeds
+        // possibly-stale, which is the trade: `dequeue` never deletes, so the
+        // rows replay on the next drain.
+        if let Some(drain) = &self.startup_drain
+            && !self.startup_barrier_settled.swap(true, Ordering::SeqCst)
+        {
             let mut drain = drain.clone();
-            // `Err` means the drain task is gone without signalling: nothing
-            // left to wait for, and the durable inbox still holds its rows.
-            let _ = drain.wait_for(|completed| *completed).await;
+            match tokio::time::timeout(INJECT_BARRIER_BUDGET, drain.wait_for(|done| *done)).await {
+                // Completed inside the budget: the drain's writes are read.
+                Ok(Ok(_)) => {}
+                // The drain task died (a panic or a drop) without signalling.
+                // The inbox still holds its rows, so proceed — but say so once:
+                // a detached task's failure used to be invisible, where a panic
+                // in `run_in_runtime` was loud.
+                Ok(Err(_)) => structured_stderr(
+                    "engine.startup_drain_failed",
+                    "warn",
+                    "engine",
+                    serde_json::json!({ "component": "capture" }),
+                ),
+                // Still in flight. Proceed, and name the budget spent.
+                Err(_) => structured_stderr(
+                    "engine.inject_barrier_timeout",
+                    "warn",
+                    "engine",
+                    serde_json::json!({
+                        "component": "inject",
+                        "budget_ms": INJECT_BARRIER_BUDGET.as_millis() as u64,
+                    }),
+                ),
+            }
         }
         let inject_params: InjectParams =
             serde_json::from_value(request.params.clone()).unwrap_or_default();
@@ -744,17 +790,30 @@ impl Engine {
     /// (`plugin/src/plugin.js:60`), while a queued backlog costs one provider
     /// call per entry and a self-hosted model takes 5–30 s each (measured:
     /// 90 s+ of no handshake, plugin degraded to no-engine). It therefore runs
-    /// in a tracked task, and the FIRST `inject` awaits the completion signal
-    /// stored here — the ordering Step 7 actually needs. Once the value is
-    /// `true`, every later `inject` resolves immediately: no re-wait, no
-    /// re-run. A drain failure is discarded exactly as before, and a task
-    /// dropped before signalling closes the channel, which the wait treats as
-    /// complete — an injector is never wedged on a dead drain.
+    /// in a tracked task, and the FIRST `inject` waits on the completion signal
+    /// stored here for at most [`INJECT_BARRIER_BUDGET`] — the ordering Step 7
+    /// needs, bounded so a serial `serve_stdio` loop is never held past the
+    /// wrapper's request deadline. Once that one wait is over, every later
+    /// `inject` resolves immediately: no re-wait, no re-run.
+    ///
+    /// Both ways the replay can fail are NAMED, once: a returned error is
+    /// logged here, and a task that dies before signalling (a panic, a drop)
+    /// closes the channel, which the waiting `inject` reports as
+    /// `engine.startup_drain_failed`. Neither loses data — `dequeue` never
+    /// deletes, only `mark_done` does — so an injector is never wedged on a
+    /// dead drain and the rows replay on the next one.
     pub fn schedule_startup_drain(&mut self, capture: Arc<CaptureService>) {
         let (completed, receiver) = watch::channel(false);
         self.startup_drain = Some(receiver);
         self.spawn_tracked(async move {
-            let _ = capture.drain_once().await;
+            if capture.drain_once().await.is_err() {
+                structured_stderr(
+                    "engine.startup_drain_failed",
+                    "warn",
+                    "engine",
+                    serde_json::json!({ "component": "capture" }),
+                );
+            }
             let _ = completed.send(true);
         });
     }
@@ -1489,16 +1548,20 @@ pub async fn run_in_runtime(
 
     // The startup capture drain is SCHEDULED, never awaited before the stdio
     // loop: Step 7 requires durable replay to complete before the first
-    // `inject` reads, and that is where it is awaited now. Awaiting it HERE
-    // held the `hello` handshake through every queued provider call — with a
-    // self-hosted model (5–30 s per call) the wrapper's 5 s deadline expired
-    // and the whole memory tool degraded. The Q8 consolidation lifecycle is
-    // scheduled for the same reason: its startup tick awaits an LLM per
-    // project, and injection stays correct meanwhile because the tick's RAII
-    // guard sets `consolidation_active`, which makes `InjectService` skip
-    // ONLY the tier-1 leg (blueprint Step 9). Consequence, by design: the
-    // first `inject` after launch may run before promoted facts exist and may
-    // skip the tier-1 leg while a tick is in flight (ADR-0008 D-W5.3-8).
+    // `inject` reads, and that is where it is awaited now — ONCE, for at most
+    // `INJECT_BARRIER_BUDGET`. Awaiting it HERE held the `hello` handshake
+    // through every queued provider call, and awaiting it UNBOUNDED at the
+    // first `inject` (the previous shape of this fix) held the serial stdio
+    // loop instead: a self-hosted model (5–30 s per call) put the first
+    // injection past the wrapper's 15 s deadline and everything queued behind
+    // it. The Q8 consolidation lifecycle is scheduled for the same reason: its
+    // startup tick awaits an LLM per project, and injection stays correct
+    // meanwhile because the tick's RAII guard sets `consolidation_active`,
+    // which makes `InjectService` skip ONLY the tier-1 leg (blueprint Step 9).
+    // Consequence, by design: the first `inject` after launch may run before
+    // promoted facts exist, may skip the tier-1 leg while a tick is in flight
+    // (ADR-0008 D-W5.3-8), and past the budget may read before the replay
+    // finished — durability is unaffected.
     if let Some(runtime) = &composed {
         engine.schedule_startup_drain(runtime.capture.clone());
         let scheduler = Arc::new(ConsolidationScheduler::new(

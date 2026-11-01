@@ -3,17 +3,32 @@
 //!
 //! `tests/engine_startup_drain.rs` pins the process-level contract: the drain
 //! never gates `hello`, and shutdown stays inside the D-45 budget while a
-//! drain is blocked. This file pins the ordering that the old AWAITED drain
-//! provided and Step 7 still needs — with the real `Engine` scheduling path,
-//! a real episodic store and the shared fake seams:
+//! drain is blocked. This file pins the ordering the old AWAITED drain provided
+//! and Step 7 still needs — with the real `Engine` scheduling path, a real
+//! episodic store and the shared fake seams:
 //!
-//! * (b) the FIRST `inject` waits for the startup drain and therefore observes
-//!   the fact the drain wrote; and
-//! * (c) a later `inject` neither re-waits nor re-runs the completed drain.
+//! * (b) with a FAST drain, the FIRST `inject` waits (inside the named
+//!   `INJECT_BARRIER_BUDGET`) and therefore observes the fact the drain wrote;
+//! * (c) a later `inject` neither re-waits nor re-runs the completed drain;
+//! * (e) a BLOCKED drain never holds the serial stdio loop past that budget:
+//!   the first `inject` proceeds, warns `engine.inject_barrier_timeout` once,
+//!   and the second `inject` does not re-wait; and
+//! * (f) a DEAD drain (the task panicked) fails open — `inject` answers — and
+//!   names itself `engine.startup_drain_failed` instead of dying silently.
+//!
+//! The ordering guarantee is therefore BOUNDED, not absolute: (b) is what a
+//! fast replay buys, (e) is the deliberate trade — a possibly-stale first read
+//! instead of a wedged engine (`dequeue` never deletes, so nothing is lost).
 //!
 //! The summarizer is a gate: its call is counted, then it holds the drain in
 //! flight until the test releases it. That makes "the first inject is waiting"
 //! an observation, not a timing guess.
+//!
+//! The named events are asserted from a CHILD of this test binary with its
+//! stderr redirected to a file: `structured_stderr` writes straight to the
+//! descriptor and libtest's per-test capture never sees it
+//! (`docs/agents/testing.md`: stdout/stderr are redirected to files, never
+//! pipes).
 
 mod common;
 
@@ -30,7 +45,8 @@ use mem_bridge::capture::{
 };
 use mem_bridge::capture_prompt::CaptureSummarizer;
 use mem_bridge::engine::{
-    Engine, EngineConfig, EngineRuntime, LaunchMode, ShutdownReport, serve_stdio,
+    Engine, EngineConfig, EngineRuntime, INJECT_BARRIER_BUDGET, LaunchMode, ShutdownReport,
+    serve_stdio,
 };
 use mem_bridge::inject::InjectService;
 use mem_bridge::recall::RecallService;
@@ -59,6 +75,21 @@ const SHUTDOWN: &str = r#"{"id":"shutdown-1","jsonrpc":"2.0","method":"shutdown"
 const HELLO_BOUND: Duration = Duration::from_secs(1);
 const INJECT_BOUND: Duration = Duration::from_secs(5);
 const IDLE_BOUND: Duration = Duration::from_millis(500);
+
+/// The reviewed barrier budget, asserted equal to the production constant so a
+/// silent widening cannot pass: 2 s is the fix, and a wider one re-opens R1.
+const BARRIER_BUDGET: Duration = Duration::from_secs(2);
+
+/// What a blocked barrier may cost before the inject answers: the budget plus
+/// scheduling slack for the fixture's store reads.
+const BLOCKED_INJECT_BOUND: Duration = Duration::from_secs(4);
+
+/// A settled barrier never re-waits, so the second inject is an ordinary read.
+const NO_REWAIT_BOUND: Duration = Duration::from_secs(1);
+
+/// The wrapper's `REQUEST_TIMEOUT_MS` (`plugin/src/plugin.js:57`): the
+/// consequence R1 measured. Every bound above stays far under it.
+const WRAPPER_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn capture_params(capture_id: &str) -> CaptureParams {
     CaptureParams {
@@ -112,23 +143,37 @@ impl CaptureSummarizer for GatedSummarizer {
     }
 }
 
+/// A summarizer that PANICS: `drain_once` unwinds, the spawned drain task dies,
+/// the `watch` sender drops with it, and the first `inject`'s wait returns
+/// `Err` — the dead-drain fail-open. Before the fix that branch was silent.
+struct PanickingSummarizer;
+
+impl CaptureSummarizer for PanickingSummarizer {
+    fn summarize<'a>(
+        &'a self,
+        _context: &'a str,
+    ) -> BoxFuture<'a, Result<CaptureSummaryOutput, EpisodicError>> {
+        Box::pin(async move {
+            panic!("the fixture summarizer fails the startup drain (dead-drain fail-open case)");
+        })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Fixture: real store + real capture drain + real inject, one gate
 // ---------------------------------------------------------------------------
 
-struct Fixture {
-    capture: Arc<CaptureService>,
-    calls: Arc<AtomicUsize>,
-    release: watch::Sender<bool>,
+/// The engine and its runtime over a fresh temp root, with ONE capture queued
+/// whose only route to a memory is the summarizer — so a drain is provably
+/// what the first `inject` waits for. The engine is assembled FIRST, then the
+/// drain is scheduled: the production order in `run_in_runtime`.
+struct Parts {
     engine: Engine,
-    _dir: TestDir,
+    capture: Arc<CaptureService>,
+    dir: TestDir,
 }
 
-/// Builds the runtime over a fresh temp root and queues ONE capture with only
-/// a transcript (no supplied summary), so the drain must call the summarizer.
-/// The engine is assembled FIRST, then the drain is scheduled — the production
-/// order in `run_in_runtime`.
-async fn fixture(prefix: &str) -> Fixture {
+async fn parts(prefix: &str, summarizer: Option<Arc<dyn CaptureSummarizer>>) -> Parts {
     let dir = TestDir::new(prefix);
     let config = dir.store_config();
     let store = Arc::new(EpisodicStore::new(dir.path().to_path_buf(), config.clone()));
@@ -136,8 +181,6 @@ async fn fixture(prefix: &str) -> Fixture {
     let shards = Arc::new(shard_manager(config));
     let embedder: Arc<dyn mem_embed::embedder::Embedder> =
         Arc::new(FakeEmbedder::with_vector(unit_vector(0)));
-    let calls = Arc::new(AtomicUsize::new(0));
-    let (release, _) = watch::channel(false);
     let capture = Arc::new(CaptureService::new(
         store.clone(),
         mem_episodic::inbox::CaptureInbox::new(store.clone()),
@@ -146,10 +189,7 @@ async fn fixture(prefix: &str) -> Fixture {
             embedder: embedder.clone(),
         })),
         embedder.clone(),
-        Some(Arc::new(GatedSummarizer {
-            calls: Arc::clone(&calls),
-            release: release.clone(),
-        })),
+        summarizer,
         Arc::new(FixedScopeResolver::default()),
         131_072,
     ));
@@ -175,12 +215,50 @@ async fn fixture(prefix: &str) -> Fixture {
     };
     let mut engine = Engine::with_runtime(EngineConfig::default(), Arc::new(runtime));
     engine.schedule_startup_drain(Arc::clone(&capture));
-    Fixture {
+    Parts {
+        engine,
         capture,
+        dir,
+    }
+}
+
+/// The gated fixture: the drain can be held in flight and released on demand.
+struct Fixture {
+    capture: Arc<CaptureService>,
+    calls: Arc<AtomicUsize>,
+    release: watch::Sender<bool>,
+    engine: Engine,
+    _dir: TestDir,
+}
+
+async fn fixture(prefix: &str) -> Fixture {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (release, _) = watch::channel(false);
+    let summarizer = Arc::new(GatedSummarizer {
+        calls: Arc::clone(&calls),
+        release: release.clone(),
+    });
+    let parts = parts(prefix, Some(summarizer)).await;
+    Fixture {
+        capture: parts.capture,
         calls,
         release,
-        engine,
-        _dir: dir,
+        engine: parts.engine,
+        _dir: parts.dir,
+    }
+}
+
+/// The dead-drain fixture: the drain task panics instead of completing.
+struct DeadFixture {
+    engine: Engine,
+    _dir: TestDir,
+}
+
+async fn dead_fixture(prefix: &str) -> DeadFixture {
+    let parts = parts(prefix, Some(Arc::new(PanickingSummarizer))).await;
+    DeadFixture {
+        engine: parts.engine,
+        _dir: parts.dir,
     }
 }
 
@@ -273,20 +351,75 @@ async fn wait_until(condition: impl Fn() -> bool) {
     }
 }
 
-fn block_of(response: &Value) -> &str {
+fn block_of(response: &Value) -> Option<&str> {
     response
         .get("result")
         .and_then(|result| result.get("block"))
         .and_then(Value::as_str)
-        .expect("an inject history block is rendered")
+}
+
+fn memory_count_of(response: &Value) -> Option<&Value> {
+    response
+        .get("result")
+        .and_then(|result| result.get("memory_count"))
+}
+
+fn occurrences(haystack: &str, needle: &str) -> usize {
+    haystack.matches(needle).count()
 }
 
 // ---------------------------------------------------------------------------
-// (b) the first inject awaits the drain, and therefore sees its write
+// The named-event wire: a child of this binary with stderr on a file
+// ---------------------------------------------------------------------------
+
+/// Runs one `#[ignore]`d case in a CHILD of this same test binary, its stderr
+/// redirected to a FILE, and returns what the child wrote there.
+///
+/// `structured_stderr` writes to the raw descriptor, which libtest's per-test
+/// capture never intercepts, so the house convention — stderr to files, never
+/// pipes — is the only way to assert a named event from an in-process seam.
+fn run_captured(inner: &str, dir: &TestDir) -> String {
+    let log = dir.path().join("child.err");
+    let stderr = std::fs::File::create(&log).expect("create the child stderr file");
+    let status = std::process::Command::new(std::env::current_exe().expect("this test binary"))
+        .args([
+            "--exact",
+            inner,
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::from(stderr))
+        .status()
+        .expect("the child test binary runs");
+    let text = std::fs::read_to_string(&log).unwrap_or_default();
+    assert!(
+        status.success(),
+        "the child case `{inner}` must pass: {status}\n{text}"
+    );
+    text
+}
+
+fn assert_reviewed_budget() {
+    assert_eq!(
+        INJECT_BARRIER_BUDGET, BARRIER_BUDGET,
+        "the barrier budget is the reviewed 2 s; a wider one re-opens the wrapper-timeout R1"
+    );
+    assert!(
+        BLOCKED_INJECT_BOUND < WRAPPER_TIMEOUT,
+        "the barrier plus its slack must stay well inside the wrapper's 15 s deadline"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// (b) a FAST drain: the first inject waits (in budget) and sees its write
 // ---------------------------------------------------------------------------
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_first_inject_waits_for_the_startup_drain_and_sees_its_write() {
+    assert_reviewed_budget();
     let fixture = fixture("startup-drain-first-inject").await;
     let mut wire = Wire::start(Arc::new(fixture.engine));
 
@@ -315,7 +448,7 @@ async fn test_first_inject_waits_for_the_startup_drain_and_sees_its_write() {
     let early = wire.recv_within(IDLE_BOUND).await;
     assert!(
         early.is_none(),
-        "the FIRST inject must wait for the startup drain; it answered while the drain was \
+        "a FAST first inject must give the drain its budget; it answered while the drain was \
          still in flight: {early:?}"
     );
 
@@ -327,7 +460,7 @@ async fn test_first_inject_waits_for_the_startup_drain_and_sees_its_write() {
         .recv_within(INJECT_BOUND)
         .await
         .expect("inject answers once the drain completed");
-    let block = block_of(&inject);
+    let block = block_of(&inject).expect("an inject history block is rendered");
     assert!(
         block.contains(DRAINED_SUMMARY),
         "the first inject observed the fact the drain wrote: {block}"
@@ -337,9 +470,7 @@ async fn test_first_inject_waits_for_the_startup_drain_and_sees_its_write() {
         "the drained episode renders under recent sessions: {block}"
     );
     assert_eq!(
-        inject
-            .get("result")
-            .and_then(|result| result.get("memory_count")),
+        memory_count_of(&inject),
         Some(&json!(1)),
         "one included logical row from the drained capture"
     );
@@ -377,8 +508,10 @@ async fn test_second_inject_does_not_re_wait_or_re_run_the_completed_drain() {
         .await
         .expect("the first inject answers after the drain");
     assert!(
-        block_of(&first).contains(DRAINED_SUMMARY),
-        "the first inject saw the drained fact: {}",
+        block_of(&first)
+            .expect("an inject history block is rendered")
+            .contains(DRAINED_SUMMARY),
+        "the first inject saw the drained fact: {:?}",
         block_of(&first)
     );
 
@@ -406,12 +539,173 @@ async fn test_second_inject_does_not_re_wait_or_re_run_the_completed_drain() {
         "the second inject must not re-run the drain"
     );
     assert_eq!(
-        second
-            .get("result")
-            .and_then(|result| result.get("memory_count")),
+        memory_count_of(&second),
         Some(&json!(1)),
         "the second capture is still queued, not drained by an inject"
     );
 
     wire.finish().await;
+}
+
+// ---------------------------------------------------------------------------
+// (e) a BLOCKED drain: bounded, warned once, and never re-waited
+// ---------------------------------------------------------------------------
+
+/// The child run (see [`run_captured`]): the barrier is bounded and one-shot.
+#[test]
+#[ignore = "run by test_blocked_startup_drain_is_bounded_and_names_the_timeout in a child process"]
+fn inner_blocked_startup_drain_is_bounded() {
+    let runtime = mem_store::tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build the child runtime");
+    runtime.block_on(async {
+        // The gate is NEVER released: the drain stays in flight for the whole
+        // case, exactly the backlog R1 measured.
+        let fixture = fixture("startup-drain-blocked").await;
+        let mut wire = Wire::start(Arc::new(fixture.engine));
+
+        wire.send(HELLO).await;
+        wire.recv_within(HELLO_BOUND)
+            .await
+            .expect("`hello` must never wait for the startup drain");
+
+        let started = Instant::now();
+        wire.send(&inject_request("inject-1")).await;
+        wait_until(|| fixture.calls.load(Ordering::SeqCst) == 1).await;
+        let first = wire.recv_within(BLOCKED_INJECT_BOUND).await.unwrap_or_else(|| {
+            panic!(
+                "a blocked startup drain must never hold the serial stdio loop past the barrier \
+                 budget ({BARRIER_BUDGET:?}); no inject reply within {BLOCKED_INJECT_BOUND:?} \
+                 (the wrapper's deadline is {WRAPPER_TIMEOUT:?})"
+            )
+        });
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= BARRIER_BUDGET,
+            "the barrier must actually give the drain its budget before proceeding; it \
+             answered after {elapsed:?}"
+        );
+        assert!(
+            elapsed < BLOCKED_INJECT_BOUND,
+            "the barrier must be BOUNDED, not merely moved: {elapsed:?}"
+        );
+        assert!(
+            elapsed < WRAPPER_TIMEOUT,
+            "the first inject answers inside the wrapper's deadline: {elapsed:?}"
+        );
+        assert_eq!(
+            memory_count_of(&first),
+            Some(&json!(0)),
+            "the trade the budget makes: the un-drained capture is not in this read"
+        );
+        assert!(
+            block_of(&first).unwrap_or("").is_empty(),
+            "the blocked drain wrote nothing, so the first read carries no session block: {:?}",
+            block_of(&first)
+        );
+
+        // The second inject must not re-wait: the barrier settled on the first.
+        let started = Instant::now();
+        wire.send(&inject_request("inject-2")).await;
+        let second = wire
+            .recv_within(NO_REWAIT_BOUND)
+            .await
+            .expect("a settled barrier never re-waits a later inject");
+        assert!(
+            started.elapsed() < BARRIER_BUDGET,
+            "the second inject did not re-wait the barrier: {:?}",
+            started.elapsed()
+        );
+        assert_eq!(
+            fixture.calls.load(Ordering::SeqCst),
+            1,
+            "the second inject must not re-run the drain"
+        );
+        assert_eq!(
+            memory_count_of(&second),
+            Some(&json!(0)),
+            "the barrier's expiry is never repaired by a later inject"
+        );
+
+        wire.finish().await;
+    });
+}
+
+#[test]
+fn test_blocked_startup_drain_is_bounded_and_names_the_timeout() {
+    assert_reviewed_budget();
+    let dir = TestDir::new("startup-drain-blocked-log");
+    let text = run_captured("inner_blocked_startup_drain_is_bounded", &dir);
+    assert_eq!(
+        occurrences(&text, "engine.inject_barrier_timeout"),
+        1,
+        "the expired barrier is named exactly once, never per request: {text}"
+    );
+    assert!(
+        text.contains(&format!("\"budget_ms\":{}", BARRIER_BUDGET.as_millis())),
+        "the warn carries the budget it spent: {text}"
+    );
+    assert!(
+        !text.contains("engine.startup_drain_failed"),
+        "a live-but-slow drain is not a dead one: {text}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// (f) a DEAD drain: fail-open, and named instead of silent
+// ---------------------------------------------------------------------------
+
+/// The child run (see [`run_captured`]): a panicked drain task never wedges.
+#[test]
+#[ignore = "run by test_dead_startup_drain_fails_open_and_names_the_failure in a child process"]
+fn inner_dead_startup_drain_fails_open() {
+    let runtime = mem_store::tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build the child runtime");
+    runtime.block_on(async {
+        let fixture = dead_fixture("startup-drain-dead").await;
+        let mut wire = Wire::start(Arc::new(fixture.engine));
+
+        wire.send(HELLO).await;
+        wire.recv_within(HELLO_BOUND)
+            .await
+            .expect("`hello` must never wait for the startup drain");
+
+        let started = Instant::now();
+        wire.send(&inject_request("inject-1")).await;
+        let inject = wire.recv_within(INJECT_BOUND).await.unwrap_or_else(|| {
+            panic!(
+                "a DEAD startup drain must fail open, never wedge: no inject reply within \
+                 {INJECT_BOUND:?} (the wrapper's deadline is {WRAPPER_TIMEOUT:?})"
+            )
+        });
+        assert!(
+            started.elapsed() < INJECT_BOUND,
+            "the fail-open costs no wait once the task is gone: {:?}",
+            started.elapsed()
+        );
+        assert_eq!(
+            memory_count_of(&inject),
+            Some(&json!(0)),
+            "a dead drain drained nothing; the durable rows stay for the next drain"
+        );
+
+        wire.finish().await;
+    });
+}
+
+#[test]
+fn test_dead_startup_drain_fails_open_and_names_the_failure() {
+    let dir = TestDir::new("startup-drain-dead-log");
+    let text = run_captured("inner_dead_startup_drain_fails_open", &dir);
+    assert!(
+        text.contains("engine.startup_drain_failed"),
+        "the dead-drain fail-open must name itself; the review's F1 was this silence: {text}"
+    );
+    assert!(
+        !text.contains("engine.inject_barrier_timeout"),
+        "a dead drain resolves at once; it never spends the budget: {text}"
+    );
 }
