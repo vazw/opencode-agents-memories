@@ -86,7 +86,8 @@
 
 - **manual provider** — `manual_provider` builds a real adapter from
   `memoryProvider`/`memoryModel`/`memoryApiUrl`/`memoryApiKey` through
-  `ProviderRegistry::create` (no longer a factory with no production caller).
+  `ProviderRegistry::create_structured` (no longer a factory with no production
+  caller; the STRUCTURED handle is what capture needs — ADR-0029).
   The key is the RESOLVED secret, seated in a `StaticSecretResolver` under the
   synthetic `memoryApiKey` reference and sent per call as
   `Authorization: Bearer` — never stored on the provider, never logged.
@@ -124,6 +125,32 @@
   (engine exits 70). A `file://` reference works today (create it `0600`: the
   loader checks no permissions); a wrapper allowlist knob is a separate
   security decision.
+
+**Capture provider seam (ADR-0029 — capture asks for structured output):**
+
+- **one capability, no streaming** — `capture_provider::StructuredCapture` exposes
+  `complete_structured(request, schema)` and nothing else; `ProviderCaptureSummarizer`
+  holds that handle and NO `AiProvider` at all. The streaming arm is unreachable, so a
+  schema-free capture cannot be written here. This is the measured defect it closes:
+  7 of the 8 concrete `complete` impls drop `request.json_schema` (only
+  `opencode_host::run_chunks` honours it), so the prompt's markdown `FORMAT:` block used
+  to come back where JSON was expected, and every attempt dead-lettered as
+  `summarizer_failed`.
+- **three adapters** — `Structured` (a registry handle, delegated verbatim),
+  `HostStructured` (the lazy host, resolved on use, cache invalidated on ANY error), and
+  `FilteredStructured` (`pub(crate)`, minted only by `build_composed_runtime`: it calls
+  `privacy::filter_request_for_delivery` first and returns the reply unfiltered, D8).
+- **`CaptureProvider { base, structured }`** — `engine_capture_provider` returns BOTH
+  halves of one provider. `host_arm` still warms once (`Auto-capture provider ready` is
+  emitted only from `LazyHostProvider::resolve()`, so deleting the warm deletes the
+  operator's only startup evidence). The pairing is a composition invariant, not a type
+  guarantee.
+- **`ComposedRuntime.provider` now means "the filtered capture handle"** — anything that
+  expected an `AiProvider` there is a compile error by design. The consolidation
+  summarizer deliberately keeps the UNWRAPPED `base` (D-52-7).
+- **this does not make capture persist** — the host arm's 2.2.5 wire drift
+  (`errorKind: "protocol"`) and the wrapper's missing `agent_id`
+  (`episodic_write_failed`) are separate defects with their own blueprints.
 
 **Deferred register rows (orchestrator; W6.2 owns `docs/agents/testing.md`):**
 the `-32002` code row, the exit-code-75 row, the status-file-format row.

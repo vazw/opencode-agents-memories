@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use mem_ai::privacy::PrivacyConfig;
 use mem_ai::provider::request::{ChatMessage, CompletionRequest, EmbedRequest, ModelInfo};
 use mem_ai::provider::{AiProvider, BoxFuture, CompletionStream, ProviderError};
+use mem_bridge::capture_provider::{CaptureProvider, StructuredCapture};
 use mem_bridge::composition::build_composed_runtime;
 use mem_store::serde_json::Value;
 
@@ -86,6 +87,22 @@ impl AiProvider for RecordingProvider {
     }
 }
 
+/// The capture seam's half: records the request it is handed and answers one
+/// fixed value. This is where D-52-4 is observed now — the capture summarizer
+/// consumes only this handle.
+impl StructuredCapture for RecordingProvider {
+    fn complete_structured<'a>(
+        &'a self,
+        request: CompletionRequest,
+        _schema: Value,
+    ) -> BoxFuture<'a, Result<Value, ProviderError>> {
+        self.requests.lock().expect("requests lock").push(request);
+        Box::pin(async move {
+            Ok(mem_store::serde_json::json!({ "summary": "s", "type": "task", "tags": [] }))
+        })
+    }
+}
+
 struct NoopEmbedder;
 
 impl mem_embed::embedder::Embedder for NoopEmbedder {
@@ -129,6 +146,11 @@ fn load_config(root: &std::path::Path, home: &std::path::Path) -> mem_core::conf
     config
 }
 
+fn capture_schema() -> Value {
+    mem_store::serde_json::from_str(mem_bridge::capture_prompt::CAPTURE_OUTPUT_SCHEMA)
+        .expect("the frozen capture schema parses")
+}
+
 fn two_message_request() -> CompletionRequest {
     CompletionRequest::new("m")
         .with_message(ChatMessage::user("clean question"))
@@ -160,7 +182,10 @@ async fn test_composed_runtime_wraps_the_minted_provider_in_the_privacy_layer() 
         &root,
         &config,
         Arc::new(NoopEmbedder),
-        Some(recorder.clone() as Arc<dyn AiProvider>),
+        Some(CaptureProvider {
+            base: recorder.clone() as Arc<dyn AiProvider>,
+            structured: recorder.clone() as Arc<dyn StructuredCapture>,
+        }),
     )
     .await
     .expect("the runtime composes");
@@ -169,7 +194,9 @@ async fn test_composed_runtime_wraps_the_minted_provider_in_the_privacy_layer() 
         .provider
         .clone()
         .expect("the composed runtime exposes the capture provider");
-    let _stream = provider.complete(two_message_request());
+    let _value = provider
+        .complete_structured(two_message_request(), capture_schema())
+        .await;
 
     let recorded = recorder.requests();
     assert_eq!(recorded.len(), 1, "the inner provider is reached once");
@@ -207,13 +234,18 @@ async fn test_the_minted_layer_reads_filter_injected_prompts() {
         &root,
         &config,
         Arc::new(NoopEmbedder),
-        Some(recorder.clone() as Arc<dyn AiProvider>),
+        Some(CaptureProvider {
+            base: recorder.clone() as Arc<dyn AiProvider>,
+            structured: recorder.clone() as Arc<dyn StructuredCapture>,
+        }),
     )
     .await
     .expect("the runtime composes");
 
     let provider = runtime.provider.clone().expect("provider");
-    let _stream = provider.complete(two_message_request());
+    let _value = provider
+        .complete_structured(two_message_request(), capture_schema())
+        .await;
 
     let recorded = recorder.requests();
     assert_eq!(recorded.len(), 1);

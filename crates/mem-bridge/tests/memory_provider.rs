@@ -234,7 +234,7 @@ async fn test_opencode_host_wins_when_the_operator_named_it() {
     )
     .expect("the host arm always composes a provider");
     assert_eq!(
-        provider.name(),
+        provider.base.name(),
         "opencode-host",
         "the named OpenCode host is the capture provider"
     );
@@ -264,7 +264,7 @@ async fn test_unconfigured_manual_fallback_uses_the_opencode_host() {
     let provider =
         mem_bridge::engine::engine_capture_provider(&config, host_provider(state.path()))
             .expect("the host path still composes");
-    assert_eq!(provider.name(), "opencode-host");
+    assert_eq!(provider.base.name(), "opencode-host");
 }
 
 /// Neither block: the host default, exactly as before the manual wiring.
@@ -279,7 +279,7 @@ async fn test_neither_block_configures_the_opencode_host() {
         mem_bridge::engine::engine_capture_provider(&config, host_provider(state.path()))
             .expect("the host default composes");
     assert_eq!(
-        provider.name(),
+        provider.base.name(),
         "opencode-host",
         "with neither block the host is the default route"
     );
@@ -297,7 +297,7 @@ async fn test_manual_provider_is_the_fallback_when_the_host_is_not_named() {
         mem_bridge::engine::engine_capture_provider(&config, host_provider(state.path()))
             .expect("the complete manual block composes a provider");
     assert_eq!(
-        provider.name(),
+        provider.base.name(),
         "openai-chat",
         "the manual block is the fallback route"
     );
@@ -378,7 +378,7 @@ async fn test_named_host_is_not_derailed_by_a_claimed_manual_block() {
         resolvable_host_provider(state.path(), 45192),
     )
     .expect("the host arm still composes despite the manual claim");
-    assert_eq!(provider.name(), "opencode-host");
+    assert_eq!(provider.base.name(), "opencode-host");
 
     let content = sink_text();
     assert!(
@@ -479,7 +479,7 @@ async fn test_ready_line_strips_url_userinfo() {
     let provider =
         mem_bridge::engine::engine_capture_provider(&config, host_provider(state.path()))
             .expect("the complete manual block composes a provider");
-    assert_eq!(provider.name(), "openai-chat");
+    assert_eq!(provider.base.name(), "openai-chat");
 
     let content = sink_text();
     assert!(

@@ -13,11 +13,10 @@ use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use common::{FakeEmbedder, FixedScopeResolver, RecorderTier1Writer, TestDir};
-use mem_ai::provider::{
-    AiProvider, BoxFuture, HostRequest, HostResponse, HostTransport, ProviderError,
-};
+use mem_ai::provider::{BoxFuture, HostRequest, HostResponse, HostTransport, ProviderError};
 use mem_bridge::capture::{CaptureParams, CaptureService};
 use mem_bridge::capture_prompt::{CaptureSummarizer, ProviderCaptureSummarizer};
+use mem_bridge::capture_provider::HostStructured;
 use mem_bridge::host_endpoint::ProcessClock;
 use mem_bridge::host_provider::{HostResolverDeps, LazyHostProvider};
 use mem_core::env::EnvSource;
@@ -97,12 +96,14 @@ fn write_service(state: &Path) {
     .expect("write service.json");
 }
 
-fn lazy_provider(state: &Path) -> Arc<dyn AiProvider> {
+/// The lazy host, as the CONCRETE handle: the capture seam wraps it in
+/// `HostStructured` (ADR-0029), so no `AiProvider` is involved on this path.
+fn lazy_provider(state: &Path) -> Arc<LazyHostProvider> {
     let env: BTreeMap<String, String> =
         [("XDG_STATE_HOME".to_string(), state.display().to_string())]
             .into_iter()
             .collect();
-    let provider = LazyHostProvider::new(HostResolverDeps {
+    Arc::new(LazyHostProvider::new(HostResolverDeps {
         override_url: None,
         provider_id: Some("opencode-go".to_string()),
         model_id: Some("beam-free".to_string()),
@@ -111,8 +112,7 @@ fn lazy_provider(state: &Path) -> Arc<dyn AiProvider> {
         probe: Arc::new(HostProbe),
         clock: Arc::new(NoClock),
         transport: Arc::new(MeasuredHost),
-    });
-    Arc::new(provider)
+    }))
 }
 
 fn service(dir: &TestDir, summarizer: Arc<dyn CaptureSummarizer>) -> CaptureService {
@@ -139,7 +139,7 @@ async fn test_capture_against_the_measured_2_2_5_body_dead_letters_with_a_named_
     write_service(state.path());
 
     let summarizer: Arc<dyn CaptureSummarizer> = Arc::new(ProviderCaptureSummarizer::new(
-        lazy_provider(state.path()),
+        Arc::new(HostStructured::new(lazy_provider(state.path()))),
         "beam-free",
         131_072,
     ));

@@ -1332,7 +1332,8 @@ pub fn engine_host_provider(
     ))
 }
 
-/// The capture provider the engine hands to composition.
+/// The capture provider the engine hands to composition: BOTH halves of the
+/// provider the precedence ladder selects (ADR-0029).
 ///
 /// Precedence (owner ruling 2026-11-01, ADR-0028 as amended): when the operator
 /// explicitly NAMED the OpenCode host (`opencodeProvider` or `opencodeModel`),
@@ -1354,14 +1355,14 @@ pub fn engine_host_provider(
 pub fn engine_capture_provider(
     config: &mem_core::config::Config,
     host_provider: Arc<crate::host_provider::LazyHostProvider>,
-) -> Option<Arc<dyn mem_ai::provider::AiProvider>> {
+) -> Option<crate::capture_provider::CaptureProvider> {
     // 1. The named host is the primary route: the manual block is not even
     //    evaluated, so a claimed-but-unusable one beside it cannot fail closed.
     if host_is_named(config) {
         return Some(host_arm(host_provider));
     }
     match crate::manual_provider::manual_capture_provider(config) {
-        Ok(Some(provider)) => {
+        Ok(Some(structured)) => {
             // F6: the endpoint is operator input; log it with any userinfo
             // stripped, so the manual arm redacts like the host arm's origin.
             crate::host_provider::log_provider_ready(
@@ -1371,7 +1372,15 @@ pub fn engine_capture_provider(
                 None,
                 config.memory_provider.as_str(),
             );
-            Some(provider)
+            // Both halves from the ONE registry handle; `base` is the upcast
+            // (`Arc<dyn AiProviderStructured> -> Arc<dyn AiProvider>`) the
+            // consolidation summarizer needs UNWRAPPED (D-52-7). Capture gets
+            // the structured handle. Neither half is filtered here: filtering
+            // is composition's job.
+            Some(crate::capture_provider::CaptureProvider {
+                base: structured.clone(),
+                structured: Arc::new(crate::capture_provider::Structured::new(structured)),
+            })
         }
         // 4. Neither block: the host default.
         Ok(None) => Some(host_arm(host_provider)),
@@ -1384,12 +1393,24 @@ pub fn engine_capture_provider(
     }
 }
 
-/// The host arm: warm the lazy provider once and hand it to composition.
+/// The host arm: warm the lazy provider once, then hand BOTH halves to composition.
+///
+/// The `warm()` call is load-bearing — do not delete it. `Auto-capture provider
+/// ready` is emitted only from `LazyHostProvider::resolve()` (`host_provider.rs`),
+/// `HostStructured::new` does no I/O, and `complete_structured` resolves on use.
+/// On a config with `autoCaptureEnabled: false` and an empty inbox nothing ever
+/// resolves, so the ready line would never fire: root
+/// `tests/engine_capture_provider.rs` would hang in `wait_for_log` past
+/// `STARTUP_BOUND`, and the ready-line assertions in `memory_provider.rs` would
+/// go RED. This is the only production `.warm()` site in the tree.
 fn host_arm(
     host_provider: Arc<crate::host_provider::LazyHostProvider>,
-) -> Arc<dyn mem_ai::provider::AiProvider> {
+) -> crate::capture_provider::CaptureProvider {
     let _ = host_provider.warm();
-    host_provider
+    crate::capture_provider::CaptureProvider {
+        base: host_provider.clone(),
+        structured: Arc::new(crate::capture_provider::HostStructured::new(host_provider)),
+    }
 }
 
 /// True when the operator explicitly named the OpenCode host.

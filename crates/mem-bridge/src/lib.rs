@@ -8,6 +8,7 @@ pub const CRATE_NAME: &str = "mem-bridge";
 pub mod capture;
 pub mod capture_context;
 pub mod capture_prompt;
+pub mod capture_provider;
 pub mod compaction;
 pub mod composition;
 pub mod cross_tier;

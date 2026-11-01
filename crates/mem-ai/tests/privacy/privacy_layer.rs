@@ -15,10 +15,11 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures::stream;
+use mem_ai::privacy::filter_request_for_delivery;
 use mem_ai::privacy::layer::{PrivacyConfig, PrivacyFilterLayer};
 use mem_ai::provider::{
     AiProvider, ChatMessage, CompletionRequest, CompletionStream, EmbedRequest, ModelInfo,
-    OpenCodeHostConfig, ProviderConfig, ProviderError, ProviderRegistry, Role,
+    OpenCodeHostConfig, ProviderConfig, ProviderError, ProviderErrorKind, ProviderRegistry, Role,
     StaticSecretResolver,
 };
 use serde_json::{Value, json};
@@ -369,4 +370,66 @@ async fn test_layer_forwards_completion_chunks_unchanged() {
 
     assert_eq!(chunks.len(), 1);
     assert_eq!(chunks[0].as_ref().unwrap(), &chunk);
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0029 — the delivery guard, shared by the layer and the capture seam
+// ---------------------------------------------------------------------------
+
+/// The pure rule is useful only together with the guard: a capture request
+/// whose user messages were ALL injected must fail loudly, not be sent with
+/// just its system prompt.
+#[test]
+fn test_filter_request_for_delivery_drops_injected_messages() {
+    // A clean extraction that lost the body (an identity function) leaves both
+    // messages in place -> 2 != 1.
+    let config = PrivacyConfig::default();
+    let request = CompletionRequest::new("m")
+        .with_message(ChatMessage::user("clean question"))
+        .with_message(ChatMessage::user(INJECTED));
+
+    let delivered = filter_request_for_delivery(&config, request).expect("one message survives");
+
+    assert_eq!(delivered.messages.len(), 1);
+    assert_eq!(delivered.messages[0].content, "clean question");
+}
+
+#[test]
+fn test_filter_request_for_delivery_refuses_an_emptied_conversation() {
+    // r1's defect: the guard left behind inside `PrivacyFilterProvider::complete`
+    // only, so the free function happily returns an empty conversation.
+    let config = PrivacyConfig::default();
+    let request = CompletionRequest::new("m").with_message(ChatMessage::user(INJECTED));
+
+    let error = filter_request_for_delivery(&config, request)
+        .expect_err("an emptied conversation is refused, never delivered");
+
+    assert_eq!(error.kind, ProviderErrorKind::Config);
+    assert_eq!(error.message, "all messages were filtered as injected");
+}
+
+#[tokio::test]
+async fn test_guard_agrees_on_the_free_fn_and_the_layer() {
+    // Two divergent implementations of the same rule: the free function and
+    // `PrivacyFilterProvider::complete` must agree on input, kind and message.
+    let config = PrivacyConfig::default();
+    let request = CompletionRequest::new("m")
+        .with_message(ChatMessage::user(format!("{INJECTED}\n{INJECTED}")));
+
+    let free = filter_request_for_delivery(&config, request.clone())
+        .expect_err("the free function refuses the emptied conversation");
+    let inner = Arc::new(RecordingProvider::new());
+    let wrapped = PrivacyFilterLayer::new(config).wrap(inner.clone());
+
+    let chunks = drain(wrapped.complete(request)).await;
+
+    assert_eq!(chunks.len(), 1, "the layer answers one error chunk");
+    let layer_error = chunks[0].as_ref().expect_err("the chunk is the error");
+    assert_eq!(layer_error.kind, free.kind);
+    assert_eq!(layer_error.message, free.message);
+    assert_eq!(
+        inner.completion_count(),
+        0,
+        "the inner provider is not called"
+    );
 }

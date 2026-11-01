@@ -86,16 +86,17 @@ pub struct ComposedRuntime {
     pub learning_lock: Arc<LearningLock>,
     /// Whether an LLM-backed capture summarizer was wirable.
     pub summarizer_available: bool,
-    /// The provider handed to the **capture** summarizer, post-wrap (D-52-4):
-    /// the unique mint's product wrapped once by `PrivacyFilterLayer`. Exposed
-    /// for the same reason `prompts` and `profile` are — a layer that is
-    /// constructed and never wrapped emits byte-identical traffic to no layer
-    /// at all.
+    /// The capture provider **post-filter** (D-52-4): the `FilteredStructured`
+    /// handle the capture summarizer consumes, and the only provider handle
+    /// capture can reach — it exposes no `AiProvider`, so no schema-free call
+    /// site exists. Exposed for the same reason `prompts` and `profile` are: a
+    /// guard that is constructed and never handed over protects nothing.
     ///
-    /// **Written only by `build_composed_runtime`.** Issue 33 must not touch
-    /// this field or its initialiser. The consolidation summarizer
-    /// deliberately keeps the UNWRAPPED handle (D-52-7).
-    pub provider: Option<Arc<dyn mem_ai::provider::AiProvider>>,
+    /// Minted only by `build_composed_runtime`. Issue 33 must not touch this
+    /// field or its initialiser. The consolidation summarizer deliberately
+    /// keeps the UNWRAPPED `base` (D-52-7): a wrapped consolidation summarizer
+    /// turns a legacy marker-bearing memory into a silent permanent skip.
+    pub provider: Option<Arc<dyn crate::capture_provider::StructuredCapture>>,
 }
 
 /// Builds the runtime over `storage_root` from the resolved config.
@@ -103,7 +104,7 @@ pub async fn build_composed_runtime(
     storage_root: &std::path::Path,
     config: &Config,
     embedder: Arc<dyn mem_embed::embedder::Embedder>,
-    provider: Option<Arc<dyn mem_ai::provider::AiProvider>>,
+    provider: Option<crate::capture_provider::CaptureProvider>,
 ) -> Result<ComposedRuntime, String> {
     // SECURITY (mandate 5): the store config is DERIVED from the resolved
     // `mem_core::Config` — `from_core` copies the configured encryption
@@ -220,32 +221,29 @@ pub async fn build_composed_runtime(
     // Consequence, recorded: with `provider: None` consolidation falls back to
     // `UnavailableMilestoneSummarizer` (below). That is the tests / degraded
     // composition path; production always passes the lazy provider.
-    // D-52-4/D-52-7: the capture summarizer's provider, post-wrap. `wrap`
-    // allocates and returns `Arc<PrivacyFilterProvider>` — an `Arc::new(..)`
-    // around it would be `Arc<Arc<_>>` and would not coerce to
-    // `Arc<dyn AiProvider>`. The consolidation handle below keeps the
-    // UNWRAPPED `provider` on purpose (a wrapped consolidation summarizer
-    // turns a legacy marker-bearing memory into a silent permanent skip).
-    let privacy = mem_ai::privacy::PrivacyConfig::from_core(config);
-    let layer = mem_ai::privacy::PrivacyFilterLayer::new(privacy);
-    let capture_provider = provider
-        .as_ref()
-        .map(|inner| layer.wrap(inner.clone()) as Arc<dyn mem_ai::provider::AiProvider>);
-    let summarizer_probe = capture_provider
-        .clone()
-        .map(|provider| {
-            let model = config
-                .opencode_model
-                .clone()
-                .unwrap_or_else(|| "inherit".to_string());
-            Arc::new(crate::capture_prompt::ProviderCaptureSummarizer::new(
-                provider,
-                model,
-                config.auto_capture_max_context_bytes.max(1024) as usize,
-            )) as Arc<dyn crate::capture_prompt::CaptureSummarizer>
-        })
-        .ok_or_else(|| "no provider".to_string())
-        .ok();
+    // D-52-4/D-52-7: the capture summarizer's handle, POST-filter. The guard
+    // is minted here and nowhere else, for the same reason `wrap` was: a layer
+    // constructed and never handed over emits byte-identical traffic to no
+    // layer at all. The consolidation handle below keeps the UNWRAPPED `base`
+    // on purpose (a wrapped consolidation summarizer turns a legacy
+    // marker-bearing memory into a silent permanent skip).
+    let capture_structured = provider.as_ref().map(|capture| {
+        Arc::new(crate::capture_provider::FilteredStructured::new(
+            capture.structured.clone(),
+            mem_ai::privacy::PrivacyConfig::from_core(config),
+        )) as Arc<dyn crate::capture_provider::StructuredCapture>
+    });
+    let summarizer_probe = capture_structured.clone().map(|handle| {
+        let model = config
+            .opencode_model
+            .clone()
+            .unwrap_or_else(|| "inherit".to_string());
+        Arc::new(crate::capture_prompt::ProviderCaptureSummarizer::new(
+            handle,
+            model,
+            config.auto_capture_max_context_bytes.max(1024) as usize,
+        )) as Arc<dyn crate::capture_prompt::CaptureSummarizer>
+    });
     let summarizer = summarizer_probe.clone();
 
     let resolver: Arc<dyn crate::scope_resolver::ProjectScopeResolver> = Arc::new(EnvResolver {
@@ -294,8 +292,8 @@ pub async fn build_composed_runtime(
     // promotion sink over the project shards.
     let consolidation_summarizer: Arc<dyn mem_episodic::summarizer::MilestoneSummarizer> =
         match provider.as_ref() {
-            Some(provider) => Arc::new(mem_episodic::summarizer::ProviderSummarizer::new(
-                provider.clone(),
+            Some(capture) => Arc::new(mem_episodic::summarizer::ProviderSummarizer::new(
+                capture.base.clone(),
                 config
                     .opencode_model
                     .clone()
@@ -344,7 +342,7 @@ pub async fn build_composed_runtime(
         tags,
         learning_lock,
         summarizer_available: summarizer_probe.is_some(),
-        provider: capture_provider,
+        provider: capture_structured,
     })
 }
 

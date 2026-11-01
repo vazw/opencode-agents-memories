@@ -192,29 +192,56 @@ impl PrivacyFilterProvider {
     pub fn config(&self) -> &PrivacyConfig {
         &self.config
     }
+}
 
-    /// Apply the request-side rules: drop injected user messages, then strip
-    /// private content from what survives, then touch nothing else.
-    fn filter_request(&self, mut request: CompletionRequest) -> CompletionRequest {
-        if self.config.filter_injected_prompts {
-            let filter =
-                InjectionFilter::new(self.config.blocklist.clone(), self.config.allowlist.clone());
-            request
-                .messages
-                .retain(|message| message.role != Role::User || !filter.is_injected(message));
-        }
-
-        if self.config.strip_private {
-            for message in &mut request.messages {
-                message.content = strip_private_content(&message.content);
-            }
-            if let Some(system) = request.system.take() {
-                request.system = Some(strip_private_content(&system));
-            }
-        }
-
+/// The request-side rules, pure: drop injected user messages, then strip
+/// private content from what survives, then touch nothing else.
+///
+/// `pub(crate)` on purpose (ADR-0029): external callers go through
+/// [`filter_request_for_delivery`], which cannot hand back an emptied
+/// conversation.
+pub(crate) fn filter_request(
+    config: &PrivacyConfig,
+    mut request: CompletionRequest,
+) -> CompletionRequest {
+    if config.filter_injected_prompts {
+        let filter = InjectionFilter::new(config.blocklist.clone(), config.allowlist.clone());
         request
+            .messages
+            .retain(|message| message.role != Role::User || !filter.is_injected(message));
     }
+
+    if config.strip_private {
+        for message in &mut request.messages {
+            message.content = strip_private_content(&message.content);
+        }
+        if let Some(system) = request.system.take() {
+            request.system = Some(strip_private_content(&system));
+        }
+    }
+
+    request
+}
+
+/// Apply the rules, then refuse to dial a conversation the rules emptied.
+///
+/// `had_messages` is computed BEFORE filtering: a request that carried no
+/// messages at all is not "emptied", it is simply empty. On the refusal branch
+/// the inner provider is never called.
+pub fn filter_request_for_delivery(
+    config: &PrivacyConfig,
+    request: CompletionRequest,
+) -> Result<CompletionRequest, ProviderError> {
+    let had_messages = !request.messages.is_empty();
+    let filtered = filter_request(config, request);
+    if had_messages && filtered.messages.is_empty() {
+        // Never send an empty conversation: fail loudly, and do not call the
+        // inner provider at all.
+        return Err(ProviderError::config(
+            "all messages were filtered as injected",
+        ));
+    }
+    Ok(filtered)
 }
 
 #[async_trait]
@@ -224,22 +251,12 @@ impl AiProvider for PrivacyFilterProvider {
     }
 
     fn complete(&self, request: CompletionRequest) -> CompletionStream {
-        let had_messages = !request.messages.is_empty();
-        let filtered = self.filter_request(request);
-
-        if had_messages && filtered.messages.is_empty() {
-            // Never send an empty conversation: fail loudly, and do not call
-            // the inner provider at all.
-            return Box::pin(futures::stream::once(async {
-                Err(ProviderError::config(
-                    "all messages were filtered as injected",
-                ))
-            }));
+        match filter_request_for_delivery(&self.config, request) {
+            Err(error) => Box::pin(futures::stream::once(async move { Err(error) })),
+            // The returned stream is not inspected, buffered, reordered or
+            // rewritten (D8).
+            Ok(filtered) => self.inner.complete(filtered),
         }
-
-        // The returned stream is not inspected, buffered, reordered or
-        // rewritten (D8).
-        self.inner.complete(filtered)
     }
 
     async fn embed(&self, mut request: EmbedRequest) -> Result<Vec<Vec<f32>>, ProviderError> {
@@ -281,8 +298,13 @@ impl AiProviderStructured for PrivacyFilterProvider {
             ));
         };
         // The request is filtered; the returned value is not (D8).
+        //
+        // The BARE rule, not the delivery guard: this lane (profile learning)
+        // has no production caller today — `wrap_structured` is reached only by
+        // its own tests — and changing it is a separate decision (ADR-0029 §4).
+        // The capture lane is guarded by `FilteredStructured` instead.
         structured
-            .complete_structured(self.filter_request(request), json_schema)
+            .complete_structured(filter_request(&self.config, request), json_schema)
             .await
     }
 

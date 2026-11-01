@@ -132,6 +132,23 @@ impl LazyHostProvider {
         self.resolve().err().map(|error| error.reason())
     }
 
+    /// The cached provider, or a fresh resolution, in `ProviderError` shape.
+    ///
+    /// The structured capture lane resolves on use exactly as `complete` does,
+    /// and needs the same `Config` mapping a failed resolution produces.
+    pub(crate) fn resolved(&self) -> Result<Arc<OpenCodeHostProvider>, ProviderError> {
+        self.resolve().map_err(Self::resolve_error)
+    }
+
+    /// Drop the cached origin: the next use re-resolves `service.json`.
+    ///
+    /// The structured lane calls this on ANY error — a foreign process on a
+    /// recycled port answers `401`/`404`/junk, never `Network`, and caching
+    /// that origin pins a stranger for the engine's life.
+    pub(crate) fn invalidate(&self) {
+        *write_or_recover(&self.state.cache) = None;
+    }
+
     /// The provider error shape of a resolution failure.
     fn resolve_error(error: HostWiringError) -> ProviderError {
         ProviderError::new(ProviderErrorKind::Config, error.reason()).with_provider(PROVIDER_NAME)

@@ -117,6 +117,19 @@ pub fn parse_capture_output(
             });
         }
     };
+    parse_capture_value(value)
+}
+
+/// The value path: the same normalizers, over an already-parsed [`Value`].
+///
+/// This is the arm the structured completion feeds (ADR-0029): the provider
+/// hands back a `Value`, so there is no string to decode and no `{text}` join.
+/// Everything below is the unchanged capture contract — `skip` short-circuits
+/// before the empty-summary check, an empty summary fails closed, tags are
+/// lowercased and deduplicated, and the extension is sanitized.
+pub fn parse_capture_value(
+    value: mem_store::serde_json::Value,
+) -> Result<CaptureSummaryOutput, mem_episodic::error::EpisodicError> {
     if !value.is_object() {
         return Err(mem_episodic::error::EpisodicError::Summary {
             message: "capture summary output is not a JSON object".to_string(),
@@ -287,12 +300,17 @@ fn parse_trailing_json(raw: &str) -> Result<mem_store::serde_json::Value, String
 // The production provider adapter (the engine composition root composes it)
 // ---------------------------------------------------------------------------
 
-/// The provider-backed capture summarizer: one structured completion over
-/// the bounded summary prompt; `{text}` deltas are joined, `{"json": v}`
-/// short-circuits to the parsed object, and everything parses through
-/// [`parse_capture_output`] fail-closed.
+/// The provider-backed capture summarizer: ONE schema-bound structured
+/// completion over the bounded summary prompt, parsed by
+/// [`parse_capture_value`] fail-closed.
+///
+/// It holds no `AiProvider` at all (ADR-0029): the streaming arm is not merely
+/// unused, it is unreachable, so a schema-free capture path cannot be written
+/// here. A `StructuredCapture` that answers `Unsupported` surfaces as a named
+/// failure with no streaming fallback — reintroducing one would re-open the
+/// exact defect (7 of 8 `complete` impls drop `request.json_schema`).
 pub struct ProviderCaptureSummarizer {
-    provider: Arc<dyn mem_ai::provider::AiProvider>,
+    completion: Arc<dyn crate::capture_provider::StructuredCapture>,
     model: String,
     max_context_bytes: usize,
     /// The last provider failure; cleared on entry to every `summarize`.
@@ -301,12 +319,12 @@ pub struct ProviderCaptureSummarizer {
 
 impl ProviderCaptureSummarizer {
     pub fn new(
-        provider: Arc<dyn mem_ai::provider::AiProvider>,
+        completion: Arc<dyn crate::capture_provider::StructuredCapture>,
         model: impl Into<String>,
         max_context_bytes: usize,
     ) -> Self {
         Self {
-            provider,
+            completion,
             model: model.into(),
             max_context_bytes,
             last_failure: Mutex::new(None),
@@ -345,7 +363,6 @@ impl CaptureSummarizer for ProviderCaptureSummarizer {
         Box::pin(async move {
             // Entry clear: a failure record belongs to ONE attempt only.
             *lock_or_recover(&self.last_failure) = None;
-            use mem_episodic::futures::StreamExt;
             let schema_json = CAPTURE_OUTPUT_SCHEMA;
             let user_prompt = crate::capture_context::build_bounded_summary_prompt(
                 context,
@@ -357,31 +374,18 @@ impl CaptureSummarizer for ProviderCaptureSummarizer {
                 .with_system(CAPTURE_SYSTEM_PROMPT)
                 .with_message(mem_ai::provider::request::ChatMessage::user(user_prompt));
             // CAPTURE_OUTPUT_SCHEMA parse: propagate into EpisodicError::Json, whose From<serde_json::Error> exists (ADR-0013 D-3)
-            request.json_schema = Some(mem_store::serde_json::from_str(schema_json)?);
-            let mut stream = self.provider.complete(request);
-            let mut text = String::new();
-            while let Some(delta) = stream.next().await {
-                match delta {
-                    Ok(chunk) => {
-                        if let Some(text_delta) = chunk.get("text").and_then(|t| t.as_str()) {
-                            text.push_str(text_delta);
-                        }
-                        if let Some(json) = chunk.get("json") {
-                            let serialized = mem_store::serde_json::to_string(json)
-                                .unwrap_or_else(|_| String::new());
-                            return parse_capture_output(&serialized);
-                        }
-                    }
-                    Err(error) => {
-                        *lock_or_recover(&self.last_failure) =
-                            Some(classify_provider_error(&error));
-                        return Err(mem_episodic::error::EpisodicError::Summary {
-                            message: format!("capture summarizer provider failed: {error}"),
-                        });
-                    }
+            let schema: mem_store::serde_json::Value =
+                mem_store::serde_json::from_str(schema_json)?;
+            request.json_schema = Some(schema.clone());
+            match self.completion.complete_structured(request, schema).await {
+                Ok(value) => parse_capture_value(value),
+                Err(error) => {
+                    *lock_or_recover(&self.last_failure) = Some(classify_provider_error(&error));
+                    Err(mem_episodic::error::EpisodicError::Summary {
+                        message: format!("capture summarizer provider failed: {error}"),
+                    })
                 }
             }
-            parse_capture_output(&text)
         })
     }
 

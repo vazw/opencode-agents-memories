@@ -584,6 +584,32 @@ impl mem_ai::provider::AiProvider for ScriptedProvider {
     }
 }
 
+/// The capture seam's half of the same script: `Err(network)` on the first
+/// call, then a value that is not a capture object. The summarizer holds only
+/// this handle now (ADR-0029), so the double must script it too.
+impl mem_bridge::capture_provider::StructuredCapture for ScriptedProvider {
+    fn complete_structured<'a>(
+        &'a self,
+        _request: mem_ai::provider::CompletionRequest,
+        _schema: mem_store::serde_json::Value,
+    ) -> mem_ai::provider::BoxFuture<
+        'a,
+        Result<mem_store::serde_json::Value, mem_ai::provider::ProviderError>,
+    > {
+        let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Box::pin(async move {
+            if call == 0 {
+                Err(
+                    mem_ai::provider::ProviderError::network("transport down".to_string())
+                        .with_provider("scripted"),
+                )
+            } else {
+                Ok(mem_store::serde_json::json!("not json"))
+            }
+        })
+    }
+}
+
 /// R25/B2 — the REAL summarizer clears its record on entry, so a stale
 /// `network` reason can never name a later parse failure.
 #[mem_store::tokio::test(crate = "mem_store::tokio")]

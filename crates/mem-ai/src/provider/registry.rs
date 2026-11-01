@@ -1,9 +1,16 @@
 //! `ProviderRegistry` — the provider factory.
 //!
-//! Holds typed [`ProviderConfig`] values, resolves them to `Arc<dyn AiProvider>`
-//! through registered factories, and owns the secret resolver it was injected
-//! with. `register_builtin` wires the OpenCode host provider plus the seven
-//! W2.2 remote adapters, without touching callers.
+//! Holds typed [`ProviderConfig`] values, resolves them to
+//! `Arc<dyn AiProviderStructured>` through registered factories, and owns the
+//! secret resolver it was injected with. `register_builtin` wires the OpenCode
+//! host provider plus the seven W2.2 remote adapters, without touching callers.
+//!
+//! Both aliases name the STRUCTURED handle on purpose (ADR-0029): the factories
+//! always built capable adapters, and the old `Arc<dyn AiProvider>` return type
+//! silently discarded the capability, so a capture path that needed structured
+//! output could not reach it. [`ProviderRegistry::create`] upcasts once and
+//! keeps its byte-identical contract for every existing caller;
+//! [`ProviderRegistry::create_structured`] is the new, explicit door.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,7 +20,7 @@ use crate::provider::error::ProviderError;
 use crate::provider::opencode_host::{
     OpenCodeHostConfig, OpenCodeHostProvider, ReqwestHostTransport,
 };
-use crate::provider::provider_trait::AiProvider;
+use crate::provider::provider_trait::{AiProvider, AiProviderStructured};
 use crate::provider::remote::anthropic::{self as anthropic, AnthropicProvider};
 use crate::provider::remote::atlas_cloud::{self as atlas_cloud, AtlasCloudProvider};
 use crate::provider::remote::gemini::{self as gemini, GeminiProvider};
@@ -37,7 +44,7 @@ type RemoteBuild = Arc<
     dyn Fn(
             RemoteProviderConfig,
             Arc<dyn SecretResolver>,
-        ) -> Result<Arc<dyn AiProvider>, ProviderError>
+        ) -> Result<Arc<dyn AiProviderStructured>, ProviderError>
         + Send
         + Sync,
 >;
@@ -170,9 +177,13 @@ impl ProviderConfig {
     }
 }
 
-/// A registered factory: config in, trait-object provider out.
-type ProviderFactory =
-    Arc<dyn Fn(&ProviderConfig) -> Result<Arc<dyn AiProvider>, ProviderError> + Send + Sync>;
+/// A registered factory: config in, STRUCTURED trait-object provider out.
+///
+/// Narrower than [`AiProvider`] because every built-in adapter is capable
+/// (ADR-0029); `create` upcasts, so no caller depends on the difference.
+type ProviderFactory = Arc<
+    dyn Fn(&ProviderConfig) -> Result<Arc<dyn AiProviderStructured>, ProviderError> + Send + Sync,
+>;
 
 /// The provider factory + injection seam.
 pub struct ProviderRegistry {
@@ -232,7 +243,7 @@ impl ProviderRegistry {
                 host.validate()?;
                 let provider =
                     OpenCodeHostProvider::new(host.clone(), Arc::new(ReqwestHostTransport::new()));
-                Ok(Arc::new(provider) as Arc<dyn AiProvider>)
+                Ok(Arc::new(provider) as Arc<dyn AiProviderStructured>)
             }),
         );
 
@@ -251,7 +262,7 @@ impl ProviderRegistry {
                 Arc::new(move |config, resolver| {
                     Ok(
                         Arc::new(AnthropicProvider::new(config, resolver, transport.clone()))
-                            as Arc<dyn AiProvider>,
+                            as Arc<dyn AiProviderStructured>,
                     )
                 }),
             ),
@@ -267,7 +278,7 @@ impl ProviderRegistry {
                 Arc::new(move |config, resolver| {
                     Ok(
                         Arc::new(OpenAiChatProvider::new(config, resolver, transport.clone()))
-                            as Arc<dyn AiProvider>,
+                            as Arc<dyn AiProviderStructured>,
                     )
                 }),
             ),
@@ -285,7 +296,7 @@ impl ProviderRegistry {
                         config,
                         resolver,
                         transport.clone(),
-                    )) as Arc<dyn AiProvider>)
+                    )) as Arc<dyn AiProviderStructured>)
                 }),
             ),
         );
@@ -300,7 +311,7 @@ impl ProviderRegistry {
                 Arc::new(move |config, resolver| {
                     Ok(
                         Arc::new(GeminiProvider::new(config, resolver, transport.clone()))
-                            as Arc<dyn AiProvider>,
+                            as Arc<dyn AiProviderStructured>,
                     )
                 }),
             ),
@@ -316,7 +327,7 @@ impl ProviderRegistry {
                 Arc::new(move |config, resolver| {
                     Ok(
                         Arc::new(MinimaxProvider::new(config, resolver, transport.clone()))
-                            as Arc<dyn AiProvider>,
+                            as Arc<dyn AiProviderStructured>,
                     )
                 }),
             ),
@@ -332,7 +343,7 @@ impl ProviderRegistry {
                 Arc::new(move |config, resolver| {
                     Ok(
                         Arc::new(AtlasCloudProvider::new(config, resolver, transport.clone()))
-                            as Arc<dyn AiProvider>,
+                            as Arc<dyn AiProviderStructured>,
                     )
                 }),
             ),
@@ -348,7 +359,7 @@ impl ProviderRegistry {
                 Arc::new(move |config, resolver| {
                     Ok(
                         Arc::new(OrcaRouterProvider::new(config, resolver, transport.clone()))
-                            as Arc<dyn AiProvider>,
+                            as Arc<dyn AiProviderStructured>,
                     )
                 }),
             ),
@@ -393,8 +404,25 @@ impl ProviderRegistry {
         })
     }
 
-    /// Resolve one config through its registered factory.
+    /// Resolve one config through its registered factory, as a base handle.
+    ///
+    /// The upcast is the ONLY thing this adds over
+    /// [`Self::create_structured`]: every caller that only needs `complete` /
+    /// `embed` / `count_tokens` keeps working unchanged.
     pub fn create(&self, config: &ProviderConfig) -> Result<Arc<dyn AiProvider>, ProviderError> {
+        self.create_structured(config)
+            .map(|provider| provider as Arc<dyn AiProvider>)
+    }
+
+    /// Resolve one config to the provider's STRUCTURED capability.
+    ///
+    /// This is the door the capture summarizer needs (ADR-0029): a factory's
+    /// product is always an `AiProviderStructured`, so asking for it here
+    /// cannot silently yield a provider that drops the schema.
+    pub fn create_structured(
+        &self,
+        config: &ProviderConfig,
+    ) -> Result<Arc<dyn AiProviderStructured>, ProviderError> {
         let kind = config.kind();
         let factory = self.factories.get(&kind).ok_or_else(|| {
             ProviderError::config(format!("no factory registered for provider kind {kind}"))

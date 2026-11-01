@@ -22,7 +22,7 @@
 use std::sync::Arc;
 
 use mem_ai::provider::{
-    AiProvider, HttpTransport, ProviderConfig, ProviderRegistry, RemoteProviderConfig,
+    AiProviderStructured, HttpTransport, ProviderConfig, ProviderRegistry, RemoteProviderConfig,
     ReqwestTransport, StaticSecretResolver,
 };
 use url::Url;
@@ -47,7 +47,7 @@ pub const REASON_UNUSABLE: &str = "memory_provider_unusable";
 pub fn build_manual_provider(
     config: &Config,
     transport: Arc<dyn HttpTransport>,
-) -> Result<Option<Arc<dyn AiProvider>>, &'static str> {
+) -> Result<Option<Arc<dyn AiProviderStructured>>, &'static str> {
     if !is_claimed(config) {
         return Ok(None);
     }
@@ -92,8 +92,10 @@ pub fn build_manual_provider(
 
     let mut registry = ProviderRegistry::new(resolver);
     registry.register_builtin_with(transport);
+    // The STRUCTURED handle (ADR-0029): capture must ask for a schema-bound
+    // completion, and `create` would discard exactly that capability.
     registry
-        .create(&provider_config)
+        .create_structured(&provider_config)
         .map(Some)
         .map_err(|_| REASON_UNUSABLE)
 }
@@ -102,7 +104,7 @@ pub fn build_manual_provider(
 /// when the block is unconfigured.
 pub fn manual_capture_provider(
     config: &Config,
-) -> Result<Option<Arc<dyn AiProvider>>, &'static str> {
+) -> Result<Option<Arc<dyn AiProviderStructured>>, &'static str> {
     build_manual_provider(config, Arc::new(ReqwestTransport::new()))
 }
 

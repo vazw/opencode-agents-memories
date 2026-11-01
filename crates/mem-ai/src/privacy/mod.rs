@@ -121,7 +121,9 @@ pub use injection::{
     InjectionFilterable, MessagePart, contains_default_injection_marker, contains_injection_marker,
     filter_injected_parts, is_injected_part, is_internal_prompt, normalize_injection_markers,
 };
-pub use layer::{PrivacyConfig, PrivacyFilterLayer, PrivacyFilterProvider};
+pub use layer::{
+    PrivacyConfig, PrivacyFilterLayer, PrivacyFilterProvider, filter_request_for_delivery,
+};
 pub use secret::{
     FileSecretResolver, PermissionPolicy, SecretSource, SecretString, group_or_other_bits,
     validate_secret_shape,
