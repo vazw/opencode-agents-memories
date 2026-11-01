@@ -1237,16 +1237,20 @@ pub fn engine_host_provider(
 
 /// The capture provider the engine hands to composition.
 ///
-/// Precedence (owner ruling 2026-11-01, ADR-0028): a COMPLETE manual block
-/// (`memoryModel` + `memoryApiUrl` + `memoryApiKey`, or just the key for the
-/// preset providers) wins, because filling it in is the operator naming an
-/// endpoint; otherwise the OpenCode host provider applies, which is the
-/// transport path this crate resolves lazily — and this is the ONLY place it is
-/// warmed, so a manual block never touches `service.json` or `/proc`.
+/// Precedence (owner ruling 2026-11-01, ADR-0028 as amended): when the operator
+/// explicitly NAMED the OpenCode host (`opencodeProvider` or `opencodeModel`),
+/// the host provider wins — that is the product's default route, and the manual
+/// block is the fallback for environments without a usable host. The host is
+/// resolved lazily and warmed here, and this is the ONLY place it is warmed.
 ///
-/// A CLAIMED-but-unusable manual block fails closed (`None`) with the named
-/// reason on the log: quietly using another provider would hide a typo in the
-/// endpoint the operator asked for.
+/// With the host unnamed, a COMPLETE manual block (`memoryModel` +
+/// `memoryApiUrl` + `memoryApiKey`, or just the key for the preset providers) is
+/// the capture provider, because filling it in is the operator naming an
+/// endpoint. With neither block, the host default applies unchanged.
+///
+/// A CLAIMED-but-unusable manual block on the unnamed-host branch fails closed
+/// (`None`) with the named reason on the log: quietly using another provider
+/// would hide a typo in the endpoint the operator asked for.
 ///
 /// [`run_in_runtime`] is the production caller: a selector with none is a
 /// mechanism that reads as satisfied but cannot fire (rework F1).
@@ -1254,6 +1258,11 @@ pub fn engine_capture_provider(
     config: &mem_core::config::Config,
     host_provider: Arc<crate::host_provider::LazyHostProvider>,
 ) -> Option<Arc<dyn mem_ai::provider::AiProvider>> {
+    // 1. The named host is the primary route: the manual block is not even
+    //    evaluated, so a claimed-but-unusable one beside it cannot fail closed.
+    if host_is_named(config) {
+        return Some(host_arm(host_provider));
+    }
     match crate::manual_provider::manual_capture_provider(config) {
         Ok(Some(provider)) => {
             // F6: the endpoint is operator input; log it with any userinfo
@@ -1267,16 +1276,38 @@ pub fn engine_capture_provider(
             );
             Some(provider)
         }
-        Ok(None) => {
-            // The host path: one startup resolution, whichever way it lands.
-            let _ = host_provider.warm();
-            Some(host_provider as Arc<dyn mem_ai::provider::AiProvider>)
-        }
+        // 4. Neither block: the host default.
+        Ok(None) => Some(host_arm(host_provider)),
+        // 3. Claimed but unusable, host unnamed: fail closed, never a silent
+        //    host fallback.
         Err(reason) => {
             crate::host_provider::log_provider_unavailable(reason, None);
             None
         }
     }
+}
+
+/// The host arm: warm the lazy provider once and hand it to composition.
+fn host_arm(
+    host_provider: Arc<crate::host_provider::LazyHostProvider>,
+) -> Arc<dyn mem_ai::provider::AiProvider> {
+    let _ = host_provider.warm();
+    host_provider
+}
+
+/// True when the operator explicitly named the OpenCode host.
+///
+/// Only the two fields the host contract requires count: an `opencodeBaseUrl`
+/// override alone names an endpoint, not a provider/model, so it keeps the
+/// documented "otherwise the host" default rather than forcing the host arm.
+fn host_is_named(config: &mem_core::config::Config) -> bool {
+    [
+        config.opencode_provider.as_deref(),
+        config.opencode_model.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| !value.trim().is_empty())
 }
 
 /// The `run` body, testable with injected signals and any stream pair.
@@ -1321,11 +1352,11 @@ pub async fn run_in_runtime(
         Arc::new(crate::host_endpoint::SystemProcessClock),
         Arc::new(mem_ai::provider::ReqwestHostTransport::new()),
     );
-    // The ONE startup decision (ADR-0028): a COMPLETE manual block wins, a
-    // claimed-but-unusable one fails closed, and otherwise this is the host
-    // provider warmed exactly once — inside the selector, so a manual block
-    // never reads `service.json`. Composition receives the SELECTOR's result;
-    // building the host provider above does no I/O on its own.
+    // The ONE startup decision (ADR-0028 as amended): a NAMED OpenCode host wins
+    // and is warmed here exactly once; with the host unnamed a COMPLETE manual
+    // block is the fallback, a claimed-but-unusable one fails closed, and
+    // otherwise the host default applies. Composition receives the SELECTOR's
+    // result; building the host provider above does no I/O on its own.
     let capture_provider = engine_capture_provider(&core_config, host_provider);
 
     let composed = match crate::composition::build_composed_runtime(

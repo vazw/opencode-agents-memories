@@ -90,26 +90,34 @@
   The key is the RESOLVED secret, seated in a `StaticSecretResolver` under the
   synthetic `memoryApiKey` reference and sent per call as
   `Authorization: Bearer` — never stored on the provider, never logged.
-- **precedence** — a COMPLETE manual block wins over the OpenCode host; with no
-  manual field set the host path (ADR-0027) applies; a CLAIMED but unusable
-  block fails closed with `reason: "memory_provider_unusable"` rather than
-  silently switching provider. "Claimed" includes an explicit `memoryProvider`
-  key (carried as `Config.memory_provider_claimed`: the resolved value always
-  exists, so only the file layer can say it was named).
+- **precedence (owner ruling, ADR-0028 as amended)** — a NAMED OpenCode host
+  (`opencodeProvider` or `opencodeModel` set) wins and is warmed once; only with
+  the host unnamed is a COMPLETE manual block the fallback. A CLAIMED but
+  unusable block on that unnamed-host branch fails closed with
+  `reason: "memory_provider_unusable"` rather than silently switching provider;
+  beside a named host it is never evaluated. "Claimed" includes an explicit
+  `memoryProvider` key (carried as `Config.memory_provider_claimed`: the
+  resolved value always exists, so only the file layer can say it was named).
   `engine_capture_provider` is the single place that decides — and
   `run_in_runtime` is its production caller, passing the selector's result to
-  `build_composed_runtime`; the host provider is warmed only on the host arm.
-  `tests/engine_capture_provider.rs` (root package) spawns the built engine to
-  pin that call site. Its `Auto-capture provider ready` line names the winner
-  with the endpoint's userinfo stripped.
+  `build_composed_runtime`. `tests/engine_capture_provider.rs` (root package)
+  spawns the built engine over a config carrying BOTH blocks to pin that call
+  site on the named-host arm. The `Auto-capture provider ready` line names the
+  winner with the endpoint's userinfo stripped.
 - **cleartext endpoints are named** — `http://` to a NON-loopback host while a
   key is attached emits one `Auto-capture provider insecure endpoint` line
   (`baseUrl`, `scheme`, `hint`), because the key then rides `Authorization:
   Bearer` in the open (ADR-0028 D-28-6). Loopback `http://` and every
   `https://` endpoint stay silent.
-- **divergence, recorded** — `get_auto_capture_provider_status` stays the
-  upstream-parity report (opencode first) and is NOT the wiring's rule; with
-  both blocks configured it reports `OpenCode` while `openai-chat` is live.
+- **status report agrees** — `get_auto_capture_provider_status` stays the
+  upstream-parity report (opencode first) and is NOT the wiring's rule; since the
+  amendment the two agree: both name the host when `opencodeProvider` and
+  `opencodeModel` are set.
+- **the host arm never touches the manual block** — with the host named, the
+  manual block is not built, so `memoryApiUrl` never reaches the sink and the
+  cleartext warning cannot fire. An `env://` manual key that cannot resolve
+  still fails `Config::load` (exit 70) regardless of which arm would win:
+  config resolution runs before selection.
 - **`env://` needs the variable in the ENGINE's process** — the wrapper's
   `childEnvironment()` whitelist does not forward arbitrary variables, so
   `env://LITELLM_API_KEY` fails at config load with a message naming it

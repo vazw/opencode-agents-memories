@@ -7,10 +7,12 @@
 //! but nothing built a provider from those four fields, so the engine always
 //! dialled the OpenCode host. This module is that wiring and nothing more.
 //!
-//! Precedence (owner ruling 2026-11-01, ADR-0028): a COMPLETE manual block wins;
-//! otherwise the OpenCode host provider applies. A block that is partially
-//! filled is CLAIMED and therefore fails closed with the named
-//! [`REASON_UNUSABLE`] — never silently replaced by another provider.
+//! Precedence (owner ruling 2026-11-01, ADR-0028 as amended): the OpenCode host
+//! is the primary route when the operator names it (`opencodeProvider` or
+//! `opencodeModel`); with the host unnamed, a COMPLETE manual block is the
+//! fallback, and a block that is partially filled is CLAIMED and therefore
+//! fails closed with the named [`REASON_UNUSABLE`] — never silently replaced by
+//! another provider.
 //!
 //! The resolved key is seated in a [`StaticSecretResolver`] under
 //! [`MEMORY_API_KEY_REF`] and reaches the adapter as an `Authorization: Bearer`

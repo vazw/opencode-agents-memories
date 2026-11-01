@@ -95,20 +95,24 @@ fn load_config(home: &Path, body: &str, extra_env: &[(&str, &str)]) -> Config {
     Config::load(&ConfigPaths::standard(home), &env).expect("the config loads")
 }
 
-/// The OpenCode-host provider the engine builds, over inert doubles.
+/// The OpenCode-host provider the engine builds, over inert doubles. The probe
+/// answers `true` so a row CAN give the host a resolvable `service.json`;
+/// without one the host arm still resolves to `service_file_missing`.
 struct HostProbe;
 
 impl ProcessProbe for HostProbe {
     fn is_alive(&self, _pid: u32) -> bool {
-        false
+        true
     }
 }
 
-struct NoClock;
+/// Both processes report the same start time, so the pid-recycling branch never
+/// fires; the resolution rows are about precedence, not recycling.
+struct HostClock;
 
-impl ProcessClock for NoClock {
+impl ProcessClock for HostClock {
     fn start_time(&self, _pid: u32) -> Option<u64> {
-        None
+        Some(1)
     }
 }
 
@@ -138,18 +142,37 @@ fn host_provider(state: &Path) -> Arc<LazyHostProvider> {
         variant: None,
         env: Arc::new(env) as Arc<dyn EnvSource + Send + Sync>,
         probe: Arc::new(HostProbe),
-        clock: Arc::new(NoClock),
+        clock: Arc::new(HostClock),
         transport: Arc::new(UnusedTransport),
     }))
 }
 
+/// The host arm's IDLE shape: a resolvable `service.json`, so `warm()` emits the
+/// `Auto-capture provider ready` line naming `opencode-go`. Nothing dials
+/// `port` — the host provider is warmed and never sent a completion.
+fn resolvable_host_provider(state: &Path, port: u16) -> Arc<LazyHostProvider> {
+    let dir = state.join("opencode");
+    std::fs::create_dir_all(&dir).expect("create the opencode state dir");
+    std::fs::write(
+        dir.join("service.json"),
+        format!(
+            r#"{{"url":"http://127.0.0.1:{port}","pid":4242,"password":"pbkdf2-placeholder","version":"2.2.5"}}"#
+        ),
+    )
+    .expect("write service.json");
+    host_provider(state)
+}
+
+/// The owner's live shape: BOTH blocks complete. The host is named, so the host
+/// wins; the manual endpoint is a sentinel no other row uses, so its absence
+/// from the sink proves the manual block was never even built.
 const BOTH_CONFIGURED: &str = r#"{
   "autoCaptureEnabled": true,
   "opencodeProvider": "opencode-go",
   "opencodeModel": "beam-free",
   "memoryProvider": "openai-chat",
   "memoryModel": "qwen3.8-flash-next-uncensored-nothink",
-  "memoryApiUrl": "http://10.90.11.16:4000/v1",
+  "memoryApiUrl": "http://10.90.11.16:4000/host-first-never/v1",
   "memoryApiKey": "sk-dummy-key-do-not-log"
 }"#;
 
@@ -159,50 +182,79 @@ const OPENCODE_ONLY: &str = r#"{
   "opencodeModel": "beam-free"
 }"#;
 
+/// `memoryModel` only: the manual block is CLAIMED with no credentials, and the
+/// host was NOT named, so the fail-closed rule applies.
 const PARTIAL_MANUAL: &str = r#"{
   "autoCaptureEnabled": true,
-  "opencodeProvider": "opencode-go",
-  "opencodeModel": "beam-free",
   "memoryModel": "qwen3.8-flash-next-uncensored-nothink"
 }"#;
 
 /// `memoryProvider` NAMED and nothing else: a claim with no credentials.
 const PROVIDER_ONLY_CLAIM: &str = r#"{
   "autoCaptureEnabled": true,
-  "opencodeProvider": "opencode-go",
-  "opencodeModel": "beam-free",
   "memoryProvider": "anthropic"
 }"#;
 
-/// The manual block, when complete, wins over the OpenCode host.
+/// Neither block configured: the host default, unchanged.
+const NEITHER: &str = r#"{
+  "autoCaptureEnabled": true
+}"#;
+
+/// The manual block complete and the host NOT named: the fallback applies.
+/// `https://` keeps the cleartext warning out of this row.
+const MANUAL_ONLY: &str = r#"{
+  "autoCaptureEnabled": true,
+  "memoryProvider": "openai-chat",
+  "memoryModel": "qwen3.8-flash-next-uncensored-nothink",
+  "memoryApiUrl": "https://manual-fallback.example/v1",
+  "memoryApiKey": "sk-dummy-key-do-not-log"
+}"#;
+
+/// The host named AND a claimed-but-unusable manual block: the host is the
+/// primary route, so the manual claim is never even evaluated.
+const HOST_WITH_PARTIAL_MANUAL: &str = r#"{
+  "autoCaptureEnabled": true,
+  "opencodeProvider": "opencode-go",
+  "opencodeModel": "beam-free",
+  "memoryModel": "qwen3.8-flash-next-uncensored-nothink"
+}"#;
+
+/// The owner's decision (ADR-0028 amendment): an explicitly named OpenCode host
+/// wins, even with a COMPLETE manual block sitting beside it.
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
-async fn test_manual_fallback_wins_over_the_opencode_host() {
+async fn test_opencode_host_wins_when_the_operator_named_it() {
     let _ = sink();
-    let home = TestDir::new("memory-provider-wins-home");
-    let state = TestDir::new("memory-provider-wins-state");
+    let home = TestDir::new("memory-provider-host-first-home");
+    let state = TestDir::new("memory-provider-host-first-state");
     let config = load_config(home.path(), BOTH_CONFIGURED, &[]);
 
-    let provider =
-        mem_bridge::engine::engine_capture_provider(&config, host_provider(state.path()))
-            .expect("the complete manual block composes a provider");
+    let provider = mem_bridge::engine::engine_capture_provider(
+        &config,
+        resolvable_host_provider(state.path(), 45191),
+    )
+    .expect("the host arm always composes a provider");
     assert_eq!(
         provider.name(),
-        "openai-chat",
-        "the configured manual fallback is the capture provider"
+        "opencode-host",
+        "the named OpenCode host is the capture provider"
     );
 
     let content = sink_text();
     assert!(
-        content.contains("\"providerId\":\"openai-chat\""),
-        "the ready line names the provider actually in use: {content}"
+        content.contains("\"providerId\":\"opencode-go\""),
+        "the ready line names the host provider actually in use: {content}"
     );
     assert!(
-        content.contains(&format!("\"baseUrl\":\"{MEMORY_URL}\"")),
-        "the ready line names the configured endpoint: {content}"
+        content.contains("\"baseUrl\":\"http://127.0.0.1:45191/api\""),
+        "the ready line names the resolved host API base: {content}"
+    );
+    assert!(
+        !content.contains("host-first-never"),
+        "the manual block is not built at all when the host is named: {content}"
     );
 }
 
-/// With no manual field set, the OpenCode host provider applies (unchanged).
+/// With no manual field set, the named OpenCode host applies (unchanged).
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_unconfigured_manual_fallback_uses_the_opencode_host() {
     let home = TestDir::new("memory-provider-host-home");
@@ -215,7 +267,54 @@ async fn test_unconfigured_manual_fallback_uses_the_opencode_host() {
     assert_eq!(provider.name(), "opencode-host");
 }
 
-/// A CLAIMED but unusable manual block fails closed with a NAMED reason.
+/// Neither block: the host default, exactly as before the manual wiring.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_neither_block_configures_the_opencode_host() {
+    let _ = sink();
+    let home = TestDir::new("memory-provider-neither-home");
+    let state = TestDir::new("memory-provider-neither-state");
+    let config = load_config(home.path(), NEITHER, &[]);
+
+    let provider =
+        mem_bridge::engine::engine_capture_provider(&config, host_provider(state.path()))
+            .expect("the host default composes");
+    assert_eq!(
+        provider.name(),
+        "opencode-host",
+        "with neither block the host is the default route"
+    );
+}
+
+/// With the host NOT named, a complete manual block is the fallback in use.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_manual_provider_is_the_fallback_when_the_host_is_not_named() {
+    let _ = sink();
+    let home = TestDir::new("memory-provider-fallback-home");
+    let state = TestDir::new("memory-provider-fallback-state");
+    let config = load_config(home.path(), MANUAL_ONLY, &[]);
+
+    let provider =
+        mem_bridge::engine::engine_capture_provider(&config, host_provider(state.path()))
+            .expect("the complete manual block composes a provider");
+    assert_eq!(
+        provider.name(),
+        "openai-chat",
+        "the manual block is the fallback route"
+    );
+
+    let content = sink_text();
+    assert!(
+        content.contains("\"providerId\":\"openai-chat\""),
+        "the ready line names the fallback actually in use: {content}"
+    );
+    assert!(
+        content.contains("\"baseUrl\":\"https://manual-fallback.example/v1\""),
+        "the ready line names the configured endpoint: {content}"
+    );
+}
+
+/// A CLAIMED but unusable manual block, host NOT named: fail closed with a
+/// NAMED reason — never a silent switch to the host.
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_claimed_but_incomplete_manual_config_fails_closed_with_a_named_reason() {
     let _ = sink();
@@ -236,6 +335,7 @@ async fn test_claimed_but_incomplete_manual_config_fails_closed_with_a_named_rea
         "the failure is named: {content}"
     );
 }
+
 /// An EXPLICIT `memoryProvider` alone is a claim (ADR-0028 D-28-2, rework F2):
 /// the operator named a provider, so a missing credential fails closed instead
 /// of quietly dialling the OpenCode host.
@@ -261,6 +361,29 @@ async fn test_memory_provider_only_claim_fails_closed_with_a_named_reason() {
     assert!(
         content.contains(&format!("\"reason\":\"{REASON_UNUSABLE}\"")),
         "the failure is named: {content}"
+    );
+}
+
+/// The host arm is chosen from the NAMED host alone: a claimed-but-unusable
+/// manual block beside it changes nothing and is never evaluated.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_named_host_is_not_derailed_by_a_claimed_manual_block() {
+    let _ = sink();
+    let home = TestDir::new("memory-provider-host-claim-home");
+    let state = TestDir::new("memory-provider-host-claim-state");
+    let config = load_config(home.path(), HOST_WITH_PARTIAL_MANUAL, &[]);
+
+    let provider = mem_bridge::engine::engine_capture_provider(
+        &config,
+        resolvable_host_provider(state.path(), 45192),
+    )
+    .expect("the host arm still composes despite the manual claim");
+    assert_eq!(provider.name(), "opencode-host");
+
+    let content = sink_text();
+    assert!(
+        content.contains("\"baseUrl\":\"http://127.0.0.1:45192/api\""),
+        "the host arm resolved and logged its own base: {content}"
     );
 }
 
@@ -325,7 +448,7 @@ fn test_cleartext_non_loopback_endpoint_is_named_on_the_log() {
         "the cleartext endpoint is named: {content}"
     );
     assert!(
-        content.contains("\"baseUrl\":\"http://10.90.11.16:4000/v1\""),
+        content.contains(&format!("\"baseUrl\":\"{MEMORY_URL}\"")),
         "the warning names the endpoint: {content}"
     );
     assert!(

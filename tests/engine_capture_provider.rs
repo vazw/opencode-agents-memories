@@ -1,18 +1,24 @@
 //! Production-path guard for ADR-0028 (rework F1): the engine's STARTUP
 //! selector, not just the selector function.
 //!
-//! `mem_bridge::engine::engine_capture_provider` decides manual-vs-host, and
+//! `mem_bridge::engine::engine_capture_provider` decides host-vs-manual, and
 //! commit `2bb7e57` shipped it with **zero production call sites**: every test
 //! called the function directly while `run_in_runtime` still warmed and passed
-//! the host provider, so the operator's manual block was dead code and the
-//! `Auto-capture provider ready` line named the wrong provider. A unit row
-//! cannot see the difference; only a SPAWNED engine can.
+//! the host provider. A unit row cannot see the difference; only a SPAWNED
+//! engine can.
 //!
 //! Shape (along `tests/engine_shutdown.rs`'s precedent): a private `HOME`
-//! carrying the config, a private `OPENCODE_MEM_LOG_FILE`, then assert the
-//! sink names the manual provider and no host line. No network — the endpoint
-//! is a loopback discard port and `autoCaptureEnabled` is false, so the
-//! provider is composed and never dialled.
+//! carrying the config, a private `OPENCODE_MEM_LOG_FILE`, then assert the sink
+//! names the capture provider actually in use. The row below is the OWNER'S LIVE
+//! SHAPE — both blocks complete — because the owner's decision (ADR-0028
+//! amendment) is that the explicitly named OpenCode host wins and the manual
+//! block is the fallback. A private `service.json` makes the host resolve, so
+//! the ready line is produced without any network: the host is warmed and never
+//! dialled, and `autoCaptureEnabled` is false.
+//!
+//! The manual fallback's own end-to-end row is the unit suite's
+//! (`crates/mem-bridge/tests/memory_provider.rs`); this file pins the call site
+//! on the arm the owner actually runs.
 
 use std::io::Read;
 use std::net::TcpListener;
@@ -29,9 +35,14 @@ const INSECURE: &str = "Auto-capture provider insecure endpoint";
 /// A wiring proof, never a credential: it must still never reach the sink.
 const WIRING_KEY: &str = "sk-wiring-proof-do-not-log";
 const WIRING_MODEL: &str = "qwen3.8-flash-next-uncensored-nothink";
-/// A loopback discard endpoint: allowed (`http://` on loopback is the
-/// documented local-provider case) and never dialled.
+/// A loopback discard endpoint for the manual block: allowed (`http://` on
+/// loopback is the documented local-provider case) and never dialled.
 const WIRING_URL: &str = "http://127.0.0.1:9/v1";
+
+/// The port the fake OpenCode host advertises. Nothing listens there: a warmed
+/// host provider is not a dialled one, and no capture is enabled.
+const HOST_PORT: u16 = 4610;
+const HOST_VERSION: &str = "2.2.5";
 
 const STARTUP_BOUND: Duration = Duration::from_secs(30);
 const EXIT_BOUND: Duration = Duration::from_secs(10);
@@ -83,17 +94,36 @@ impl Drop for Engine {
     }
 }
 
-/// The manual block the operator would write, minus the credential.
-fn manual_config() -> String {
+/// The owner's live shape: the OpenCode host block AND the complete manual
+/// block, both present.
+fn both_blocks_config() -> String {
     format!(
         r#"{{
   "autoCaptureEnabled": false,
+  "opencodeProvider": "opencode-go",
+  "opencodeModel": "beam-free",
   "memoryProvider": "openai-chat",
   "memoryModel": "{WIRING_MODEL}",
   "memoryApiUrl": "{WIRING_URL}",
   "memoryApiKey": "{WIRING_KEY}"
 }}"#
     )
+}
+
+/// The `service.json` a live OpenCode host writes. `pid` is THIS test process —
+/// alive for the whole run, and started before the engine it spawns, so the
+/// pid-recycling branch cannot fire.
+fn write_service_file(state_home: &Path) {
+    let dir = state_home.join("opencode");
+    std::fs::create_dir_all(&dir).expect("create the opencode state dir");
+    std::fs::write(
+        dir.join("service.json"),
+        format!(
+            r#"{{"url":"http://127.0.0.1:{HOST_PORT}","pid":{},"password":"wiring-proof-password","version":"{HOST_VERSION}"}}"#,
+            std::process::id()
+        ),
+    )
+    .expect("write service.json");
 }
 
 /// Spawns the packaged engine over a private `HOME` and a private sink.
@@ -151,19 +181,21 @@ fn wait_for_log(engine: &mut Engine, log_file: &Path, stderr_path: &Path) -> Str
     }
 }
 
-/// F1: the SPAWNED engine composes the configured manual provider, and the
-/// authoritative ready line says so.
+/// F1 + the owner's decision: the SPAWNED engine composes the NAMED host even
+/// with a complete manual block beside it, and the authoritative ready line
+/// says so.
 #[test]
-fn test_spawned_engine_composes_the_configured_manual_provider() {
-    let root = scratch_dir("manual");
+fn test_spawned_engine_uses_the_named_opencode_host_over_a_complete_manual_block() {
+    let root = scratch_dir("host-first");
     let home = root.join("home");
     let storage_root = root.join("storage");
     let log_file = root.join("opencode-mem.log");
     let config_dir = home.join(".config").join("opencode");
     std::fs::create_dir_all(&config_dir).expect("create the config dir");
     std::fs::create_dir_all(&storage_root).expect("create the storage root");
-    std::fs::write(config_dir.join("opencode-mem.json"), manual_config())
+    std::fs::write(config_dir.join("opencode-mem.json"), both_blocks_config())
         .expect("write the config");
+    write_service_file(&home.join("state"));
 
     let mut engine = spawn_engine(&home, &storage_root, &log_file);
     let text = wait_for_log(&mut engine, &log_file, &storage_root.join("engine.err"));
@@ -175,33 +207,42 @@ fn test_spawned_engine_composes_the_configured_manual_provider() {
         "exactly one authoritative ready line, got {ready:?} in: {text}"
     );
     assert!(
-        ready[0].contains("\"providerId\":\"openai-chat\""),
-        "the ready line names the provider the operator configured: {}",
+        ready[0].contains("\"providerId\":\"opencode-go\""),
+        "the ready line names the named host provider: {}",
         ready[0]
     );
     assert!(
-        ready[0].contains(&format!("\"baseUrl\":\"{WIRING_URL}\"")),
-        "the ready line names the configured endpoint: {}",
+        ready[0].contains(&format!("\"hostVersion\":\"{HOST_VERSION}\"")),
+        "the ready line names the resolved host version: {}",
         ready[0]
+    );
+    assert!(
+        ready[0].contains(&format!("\"baseUrl\":\"http://127.0.0.1:{HOST_PORT}/api\"")),
+        "the ready line names the resolved host API base: {}",
+        ready[0]
+    );
+    assert!(
+        !text.contains("\"providerId\":\"openai-chat\""),
+        "the complete manual block is not the capture provider here: {text}"
+    );
+    assert!(
+        !text.contains(WIRING_URL),
+        "the manual block was never built, so its endpoint never reaches the sink: {text}"
     );
     assert!(
         !text.contains(UNAVAILABLE),
-        "a complete manual block must not fail closed: {text}"
-    );
-    assert!(
-        !text.contains("\"providerId\":\"opencode"),
-        "the OpenCode host is not the capture provider here: {text}"
+        "the named host resolves, so nothing fails closed: {text}"
     );
     assert!(
         !text.contains(INSECURE),
-        "loopback `http://` is the allowed local-provider case: {text}"
+        "the manual block is not built, so it cannot warn: {text}"
     );
     assert!(
         !text.contains(WIRING_KEY),
         "the resolved key never reaches the sink: {text}"
     );
 
-    // EOF is a clean exit: the new startup path never wedges the engine.
+    // EOF is a clean exit: the startup path never wedges the engine.
     drop(engine.child.as_mut().and_then(|child| child.stdin.take()));
     let started = Instant::now();
     loop {
