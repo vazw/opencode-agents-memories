@@ -34,6 +34,7 @@ use serde::Deserialize;
 use crate::api::auth::{AuthContext, read_marker_token};
 use crate::api::envelope::{ApiError, parse_envelope};
 use crate::api_request::{self, RequestSpec};
+use crate::confirm::{ConfirmEvent, ConfirmGate, ConfirmState, confirm_next, dispatch};
 use crate::paths::{EndpointId, endpoint, fill};
 use crate::screens::format_created_at;
 
@@ -257,6 +258,8 @@ fn memory_row(
     row: MemoryRowView,
     reload: Callback<()>,
     action_error: RwSignal<Option<String>>,
+    confirm: RwSignal<ConfirmState>,
+    request_delete: Callback<String>,
     auth: AuthContext,
 ) -> impl IntoView {
     let pinned = row.is_pinned;
@@ -282,19 +285,47 @@ fn memory_row(
         });
     };
 
-    let delete_id = row.id.clone();
-    let delete = move |_| {
-        let spec = delete_memory_spec(&delete_id);
-        let auth = auth.clone();
-        leptos::task::spawn_local(async move {
-            match perform_action(&spec, &auth).await {
-                Ok(()) => {
-                    action_error.set(None);
-                    reload.run(());
+    // The row's Delete button only arms the gate; the gate's Confirm button is
+    // the one path to `request_delete`, and the request spec there is built
+    // from `step.run` alone (never from render state).
+    let delete_area = {
+        let id = row.id.clone();
+        move || {
+            let armed = confirm.get().pending.as_deref() == Some(id.as_str());
+            if armed {
+                let on_confirm = Callback::new(move |_: ()| {
+                    if let Some(run_id) = dispatch(confirm, ConfirmEvent::Confirm) {
+                        request_delete.run(run_id);
+                    }
+                });
+                let on_cancel = Callback::new(move |_: ()| {
+                    confirm.set(confirm_next(&confirm.get_untracked(), ConfirmEvent::Cancel).state);
+                });
+                view! { <ConfirmGate on_confirm=on_confirm on_cancel=on_cancel/> }.into_any()
+            } else {
+                let ask_id = id.clone();
+                view! {
+                    <button
+                        type="button"
+                        class="memory-delete"
+                        data-testid="memory-delete"
+                        on:click=move |_| {
+                            confirm
+                                .set(
+                                    confirm_next(
+                                        &confirm.get_untracked(),
+                                        ConfirmEvent::Ask(ask_id.clone()),
+                                    )
+                                        .state,
+                                );
+                        }
+                    >
+                        "Delete"
+                    </button>
                 }
-                Err(failure) => action_error.set(Some(failure.to_string())),
+                .into_any()
             }
-        });
+        }
     };
 
     let tags = if row.tags.is_empty() {
@@ -331,14 +362,7 @@ fn memory_row(
                         >
                             {if pinned { "Unpin" } else { "Pin" }}
                         </button>
-                        <button
-                            type="button"
-                            class="memory-delete"
-                            data-testid="memory-delete"
-                            on:click=delete
-                        >
-                            "Delete"
-                        </button>
+                        {delete_area}
                     }
                 })}
         </li>
@@ -358,11 +382,15 @@ pub fn MemoriesPanel() -> impl IntoView {
     let tag_filter = RwSignal::new(String::new());
     let state = RwSignal::new(MemoriesView::Loading);
     let action_error = RwSignal::new(None::<String>);
+    let confirm = RwSignal::new(ConfirmState::default());
 
     let reload = Callback::new({
         let auth = auth.clone();
         move |_: ()| {
             let auth = auth.clone();
+            // A list refresh invalidates any arm: a stale pending id must never
+            // survive to delete a row the user can no longer see.
+            confirm.set(confirm_next(&confirm.get_untracked(), ConfirmEvent::Cancel).state);
             let current = page.get_untracked();
             let size = page_size.get_untracked();
             let text = query.get_untracked();
@@ -392,6 +420,29 @@ pub fn MemoriesPanel() -> impl IntoView {
     // The initial load: the panel renders data on mount with no interaction.
     // Every read in `reload` is untracked, so this effect runs exactly once.
     Effect::new(move |_| reload.run(()));
+
+    // The only path from a confirmed gate to the network.
+    let request_delete = Callback::new({
+        let auth = auth.clone();
+        move |id: String| {
+            let spec = delete_memory_spec(&id);
+            let auth = auth.clone();
+            leptos::task::spawn_local(async move {
+                let result = perform_action(&spec, &auth).await;
+                // `Finished` on EVERY exit path, before the reload: a transient
+                // failure must not leave `running` stuck, or the row's Delete
+                // button never works again for the rest of the session.
+                confirm.set(confirm_next(&confirm.get_untracked(), ConfirmEvent::Finished).state);
+                match result {
+                    Ok(()) => {
+                        action_error.set(None);
+                        reload.run(());
+                    }
+                    Err(failure) => action_error.set(Some(failure.to_string())),
+                }
+            });
+        }
+    });
 
     let previous = Callback::new(move |_: ()| {
         if page.get_untracked() > 1 {
@@ -501,7 +552,14 @@ pub fn MemoriesPanel() -> impl IntoView {
                                 {rows
                                     .into_iter()
                                     .map(|row| {
-                                        memory_row(row, reload, action_error, auth.clone())
+                                        memory_row(
+                                            row,
+                                            reload,
+                                            action_error,
+                                            confirm,
+                                            request_delete,
+                                            auth.clone(),
+                                        )
                                     })
                                     .collect_view()}
                             </ul>

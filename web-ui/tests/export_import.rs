@@ -4,8 +4,9 @@ use wasm_bindgen_test::wasm_bindgen_test;
 use web_ui::core_screens::{MemoryItem, TagsPage};
 use web_ui::export_import::{
     EXPLORER_EXPORT_KIND, ExportInputs, IMPORT_APPLY_SUPPORTED, ImportError, ImportFormat,
-    MAX_IMPORT_BYTES, check_import_len, export_document, export_file_name, export_pages_spec,
-    exportable_memories, format_exported_at, import_preview, should_continue,
+    MAX_IMPORT_BYTES, check_import_len, export_document, export_download_disabled,
+    export_file_name, export_pages_spec, export_preview_text, exportable_memories,
+    format_exported_at, import_preview, should_continue,
 };
 
 #[wasm_bindgen_test]
@@ -197,4 +198,40 @@ fn test_import_preview_reports_a_missing_memories_tier() {
 #[wasm_bindgen_test]
 fn test_import_apply_is_documented_unsupported() {
     const { assert!(!IMPORT_APPLY_SUPPORTED) };
+}
+
+// ---------------------------------------------------------------------------
+// The export's loading policy (U7)
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen_test]
+fn test_export_preview_does_not_report_zero_before_load() {
+    // Mutant: `format!("memories: {count}")` unconditionally, which is today's
+    // `memories: 0` while 24 pages are still arriving.
+    assert_eq!(export_preview_text(false, 0), "Loading export…");
+    assert_eq!(
+        export_preview_text(false, 3215),
+        "Loading export…",
+        "a half-filled count is not reported as final either"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_export_preview_reports_count_after_load() {
+    // Mutant: always "Loading export…" — a preview that never settles.
+    assert_eq!(export_preview_text(true, 0), "memories: 0");
+    assert_eq!(export_preview_text(true, 3215), "memories: 3215");
+}
+
+#[wasm_bindgen_test]
+fn test_export_download_is_disabled_until_loaded() {
+    // Mutant: returns false unconditionally — an early click downloads an empty
+    // export while the pages load.
+    assert!(export_download_disabled(false));
+}
+
+#[wasm_bindgen_test]
+fn test_export_download_is_enabled_after_load() {
+    // Mutant: returns true unconditionally — Download is never usable.
+    assert!(!export_download_disabled(true));
 }

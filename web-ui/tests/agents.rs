@@ -8,10 +8,11 @@ use web_ui::agents::{
     AGENTS_DETAIL_CLASS, AGENTS_DETAIL_TESTID, AGENTS_EMPTY_CLASS, AGENTS_EMPTY_TESTID,
     AGENTS_ERROR_CLASS, AGENTS_ERROR_TESTID, AGENTS_FACT_CLASS, AGENTS_FACT_TESTID,
     AGENTS_LOADING_CLASS, AGENTS_LOADING_TESTID, AGENTS_MILESTONE_CLASS, AGENTS_MILESTONE_TESTID,
-    AGENTS_ROSTER_CLASS, AGENTS_ROSTER_TESTID, AGENTS_ROW_CLASS, AGENTS_ROW_TESTID,
-    AGENTS_UNAVAILABLE_CLASS, AGENTS_UNAVAILABLE_MESSAGE, AGENTS_UNAVAILABLE_TESTID, AgentSummary,
-    AgentsOutcome, AgentsView, ContributorDto, MilestoneDto, PromotedFactDto, agent_detail,
-    agents_view, format_window, list_milestones_spec, outcome_for_error, roster,
+    AGENTS_NEEDS_PROJECT_MESSAGE, AGENTS_PROMPT_CLASS, AGENTS_PROMPT_TESTID, AGENTS_ROSTER_CLASS,
+    AGENTS_ROSTER_TESTID, AGENTS_ROW_CLASS, AGENTS_ROW_TESTID, AGENTS_UNAVAILABLE_CLASS,
+    AGENTS_UNAVAILABLE_MESSAGE, AGENTS_UNAVAILABLE_TESTID, AgentSummary, AgentsOutcome, AgentsView,
+    ContributorDto, MilestoneDto, PromotedFactDto, agent_detail, agents_view, format_window,
+    list_milestones_spec, mount_action, outcome_for_error, roster,
 };
 use web_ui::api::envelope::ApiError;
 
@@ -318,6 +319,7 @@ fn test_agents_view_unavailable_is_not_the_failure_state() {
         AGENTS_MILESTONE_TESTID,
         AGENTS_FACT_TESTID,
         AGENTS_ROW_TESTID,
+        AGENTS_PROMPT_TESTID,
     ];
     let classes = [
         AGENTS_LOADING_CLASS,
@@ -329,6 +331,7 @@ fn test_agents_view_unavailable_is_not_the_failure_state() {
         AGENTS_MILESTONE_CLASS,
         AGENTS_FACT_CLASS,
         AGENTS_ROW_CLASS,
+        AGENTS_PROMPT_CLASS,
     ];
     assert!(testids.iter().all(|hook| !hook.is_empty()));
     assert!(classes.iter().all(|hook| !hook.is_empty()));
@@ -520,4 +523,43 @@ fn test_agent_detail_keeps_the_server_source_count() {
         detail.milestones[0].source_count, 5,
         "the server's source count is rendered as sent"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The mount action (B2: the panel must never stay on `Loading`)
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen_test]
+fn test_mount_action_without_project_reports_notice_not_loading() {
+    // The distinguishing input is the bare route. The mutant is today's mount:
+    // no `?project=` means the effect produces no state at all, so the panel
+    // renders `Loading` forever. A notice must become an outcome, never a skip.
+    let action = mount_action("");
+    assert_eq!(action.project, "");
+    assert!(!action.fetch, "there is nothing to fetch without a project");
+    assert_eq!(
+        action.notice.as_deref(),
+        Some(AGENTS_NEEDS_PROJECT_MESSAGE),
+        "the pre-input state carries the action-naming copy"
+    );
+
+    let outcome = action.notice.map(|_| AgentsOutcome::NeedsProject);
+    let view = agents_view(outcome.as_ref());
+    assert_eq!(view, AgentsView::NeedsProject);
+    assert_ne!(view, AgentsView::Loading, "the panel must not stay loading");
+    assert_ne!(
+        view,
+        AgentsView::Failed(String::new()),
+        "a missing project id is not a failure"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_mount_action_with_project_seeds_and_fetches() {
+    // Mutant: `fetch` always false — a seeded route renders a prompt and never
+    // asks the server (half of the B2 regression).
+    let action = mount_action("?project=p1");
+    assert_eq!(action.project, "p1");
+    assert!(action.fetch, "a seeded route must issue its one request");
+    assert_eq!(action.notice, None);
 }

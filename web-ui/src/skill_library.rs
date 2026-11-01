@@ -23,6 +23,7 @@ use serde::Deserialize;
 use crate::api::auth::{AuthContext, read_marker_token};
 use crate::api::envelope::ApiError;
 use crate::api_request::{self, RequestSpec};
+use crate::confirm::{ConfirmEvent, ConfirmGate, ConfirmState, confirm_next, dispatch};
 use crate::paths::{EndpointId, endpoint, fill};
 
 fn default_true() -> bool {
@@ -365,11 +366,14 @@ pub fn SkillLibraryPanel() -> impl IntoView {
     let draft_autoinvoke = RwSignal::new(true);
     let draft_enabled = RwSignal::new(true);
     let form_error = RwSignal::new(None::<String>);
+    let confirm = RwSignal::new(ConfirmState::default());
 
     let reload = Callback::new({
         let auth = auth.clone();
         move |_: ()| {
             let auth = auth.clone();
+            // A list refresh invalidates any arm.
+            confirm.set(confirm_next(&confirm.get_untracked(), ConfirmEvent::Cancel).state);
             state.set(SkillsView::Loading);
             leptos::task::spawn_local(async move {
                 match api_request::request::<SkillsPage>(&list_skills_spec(), &auth).await {
@@ -472,13 +476,18 @@ pub fn SkillLibraryPanel() -> impl IntoView {
         }
     });
 
-    let delete = Callback::new({
+    // The only path from a confirmed gate to the network.
+    let request_delete = Callback::new({
         let auth = auth.clone();
         move |id: String| {
             let auth = auth.clone();
             let spec = delete_skill_spec(&id);
             leptos::task::spawn_local(async move {
-                match api_request::request::<serde_json::Value>(&spec, &auth).await {
+                let result = api_request::request::<serde_json::Value>(&spec, &auth).await;
+                // `Finished` on EVERY exit path: success, HTTP error, transport
+                // error. A transient failure must not kill the row's Delete.
+                confirm.set(confirm_next(&confirm.get_untracked(), ConfirmEvent::Finished).state);
+                match result {
                     Ok(_) => {
                         error.set(None);
                         reload.run(());
@@ -520,7 +529,7 @@ pub fn SkillLibraryPanel() -> impl IntoView {
     view! {
         <section class="skill-library-panel" data-testid="skill-library-panel">
             <h2>"Skill Library"</h2>
-            <input type="text" class="skill-search" data-testid="skill-search" aria-label="Search skills"
+            <input type="text" id="skill-search" name="q" class="skill-search" data-testid="skill-search" aria-label="Search skills"
                 placeholder="Search skills"
                 prop:value=move || search.get()
                 on:input=move |e| search.set(event_target_value(&e)) />
@@ -529,20 +538,20 @@ pub fn SkillLibraryPanel() -> impl IntoView {
             </button>
 
             {move || match state.get() {
-                SkillsView::Loading => view! { <p data-testid="skills-loading">"Loading…"</p> }.into_any(),
-                SkillsView::Empty => view! { <p data-testid="skills-empty">"No skills"</p> }.into_any(),
-                SkillsView::Error(msg) => view! { <p data-testid="skills-error">{msg}</p> }.into_any(),
+                SkillsView::Loading => view! { <p class="panel-loading" data-testid="skills-loading">"Loading…"</p> }.into_any(),
+                SkillsView::Empty => view! { <p class="skills-empty" data-testid="skills-empty">"No skills"</p> }.into_any(),
+                SkillsView::Error(msg) => view! { <p class="skills-error" data-testid="skills-error">{msg}</p> }.into_any(),
                 SkillsView::Loaded { .. } => {
                     let filtered = visible_rows();
                     if filtered.is_empty() && rows.get().is_empty() {
-                        view! { <p data-testid="skills-empty">"No skills"</p> }.into_any()
+                        view! { <p class="skills-empty" data-testid="skills-empty">"No skills"</p> }.into_any()
                     } else {
                         view! {
                             <ul class="skill-list">
                                 {filtered.into_iter().map(|row| {
                                     let id = row.id.clone();
                                     let id2 = row.id.clone();
-                                    let id3 = row.id.clone();
+                                    let row_id = row.id.clone();
                                     view! {
                                         <li class="skill-row" data-testid="skill-row">
                                             <code class="skill-id" data-testid="skill-id">{row.id.clone()}</code>
@@ -556,11 +565,58 @@ pub fn SkillLibraryPanel() -> impl IntoView {
                                                 on:click=move |_| open_edit.run(id2.clone())>
                                                 "Edit"
                                             </button>
-                                            <button type="button" class="skill-delete" data-testid="skill-delete"
-                                                aria-label=format!("Delete {}", id3)
-                                                on:click=move |_| delete.run(id3.clone())>
-                                                "Delete"
-                                            </button>
+                                            {move || {
+                                                let armed = confirm.get().pending.as_deref()
+                                                    == Some(row_id.as_str());
+                                                if armed {
+                                                    let on_confirm = Callback::new(move |_: ()| {
+                                                        if let Some(run_id) = dispatch(
+                                                            confirm,
+                                                            ConfirmEvent::Confirm,
+                                                        ) {
+                                                            request_delete.run(run_id);
+                                                        }
+                                                    });
+                                                    let on_cancel = Callback::new(move |_: ()| {
+                                                        confirm
+                                                            .set(
+                                                                confirm_next(
+                                                                    &confirm.get_untracked(),
+                                                                    ConfirmEvent::Cancel,
+                                                                )
+                                                                    .state,
+                                                            );
+                                                    });
+                                                    view! {
+                                                        <ConfirmGate on_confirm=on_confirm on_cancel=on_cancel/>
+                                                    }
+                                                        .into_any()
+                                                } else {
+                                                    let ask_id = row_id.clone();
+                                                    let label = format!("Delete {}", ask_id);
+                                                    view! {
+                                                        <button
+                                                            type="button"
+                                                            class="skill-delete"
+                                                            data-testid="skill-delete"
+                                                            aria-label=label
+                                                            on:click=move |_| {
+                                                                confirm
+                                                                    .set(
+                                                                        confirm_next(
+                                                                            &confirm.get_untracked(),
+                                                                            ConfirmEvent::Ask(ask_id.clone()),
+                                                                        )
+                                                                            .state,
+                                                                    );
+                                                            }
+                                                        >
+                                                            "Delete"
+                                                        </button>
+                                                    }
+                                                        .into_any()
+                                                }
+                                            }}
                                         </li>
                                     }
                                 }).collect_view()}
@@ -578,28 +634,28 @@ pub fn SkillLibraryPanel() -> impl IntoView {
                 view! {
                     <form class="skill-form" data-testid="skill-form">
                         <code class="skill-form-id" data-testid="skill-form-id">{form_id_display()}</code>
-                        <input type="text" class="skill-form-name" data-testid="skill-form-name"
-                            aria-label="Skill name"
+                        <label for="skill-name">"Name"</label>
+                        <input type="text" id="skill-name" class="skill-form-name" data-testid="skill-form-name"
                             prop:value=move || draft_name.get()
                             on:input=move |e| draft_name.set(event_target_value(&e)) />
-                        <input type="text" class="skill-form-description" data-testid="skill-form-description"
-                            aria-label="Skill description"
+                        <label for="skill-description">"Description"</label>
+                        <input type="text" id="skill-description" class="skill-form-description" data-testid="skill-form-description"
                             prop:value=move || draft_description.get()
                             on:input=move |e| draft_description.set(event_target_value(&e)) />
-                        <textarea class="skill-form-content" data-testid="skill-form-content"
-                            aria-label="Skill content"
+                        <label for="skill-content">"Content"</label>
+                        <textarea id="skill-content" class="skill-form-content" data-testid="skill-form-content"
                             prop:value=move || draft_content.get()
                             on:input=move |e| draft_content.set(event_target_value(&e)) />
                         <label>
-                            <input type="checkbox" class="skill-form-autoinvoke" data-testid="skill-form-autoinvoke"
-                                aria-label="Auto-invoke"
+                            <input type="checkbox" id="skill-autoinvoke" name="autoinvoke"
+                                class="skill-form-autoinvoke" data-testid="skill-form-autoinvoke"
                                 prop:checked=move || draft_autoinvoke.get()
                                 on:change=move |e| draft_autoinvoke.set(event_target_checked(&e)) />
                             "Auto-invoke"
                         </label>
                         <label>
-                            <input type="checkbox" class="skill-form-enabled" data-testid="skill-form-enabled"
-                                aria-label="Enabled"
+                            <input type="checkbox" id="skill-enabled" name="enabled"
+                                class="skill-form-enabled" data-testid="skill-form-enabled"
                                 prop:checked=move || draft_enabled.get()
                                 on:change=move |e| draft_enabled.set(event_target_checked(&e)) />
                             "Enabled"

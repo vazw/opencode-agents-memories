@@ -178,6 +178,25 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
+/// The export preview line.
+///
+/// The walk pages up to 25×200 memories, so a count rendered before the walk
+/// settles is a lie that also enables the Download button (U7): an early click
+/// exported an almost-empty file.
+pub fn export_preview_text(loaded: bool, count: usize) -> String {
+    if loaded {
+        format!("memories: {count}")
+    } else {
+        "Loading export…".to_string()
+    }
+}
+
+/// Download is disabled until **all three** loads (memories, tags, profile)
+/// have settled — success or error, both settle.
+pub fn export_download_disabled(loaded: bool) -> bool {
+    !loaded
+}
+
 /// The download's stamp: the browser clock, formatted by the pure formatter.
 fn export_stamp_now() -> String {
     format_exported_at(js_sys::Date::now() as u64)
@@ -326,6 +345,11 @@ pub fn ExportImportPanel() -> impl IntoView {
     });
     let profile = RwSignal::new(None::<ProfileView>);
     let truncated = RwSignal::new(false);
+    // U7: `loaded` is derived from three settled tasks; the generation counter
+    // keeps a superseded reload from publishing a half-filled export.
+    let settled = RwSignal::new(0u8);
+    let generation = RwSignal::new(0u64);
+    let loaded = Memo::new(move |_| settled.get() >= 3);
     let import_text = RwSignal::new(String::new());
     let import_preview_result = RwSignal::new(None::<ImportPreview>);
     let import_error = RwSignal::new(None::<String>);
@@ -334,6 +358,10 @@ pub fn ExportImportPanel() -> impl IntoView {
         let auth = auth.clone();
         move |_: ()| {
             let auth = auth.clone();
+            // Fail closed on every reload.
+            let generation_now = generation.get_untracked() + 1;
+            generation.set(generation_now);
+            settled.set(0);
             let auth_m = auth.clone();
             leptos::task::spawn_local(async move {
                 let mut all: Vec<MemoryItem> = Vec::new();
@@ -367,6 +395,10 @@ pub fn ExportImportPanel() -> impl IntoView {
                 }
                 memories.set(all);
                 truncated.set(trunc);
+                // Exactly once per task, on every exit path.
+                if generation.get_untracked() == generation_now {
+                    settled.update(|count| *count += 1);
+                }
             });
             let auth_t = auth.clone();
             leptos::task::spawn_local(async move {
@@ -374,12 +406,18 @@ pub fn ExportImportPanel() -> impl IntoView {
                 if let Ok(t) = api_request::request::<TagsPage>(&spec, &auth_t).await {
                     tags.set(t);
                 }
+                if generation.get_untracked() == generation_now {
+                    settled.update(|count| *count += 1);
+                }
             });
             let auth_p = auth.clone();
             leptos::task::spawn_local(async move {
                 let spec = RequestSpec::get(endpoint(EndpointId::UserProfile).template);
                 if let Ok(p) = api_request::request::<ProfileView>(&spec, &auth_p).await {
                     profile.set(Some(p));
+                }
+                if generation.get_untracked() == generation_now {
+                    settled.update(|count| *count += 1);
                 }
             });
         }
@@ -454,17 +492,18 @@ pub fn ExportImportPanel() -> impl IntoView {
         <section class="export-import-panel" data-testid="export-import-panel">
             <h2>"Export / Import"</h2>
             <div class="export-preview" data-testid="export-preview">
-                {move || format!(
-                    "memories: {}",
-                    exportable_memories(&memories.get()).len()
+                {move || export_preview_text(
+                    loaded.get(),
+                    exportable_memories(&memories.get()).len(),
                 )}
             </div>
             <button type="button" class="export-download" data-testid="export-download"
+                prop:disabled=move || export_download_disabled(loaded.get())
                 on:click=move |_| download.run(())>
                 "Download export"
             </button>
-            <textarea class="import-input" data-testid="import-input"
-                aria-label="Import JSON"
+            <label for="import-json">"Import JSON"</label>
+            <textarea id="import-json" class="import-input" data-testid="import-input"
                 prop:value=move || import_text.get()
                 on:input=move |e| on_import_input.run(event_target_value(&e)) />
             {move || import_preview_result.get().map(|p| view! {
