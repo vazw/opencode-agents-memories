@@ -1,6 +1,10 @@
 # 108 — capture should use the host's stateless generate route, not a session it creates and deletes
 
-Status: ready-for-agent — 2026-11-01. All claims below are **MEASURED against the live 2.2.5 host**
+Status: done — closed 2026-11-02 by live measurement: **4 captures persisted, 0 failures**, against
+**290 attempts / 0 persisted** on the previous binary (`543159561997` vs `4b0177178c4a`). Evidence:
+`docs/evidence/stateless-capture-2026-11-02/` (raw post-restart log lines + the re-stage procedure).
+Implementation: `4057162` on top of `81ba4ca`; plan gate 5, review 3. All claims below are **MEASURED
+against the live 2.2.5 host**
 (`.tmp/progress/host-exchange-20261101T162001Z/`, plus a direct call recorded here) or **READ** from the
 spec that host serves at `GET /openapi.json` (138 paths, fetched live into `.tmp/scratch/live-openapi.json`).
 
