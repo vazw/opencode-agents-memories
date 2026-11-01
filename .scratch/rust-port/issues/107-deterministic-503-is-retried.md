@@ -70,3 +70,13 @@ No slice parent. Surfaced by the same probe as issue 108; it is the *reason* 108
 The defect we own is that a structured error body, which the host does provide, is discarded: the engine
 reads the status class and throws the payload away. Both this and issue 88's earlier "the log does not
 discriminate" finding are the same underlying habit — reading a status where a body was available.
+
+**The taxonomy that makes this fixable was in the live spec all along (2026-11-01).** Issue 108's route,
+`POST /api/experimental/generate/text`, declares distinct errors per condition:
+`400 InvalidRequestError{kind,field}`, `404 ProviderNotFound`, `422 UnsupportedModel{providerID,modelID,capability}`,
+`502 ProviderRequestError{providerID,reason,status,retryAfterMs}`, `503 ServiceUnavailableError{service}`.
+So on that route a retryable provider failure is **502 with `retryAfterMs`**, an unfixable configuration
+mistake is **422**, and a 503 is the service itself. Retryability becomes readable from the body instead of
+inferred from the status class — which is what this issue asks for, available without inventing a scheme.
+The acceptance criteria therefore apply at that route; if 108 lands, close the "agent not found as 503"
+example above as superseded and keep the general rule.

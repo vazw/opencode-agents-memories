@@ -99,3 +99,10 @@ consequence and no measurement behind it.
 the host spec documents a different one; the runtime accepted both. Three sources, two shapes, one
 silently inert guard. This is the same pattern as the wire-contract wave: behaviour observed in one
 client is not a contract, and a 2xx is not agreement.
+
+**Superseded in scope, not in fact (2026-11-01).** Issue 108 may delete the whole capture-session path in
+favour of the host's stateless `POST /experimental/generate/text`, which creates no session and therefore
+carries no permission body. If that lands, this issue is **moot for capture** and should be closed citing
+108 — the undeclared `permission` key would no longer have an emitter. It stays open only if sessions are
+created anywhere else in the port. The measurement path below is unaffected: if a session is ever created
+again, `GET /api/session/{id}` still settles whether the ruleset applies.
