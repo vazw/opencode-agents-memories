@@ -8,7 +8,43 @@ The upstream suite (`example/opencode-mem/tests/`, 110 files, v2.31.3 @ 906038e)
 - Shared helpers live in `crates/<crate>/tests/common/mod.rs` (std-only, headed by `#![allow(dead_code)]`; no dev-dependencies).
 - Test names are `test_<behavior>_<condition>`.
 - Crate-internal tests (`#[cfg(test)]` in `src/`) are only for private items — integration tests assert through the crate's public interface.
-- Focused command: `cargo test -p <crate> --test <file>`. Full battery (all exit 0): `cargo fmt --all --check`, `cargo build --workspace` (0 warnings), the two clippy gates of ADR-0013 D-5 — `cargo clippy --workspace --lib -- -A clippy::all -D clippy::unwrap_used -D clippy::expect_used` and `cargo clippy --workspace --all-targets -- -D warnings -A clippy::await_holding_lock -A clippy::assertions_on_constants -A clippy::doc_lazy_continuation` — and `cargo test --workspace`. The pre-commit hook (`.githooks/pre-commit`, ADR-0016) runs those same two gates in the root workspace plus a staged-file `rustfmt --check`: it is a floor under the commit, not the battery. The single unexcluded form `cargo clippy --workspace --all-targets -- -D warnings` exits 101 on the **root** workspace with 17 pre-existing errors across three lints (14 `clippy::await_holding_lock` in `crates/mem-skills/tests/skills_manager.rs`, 1 `clippy::doc_lazy_continuation` in `crates/mem-bridge/src/vault_feeder.rs:15:5`, 2 `clippy::assertions_on_constants` in `crates/mem-vault/tests/no_write_path.rs`), which is why all three exclusions are load-bearing. The pre-commit hook's `web-ui` phase runs **both** gates in that separate workspace, panic families first: the 7 pre-existing `web-ui` panic sites were repaired on 2026-10-25 (7 → 0, ADR-0016 D-3). `web-ui`'s own suite is wasm-only: `cd web-ui && cargo test --target wasm32-unknown-unknown` (wasm-bindgen-test-runner + Chromium, **159 tests at the W6.6 landing**).
+- Focused command: `cargo test -p <crate> --test <file>`. Full battery (all exit 0): `cargo fmt --all --check`, `cargo build --workspace` (0 warnings), the two clippy gates of ADR-0013 D-5 — `cargo clippy --workspace --lib -- -A clippy::all -D clippy::unwrap_used -D clippy::expect_used` and `cargo clippy --workspace --all-targets -- -D warnings -A clippy::await_holding_lock -A clippy::assertions_on_constants -A clippy::doc_lazy_continuation` — and `cargo test --workspace`. The pre-commit hook (`.githooks/pre-commit`, ADR-0016) runs those same two gates in the root workspace plus a staged-file `rustfmt --check`: it is a floor under the commit, not the battery. The single unexcluded form `cargo clippy --workspace --all-targets -- -D warnings` exits 101 on the **root** workspace with 17 pre-existing errors across three lints (14 `clippy::await_holding_lock` in `crates/mem-skills/tests/skills_manager.rs`, 1 `clippy::doc_lazy_continuation` in `crates/mem-bridge/src/vault_feeder.rs:15:5`, 2 `clippy::assertions_on_constants` in `crates/mem-vault/tests/no_write_path.rs`), which is why all three exclusions are load-bearing. The pre-commit hook's `web-ui` phase runs **both** gates in that separate workspace, panic families first: the 7 pre-existing `web-ui` panic sites were repaired on 2026-10-25 (7 → 0, ADR-0016 D-3). `web-ui`'s own suite is wasm-only: `cd web-ui && cargo test --target wasm32-unknown-unknown` (wasm-bindgen-test-runner + Chromium, **159 tests at the W6.6 landing**, 170 after the 2026-11-02 web-ui repair wave).
+
+### `web-ui` class coverage (a scripted gate, not a unit test)
+
+The Memory Explorer's stylesheet must wire every class token its Rust can emit. The gate is a node
+script, not a wasm test:
+
+```sh
+cd web-ui && node scripts/check-class-coverage.mjs --self-test --min-emitted=181
+```
+
+- It classifies **every** `class=` site in `web-ui/src/**/*.rs` as literal / const / balanced
+  brace block, and treats anything else (a tuple, a closure, `format!(…)`, a lowercase local, a raw
+  string) as a **residue** that exits 1. It never skips a carrier form.
+- `--self-test` runs eight embedded fixtures and prints `SELFTEST 8/8`. Fixture 3 is the
+  balanced-brace discriminator (a `\{([^}]*)\}` scan yields one of the two branches); fixtures 5–8
+  are the silent-skip discriminators (a literal-only extractor reports 0 residues on all four).
+- Census and triple: `sites=196 literal=181 const=14 brace=1 residue=0` and
+  `emitted=181 hooks=181 missing=0 dead=0 unresolved=0`.
+- Arc: the baseline at `81ba4ca` was `sites=187 literal=173 const=13 brace=1 residue=0` /
+  `emitted=175 hooks=58 missing=117 dead=0`. The repair wave closed all 117 and added six hooks
+  (`skills-empty`, four `confirm-gate*`, `agents-prompt`), so **175/58/117 → 181/181/0**. The
+  `--min-emitted=181` floor is a ratchet: a deleted rule is caught as `missing>0`, a wholesale
+  stylesheet revert as `emitted<181`.
+- `.githooks/pre-commit` runs the same command whenever a `web-ui/` path is staged (missing `node`
+  fails the commit — never a silent skip), and `scripts/test-pre-commit.sh` case 17 proves the gate
+  names the unwired hook: a fixture carrying the real `web-ui/src` and the post-wave stylesheet with
+  exactly `.tag-row` deleted must exit non-zero, print `MISSING tag-row`, `missing=1`, `emitted=181`
+  — and must not trip the ratchet instead.
+
+**C3 correction (the audit's "12 dead rules").** The audit's claim that 12 CSS rules target classes
+no screen emits is a measurement artifact: those classes are emitted through `const …_CLASS`
+indirections (`agents.rs`, `core_screens.rs`), and the arithmetic closes exactly (`58 − 12 = 46`
+wired; `160 − 46 = 114` "missing" in the audit's literal-only extraction). **No rule was deleted on
+the strength of it** — that would break the Agents roster and the Maintenance treatments. Re-derive
+with the gate before deleting CSS: a rule the gate reports as `DEAD` is the only kind that is safe
+to remove.
 
 ## Test-first slices
 

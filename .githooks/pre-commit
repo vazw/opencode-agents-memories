@@ -41,7 +41,39 @@ while IFS= read -r -d '' p; do
     staged+=("$p")
 done < <(git diff --cached --name-only -z --diff-filter=ACMR)
 
-# P4 — fast path: no Rust-related path staged means no cargo work at all.
+# P4 — the class-coverage gate. It is cheap (one node run, ~60 ms) and it must
+# run for *any* staged `web-ui/` path — including a stylesheet-only edit, which
+# is exactly the change that can unwire a hook. A missing node is a hard
+# environment failure, never a silent skip.
+webui=0
+for p in "${staged[@]}"; do
+    case "$p" in
+        web-ui/*) webui=1 ;;
+    esac
+done
+if [ "$webui" -eq 1 ]; then
+    if ! command -v node > /dev/null 2>&1; then
+        printf 'pre-commit: FAIL environment — node not found on PATH (the web-ui class-coverage gate requires it)\n' >&2
+        bypass_note
+        exit 1
+    fi
+    if [ ! -f "$toplevel/web-ui/scripts/check-class-coverage.mjs" ]; then
+        printf 'pre-commit: FAIL environment — web-ui/scripts/check-class-coverage.mjs is missing\n' >&2
+        bypass_note
+        exit 1
+    fi
+    mkdir -p "$toplevel/.tmp/scratch"
+    coverage_log="$toplevel/.tmp/scratch/coverage.log"
+    if ! node "$toplevel/web-ui/scripts/check-class-coverage.mjs" --min-emitted=181 --self-test > "$coverage_log" 2>&1; then
+        printf 'pre-commit: FAIL class coverage — a web-ui class hook has no CSS rule\n' >&2
+        tail -n 40 "$coverage_log" >&2
+        printf 'pre-commit: reproduce: node web-ui/scripts/check-class-coverage.mjs --min-emitted=181 --self-test\n' >&2
+        exit 1
+    fi
+    rm -f "$coverage_log"
+fi
+
+# P5 — fast path: no Rust-related path staged means no cargo work at all.
 rust_related=0
 for p in "${staged[@]}"; do
     case "$p" in
@@ -52,7 +84,7 @@ if [ "$rust_related" -eq 0 ]; then
     exit 0
 fi
 
-# P5 — one scratch root, created on first use. `.tmp/` is gitignored, so a fresh
+# P6 — one scratch root, created on first use. `.tmp/` is gitignored, so a fresh
 # clone has no `.tmp/scratch`; `mktemp -d` against a missing parent would fail.
 export CARGO_TARGET_DIR="$toplevel/.tmp/scratch/cargo-target"
 export TMPDIR="$toplevel/.tmp/scratch"
@@ -67,7 +99,7 @@ trap 'rm -rf "$tmp"' EXIT
 # hook resume as if it had checked anything: clean up, then stop.
 trap 'exit 1' INT TERM HUP
 
-# P6 — rustfmt judges the index blob of each staged `.rs` file, not the worktree.
+# P7 — rustfmt judges the index blob of each staged `.rs` file, not the worktree.
 # `skip_children=true` is required for a materialised blob (a copied lib.rs
 # otherwise fails to resolve its modules); each staged file is still checked on
 # its own, so a staged unformatted child is caught by its own entry.
@@ -108,7 +140,7 @@ for p in "${staged[@]}"; do
     fi
 done
 
-# P7 — the clippy gates. Gate 1 is ADR-0013 D-5's `--lib` command verbatim; gate 2
+# P8 — the clippy gates. Gate 1 is ADR-0013 D-5's `--lib` command verbatim; gate 2
 # is the all-targets form recorded in AGENTS.md §Gates, docs/agents/testing.md and
 # ADR-0016 (D-5 carries the `--lib` command only).
 clip_log="$tmp/clippy.log"
@@ -123,13 +155,6 @@ clippy_gate() {
         exit 1
     fi
 }
-
-webui=0
-for p in "${staged[@]}"; do
-    case "$p" in
-        web-ui/*) webui=1 ;;
-    esac
-done
 
 clippy_scope="root"
 clippy_gate "gate 1/2: panic families — root workspace" "$toplevel" "$CARGO_TARGET_DIR" \

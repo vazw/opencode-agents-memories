@@ -159,10 +159,13 @@ redefine the gate.
 
 **D-8 — The self-test is committed at `scripts/test-pre-commit.sh`.** A gitignored harness dies
 with the wave and cannot re-prove the hook after a later edit; bats would be a new dependency. It
-runs 16 behavioural cases in throwaway repositories under
+runs 17 behavioural cases in throwaway repositories under
 `<repo>/.tmp/scratch/precommit-selftest/`, carries a copy of the *tracked* hook, configures
 `core.hooksPath .githooks`, and refuses to run if its work dir resolves to the repository root or
-outside `.tmp/scratch`. It makes no writes to this repository's index or worktree.
+outside `.tmp/scratch`. It makes no writes to this repository's index or worktree. Case 17 is
+the `web-ui` class-coverage gate (amended 2026-11-02): it pins the real `web-ui/src` and the
+post-wave stylesheet with `.tag-row` deleted, so the gate must red on the missing hook
+(`missing=1`, `MISSING tag-row`) rather than on the `--min-emitted` ratchet.
 
 **D-9 — Toolchain presence is checked before the fast path.** A missing `cargo` or `rustfmt`
 exits 1 naming the tool even for a docs-only commit: a hook that silently degrades to a no-op is
