@@ -10,6 +10,9 @@
 - **Amended:** 2026-11-01 (issue 88, the wire wave) — D-29-6 restated: the fixtures answer the
   **documented** wire, which is READ from the API description and has never been captured; the schema
   still reaches the model, now in the prompt TEXT; the scope guard's item 1 is narrowed to what is left.
+- **Amended:** 2026-11-01 (issue 108, the stateless-capture wave) — D-29-7..D-29-11 replace the session
+  lifecycle with ONE stateless call, delete the loop guard with its subject, name the parse miss, carry
+  retryability on a closed wire token, and record two tracked deferrals.
 
 ## Context
 
@@ -97,6 +100,63 @@ losses, both deliberate: `format`/`tools` leave the host arm (superseded by the 
 assistant-side error name/data is no longer surfaced (the documented reply has no field for it; a non-2xx
 is named by its status). No model left the wire — the create body carries `Model.Ref` and `agent`.
 
+**D-29-7 — Capture is ONE stateless call; the session is gone (issue 108).**
+The provider no longer creates, names, prompts and deletes a transient session (three HTTP calls plus a
+process-global loop guard). `HostState::generate` makes exactly one `POST {base}/experimental/generate/text`
+with a body of `{"prompt": …}` plus `{"model": {"id", "providerID", "variant"?}}` when a model is resolved
+(an empty model, the `"inherit"` sentinel, or a missing provider id omits the key). There is **no query
+string**: the measured call carried none and the route declares `parameters: []`. The reply is
+`{"data":{"text": …}}`. This is what the reference implementation does, and it is MEASURED working against
+the live 2.2.5 host: `200`, 1098 ms, `{"data":{"text":"ok"}}`, and the host's session count unchanged
+(50 → 50) — the old create polluted the owner's TUI list and failed with a 503 naming an agent the host
+never registered. `additionalProperties:false` is a runtime contract here, unlike the old create body's
+undeclared `permission` ruleset.
+
+**D-29-8 — The loop guard is deleted with its subject.**
+An internal capture session no longer exists, so `internal_capture`'s tracked set, its reserved title, its
+60 s grace window, `note_structured_step` and the client-side step cap have nothing to guard. Upstream keeps
+them because upstream still creates a session. The plugin's `hooks.config` agent registration (issue 75) is
+deleted in the same wave: the host runs V2 and our adapter forwards only `event`, so the hook never reaches
+it (MEASURED: `GET /api/agent` → 28 agents, ours absent).
+
+**D-29-9 — One format authority, and the parse miss is named.**
+`CAPTURE_SYSTEM_PROMPT` loses its markdown `FORMAT:` block — its one production reader always supplies a
+schema, so the single format instruction is `capture_context::SCHEMA_ANSWER_INSTRUCTION`. Because the route
+cannot enforce `json_schema`, the reply is recovered by upstream's three-shape scan
+(`parse_structured_lenient`: direct JSON → first fenced block → the LAST balanced object that parses) and a
+miss is `ProviderErrorKind::ModelOutput` (`capture_output_not_json`, retryable), carrying only the reply's
+byte length. **Admitted blind spot:** a well-formed but wrong balanced object parses silently — the scan
+cannot tell a model's example from its answer, and the last-object rule can prefer the former. `parse_capture_value`
+stays fail-closed (no summary → no capture), but it cannot detect a wrong summary with the right shape.
+
+**D-29-10 — Retryability is decided by the closed wire token, never by a message or the status class.**
+`decode_generate_failure` maps every declared `_tag` (both spellings) onto eleven tokens
+(`wire_reason`: `invalid-request`, `unauthorized`, `provider-not-found`, `model-not-found`,
+`location-not-found`, `model-unsupported`, `provider-request-retryable`, `provider-request-terminal`,
+`service-unavailable`, `route-moved`, `unrecognised`), builds a bounded `detail` from the DECLARED error
+fields only (`field`/`kind`, `providerID`, `modelID`, `capability`, `location`, `service`, `reason`,
+`status`, `retryAfterMs`, `tag`), and keeps the message fixed per status. `classify_provider_error` branches
+on the token first; `is_retryable()` applies ONLY to the untagged default, because it returns true for every
+5xx and would erase the two 502 classes. `record_failure` dead-letters at once, with no attempt bump, for a
+`!retryable` class or a `retryAfterMs` above `HOST_RETRY_AFTER_CEILING_MS` (30 000 — a policy choice for
+the owner, not a measurement), and otherwise runs the unchanged five-attempt ladder.
+**A >30 s hint dead-letters PERMANENTLY:** dead rows are excluded by `SELECT_CAPTURE_INBOX_BATCH`
+(`status = 'queued'`) and nothing in the tree requeues them; the row and its `payload` survive
+(`DEADLETTER_CAPTURE_INBOX` is an `UPDATE … status='dead'`), so a future requeue tool can recover it.
+`EntryOutcome::Deferred` was rejected on three grounds: it consumes no attempt (nothing bounds the loop), it
+honours no hint without a scheduling column (the next tick re-issues immediately), and it already means "a
+live lock or an unreadable scope shard", so reusing it would erase a diagnostic distinction.
+**Chosen bounded behaviour:** a `ProviderRequestError` with an absent or unknown `reason` stays RETRYABLE —
+`reason` is required with a closed enum, so a conformant host cannot send a permanent 502 without one; the
+cost asymmetry (four extra requests versus permanent loss) decides it, and the ladder bounds it at five.
+
+**D-29-11 — Two tracked deferrals.**
+(1) The capture inbox has no scheduling column, so a bounded `retryAfterMs` is honoured as a refusal, not a
+delay, and a >30 s hint is permanent — `.scratch/rust-port/issues/110-capture-inbox-not-before-column.md`.
+(2) `build_bounded_summary_prompt`'s byte accounting is two bytes short of the schema block it appends —
+`.scratch/rust-port/issues/111-summary-prompt-budget-two-byte-gap.md`. Neither is a defect this wave may
+absorb silently.
+
 ## Consequences
 
 - Capture latency grows from ~4.2 s to ~25.5 s per attempt — and that is the point: 4.2 s bought a
@@ -120,7 +180,9 @@ remains outside it:
    documented wire, and the model/agent travel on the create body — but the port still sends
    `permission` where the document declares `permissions: Permission.Ruleset`. That is a rebuild, not a
    rename, and `requeue-captures` is still unshipped. Runtime confirmation that the live host behaves as
-   documented is likewise unmeasured: no exchange has ever been captured.
+   documented is likewise unmeasured: no exchange has ever been captured. **Closed by D-29-7:** issue 108
+   removed the create/prompt/delete lifecycle entirely; `requeue-captures` remains unshipped and is named
+   in D-29-10/D-29-11.
 2. **The wrapper never sends `agent_id`** (`plugin/src/plugin.js`), and `mem-episodic` rejects an empty
    one — `episodic_write_failed`. **Addressed by `95857b7`**; whether that closes persistence live is not
    measured here.

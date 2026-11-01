@@ -68,25 +68,43 @@
 - **`LazyHostProvider`** — resolve on use, cache on success, clear on ANY inner
   error (a foreign listener on a recycled port answers `401`/`404`/junk, never
   `Network`). `warm()` is the startup probe and never caches a failure. Model
-  and provider come from the wiring, and they travel on the CREATE body as
-  `model: Model.Ref{id, providerID, variant?}` beside `agent: Agent.ID`; the
-  prompt body is exactly `{"prompt": …}`.
-- **the documented wire** — the create reply is decoded in both shapes
-  (`{data: Session.Info}`, with a bare `{id}` as the fall-through); the prompt
-  POSTs `…/{id}/generate`, whose body declares only `prompt`, so the JSON
-  schema rides in the prompt TEXT (`capture_context::SCHEMA_ANSWER_INSTRUCTION`)
-  and the reply is decoded from `{"data":{"text": …}}`. A shape mismatch is a
-  NAMED `host_wire_shape_mismatch` / `errorKind: "wire-shape"`, never
-  `protocol`. Against these documented shapes a capture reaches persistence —
-  but every shape here is READ, not measured: no create or generate exchange
-  with the live host has ever been captured, so live behaviour stays
-  unconfirmed.
+  and provider come from the wiring, and they travel on the GENERATE body as
+  `model: Model.Ref{id, providerID, variant?}`; `"inherit"` omits the key
+  rather than forwarding the sentinel.
+- **the documented wire** — ONE stateless request per attempt:
+  `POST {base}/experimental/generate/text`, body `{"prompt": …}` plus `model`
+  when one is resolved, no query string (`parameters: []`,
+  `additionalProperties:false`). The reply is decoded from
+  `{"data":{"text": …}}`; the JSON schema rides in the prompt TEXT
+  (`capture_context::SCHEMA_ANSWER_INSTRUCTION`) because the route declares no
+  `format` field, and the text is recovered by upstream's three-shape scan
+  (direct JSON → fenced block → last balanced object). No session is created,
+  named, deleted or tracked. A reply without the envelope is a NAMED
+  `host_wire_shape_mismatch` / `errorKind: "wire-shape"`, never `protocol`; a
+  text with no structured value is `capture_output_not_json` /
+  `errorKind: "model-output"`, retryable, carrying only the reply's byte count.
+  Against these documented shapes a capture reaches persistence — but every
+  shape here is READ, not measured: no exchange with the live host has ever
+  been captured inside the test suite, so live behaviour stays unconfirmed.
 - **named failures** — `Auto-capture provider ready` (`baseUrl`,
   `hostVersion?`, `providerId`), `Auto-capture provider unavailable`
   (`reason`, `hostVersion?`) and `Auto-capture provider failed` (`captureId`,
-  `reason`, `errorKind`, `status?`); the retry-exhausted dead-letter payload
-  carries `reason` plus `errorKind`/`status` when present, so no capture dies
-  anonymously.
+  `reason`, `errorKind`, `status?`, `detail?`, `retryAfterMs?`).
+- **retryability is per class, carried by the closed token** — every declared
+  host error `_tag` decodes to one of eleven `wire_reason` tokens
+  (`invalid-request`, `unauthorized`, `provider-not-found`, `model-not-found`,
+  `location-not-found`, `model-unsupported`, `provider-request-retryable`,
+  `provider-request-terminal`, `service-unavailable`, `route-moved`,
+  `unrecognised`) plus a bounded `detail` built from the declared fields; the
+  message stays fixed per status. A permanent class (a `422`, a moved route, a
+  terminal `502`) dead-letters on the first drain and consumes no attempt. A
+  `retryAfterMs` at or below `HOST_RETRY_AFTER_CEILING_MS` (30 s) is retried;
+  ABOVE it the capture is dead-lettered **permanently** — dead rows are
+  excluded by the `status = 'queued'` inbox select and nothing requeues them,
+  so the retained `payload` is the only recovery path (the missing scheduling
+  column is tracked as issue 110). The retry-exhausted dead-letter payload
+  carries `reason` plus `errorKind`/`status`/`detail`/`retryAfterMs` when
+  present, so no capture dies anonymously.
 
 **Manual capture provider (ADR-0028 — the documented `memoryProvider` fallback):**
 

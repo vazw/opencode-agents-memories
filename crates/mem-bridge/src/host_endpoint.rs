@@ -37,7 +37,8 @@ pub const STATE_DIR_ENV: &str = "XDG_STATE_HOME";
 /// The host's service record inside `<state>/opencode/`.
 pub const SERVICE_FILE: &str = "service.json";
 
-/// The API path prefix the provider appends `/session` and `/config` to.
+/// The API path prefix the provider appends `/experimental/generate/text` and
+/// `/config` to.
 pub const API_PREFIX: &str = "api";
 
 /// The basic-auth user name the host accepts.
