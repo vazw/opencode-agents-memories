@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use mem_embed::embedder::BoxFuture;
 
+use mem_ai::provider::error::wire_reason;
 use mem_ai::provider::{ProviderError, ProviderErrorKind};
 
 use mem_core::sync::lock_or_recover;
@@ -70,7 +71,11 @@ pub const CAPTURE_OUTPUT_SCHEMA: &str = r#"{
 /// One NAMED summarizer failure: the closed capture reason plus the provider
 /// classification. `error_kind` is a [`ProviderErrorKind`] label and `status`
 /// the HTTP status, when the failure came from a response.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `retryable` is decided by the CLASSIFIED token (never by sniffing a
+/// message), `retry_after_ms` carries the host's hint, and `detail` is the
+/// decoded operator payload — copied verbatim, never parsed for a decision.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SummarizerFailure {
     /// One of the capture reasons, or a host-resolution reason.
     pub reason: &'static str,
@@ -78,7 +83,18 @@ pub struct SummarizerFailure {
     pub error_kind: &'static str,
     /// HTTP status when the host answered.
     pub status: Option<u16>,
+    /// Whether another attempt may succeed.
+    pub retryable: bool,
+    /// The host's `retryAfterMs` hint, when it sent one.
+    pub retry_after_ms: Option<u64>,
+    /// Decoded operator detail (bounded, never the reply).
+    pub detail: Option<String>,
 }
+
+/// A `retryAfterMs` above this many milliseconds dead-letters the capture
+/// instead of holding it for a retry. A policy choice, not a measurement: the
+/// drain path must not park a capture behind one long outage.
+pub const HOST_RETRY_AFTER_CEILING_MS: u64 = 30_000;
 
 /// The summarizer seam for captures: `context` is the bounded markdown
 /// context (or the raw transcript when the wrapper sent none). The
@@ -306,27 +322,71 @@ impl ProviderCaptureSummarizer {
 
 /// Classify one provider failure onto the closed capture reason set.
 ///
-/// Four outcomes: an auth rejection, a wire-shape mismatch, a host-resolution
-/// reason carried in a `Config` message, or the default `summarizer_failed`.
-/// The auth branch is FIRST so a rejection can never be re-labelled.
+/// Branch order is load-bearing: the closed wire token FIRST (it supplies both
+/// the reason AND retryability), then Auth, then WireShape, then a
+/// Config-wiring reason, then a model-output miss, then the default.
+///
+/// `is_retryable()` is consulted ONLY on the untagged default path: it returns
+/// true for any 5xx `HttpStatus`, which would erase the difference between the
+/// two 502 classes if a tagged failure used it.
 pub fn classify_provider_error(error: &ProviderError) -> SummarizerFailure {
-    let reason =
+    if let Some(wire_reason) = error.wire_reason {
+        let (reason, retryable) = match wire_reason {
+            wire_reason::INVALID_REQUEST => ("host_invalid_request", false),
+            wire_reason::UNAUTHORIZED => ("host_auth_rejected", false),
+            wire_reason::PROVIDER_NOT_FOUND => ("host_provider_not_found", false),
+            wire_reason::MODEL_NOT_FOUND => ("host_model_not_found", false),
+            wire_reason::LOCATION_NOT_FOUND => ("host_location_not_found", false),
+            wire_reason::MODEL_UNSUPPORTED => ("host_model_unsupported", false),
+            wire_reason::PROVIDER_REQUEST_RETRYABLE => ("host_provider_request_error", true),
+            wire_reason::PROVIDER_REQUEST_TERMINAL => ("host_provider_request_error", false),
+            wire_reason::SERVICE_UNAVAILABLE => ("host_service_unavailable", true),
+            wire_reason::ROUTE_MOVED => ("host_route_moved", false),
+            // `wire_reason::ALL` is the closed set; a token outside it can only
+            // come from a future decoder, so it takes the defensive class
+            // rather than panicking inside the drain loop.
+            _ => ("host_unrecognised_error", error.is_retryable()),
+        };
+        return SummarizerFailure {
+            reason,
+            error_kind: error.kind.as_str(),
+            status: error.status,
+            retryable,
+            retry_after_ms: error.retry_after_ms,
+            detail: error.detail.as_deref().map(str::to_owned),
+        };
+    }
+
+    let (reason, retryable, detail) =
         if error.kind == ProviderErrorKind::Auth || matches!(error.status, Some(401) | Some(403)) {
-            "host_auth_rejected"
+            ("host_auth_rejected", true, None)
         } else if error.kind == ProviderErrorKind::WireShape {
-            "host_wire_shape_mismatch"
+            ("host_wire_shape_mismatch", true, None)
         } else if error.kind == ProviderErrorKind::Config {
-            crate::host_endpoint::HostWiringError::all()
+            let wired = crate::host_endpoint::HostWiringError::all()
                 .into_iter()
                 .find(|candidate| candidate.reason() == error.message)
-                .map_or("summarizer_failed", |candidate| candidate.reason())
+                .map(|candidate| candidate.reason());
+            (wired.unwrap_or("summarizer_failed"), true, None)
+        } else if error.kind == ProviderErrorKind::ModelOutput {
+            (
+                "capture_output_not_json",
+                true,
+                Some(format!(
+                    "{}; no JSON of any of the three shapes",
+                    error.detail.as_deref().unwrap_or("reply 0 bytes")
+                )),
+            )
         } else {
-            "summarizer_failed"
+            ("summarizer_failed", error.is_retryable(), None)
         };
     SummarizerFailure {
         reason,
         error_kind: error.kind.as_str(),
         status: error.status,
+        retryable,
+        retry_after_ms: error.retry_after_ms,
+        detail,
     }
 }
 
@@ -365,6 +425,6 @@ impl CaptureSummarizer for ProviderCaptureSummarizer {
     }
 
     fn last_failure(&self) -> Option<SummarizerFailure> {
-        *lock_or_recover(&self.last_failure)
+        lock_or_recover(&self.last_failure).clone()
     }
 }

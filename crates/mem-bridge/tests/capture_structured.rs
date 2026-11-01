@@ -313,3 +313,184 @@ fn test_classify_leaves_a_protocol_failure_unnamed() {
     assert_eq!(failure.reason, "summarizer_failed");
     assert_eq!(failure.error_kind, "protocol");
 }
+
+/// Issue 108 — every declared host class maps to a NAMED capture reason.
+///
+/// The bodies are the declared error schemas (from the live OpenAPI document),
+/// not hand-written reasons; the classifier reads the decoded `wire_reason`,
+/// never the message. A classifier that sniffed `message` fails every row here,
+/// because a production message carries no class token.
+#[test]
+fn test_108_classify_maps_every_wire_reason_to_a_named_capture_reason() {
+    use mem_ai::provider::decode_generate_failure;
+
+    let cases: [(u16, &str, &str); 10] = [
+        (
+            400,
+            r#"{"_tag":"InvalidRequestError","message":"x","kind":"body","field":"prompt"}"#,
+            "host_invalid_request",
+        ),
+        (
+            401,
+            r#"{"_tag":"UnauthorizedError","message":"x"}"#,
+            "host_auth_rejected",
+        ),
+        (
+            404,
+            r#"{"_tag":"ProviderNotFoundError","providerID":"p","message":"x"}"#,
+            "host_provider_not_found",
+        ),
+        (
+            404,
+            r#"{"_tag":"ModelNotFoundError","providerID":"p","modelID":"m","message":"x"}"#,
+            "host_model_not_found",
+        ),
+        (
+            404,
+            r#"{"_tag":"LocationNotFoundError","location":{"directory":"/x"},"message":"x"}"#,
+            "host_location_not_found",
+        ),
+        (
+            422,
+            r#"{"_tag":"UnsupportedModelError","providerID":"p","modelID":"m","capability":"structured_output","message":"x"}"#,
+            "host_model_unsupported",
+        ),
+        (
+            502,
+            r#"{"_tag":"ProviderRequestError","providerID":"p","reason":"rate_limit","message":"x"}"#,
+            "host_provider_request_error",
+        ),
+        (
+            503,
+            r#"{"_tag":"ServiceUnavailableError","message":"x","service":"llm"}"#,
+            "host_service_unavailable",
+        ),
+        (404, "", "host_route_moved"),
+        (
+            404,
+            r#"{"_tag":"SomethingNewError","message":"x"}"#,
+            "host_unrecognised_error",
+        ),
+    ];
+    for (status, body, expected) in cases {
+        let error = decode_generate_failure(status, body);
+        let failure = mem_bridge::capture_prompt::classify_provider_error(&error);
+        assert_eq!(failure.reason, expected, "body {body}");
+        assert_eq!(failure.error_kind, error.kind.as_str(), "body {body}");
+        assert_eq!(
+            error.message,
+            format!("POST /experimental/generate/text failed ({status})"),
+            "the message is fixed per status, body {body}"
+        );
+        assert!(
+            !error.message.contains("_tag") && !error.message.contains("SomethingNew"),
+            "the message never carries the class token: {}",
+            error.message
+        );
+    }
+}
+
+/// A permanent `422` is not retryable and its detail names the declared fields:
+/// the operator can fix the model id without reading a reply.
+#[test]
+fn test_108_classify_unsupported_model_is_not_retryable_and_names_it() {
+    let error = mem_ai::provider::decode_generate_failure(
+        422,
+        r#"{"_tag":"UnsupportedModelError","providerID":"p","modelID":"m","capability":"structured_output","message":"x"}"#,
+    );
+    let failure = mem_bridge::capture_prompt::classify_provider_error(&error);
+    assert_eq!(failure.reason, "host_model_unsupported");
+    assert!(!failure.retryable, "a 422 cannot succeed on retry");
+    let detail = failure
+        .detail
+        .as_deref()
+        .expect("the detail names the keys");
+    assert!(detail.contains("providerID=p"), "{detail}");
+    assert!(detail.contains("modelID=m"), "{detail}");
+    assert!(detail.contains("capability=structured_output"), "{detail}");
+}
+
+/// A `502` splits on the declared `reason`, carries `retryAfterMs`, and an
+/// absent/unknown reason stays RETRYABLE — inverting that default would turn a
+/// newer host's `quota_exhausted` into permanent loss.
+#[test]
+fn test_108_classify_502_carries_retry_after_and_its_two_classes() {
+    let classify = |body: &str| {
+        let error = mem_ai::provider::decode_generate_failure(502, body);
+        mem_bridge::capture_prompt::classify_provider_error(&error)
+    };
+
+    let rate_limited = classify(
+        r#"{"_tag":"ProviderRequestError","providerID":"p","reason":"rate_limit","message":"x","retryAfterMs":1500}"#,
+    );
+    assert_eq!(rate_limited.reason, "host_provider_request_error");
+    assert!(rate_limited.retryable, "rate_limit is transient");
+    assert_eq!(rate_limited.retry_after_ms, Some(1500));
+    assert!(
+        rate_limited
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("rate_limit"),
+        "{:?}",
+        rate_limited.detail
+    );
+
+    let authentication = classify(
+        r#"{"_tag":"ProviderRequestError","providerID":"p","reason":"authentication","message":"x"}"#,
+    );
+    assert!(!authentication.retryable, "authentication is terminal");
+    assert!(
+        authentication
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("authentication"),
+        "{:?}",
+        authentication.detail
+    );
+
+    let absent = classify(r#"{"_tag":"ProviderRequestError","providerID":"p","message":"x"}"#);
+    assert!(absent.retryable, "an absent reason defaults to retryable");
+    assert!(
+        absent
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("reason=<absent>"),
+        "{:?}",
+        absent.detail
+    );
+
+    let unknown = classify(
+        r#"{"_tag":"ProviderRequestError","providerID":"p","reason":"quota_exhausted","message":"x"}"#,
+    );
+    assert!(unknown.retryable, "an unknown reason defaults to retryable");
+    assert!(
+        unknown
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("quota_exhausted"),
+        "{:?}",
+        unknown.detail
+    );
+}
+
+/// The model's own miss is NAMED and RETRYABLE — `ModelOutput`, never
+/// `summarizer_failed`, and the detail carries only the reply length.
+#[test]
+fn test_108_classify_model_output_is_retryable() {
+    let error =
+        mem_ai::provider::remote::structured::parse_structured_lenient("p", STREAMED_MARKDOWN)
+            .expect_err("markdown carries no structured value");
+    let failure = mem_bridge::capture_prompt::classify_provider_error(&error);
+    assert_eq!(failure.reason, "capture_output_not_json");
+    assert!(failure.retryable);
+    let detail = failure.detail.as_deref().expect("a length detail");
+    assert!(detail.contains("reply 308 bytes"), "{detail}");
+    assert!(
+        !detail.contains("INJECT_BARRIER_BUDGET"),
+        "the reply text is never echoed: {detail}"
+    );
+}

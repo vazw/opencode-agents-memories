@@ -352,7 +352,7 @@ impl mem_bridge::capture_prompt::CaptureSummarizer for FailingProviderSummarizer
     }
 
     fn last_failure(&self) -> Option<mem_bridge::capture_prompt::SummarizerFailure> {
-        Some(self.failure)
+        Some(self.failure.clone())
     }
 }
 
@@ -446,6 +446,9 @@ async fn test_provider_failure_logs_error_kind_and_status() {
             reason: "host_auth_rejected",
             error_kind: "auth",
             status: Some(401),
+            retryable: true,
+            retry_after_ms: None,
+            detail: None,
         },
     });
     let capture = service_with_summarizer(&dir, Arc::new(ScriptedWriter::default()), summarizer);
@@ -489,6 +492,9 @@ async fn test_host_config_reason_is_carried_into_the_dead_letter() {
             reason: "service_file_missing",
             error_kind: "config",
             status: None,
+            retryable: true,
+            retry_after_ms: None,
+            detail: None,
         },
     });
     let capture = service_with_summarizer(&dir, Arc::new(ScriptedWriter::default()), summarizer);

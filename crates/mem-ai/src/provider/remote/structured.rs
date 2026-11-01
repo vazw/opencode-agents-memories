@@ -117,7 +117,8 @@ pub fn parse_structured_lenient(provider: &str, text: &str) -> Result<Value, Pro
             text.len()
         ),
     )
-    .with_provider(provider))
+    .with_provider(provider)
+    .with_detail(format!("reply {} bytes", text.len())))
 }
 
 /// The first ```/```json fenced block's inner text, when the reply has one.

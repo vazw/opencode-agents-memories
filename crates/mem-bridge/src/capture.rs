@@ -763,13 +763,13 @@ impl CaptureService {
             Ok(scope) => scope,
             Err(_) => {
                 return self
-                    .retryable_or_dead(entry, Failure::of("scope_unresolved"))
+                    .record_failure(entry, Failure::of("scope_unresolved"))
                     .await;
             }
         };
         let Some((summary, tags)) = summary_with_extracted_tags(&params) else {
             return self
-                .retryable_or_dead(entry, Failure::of("summary_missing"))
+                .record_failure(entry, Failure::of("summary_missing"))
                 .await;
         };
         // A caller-supplied summary carries no upstream `type` and no
@@ -788,7 +788,7 @@ impl CaptureService {
             .map(|text| self.privacy.strip_then_filter_text(text));
         let retention = match self.resolve_retention(&params, filtered_transcript.as_deref()) {
             Ok(retention) => retention,
-            Err(reason) => return self.dead_letter_now(entry, reason).await,
+            Err(reason) => return self.dead_letter_now(entry, Failure::of(reason)).await,
         };
         if let Err(error) = self
             .commit_episodic(&params, &summary, &tags, &extension, &retention)
@@ -796,7 +796,7 @@ impl CaptureService {
         {
             log_episodic_write_failed(entry, &error);
             return self
-                .retryable_or_dead(entry, Failure::of("episodic_write_failed"))
+                .record_failure(entry, Failure::of("episodic_write_failed"))
                 .await;
         }
 
@@ -844,7 +844,7 @@ impl CaptureService {
                 EntryOutcome::Deferred
             }
             Err(CaptureWriterError::Failed(_)) => {
-                self.retryable_or_dead(entry, Failure::of("tier1_write_failed"))
+                self.record_failure(entry, Failure::of("tier1_write_failed"))
                     .await
             }
         }
@@ -866,7 +866,7 @@ impl CaptureService {
             Ok(scope) => scope,
             Err(_) => {
                 return self
-                    .retryable_or_dead(entry, Failure::of("scope_unresolved"))
+                    .record_failure(entry, Failure::of("scope_unresolved"))
                     .await;
             }
         };
@@ -908,7 +908,7 @@ impl CaptureService {
         // writes neither tier (no session row).
         let retention = match self.resolve_retention(&params, transcript.as_deref()) {
             Ok(retention) => retention,
-            Err(reason) => return self.dead_letter_now(entry, reason).await,
+            Err(reason) => return self.dead_letter_now(entry, Failure::of(reason)).await,
         };
 
         // 3. Context + summary construction — OFF the serial DB lane.
@@ -916,8 +916,8 @@ impl CaptureService {
             Ok(output) => output,
             Err(_) => {
                 let failure = self.summarizer_failure();
-                log_provider_failed(entry, failure);
-                return self.retryable_or_dead(entry, failure).await;
+                log_provider_failed(entry, &failure);
+                return self.record_failure(entry, failure).await;
             }
         };
         let (summary, memory_type, tags, extension) = match output {
@@ -949,7 +949,7 @@ impl CaptureService {
         {
             log_episodic_write_failed(entry, &error);
             return self
-                .retryable_or_dead(entry, Failure::of("episodic_write_failed"))
+                .record_failure(entry, Failure::of("episodic_write_failed"))
                 .await;
         }
 
@@ -1000,7 +1000,7 @@ impl CaptureService {
                 EntryOutcome::Deferred
             }
             Err(CaptureWriterError::Failed(_)) => {
-                self.retryable_or_dead(entry, Failure::of("tier1_write_failed"))
+                self.record_failure(entry, Failure::of("tier1_write_failed"))
                     .await
             }
         }
@@ -1019,22 +1019,43 @@ impl CaptureService {
                 reason: failure.reason,
                 error_kind: Some(failure.error_kind),
                 status: failure.status,
+                retryable: failure.retryable,
+                retry_after_ms: failure.retry_after_ms,
+                detail: failure.detail,
             },
             // A JSON/parse failure: no provider classification belongs to it.
             None => Failure::of("summarizer_failed"),
         }
     }
 
-    /// A consumed retryable failure; the fifth consumed attempt
-    /// dead-letters the entry to the episodic-only terminal state.
+    /// Record one failure at the drain seam.
+    ///
+    /// Contract: at most ONE attempt bump and at most ONE dead-letter per call.
+    /// - branch 1 (`!retryable`) dead-letters immediately, no bump: a permanent
+    ///   class must not burn five attempts;
+    /// - branch 2 (a `retryAfterMs` above the ceiling) dead-letters immediately,
+    ///   no bump: the engine never re-issues a dead row, so the hint is a
+    ///   bounded refusal, not a sleep;
+    /// - branch 3 is the existing ladder: bump, then dead-letter when the bump
+    ///   reaches five. Bump-then-dead-letter here is one bump plus one
+    ///   dead-letter, which is that path by design.
     ///
     /// `failure` names the cause; it is carried into the dead-letter payload so
     /// no capture ever dies anonymously.
-    async fn retryable_or_dead(
+    async fn record_failure(
         &self,
         entry: &mem_episodic::inbox::InboxEntry,
         failure: Failure,
     ) -> EntryOutcome {
+        if !failure.retryable {
+            return self.dead_letter_now(entry, failure).await;
+        }
+        if failure
+            .retry_after_ms
+            .is_some_and(|ms| ms > crate::capture_prompt::HOST_RETRY_AFTER_CEILING_MS)
+        {
+            return self.dead_letter_now(entry, failure).await;
+        }
         let attempts_after = self
             .inbox
             .bump_attempts(&entry.capture_id)
@@ -1071,35 +1092,46 @@ impl CaptureService {
         }
     }
 
-    /// Dead-letters an entry IMMEDIATELY for a payload the retry ladder could
-    /// never fix (an invalid raw context or an unknown agent role).
+    /// Dead-letters an entry IMMEDIATELY for a failure the retry ladder could
+    /// never fix (an invalid raw context, an unknown agent role, a permanent
+    /// host class, or a `retryAfterMs` above the ceiling).
     ///
-    /// `reason` is one of the fixed message constants — never content, never
-    /// the rejected value.
+    /// `failure.reason` is one of the fixed message constants — never content,
+    /// never the rejected value.
     async fn dead_letter_now(
         &self,
         entry: &mem_episodic::inbox::InboxEntry,
-        reason: &'static str,
+        failure: Failure,
     ) -> EntryOutcome {
         let _ = self.inbox.dead_letter(&entry.capture_id).await;
-        crate::engine::structured_stderr(
-            "capture.dead_lettered",
-            "warn",
-            "capture",
-            serde_json::json!({
-                "capture_id": entry.capture_id,
-                "project_id": entry.project_id,
-                "reason": reason,
-            }),
-        );
-        log(
-            AUTO_CAPTURE_FINAL_ERROR,
-            Some(&serde_json::json!({
-                "captureId": &entry.capture_id,
-                "projectId": &entry.project_id,
-                "reason": reason,
-            })),
-        );
+        let mut structured = serde_json::json!({
+            "capture_id": entry.capture_id,
+            "project_id": entry.project_id,
+            "reason": failure.reason,
+        });
+        let mut data = serde_json::json!({
+            "captureId": &entry.capture_id,
+            "projectId": &entry.project_id,
+            "reason": failure.reason,
+        });
+        if let Some(error_kind) = failure.error_kind {
+            structured["error_kind"] = serde_json::json!(error_kind);
+            data["errorKind"] = serde_json::json!(error_kind);
+        }
+        if let Some(status) = failure.status {
+            structured["status"] = serde_json::json!(status);
+            data["status"] = serde_json::json!(status);
+        }
+        if let Some(detail) = &failure.detail {
+            structured["detail"] = serde_json::json!(detail);
+            data["detail"] = serde_json::json!(detail);
+        }
+        if let Some(ms) = failure.retry_after_ms {
+            structured["retry_after_ms"] = serde_json::json!(ms);
+            data["retryAfterMs"] = serde_json::json!(ms);
+        }
+        crate::engine::structured_stderr("capture.dead_lettered", "warn", "capture", structured);
+        log(AUTO_CAPTURE_FINAL_ERROR, Some(&data));
         EntryOutcome::Dead
     }
 
@@ -1312,11 +1344,16 @@ impl CaptureService {
 /// `reason` is one of the fixed capture reasons (or a host-resolution
 /// reason carried through the summarizer); `error_kind`/`status` are present
 /// only when a provider answered — never free text, never prompt content.
-#[derive(Debug, Clone, Copy)]
+/// `retryable` decides whether an attempt is consumed at all; `detail` and
+/// `retry_after_ms` are copied from the decoded failure (never parsed here).
+#[derive(Debug, Clone)]
 struct Failure {
     reason: &'static str,
     error_kind: Option<&'static str>,
     status: Option<u16>,
+    retryable: bool,
+    retry_after_ms: Option<u64>,
+    detail: Option<String>,
 }
 
 impl Failure {
@@ -1325,13 +1362,16 @@ impl Failure {
             reason,
             error_kind: None,
             status: None,
+            retryable: true,
+            retry_after_ms: None,
+            detail: None,
         }
     }
 }
 
 /// One `Auto-capture provider failed` line per summarizer failure (every
 /// attempt, not only the terminal one).
-fn log_provider_failed(entry: &mem_episodic::inbox::InboxEntry, failure: Failure) {
+fn log_provider_failed(entry: &mem_episodic::inbox::InboxEntry, failure: &Failure) {
     let mut data = serde_json::json!({
         "captureId": &entry.capture_id,
         "reason": failure.reason,
@@ -1341,6 +1381,12 @@ fn log_provider_failed(entry: &mem_episodic::inbox::InboxEntry, failure: Failure
     }
     if let Some(status) = failure.status {
         data["status"] = serde_json::json!(status);
+    }
+    if let Some(detail) = &failure.detail {
+        data["detail"] = serde_json::json!(detail);
+    }
+    if let Some(ms) = failure.retry_after_ms {
+        data["retryAfterMs"] = serde_json::json!(ms);
     }
     log(AUTO_CAPTURE_PROVIDER_FAILED, Some(&data));
 }
