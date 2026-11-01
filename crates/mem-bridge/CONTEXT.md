@@ -49,7 +49,7 @@
 - **shutdown pipeline** — ordered teardown: web stop wrapped in ~1 s, DB flush
   ≤ 500 ms, total < 2 s (D-45); stdio EOF and standalone signals both converge on it.
 
-**Host wiring (ADR-0027 — transport, NOT the wire contract):**
+**Host wiring (ADR-0027, ADR-0029 — transport, wire shapes, schema transport):**
 
 - **host endpoint / service file** — the live OpenCode host records itself in
   `$XDG_STATE_HOME/opencode/service.json` (`0600`: `{id, url, pid, password,
@@ -68,13 +68,19 @@
 - **`LazyHostProvider`** — resolve on use, cache on success, clear on ANY inner
   error (a foreign listener on a recycled port answers `401`/`404`/junk, never
   `Network`). `warm()` is the startup probe and never caches a failure. Model
-  and provider come from the wiring, so the prompt body names a real model and
-  the create body still carries none.
-- **transport vs wire wave** — this layer reaches the host; it does not make a
-  capture persist. The 2.2.5 host answers `{data: Session.Info}`, prompts at
-  `…/{id}/generate` and has no `StructuredOutput`, so a capture today fails
-  with a NAMED `protocol`/`http-status` reason. That contract is the wire
-  wave's (ADR-0027's handoff).
+  and provider come from the wiring, and they travel on the CREATE body as
+  `model: Model.Ref{id, providerID, variant?}` beside `agent: Agent.ID`; the
+  prompt body is exactly `{"prompt": …}`.
+- **the documented wire** — the create reply is decoded in both shapes
+  (`{data: Session.Info}`, with a bare `{id}` as the fall-through); the prompt
+  POSTs `…/{id}/generate`, whose body declares only `prompt`, so the JSON
+  schema rides in the prompt TEXT (`capture_context::SCHEMA_ANSWER_INSTRUCTION`)
+  and the reply is decoded from `{"data":{"text": …}}`. A shape mismatch is a
+  NAMED `host_wire_shape_mismatch` / `errorKind: "wire-shape"`, never
+  `protocol`. Against these documented shapes a capture reaches persistence —
+  but every shape here is READ, not measured: no create or generate exchange
+  with the live host has ever been captured, so live behaviour stays
+  unconfirmed.
 - **named failures** — `Auto-capture provider ready` (`baseUrl`,
   `hostVersion?`, `providerId`), `Auto-capture provider unavailable`
   (`reason`, `hostVersion?`) and `Auto-capture provider failed` (`captureId`,

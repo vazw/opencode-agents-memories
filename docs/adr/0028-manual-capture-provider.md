@@ -5,6 +5,14 @@
 - **Amended:** 2026-11-01 (same day) — precedence flipped to **host-first**; see
   [Amendment 1](#amendment-1--2026-11-01-same-day-host-first-owner-ruling). The first landing's
   manual-first rule is preserved there as history, not erased.
+- **Amended:** 2026-11-01 (issue 88, the wire wave) — the host-wire statements kept below as history are
+  marked as such. The port now speaks the **documented** wire: the create reply is decoded in both shapes,
+  the prompt POSTs `…/generate` with body `{"prompt"}` only, the reply is decoded from `{"data":{"text": …}}`,
+  and the JSON schema rides in the prompt TEXT (`capture_context::SCHEMA_ANSWER_INSTRUCTION`). Against those
+  documented shapes a capture reaches persistence, and a shape mismatch is named
+  `host_wire_shape_mismatch` / `errorKind: "wire-shape"` — never `protocol` (ADR-0027's amendment). Nothing
+  about live behaviour is MEASURED either way: no exchange with the host has ever been captured, so a staged
+  build remains the only way to learn it.
 - **Builds on:** `docs/adr/0027-host-endpoint-discovery.md` (the OpenCode host transport),
   `docs/adr/0001-crate-boundaries.md` (the mem-bridge → mem-ai edge).
 - **Owner ruling (original, 2026-11-01):** "a configured manual fallback wins; otherwise the OpenCode
@@ -25,8 +33,10 @@ OpenCode host.
 
 The owner's config sets **both** blocks (`opencodeProvider`/`opencodeModel` *and* the three manual
 values), and the OpenCode host is 2.2.5 — its wire contract differs from the port's, so capture cannot
-persist through it today (ADR-0027). The manual endpoint is an OpenAI-compatible LiteLLM URL, which the
-existing adapter already speaks.
+persist through it today (ADR-0027). **Historical:** that is why the manual fallback was built; it stopped
+being current on 2026-11-01, when the port learned the documented wire (see Amended — 2026-11-01,
+issue 88, the wire wave). The manual endpoint is an OpenAI-compatible LiteLLM URL, which the existing
+adapter already speaks.
 
 ## Decisions
 
@@ -162,9 +172,11 @@ before selection. Use the `file://` form (below) until the wrapper's child-envir
 
 **Startup cost, stated for the drain wave.** The awaited startup capture drain blocks on the provider
 the selector chose, so host-first makes the **host** the provider a startup drain waits on. Measured
-today (2026-11-01, 2.2.5 host): the host arm fails fast — a named `protocol` reason — rather than
-hanging. The drain taking the whole memory tool down when a provider stalls is a separate defect and a
-separate wave; this amendment neither fixes nor worsens its trigger beyond that provider swap.
+before the wire wave (2026-11-01, 2.2.5 host — see Amended, 2026-11-01, issue 88): the host arm failed fast —
+a named `protocol` reason — rather than hanging. That reading describes the pre-wave arm; whether today's
+arm fails or persists against the live host is unmeasured. The drain taking the whole memory tool down
+when a provider stalls is a separate defect and a separate wave; this amendment neither fixes nor worsens
+its trigger beyond that provider swap.
 
 ## Known consequence: `env://` references need the variable in the ENGINE's process
 
@@ -227,5 +239,6 @@ persisted capture — that is the acceptance signal, and only the owner can obse
   unnamed-host claim rows; never building the manual arm fails the fallback row and the userinfo row;
   returning `None` when neither block is set fails the neither row.
 - **The end-to-end proof is the first live `Auto-capture memory persisted` line** — only the owner can
-  observe it, and only once the engine is restaged on a host build whose wire contract this port speaks
-  (ADR-0027) — the 2.2.5 host still fails a capture with a named `protocol` reason.
+  observe it, and only once the engine is restaged (ADR-0027). The port now speaks the documented wire
+  (see Amended — 2026-11-01, issue 88, the wire wave), so the 2.2.5 `protocol` capture failure is
+  history; what remains is a staged build whose live behaviour is still unmeasured.
