@@ -1047,18 +1047,22 @@ impl ProfileStore {
         }
     }
 
-    /// The persisted daily sweep (R5): `decay_in_memory` over every active
+    /// The daily sweep (R5): `decay_in_memory` over every active
     /// profile, written back through the existing optimistic-version
     /// `update_profile` when anything changed.
     ///
     /// The sweep stamp is recorded **only after** the whole loop completes, so
     /// a mid-sweep fault re-attempts on the next tick instead of silently
     /// skipping a day. A lost optimistic-version race (`update_profile`
-    /// returning `false`) is counted, logged and left for the next sweep —
-    /// never retried inline and never forced.
+    /// returning `false`) is neither counted nor retried: it is logged at
+    /// `debug`, and because the stamp is written after the loop anyway that
+    /// profile waits for the next **due** sweep (≥ 24 h) — never for the next
+    /// hourly tick, never inline, never forced.
     ///
-    /// Nothing in this wave calls this on a schedule — see R13 (the host
-    /// lifecycle in `mem-bridge`/the composition root owns the daily tick).
+    /// `mem_bridge::engine::spawn_profile_decay_lifecycle` calls this once per
+    /// process start and then on its wake-up loop; the 24 h cadence is this
+    /// store's own gate, and the stamp is in-memory, so every engine start
+    /// re-arms it (issue 102).
     pub async fn sweep_decay_daily(&self, now: i64) -> Result<DecaySweepReport, ProfileError> {
         let due = {
             // last_decay_sweep gates the persisted decay side effect: a poisoned gate must refuse (ADR-0013 D-2 D2-c)
@@ -1104,7 +1108,7 @@ impl ProfileStore {
             } else {
                 tracing::debug!(
                     profile_id = %profile.id,
-                    "decay sweep: lost the optimistic-version race, retrying next tick"
+                    "decay sweep: lost the optimistic-version race; this profile waits for the next due sweep"
                 );
             }
         }

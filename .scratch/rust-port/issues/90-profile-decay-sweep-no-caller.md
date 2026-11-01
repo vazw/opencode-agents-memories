@@ -70,3 +70,17 @@ nothing looks unfinished. Only a production-caller grep shows the gap — which 
 **Scope correction of an earlier revision:** it listed `ProfileCleanupHook` next to the sweep as missing
 construction, and required a busy operation lock to skip a tick. Neither belongs here: the hook is gated
 on issue 47's `wontfix`, and the profile store has no operation lock to contend for.
+
+**Wave note (r2, 2026-11-01):** AC4's "tested by moving a row's version between the scan and the write"
+is **unimplementable in this wave**: the CAS lives entirely inside `update_profile`
+(`crates/mem-profile/src/profile_store.rs:748-783` re-reads `version` and updates `WHERE id = ? AND
+version = ?`), and no public seam exists between that `SELECT` and that `UPDATE` from `mem-bridge`. The
+branch was also described wrongly in this file and in the store's own prose: a lost CAS increments
+**neither** counter (`:1102-1104` counts only `written == true`), and because the stamp is written after
+the loop (`:1113-1119`) the retry is at the next **due** sweep (≥ 24 h), not the next hourly tick — the
+debug line at `:1107` said "retrying next tick" and the doc at `:1054-1058` said "is counted". The wave
+corrects both sentences and leaves the behaviour untouched; a lost CAS is observable in the tick event
+only as `profiles_scanned > profiles_updated`.
+
+Follow-up filed: issue 102 (`persist-decay-sweep-stamp.md`) — the in-memory gate re-arms on every engine
+start, so the "daily" contract is not durable. Gated on this issue; does not block it.

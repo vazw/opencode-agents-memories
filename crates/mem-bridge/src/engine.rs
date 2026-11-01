@@ -31,8 +31,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-use mem_episodic::store::EpisodicStore;
-use mem_profile::profile_store::ProfileStore;
+use mem_episodic::store::{Clock, EpisodicStore};
+use mem_profile::error::ProfileError;
+use mem_profile::profile_store::{DecaySweepReport, ProfileStore};
 use mem_profile::prompt::UserPromptManager;
 use mem_store::shard_manager::ShardManager;
 
@@ -1597,6 +1598,16 @@ pub async fn run_in_runtime(
             CONSOLIDATION_MAX_PROJECTS,
         ));
         spawn_consolidation_lifecycle(&engine, scheduler);
+        // The same `Arc<ProfileStore>` the injector and the web surface read,
+        // so the swept rows are the rows those surfaces see. `EngineRuntime`
+        // is the dispatch-time bundle and is deliberately not extended: the
+        // sweep is not a dispatch method.
+        spawn_profile_decay_lifecycle(
+            &engine,
+            runtime.profile.clone(),
+            Duration::from_secs(PROFILE_DECAY_TICK_SECS),
+            Arc::new(mem_profile::ids::now_millis),
+        );
     }
 
     match mode {
@@ -1971,5 +1982,96 @@ pub fn spawn_consolidation_lifecycle(engine: &Engine, scheduler: Arc<Consolidati
         }
         // No `?`: a failed tick must never kill the periodic loop.
         scheduler.run_periodic().await;
+    });
+}
+
+/// How often the decay lifecycle WAKES UP to ask the store whether a sweep is
+/// due. This is not the decay cadence: the 24 h gate is the store's own
+/// (`mem_profile::decay::SWEEP_INTERVAL_MILLIS`, enforced inside
+/// `sweep_decay_daily`), and a not-due wake-up writes nothing.
+pub const PROFILE_DECAY_TICK_SECS: u64 = 3600;
+
+/// The decay sweep seam. It exists so a test can hand the lifecycle a
+/// `ProfileError::LockPoisoned` (a real `ProfileStore` cannot be poisoned from
+/// another crate) and count calls; the production impl is the store itself.
+pub trait DecaySweeper: Send + Sync {
+    fn sweep<'a>(
+        &'a self,
+        now: i64,
+    ) -> mem_embed::embedder::BoxFuture<'a, Result<DecaySweepReport, ProfileError>>;
+}
+
+impl DecaySweeper for ProfileStore {
+    fn sweep<'a>(
+        &'a self,
+        now: i64,
+    ) -> mem_embed::embedder::BoxFuture<'a, Result<DecaySweepReport, ProfileError>> {
+        Box::pin(self.sweep_decay_daily(now))
+    }
+}
+
+/// One decay tick. Never fails the caller: a returned error is reported (a
+/// closed-set `kind`, never `ProfileError`'s `Display`, whose `Io` variant
+/// carries filesystem paths) and the loop carries on.
+async fn run_decay_tick(sweeper: &dyn DecaySweeper, now: i64) {
+    match sweeper.sweep(now).await {
+        // Counts only, and only when something was scanned: a not-due or empty
+        // sweep stays silent so the hourly wake-up adds no noise.
+        Ok(report) if report.profiles_scanned > 0 => structured_stderr(
+            "profile.decay_tick",
+            "info",
+            "profile",
+            serde_json::json!({
+                "profiles_scanned": report.profiles_scanned,
+                "profiles_updated": report.profiles_updated,
+            }),
+        ),
+        Ok(_) => {}
+        Err(error) => {
+            let extras = match &error {
+                ProfileError::LockPoisoned { lock, operation } => serde_json::json!({
+                    "kind": "lock_poisoned",
+                    "lock": lock,
+                    "operation": operation,
+                }),
+                _ => serde_json::json!({ "kind": "store", "detail_short": true }),
+            };
+            structured_stderr("profile.decay_failed", "warn", "profile", extras);
+            tracing::warn!(%error, "profile decay tick failed; engine continues");
+        }
+    }
+}
+
+/// Spawns the profile decay lifecycle: ONE tracked task that sweeps once at
+/// startup and then on a wake-up loop. Like the consolidation startup tick, the
+/// first sweep is deliberately NOT awaited before `serve_stdio` — it scans every
+/// active profile and would otherwise delay the plugin's timeout-bounded
+/// `hello`. `clock` is read once per tick, inside the task, never hoisted.
+pub fn spawn_profile_decay_lifecycle(
+    engine: &Engine,
+    sweeper: Arc<dyn DecaySweeper>,
+    interval: Duration,
+    clock: Clock,
+) {
+    let shutting_down = Arc::clone(&engine.shutting_down);
+    engine.spawn_tracked(async move {
+        run_decay_tick(sweeper.as_ref(), clock()).await;
+        // The same 50 ms-slice shape as `ConsolidationScheduler::run_periodic`,
+        // so shutdown is observed within one slice. `clock()` is called at the
+        // top of EVERY tick; the loop never fabricates a `now`.
+        let slice = Duration::from_millis(50);
+        let mut elapsed = Duration::ZERO;
+        while !shutting_down.load(Ordering::SeqCst) {
+            tokio::time::sleep(slice).await;
+            if shutting_down.load(Ordering::SeqCst) {
+                break;
+            }
+            elapsed += slice;
+            if elapsed < interval {
+                continue;
+            }
+            elapsed = Duration::ZERO;
+            run_decay_tick(sweeper.as_ref(), clock()).await;
+        }
     });
 }

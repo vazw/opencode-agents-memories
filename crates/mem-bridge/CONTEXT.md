@@ -177,6 +177,16 @@ the `-32002` code row, the exit-code-75 row, the status-file-format row.
   idempotent for the same milestone. `cross_tier_task(enabled, facts,
   ttl_days)` wires `NoopCrossTierTask` when `featureFlags.promotionPipeline`
   is off or no store is composed.
+- **profile decay lifecycle** (`spawn_profile_decay_lifecycle`, issue 90) — the
+  production caller of `ProfileStore::sweep_decay_daily`: ONE tracked task that
+  sweeps once at startup (behind the handshake, never awaited before
+  `serve_stdio`) and then wakes every `PROFILE_DECAY_TICK_SECS` (3600). The
+  wake-up cadence is only how often the gate is ASKED; the 24 h gate is the
+  profile store's own and is in-memory (issue 102). Its seam is the
+  `DecaySweeper` trait (the store is the production impl). Two named stderr
+  events, counts and closed-set kinds only: `profile.decay_tick` (only when
+  something was scanned) and `profile.decay_failed` (`kind`: `lock_poisoned` with
+  `lock`/`operation`, or `store`); a failed tick never ends the loop.
 - **`--mode=purge-session`** — the one sanctioned erasure path. Flags:
   `--project`, `--session`, `--agent` (all three: the triple is the key) and
   `--confirm="{project}:{session}:{agent}"` (verbatim). Root:
