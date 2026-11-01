@@ -234,7 +234,9 @@ key with no effect on the local path; updating means rebuilding `plugin/` and re
 
 Start OpenCode normally; the plugin spawns the engine, which performs the migrations in §6. Expected:
 the memory tool answers, the web UI loads, no engine stderr beyond the two informational lines
-(`consolidation.startup_tick`, `engine.shutdown_complete`).
+(`consolidation.startup_tick`, `engine.shutdown_complete`) and, **only** if an `inject` lands before
+the startup capture replay has finished, one `engine.inject_barrier_timeout` — a warn, not a failure
+(the first read waits at most 2 s and may answer stale; no later read waits).
 
 Then **quit and start once more** (a fresh-engine reopen). Never leave a `SIGTERM`'ed engine as the last
 opener — that state was observed once answering `hello`/`health` but `-32603` on `list-shards`/`list`.

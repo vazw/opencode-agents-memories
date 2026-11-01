@@ -806,6 +806,8 @@ impl Engine {
         let (completed, receiver) = watch::channel(false);
         self.startup_drain = Some(receiver);
         self.spawn_tracked(async move {
+            // Declared, not oracle-pinned: deleting this emit leaves the suite green (review
+            // mutant M3) — only the dead-task leg of the drain failure has a test.
             if capture.drain_once().await.is_err() {
                 structured_stderr(
                     "engine.startup_drain_failed",
