@@ -153,7 +153,9 @@ cost asymmetry (four extra requests versus permanent loss) decides it, and the l
 **D-29-11 — Two tracked deferrals.**
 (1) The capture inbox has no scheduling column, so a bounded `retryAfterMs` is honoured as a refusal, not a
 delay, and a >30 s hint is permanent — `.scratch/rust-port/issues/110-capture-inbox-not-before-column.md`.
-(2) `build_bounded_summary_prompt`'s byte accounting is two bytes short of the schema block it appends —
+(2) `build_bounded_summary_prompt`'s byte accounting omits the two-byte `\n\n` join that
+`opencode_host::prompt_text` folds between the system prompt and the user text (the schema block itself is
+charged exactly) —
 `.scratch/rust-port/issues/111-summary-prompt-budget-two-byte-gap.md`. Neither is a defect this wave may
 absorb silently.
 

@@ -102,9 +102,11 @@
   ABOVE it the capture is dead-lettered **permanently** — dead rows are
   excluded by the `status = 'queued'` inbox select and nothing requeues them,
   so the retained `payload` is the only recovery path (the missing scheduling
-  column is tracked as issue 110). The retry-exhausted dead-letter payload
-  carries `reason` plus `errorKind`/`status`/`detail`/`retryAfterMs` when
-  present, so no capture dies anonymously.
+  column is tracked as issue 110). The immediate dead-letter log line
+  (`dead_letter_now`) carries `reason` plus
+  `errorKind`/`status`/`detail`/`retryAfterMs` when present; the
+  retry-exhausted one carries `reason` plus `errorKind`/`status` and the final
+  `attempts`, so no capture dies anonymously.
 
 **Manual capture provider (ADR-0028 — the documented `memoryProvider` fallback):**
 
@@ -172,12 +174,9 @@
 - **`ComposedRuntime.provider` now means "the filtered capture handle"** — anything that
   expected an `AiProvider` there is a compile error by design. The consolidation
   summarizer deliberately keeps the UNWRAPPED `base` (D-52-7).
-- **this does not make capture persist** — the host arm now speaks the DOCUMENTED wire (create decoded
-  in both shapes, the prompt on `/generate` carrying exactly `{"prompt"}`, the reply decoded from
-  `{"data":{"text": …}}`), with the JSON schema appended to the prompt TEXT because that route has no
-  `format` field; a shape mismatch is named `host_wire_shape_mismatch` / `errorKind: "wire-shape"`. What
-  is left is runtime confirmation (no exchange with the live host has ever been captured), the
-  create-request ruleset rebuild (`permission` vs `permissions: Permission.Ruleset`) and `requeue-captures`.
+- **this does not make capture persist** — the host arm speaks the ONE stateless route described above;
+  what is left is runtime confirmation (no exchange with the live host has ever been captured) and
+  `requeue-captures`.
 
 **Deferred register rows (orchestrator; W6.2 owns `docs/agents/testing.md`):**
 the `-32002` code row, the exit-code-75 row, the status-file-format row.

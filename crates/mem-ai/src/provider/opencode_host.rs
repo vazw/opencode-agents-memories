@@ -1007,8 +1007,14 @@ mod tests {
                 ProviderErrorKind::HttpStatus,
             ),
         ];
+        // The closed set is the manifest: every token must have a fixture here,
+        // so a twelfth token reds this row until it is exercised. A SET, not a
+        // list: the tag loop visits each class twice.
+        let mut exercised: std::collections::BTreeSet<&'static str> =
+            std::collections::BTreeSet::new();
         for (class, status, token, kind) in simple {
             for tag in [format!("{class}Error"), format!("{class}ErrorEncoded")] {
+                exercised.insert(token);
                 let error = decode(status, &tag, "");
                 assert_eq!(error.wire_reason, Some(token), "tag {tag}");
                 assert_eq!(error.kind, kind, "tag {tag}");
@@ -1036,6 +1042,7 @@ mod tests {
                     .map(|reason| (reason, wire_reason::PROVIDER_REQUEST_TERMINAL)),
             )
         {
+            exercised.insert(reason.1);
             for tag in ["ProviderRequestError", "ProviderRequestErrorEncoded"] {
                 let error = decode(502, tag, &format!(",\"reason\":\"{}\"", reason.0));
                 assert_eq!(error.wire_reason, Some(reason.1), "reason {}", reason.0);
@@ -1045,6 +1052,18 @@ mod tests {
                 assert!(detail.contains(&format!("reason={}", reason.0)), "{detail}");
             }
         }
+
+        let route_moved = decode_generate_failure(404, "");
+        let unrecognised =
+            decode_generate_failure(404, r#"{"_tag":"SomethingNewError","message":"x"}"#);
+        exercised.insert(route_moved.wire_reason.expect("route-moved"));
+        exercised.insert(unrecognised.wire_reason.expect("unrecognised"));
+        let declared: std::collections::BTreeSet<&'static str> =
+            wire_reason::ALL.into_iter().collect();
+        assert_eq!(
+            exercised, declared,
+            "every token in wire_reason::ALL needs a fixture in this table"
+        );
     }
 
     #[test]

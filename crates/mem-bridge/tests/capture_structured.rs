@@ -324,7 +324,7 @@ fn test_classify_leaves_a_protocol_failure_unnamed() {
 fn test_108_classify_maps_every_wire_reason_to_a_named_capture_reason() {
     use mem_ai::provider::decode_generate_failure;
 
-    let cases: [(u16, &str, &str); 10] = [
+    let cases: [(u16, &str, &str); 11] = [
         (
             400,
             r#"{"_tag":"InvalidRequestError","message":"x","kind":"body","field":"prompt"}"#,
@@ -371,9 +371,18 @@ fn test_108_classify_maps_every_wire_reason_to_a_named_capture_reason() {
             r#"{"_tag":"SomethingNewError","message":"x"}"#,
             "host_unrecognised_error",
         ),
+        (
+            502,
+            r#"{"_tag":"ProviderRequestError","providerID":"p","reason":"authentication","message":"x"}"#,
+            "host_provider_request_error",
+        ),
     ];
+    // The closed set is the manifest: both 502 classes and every declared tag
+    // must have a fixture here, so a twelfth token reds this row.
+    let mut exercised: std::collections::BTreeSet<&'static str> = std::collections::BTreeSet::new();
     for (status, body, expected) in cases {
         let error = decode_generate_failure(status, body);
+        exercised.insert(error.wire_reason.expect("a decoded token"));
         let failure = mem_bridge::capture_prompt::classify_provider_error(&error);
         assert_eq!(failure.reason, expected, "body {body}");
         assert_eq!(failure.error_kind, error.kind.as_str(), "body {body}");
@@ -388,6 +397,14 @@ fn test_108_classify_maps_every_wire_reason_to_a_named_capture_reason() {
             error.message
         );
     }
+    let declared: std::collections::BTreeSet<&'static str> =
+        mem_ai::provider::error::wire_reason::ALL
+            .into_iter()
+            .collect();
+    assert_eq!(
+        exercised, declared,
+        "every token in wire_reason::ALL needs a classifier fixture in this table"
+    );
 }
 
 /// A permanent `422` is not retryable and its detail names the declared fields:
