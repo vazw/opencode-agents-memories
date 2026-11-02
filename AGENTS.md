@@ -73,7 +73,8 @@ them, and prefer a description over a numeral when the numeral cannot be kept ch
 - Root package `opencode-agents-memory` is the **composition root** over the **12 crates under
   `crates/*`**: `src/main.rs` is sync arg-parse and dispatch (a `purge-session` mode included), `src/lib.rs`
   exposes `web_dist` (`src/web_dist.rs` resolves the built UI), and root `tests/` holds
-  17 workspace-level suites (`tests/workspace_deps.rs` enforces ADR-0001's allowed edges).
+  18 workspace-level suites (`tests/workspace_deps.rs` enforces ADR-0001's allowed edges;
+  `tests/web_identity.rs` is the web-identity resolver's contract, added by issues 115/116).
 - Every tracked `Cargo.toml` is `edition = "2024"` (members inherit `[workspace.package]`); `web-ui/` is an
   excluded workspace of its own (Leptos/Thaw CSR, wasm-only, `trunk`-built).
 - `plugin/` is the OpenCode wrapper — plain `node`, no npm/Bun dependency, no lockfile: `plugin/dist/`

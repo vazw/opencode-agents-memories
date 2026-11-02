@@ -43,6 +43,14 @@ flow worked (the `[]` milestone answer was a genuinely empty table — item B ha
   evidence.
 - The roster's `COALESCE` precedence means a project that still holds live sessions is dated by
   its newest LIVE session, while a fully consolidated one is dated by its newest milestone. That is the
-  authored rule and is pinned by `test_project_roster_unions_live_sessions_and_milestones`.
+  authored rule and is pinned by `test_project_roster_unions_live_sessions_and_milestones`. Its only
+  observable consequence is **ordering** (`last_activity_at` is never rendered): a project holding an
+  older surviving session and a newer milestone sorts by the SESSION, so the picker can place it below
+  a project whose newest activity is older. That is a design decision to revisit, not a bug — and any
+  future "greatest of both" must be written
+  `COALESCE(MAX(s.last_activity_at, m.last_activity_at), s.last_activity_at, m.last_activity_at, 0)`,
+  never `GREATEST`: turso 0.8.3 refuses that function (`SELECT greatest(1, 2)` → `Parse error: no such
+  function: greatest`, MEASURED by the review-1 debugger), and a scalar `max(NULL, 7)` yields NULL,
+  which would zero every milestone-only project — the exact case D-6 exists to keep.
 - A project whose every session is soft-deleted AND which has no milestone is absent from the roster.
   Deliberate: the roster is over live source rows (D-6). Its data is not lost — the rows survive.
