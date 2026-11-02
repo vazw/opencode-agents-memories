@@ -1,10 +1,15 @@
 # 98 — `chatMessage.enabled` does not gate capture: a user turning memory off keeps writing rows
 
-Status: ready-for-human — 2026-11-02. **Coordinated gate landed in `3786a5b`** (blueprint
-`chat-message-capture-gate-r5-20261102-1054`, sha `5335a695f3bd`): the engine stays the sole config
-authority, `hello` advertises the resolved flag in `result.config`, the wrapper gates before any host
-call, and the engine refuses at `capture`. RED→GREEN and the measured mutant transcripts are under
-`## Comments`. Brief at the end of this file.
+Status: done — 2026-11-02 — **reviewed APPROVED** (`…-r5-20261102-1054.review-1.md`), landed in `3786a5b`
+plus the status commit `9e699e7` (blueprint `chat-message-capture-gate-r5-20261102-1054`, sha
+`5335a695f3bd`): the engine stays the sole config authority, `hello` advertises the resolved flag in
+`result.config`, the wrapper gates before any host call, and the engine refuses at `capture`. RED→GREEN
+and the measured mutant transcripts are under `## Comments`.
+**Remaining (owner) — the live half:** the staged engine binary predates this change, so the wrapper
+installed today fails open against it (no `config` key ⇒ capture proceeds). Nothing is broken and nothing
+is gated until the engine is rebuilt and staged with a **rename**, not the in-place `cp` in
+`stage-engine.sh` (which hits `ETXTBSY` against a running binary), then the engine is restarted. Cold
+machine is the right time. Brief at the end of this file.
 
 ## What to build
 
