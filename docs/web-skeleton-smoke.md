@@ -455,9 +455,7 @@ binary built from this workspace, on a throwaway store, one request per
 2026-10-21; four rows have no smoke row yet — `GET
 /api/projects/{project_id}/milestones` and `DELETE /api/user-profile` (both
 added after that measurement) and the two port-only rows added by issues 115/116
-(`GET /api/projects`, `GET /api/user-profiles`). The rows below are pinned 1:1
-to `crates/mem-web/src/api/mod.rs`, so a row added or dropped there shows up
-here as a count mismatch.
+(`GET /api/projects`, `GET /api/user-profiles`).
 
 Every verdict is **derived**, never asserted by hand. An **asserted** row
 passes when the live status is inside its status set *and* the response body
@@ -511,7 +509,7 @@ Binary under test: sha256 prefix `9dcded5b953f` (12 hex).
 
 > **Addendum (issue 54).** This sheet is a historical measurement record: it
 > was measured on the binary above against the then-37-row table (38 rows since
-> issue 48; 39 since W6.6) and has not been re-measured. Issue 54 changed the maintenance
+> issue 48; 39 since W6.6; 41 since issues 115/116) and has not been re-measured. Issue 54 changed the maintenance
 > wiring: `POST /api/deduplicate` now answers 200 on a composed runtime (or the
 > 200 `{"success":false,"error":"Deduplication is disabled in config"}`
 > business message when `deduplicationEnabled` is false); `/api/cleanup` and
@@ -591,7 +589,7 @@ operations, **C.** profile, **D.** skills and the OpenCode catalog,
 ## G. Milestones and the Agents view (W6.6)
 
 W6.6 adds one **product** route, `GET /api/projects/{project_id}/milestones`
-(`mem-web`'s 39th route-table row, `web-ui`'s 35th `ENDPOINTS` row). It has no
+(`mem-web`'s 38th route-table row of 41, `web-ui`'s 35th `ENDPOINTS` row). It has no
 upstream counterpart: upstream ships no agents screen and no milestone
 endpoint. The route answers the project's milestones newest first, each with
 its `contributors` (the only durable agent attribution) and the `facts.db`

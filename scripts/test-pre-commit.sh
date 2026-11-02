@@ -620,10 +620,10 @@ case_16_docs_name_the_installed_configuration() {
 
 case_17_webui_css_change_names_the_missing_hook() {
     mk_repo || return 1
-    # The fixture carries the REAL Rust sources (181 emitted tokens) and the
-    # post-wave stylesheet with exactly one rule deleted (`.tag-row`), so the
-    # case must red on the missing-hook check — never on the ratchet and never
-    # on a fixture that drifted from the tree it certifies.
+    # The fixture carries the REAL Rust sources and the post-wave stylesheet with
+    # exactly one rule deleted (`.tag-row`), so the case must red on the
+    # missing-hook check — never on the ratchet and never on a fixture that
+    # drifted from the tree it certifies.
     mkdir -p "$repo/web-ui/scripts" "$repo/web-ui/public"
     cp -R "$repo_root/web-ui/src" "$repo/web-ui/src" || {
         fail "cannot copy web-ui/src into the fixture"
@@ -641,6 +641,20 @@ case_17_webui_css_change_names_the_missing_hook() {
         fail "the fixture stylesheet has no .tag-row rule to delete"
         return 1
     }
+    # The expected emitted count is DERIVED from this fixture's own gate run, never
+    # a numeral. A hardcoded `emitted=<N>` also matches the hook's
+    # `--min-emitted=<N>` reproduce hint, so the assertion used to stay green with
+    # the census line absent (debug-r1 H5). `--min-emitted=1` keeps the ratchet out
+    # of the derivation: it measures this fixture, not the tree's floor.
+    census=$(node "$repo/web-ui/scripts/check-class-coverage.mjs" --min-emitted=1) || {
+        fail "the fixture's coverage gate does not run against the unmodified stylesheet"
+        return 1
+    }
+    expected_emitted=$(printf '%s\n' "$census" | sed -n 's/^emitted=\([0-9][0-9]*\) hooks=.*/\1/p')
+    [ -n "$expected_emitted" ] || {
+        fail "the fixture's coverage gate printed no census line"
+        return 1
+    }
     sed -i '/^\.tag-row {$/,/^}$/d' "$repo/web-ui/public/styles.css"
     git -C "$repo" add web-ui/public/styles.css web-ui/scripts/check-class-coverage.mjs
     run_commit "$repo" "case 17 coverage gate"
@@ -651,7 +665,10 @@ case_17_webui_css_change_names_the_missing_hook() {
     assert_contains "FAIL class coverage" || return 1
     assert_contains "MISSING tag-row" || return 1
     assert_contains "missing=1" || return 1
-    assert_contains "emitted=181" || return 1
+    # The census line's two-token shape (`emitted=N hooks=`), not the bare
+    # `emitted=N`: the reproduce hint prints `--min-emitted=N`, which contains the
+    # bare form and would satisfy the assertion vacuously.
+    assert_contains "emitted=$expected_emitted hooks=" || return 1
     # A fixture carrying the pre-wave stylesheet or a stale source tree would
     # trip the ratchet instead, which is the wrong reason to pass this case.
     assert_not_contains "below the ratchet" || return 1
@@ -668,6 +685,7 @@ run() {
     repo=""
     commit_out=""
     commit_rc=0
+    expected_emitted=""
     if "$fn"; then
         ok=$((ok + 1))
         printf 'ok   %s\n' "$fn"

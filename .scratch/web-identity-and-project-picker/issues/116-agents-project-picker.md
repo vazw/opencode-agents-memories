@@ -2,7 +2,7 @@
 
 Status: done — 2026-11-03 — landed in `deb8bf4` (the store's project-roster statement),
 `2e8817f` (`GET /api/projects` + the surface pin) and `1204f83` (the screen). Evidence:
-`crates/mem-episodic/tests/project_roster.rs` (4), `crates/mem-web/tests/api_projects.rs` (4),
+`crates/mem-episodic/tests/project_roster.rs` (5), `crates/mem-web/tests/api_projects.rs` (4),
 `web-ui/tests/agents.rs`, `web-ui/tests/api_paths.rs`, `web-ui/tests/nav.rs`. Browser evidence is O2's.
 
 Defect B of `.scratch/web-identity-and-project-picker/PRD.md`.
