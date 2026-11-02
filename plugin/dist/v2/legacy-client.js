@@ -1,6 +1,10 @@
 // V2→V1 legacy client (W5.2, blueprint D2/D3/D7) — adapts the V2 plugin context
 // to the *narrow* slice of the V1 client shape the ported wrapper actually
 // consumes:
+//   - `session.get({ path: { id } })` → the session ROW (`agent`, `model`,
+//     `parentID`). Read by the compaction seam's child gate and agent/model
+//     resolution (`plugin/src/compaction.js`) and by the idle capture's
+//     attribution — never written;
 //   - `session.messages({ path: { id } })` → the transcript the idle capture
 //     parses (`plugin/src/plugin.js:668-677`), in the V1 `{ info, parts }` shape;
 //   - `session.prompt({ path, body })` → the compaction restore's V1 send: a
@@ -12,8 +16,15 @@
 // session create/abort/delete, the provider directory, `legacyToolResult` — is
 // deliberately absent: the port's V1 behaviour consumes no such capability, the
 // summariser lives in Rust, and provider connectivity is issue 62's (never a
-// `client.provider` surface here). `session.get` is deliberately absent as well:
-// its blast radius is stated in issue 112's D-112-4.
+// `client.provider` surface here).
+//
+// `session.get` was absent until issue 114, which reversed issue 112's D-112-4
+// deferral: `ctx.session.context` is bounded to the latest completed compaction
+// (`packages/core/src/session/store.ts:194`), so after a compaction the
+// transcript is `[compaction, idle]` — no agent-bearing row — and the restore's
+// agent gate could never resolve. The row is the only source of truth for the
+// gate; agent/model stay advisory on the V2 send (the synthetic route drops
+// them, see `prompt`), and the V1 route pins both in its body.
 //
 // Upstream reference: example/opencode-mem/src/v2/legacy-client.ts.
 
@@ -136,6 +147,20 @@ export const MEMORY_CONTEXT_DESCRIPTION = "memory context";
 export function createLegacyClient(ctx, toastRpc) {
   return {
     session: {
+      // Upstream `session.get` (`example/opencode-mem/src/v2/legacy-client.ts:265`),
+      // restored (issue 114). The host answers with `Session.Info`
+      // (`packages/schema/src/session.ts:32-63`), which carries `agent`, `model`
+      // and `parentID`. `readSession` unwraps `{data}`; the host takes
+      // `{sessionID}`, the V1 SDK takes `{path:{id}}` — `sessionIDFrom` accepts both.
+      // Read for the GATE, not for the write: the synthetic route drops
+      // agent/model (see `prompt` below). Do not "simplify" this by deleting the
+      // gate — the V1 route pins the resolved agent in its send body.
+      get: async (input) => {
+        const sessionID = sessionIDFrom(input);
+        if (!sessionID) throw new Error("session id required");
+        if (typeof ctx?.session?.get !== "function") throw new Error("session.get unavailable");
+        return { data: await ctx.session.get({ sessionID }) };
+      },
       messages: async (input) => {
         const sessionID = sessionIDFrom(input);
         if (!sessionID) throw new Error("session id required");

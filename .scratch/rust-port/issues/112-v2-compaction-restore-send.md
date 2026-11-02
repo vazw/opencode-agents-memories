@@ -1,6 +1,8 @@
 # 112 — the V2 post-compaction restore sends a visible synthetic and toasts
 
 Status: done — 2026-11-02 — implemented in the wave that created this file (local commit, nothing pushed).
+**Live verification FAILED** after shipping: two restore injections, zero rows — D-112-4 reversed and
+the fix tracked in issue 114 (see the 2026-11-02 comment below).
 
 The 2026-10-21 ruling ("the compaction hook does BOTH halves … the restore mirrors upstream via a
 synthetic no-reply prompt") stands; issue 67's no-send deviation was the outlier. This issue restores
@@ -82,3 +84,32 @@ their output, the pre-fix row census, and the host-source line re-derivations.
 ## Parent
 
 ADR-0017 DECISION 5 (amended 2026-11-02) and DECISION 11; reverses issue 67's send-path decision.
+
+## Comments
+
+- **2026-11-02 — D-112-4 REOPENED and REVERSED (issue 114).** The live run this file's Step 7
+  demanded was made by the owner after `18fea68` and it **failed**: the engine recorded two restore
+  injections after the host restart and **zero** `synthetic` rows carrying `"description":"memory
+  context"` were written (newest is still `2026-10-30 22:49:04` +07). Denominator corrected: three
+  post-restart `compaction` rows (`12:31:01`, `12:43:04`, `12:43:22` +07), two restore injections,
+  zero rows — the five timestamps in the handoff were five *engine lines* (two ingest/restore pairs
+  plus one orphan ingest), not five compactions.
+  **Cause:** `readSession` returned `null` (no `session.get` on the legacy client), so
+  `resolveSessionAgent` fell back to `ctx.session.context`, which the host bounds to the latest
+  completed compaction — `[compaction, idle]` at `seq 6863`/`6866`, no agent-bearing row — and the
+  agent gate returned before the send.
+  **Both premises of D-112-4 were wrong.** (1) "assistant rows carry `$.agent` in 100 % of rows" was
+  true of the rows that exist and irrelevant: the slice has **no assistant rows at all**. (3) "`get`
+  could not buy anything for the restore" is falsified — it buys the agent the gate needs. (2) was a
+  real cost, and it is paid deliberately rather than avoided: the ingest gate issue 67's decision
+  expected is **not** applied (owner ruling, D-114-2, 2575/2631 session rows are children), while the
+  restore's gate becomes live for the first time.
+  **Fix:** `createLegacyClient` exposes `session.get`, ported from
+  `example/opencode-mem/src/v2/legacy-client.ts:265-269` (+5 lines, one file, dist twin copied).
+  Guard replaced, not dropped: `test_v2_compaction_hook_does_not_apply_the_child_gate` became
+  `test_v2_compaction_ingest_stays_ungated_for_a_child_session`, and the new
+  `test_v2_compaction_hook_applies_the_child_gate_to_the_restore` pins the gate the old case never
+  reached. The oracle this wave lacked — the live post-compaction slice **plus an answerable
+  `session.get`** — is `plugin/tests/v2-restore-agent.test.mjs`, measured red on `18fea68`
+  (`readSession -> null`, `resolveSessionAgent -> undefined`). Records: ADR-0017 DECISION 2/5/11
+  amendments, `docs/evidence/issue-112-v2-restore-send/MEASUREMENT.md` §8, issue 114.

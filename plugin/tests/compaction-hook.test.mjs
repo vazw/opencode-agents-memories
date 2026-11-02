@@ -325,9 +325,14 @@ test(
 );
 
 test(
-  "test_child_session_ingest_is_a_no_op_while_the_parent_gets_context",
+  "test_child_session_ingest_proceeds_for_a_child_session_by_ruling",
   { timeout: 30000 },
   async (t) => {
+    // D-114-2 (issue 114, owner ruling): the pre-compaction ingest is UNGATED.
+    // `experimental.session.compacting` is the ONE handler both routes delegate
+    // to, so deleting its `readSession` + `isChildSession` lines de-gates the V1
+    // route as well — deliberately. 2575 of 2631 live session rows are children;
+    // gating the ingest would drop the block from 96 % of the store.
     const { record, wire } = await runCase(t, {
       fixture: {
         ...fixtureC(),
@@ -340,17 +345,18 @@ test(
 
     assert.deepEqual(
       record.contextAfter["sess-K"],
-      [],
-      "the child's hook RAN and appended nothing (contextAfter is keyed by session)"
+      [INGEST_2],
+      "the child's hook ingests too (the gate that used to return here is gone)"
     );
     assert.deepEqual(
       record.contextAfter["sess-A"],
       [INGEST_2],
       "the parent in the same run gets the ingest string (positive control)"
     );
-    assert.ok(
-      injects(wire, "ingest").every((message) => message.params.session_id !== "sess-K"),
-      "the child's gate returns before the request"
+    assert.deepEqual(
+      injects(wire, "ingest").map((message) => message.params.session_id).sort(),
+      ["sess-A", "sess-K"],
+      "both halves reach the engine; the restore above stays gated for the child"
     );
   }
 );

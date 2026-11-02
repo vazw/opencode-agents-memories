@@ -964,9 +964,9 @@ export const server = async function server(input) {
             : null;
         if (sessionID === null) return;
         if (!(await compactionCapability())) return;
-        const client = hostInputRef()?.client;
-        const session = await readSession(client, sessionID);
-        if (isChildSession(session)) return;
+        // D-114-2 (owner ruling): the ingest stays UNGATED — no readSession /
+        // isChildSession here, so a child keeps ingesting as it does today.
+        // The restore below keeps its child gate.
         const result = await sendRequest(
           "inject",
           compactionParams("ingest", sessionID),

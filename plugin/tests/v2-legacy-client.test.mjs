@@ -1,11 +1,15 @@
 // W5.2 `js` shard — the V2→V1 legacy client, ported from
-// example/opencode-mem/src/v2/legacy-client.ts. Seven cases (blueprint D6.2):
+// example/opencode-mem/src/v2/legacy-client.ts. Twelve cases (blueprint D6.2):
 // four upstream cases (`:387` execution alias, `:448` toast emit, `:482`
 // no-RPC fallback, `:494` emit-rejects fallback), two transcript-mapping cases
-// (upstream's `legacyMessage` has no direct case) and one missing-session-id
-// guard. The 13 remaining upstream cases are N-A: the port's V1 behaviour
-// consumes `session.messages` and `tui.showToast` only — no structured output,
-// no session create/prompt/abort/delete, no provider/model pass-through.
+// (upstream's `legacyMessage` has no direct case), four send-path cases (the
+// `noReply`→`synthetic` mapping, `resume:false`, the unavailable-synthetic
+// rejection and the text-parts-only body), one missing-session-id guard, and
+// one for `session.get` (issue 114 restored the capability upstream has at
+// `:265`). The 13 remaining upstream cases are N-A: the port's V1 behaviour
+// consumes `session.get`, `session.messages` and `tui.showToast` only — no
+// structured output, no session create/prompt/abort/delete, no provider/model
+// pass-through.
 //
 // The module is imported dynamically in each case so a missing module reports
 // once per case instead of failing the file at load.
@@ -370,6 +374,57 @@ test("test_v2_legacy_client_prompt_uses_only_text_parts", async () => {
   });
 
   assert.equal(syntheticCalls[0].text, "A\nB", "a tool part contributes no text and no 'undefined'");
+});
+
+test("test_v2_legacy_client_get_reads_the_session_row", async () => {
+  const { createLegacyClient } = await import(CLIENT_MODULE);
+  const calls = [];
+  const row = {
+    agent: "main",
+    model: { providerID: "opencode-go", id: "deepseek-v4.1-flash" },
+    parentID: "ses-parent",
+  };
+  const client = createLegacyClient(
+    createContext({
+      session: {
+        get: async (input) => {
+          calls.push(input);
+          return row;
+        },
+      },
+    })
+  );
+
+  // The wrapper calls the V1 shape `{ path: { id } }` (compaction.js:35); the
+  // host takes `{ sessionID }`. Passing the input through is the mutant.
+  assert.deepEqual(
+    await client.session.get({ path: { id: "ses-A" } }),
+    { data: row },
+    "the row is returned inside the SDK's {data} envelope"
+  );
+  assert.deepEqual(calls[0], { sessionID: "ses-A" }, "the host receives {sessionID}, never {path}");
+  // A host that hands the V2 shape directly must work too.
+  assert.deepEqual(await client.session.get({ sessionID: "ses-A" }), { data: row });
+  assert.deepEqual(calls[1], { sessionID: "ses-A" });
+
+  await assert.rejects(
+    () => client.session.get({}),
+    /session id required/,
+    "a session read without an id is a caller bug, not an empty row"
+  );
+  await assert.rejects(
+    () => client.session.get({ path: {} }),
+    /session id required/
+  );
+
+  // readSession degrades a throw to `null` ("not a child, proceed"), so the
+  // capability must announce its own absence rather than resolve undefined.
+  const noGet = createLegacyClient(createContext({ session: { context: async () => [] } }));
+  await assert.rejects(
+    () => noGet.session.get({ sessionID: "ses-A" }),
+    /session\.get unavailable/,
+    "a host with no session read must throw, never resolve a silent skip"
+  );
 });
 
 test("test_v2_legacy_client_requires_a_session_id", async () => {

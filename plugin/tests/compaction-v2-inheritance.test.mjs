@@ -10,11 +10,13 @@
 // drops the event and the case would pass for the wrong reason.
 //
 // Assertions:
-//   (a) the event crossed the locator and reached the handler — sessionGetCalls
-//       deep-equals ["sess-A"] AND the stub's wire carries one restore inject;
-//       only this pair is an oracle. With `session.get` deferred the locator's
-//       single call is the whole count, so this is also the pin that no second
-//       host read appeared.
+//   (a) the event crossed the locator and reached the handler —
+//       sessionGetCalls deep-equals ["sess-A","sess-A"] (the locator's
+//       `ctx.session.get`, then `readSession`'s) AND the stub's wire carries one
+//       restore inject; only this pair is an oracle. Issue 114 restored
+//       `session.get`, so the second read is expected: the restore resolves its
+//       session row. A one-element array now means the handler never read the
+//       row.
 //   (b) one synthetic restore write (description "memory context") and one
 //       toast — issue 112 made the V2 restore an actual send.
 //   (c) helloCount >= 1 and consoleErrors === [] — liveness/no-throw only.
@@ -65,11 +67,11 @@ test(
       JSON.stringify({
         location: { directory },
         session: {
-          // An agent-bearing assistant message: with `session.get` deferred the
-          // agent resolves from the transcript, and the handler proceeds to the
-          // send. Without it the handler would stop at the agent gate.
+          // The session ROW carries the agent (issue 114): the send no longer
+          // depends on the transcript's shape, which after a compaction is
+          // `[compaction, idle]` and holds no agent at all.
           context: [{ id: "msg-1", type: "assistant", agent: "builder", content: [] }],
-          get: { "sess-A": { location: { directory } } },
+          get: { "sess-A": { agent: "builder", location: { directory } } },
         },
         // No location on the envelope: the locator takes its session branch
         // and asks the host (ctx.session.get).
@@ -103,11 +105,11 @@ test(
     const record = JSON.parse(fs.readFileSync(donePath, "utf8"));
     const wire = readWire(requestLogPath);
 
-    // (a) the oracle: the locator asked the host AND the inject reached the wire.
+    // (a) the oracle: the locator asked the host AND the handler read the row.
     assert.deepEqual(
       record.sessionGetCalls,
-      ["sess-A"],
-      "the locator took its session branch and asked the host"
+      ["sess-A", "sess-A"],
+      "the locator's read, then readSession's (issue 114 restored session.get)"
     );
     const restore = wire.filter(
       (message) =>

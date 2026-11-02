@@ -73,11 +73,28 @@ nothing at `fc41bbd`), so a child session's capture does write a tier-1 row unde
 papered over: the lane gates both halves on the host's own child predicate
 (`session.get().parentID`, upstream's `isChildSession` at `example/opencode-mem/src/index.ts:240`).
 The gate is **positive-evidence-only**: a non-empty `parentID` means child; an absent
-`session.get` (the normal V2 case — `plugin/src/v2/legacy-client.js:117-134` exposes no
-`session.get`), a `null` response or a throw means **not a child, proceed**. Treating "unknown"
+`session.get` (a host without that capability — not the V2 case as of the amendment below), a `null`
+response or a throw means **not a child, proceed**. Treating "unknown"
 as "child" would silently disable the restore for every V2 session. When issue 63 wires the
 capture gate the gate becomes redundant but stays correct; the tests pin the observable
 (`promptCalls`, `contextAfter`), never the mechanism.
+
+*Amendment 2026-11-02 (issue 114) — `session.get` EXISTS on V2, the restore's gate is live, and the
+ingest is ungated by owner ruling.* This decision's parenthetical — "an absent `session.get` (the
+normal V2 case — `plugin/src/v2/legacy-client.js:117-134` exposes no `session.get`)" — is superseded:
+that absence was a port divergence from upstream (`example/opencode-mem/src/v2/legacy-client.ts:265`)
+and it made the gate unreachable on the only route the live host runs. `createLegacyClient` now exposes
+`session.get`, so `readSession` answers and `isChildSession` is decided on real evidence. The two halves
+then diverge deliberately (D-114-2, owner ruling): the **restore** keeps the gate — a child returns
+before the inject, which is DECISION 2's original intent finally taking effect — while the
+**pre-compaction ingest** does **not** read the session at all. The reason is scale, not principle:
+2583 of 2639 live session rows are children (measured 2026-11-02T06:24:41Z; the wave's plan recorded
+2575/2631 — the store is live), and one child was ingesting at `12:46:23` with `memory_count:2`, so
+gating the ingest would have removed the block from ~98 % of the store. "Gates both halves" is therefore
+no longer the shape; it is one gated half and one deliberately ungated half, and
+`plugin/tests/v2-compaction-hook.test.mjs` + `plugin/tests/compaction-hook.test.mjs` pin each (the
+ingest case on both routes, and the restore's gate). Re-adding the ingest gate is a three-line change,
+recorded rather than recommended.
 
 **DECISION 3 — the pre-compaction context is the session-scoped tier-1 render.** The port's own
 injected `<project_agent_session_history>` block and the episodic `## Recent sessions` /
@@ -129,7 +146,8 @@ under V2, because the legacy client cannot read a session at all (below).
 
 Two decisions are pinned by tests, not prose (`plugin/tests/v2-compaction-hook.test.mjs`):
 
-- **The child gate is not applied under V2.** `readSession` returns null because `createLegacyClient`
+- **The child gate is not applied under V2.** *(Superseded by the 2026-11-02 issue-114 amendment
+  below: `session.get` is restored and the gate is live.)* `readSession` returns null because `createLegacyClient`
   exposes no `session.get` (`plugin/src/v2/legacy-client.js:120-134`), and DECISION 2's
   positive-evidence rule says *proceed*. A child session may now ingest its **own** captured rows — a
   recorded divergence from V1's agent-only property, whose real fix is the capture gate (issue 63), not a
@@ -169,6 +187,41 @@ deferring its entry into the model request to the next promotion
 silently dropped: `test_v2_compaction_seam_ingests_then_reads_after_without_a_send` →
 `test_v2_compaction_seam_ingests_then_sends_the_restore_and_toasts`. Re-derivation, and the live
 residual measurement, are in `docs/evidence/issue-112-v2-restore-send/MEASUREMENT.md`.
+
+**Amendment 2026-11-02 (issue 114) — D-112-4 is REVERSED: `session.get` is restored, and the restore
+now resolves its agent from the session ROW. The ingest stays ungated (D-114-2).** The live run that
+`18fea68` shipped into failed, and the failure was the one this ADR had recorded as the risk to watch:
+
+- **What was observed.** Post-restart the store held three `session_message` rows of type
+  `compaction`; the engine logged **five** injection lines, which are the two ingest/restore pairs
+  (`12:31:01`+`12:41:44` on `ses_eba84b…`, `12:43:22`+`12:43:56` on `ses_e8839…`) plus one orphan
+  ingest at `12:46:23` whose session has no completed compaction. Denominator, corrected: **two
+  restore injections fired, zero rows written** — no `synthetic` row, no toast.
+- **Cause.** `readSession` returned `null` (no `session.get` on the legacy client), so
+  `resolveSessionAgent` fell back to the transcript. On V2 that transcript is
+  `ctx.session.context({sessionID})`, which the host bounds to the **latest completed compaction**
+  (`packages/core/src/session/store.ts:194` → `packages/core/src/session/history.ts:319-323`). After a
+  compaction the slice is exactly `[compaction, idle]` (live rows `seq 6863`/`6866`); the resolver skips
+  the summary row by design (`plugin/src/compaction.js:73-82`), found nothing, and the agent gate
+  returned before the send.
+- **Why D-112-4's rationale was true but irrelevant.** It argued that `session.get` buys nothing because
+  "100 % of assistant rows carry `$.agent`". That is true of the assistant rows that exist — and the
+  slice contains **no assistant rows at all**. A statistical claim about a population the reader never
+  sees is not a guarantee about the slice. Its second premise also fell: "adding `session.get` …
+  would move the pinned `sessionGetCalls` oracle of `compaction-v2-inheritance.test.mjs`" was treated as
+  a cost; the movement (`["sess-A"]` → `["sess-A","sess-A"]`, the locator then `readSession`) is the
+  oracle of the fix, and the test was re-pointed deliberately.
+- **The fix.** `createLegacyClient` exposes `session.get` (`plugin/src/v2/legacy-client.js`), ported from
+  `example/opencode-mem/src/v2/legacy-client.ts:265-269`: it accepts `{sessionID}` and `{path:{id}}`,
+  unwraps `{data}`, and the host answers `Session.Info` (`packages/schema/src/session.ts:32-63`) with
+  `agent`, `model` and `parentID`. Agent and model are read for the GATE; the synthetic route still drops
+  both, and the V1 route still pins them in its send body, so the gate is not "simplified" away.
+  A missing row (`NotFoundError` → `null`) still degrades to "not a child, proceed": the gate must never
+  be able to disable the restore.
+- **Blast radius, third call site.** `fireIdleCapture` reads the same row, so the first idle after a
+  compaction stops being eaten by `capture.agent_unresolved` — new capture rows after compactions are
+  expected, and V1 already behaves this way. See issue 114 for the child-count evidence and the
+  `session_v2` table gotcha.
 
 **The hook covers the summarisation path only.** `compaction.ts:303` chooses
 `native ? compactNatively(...) : summarize(...)` (`:317-321`): a native model never reaches `prepare`, so
@@ -250,6 +303,13 @@ on a path that had never delivered a single toast. This is DECISION 10's recorde
 un-defer: add the call beside `notifyRestore` in `plugin/src/plugin.js` with a distinct `title` and a
 `notification: {when: "blurred"}` gate, then widen `MemToast` (or match the title) so the two intents
 stay separable; neither change is in this wave.
+
+*Issue 114 leaves this decision unchanged.* The gate restoration changes *whether* a toast fires (the
+restore now reaches the send for top-level sessions) and not *how* it is delivered: still the existing
+toast RPC, still exactly one per successful write, still no `ctx.attention.notify`. The child gate's
+silent return is likewise unlogged by design (the wrapper's stderr is a socket on the live host, so a
+log line there is not an observation channel); the live evidence for this fix is a DB row, not a log
+line.
 
 ## The renderer, byte-for-byte
 

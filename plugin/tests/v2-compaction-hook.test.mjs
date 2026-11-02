@@ -9,9 +9,14 @@
 // transcript message) and never `event.result` (it skips the model call).
 //
 // Two halves are pinned here that the issue demanded as decisions, not prose:
-//   - the child gate is NOT applied on V2 (`createLegacyClient` exposes no
-//     `session.get`, so `readSession` returns null and ADR-0017 D2's
-//     positive-evidence rule says proceed);
+//   - the ingest is UNGATED on V2 by owner ruling (issue 114, D-114-2):
+//     `createLegacyClient` now exposes `session.get`, but the pre-compaction
+//     handler deliberately does not call it — the overwhelming majority of live
+//     session rows are children (2583 of 2639 on 2026-11-02), and gating the
+//     ingest would drop the block from ~98 % of them;
+//   - the RESTORE keeps its child gate, and `session.get` makes it live for the
+//     first time: a child returns before the inject, so no engine call, no row
+//     and no toast. Top-level sessions resolve their agent from the session row.
 //   - the restore DOES send on V2 (issue 112): `createLegacyClient.session.prompt`
 //     maps the V1 `noReply` body onto `ctx.session.synthetic`, one toast follows
 //     a successful write, and the legacy adapter no longer emits the issue-67
@@ -357,10 +362,19 @@ test(
         return {
           location: { directory },
           session: {
-            // A non-summary assistant message with an agent: with `session.get`
-            // deferred, the agent resolves from this transcript.
-            context: [{ id: "msg-1", type: "assistant", agent: "builder", content: [] }],
-            get: { "ses-A": { location: { directory } } },
+            // The live post-compaction slice: `ctx.session.context` is bounded to
+            // the latest completed compaction, so these two boundary rows are all
+            // the transcript holds at restore time — no agent-bearing row.
+            context: [{ id: "msg-6863", type: "compaction" }, { id: "msg-6866", type: "idle" }],
+            // ... and the session row carries the agent and the model, which is
+            // what the gate and the send read (issue 114).
+            get: {
+              "ses-A": {
+                agent: "main",
+                model: { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" },
+                location: { directory },
+              },
+            },
           },
           compactions: [{ sessionID: "ses-A" }],
           // The envelope carries the directory, so the locator decides without
@@ -380,7 +394,11 @@ test(
     const restore = injectsOf(record.injects, "restore");
     assert.equal(restore.length, 1, "the inherited restore read reaches the engine");
     assert.equal(restore[0].session_id, "ses-A");
-    assert.deepEqual(record.contextCalls, ["ses-A"], "agent resolution read the transcript once");
+    // Issue 114: the agent and the model come from the session ROW. The
+    // transcript is bounded to `[compaction, idle]`, so a resolver that reads it
+    // resolves nothing — `contextCalls` must stay empty.
+    assert.deepEqual(record.sessionGetCalls, ["ses-A"], "one host session read: the restore's own");
+    assert.deepEqual(record.contextCalls, [], "with a session row, the transcript is never read");
 
     // The send: a synthetic write, never a queued prompt.
     assert.equal(record.syntheticCalls.length, 1, "one synthetic restore write");
@@ -393,10 +411,6 @@ test(
         record.syntheticCalls[0].text.slice(0, 40)
       )})`
     );
-
-    // D-112-4: `session.get` is not reachable through the legacy client, and the
-    // locator short-circuits on the event's own `location` — zero is the guard.
-    assert.deepEqual(record.sessionGetCalls, [], "no host session read on the restore path");
 
     assert.equal(record.toastEmits.length, 1, "one successful write, exactly one toast");
     assert.equal(record.toastEmits[0].name, "toast");
@@ -413,6 +427,54 @@ test(
       0,
       `the retired skip line must not appear on a successful send (stderr=${stderr})`
     );
+  }
+);
+
+test(
+  "test_v2_compaction_hook_applies_the_child_gate_to_the_restore",
+  { timeout: 30000 },
+  async (t) => {
+    const { record } = await runCompactionCase(t, {
+      fixture: (tmp) => {
+        const directory = path.join(tmp, "project");
+        return {
+          location: { directory },
+          session: {
+            context: [],
+            // Child-shaped AND fully answerable: the agent and the model are
+            // mandatory here. Without them the mutant (gate deleted, plugin.js
+            // restore path) would still stop at the AGENT gate and produce
+            // 1 inject / 0 / 0 — only the inject count would separate it. With
+            // them the mutant sends, so all three zeros below are load-bearing.
+            get: {
+              "ses-A": {
+                parentID: "ses-parent",
+                agent: "main",
+                model: { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" },
+                location: { directory },
+              },
+            },
+          },
+          // No `compactions` step: this case is the restore half only.
+          events: [
+            { type: "session.compaction.ended", location: { directory }, data: { sessionID: "ses-A" } },
+          ],
+          rpc: { registered: true },
+        };
+      },
+    });
+
+    // The gate was reached (the host read happened), and it was what returned:
+    // a restore that could not resolve its session would also produce three
+    // zeros, for the wrong reason.
+    assert.deepEqual(record.sessionGetCalls, ["ses-A"], "the restore read the session row");
+    assert.equal(
+      injectsOf(record.injects, "restore").length,
+      0,
+      "a child session returns at the gate, before the engine call"
+    );
+    assert.equal(record.syntheticCalls.length, 0, "no engine call, no write");
+    assert.equal(record.toastEmits.length, 0, "no write, no toast");
   }
 );
 
@@ -439,6 +501,9 @@ test(
 
     assert.deepEqual(record.compactionErrors, []);
     assert.equal(injectsOf(record.injects, "restore").length, 1, "the read still precedes the gate");
+    // The skip is provably POST-get: the host row was read and answered, it just
+    // carries no agent (5 of 2631 live rows) — the transcript is empty too.
+    assert.deepEqual(record.sessionGetCalls, ["ses-A"], "the host session read happened before the skip");
     assert.equal(record.syntheticCalls.length, 0, "no agent, no write");
     assert.equal(record.toastEmits.length, 0, "no write, no toast");
 
@@ -491,7 +556,7 @@ test(
 );
 
 test(
-  "test_v2_compaction_hook_does_not_apply_the_child_gate",
+  "test_v2_compaction_ingest_stays_ungated_for_a_child_session",
   { timeout: 30000 },
   async (t) => {
     const { record } = await runCompactionCase(t, {
@@ -501,8 +566,8 @@ test(
           location: { directory },
           session: {
             context: [],
-            // Child-shaped: a `session.get` the host could answer, which the
-            // legacy client deliberately cannot reach.
+            // Child-shaped: the host CAN answer, and the restore half's gate
+            // does read it — but the ingest half must not ask at all (D-114-2).
             get: { "ses-A": { parentID: "ses-parent", location: { directory } } },
           },
           compactions: [{ sessionID: "ses-A" }],
@@ -512,14 +577,14 @@ test(
       },
     });
 
-    assert.deepEqual(
-      record.sessionGetCalls,
-      [],
-      "the legacy client exposes no session.get, so the child gate cannot fire"
-    );
     assert.deepEqual(record.compactionErrors, []);
     assertSystemCarriesTheIngest(record.systems[0].system);
-    assert.equal(injectsOf(record.injects, "ingest").length, 1, "the ingest proceeds on a child-shaped session");
+    assert.equal(
+      injectsOf(record.injects, "ingest").length,
+      1,
+      "the ingest proceeds on a child-shaped session (owner ruling, D-114-2)"
+    );
+    assert.equal(record.sessionGetCalls.length, 0, "the ingest never reads the session");
   }
 );
 
