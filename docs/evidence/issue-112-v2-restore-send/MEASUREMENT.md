@@ -127,6 +127,8 @@ user's.
 - The `./v2` export stays because `plugin/tests/v2-loader-contract.test.mjs:30` pins it; the finding is
   tracked separately as issue 113. This wave only corrects the misleading header comment in
   `plugin/src/v2/plugin.js`.
+  RESOLVED 2026-11-02 (issue 113, 48c00a1): the export is gone; the contract row now asserts its
+  absence.
 
 ## 6. The toast bridge is unchanged and already in shape (D-112-9, `READ`)
 

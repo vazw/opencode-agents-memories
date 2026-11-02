@@ -127,9 +127,10 @@ slice contains no assistant rows at all.
 
 ## Follow-ups (recorded, not done here)
 
-- `plugin/src/compaction.js`'s module note still says "an absent `session.get` (the V2 legacy client
-  exposes none)" (`:9-12`). That sentence went stale with this fix; the file is deliberately
-  byte-unchanged in this wave, so the note is a follow-up edit, not a silent leftover.
+- DONE d481ed9 (this issue's follow-up): the module note in plugin/src/compaction.js no
+  longer claims the V2 legacy client exposes no `session.get`. It now names the
+  absent-capability branch as the V1 SDK's and cites 8a13ce3. Both twins moved together
+  and `cmp -s` passed.
 - `plugin/src/plugin.js` (ingest) has no child gate by ruling; the capture child gate belongs to issue 63.
 
 ## Live verification — PASSED 2026-11-02T14:09–14:10 +07 (owner-run)
