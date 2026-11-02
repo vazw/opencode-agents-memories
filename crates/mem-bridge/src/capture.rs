@@ -39,6 +39,13 @@ pub const CAPTURE_SUMMARY_ID_DOMAIN: &str = "capture-summary-v1";
 /// The tier-1 source literal (upstream `source: "auto-capture"`).
 pub const AUTO_CAPTURE_SOURCE: &str = "auto-capture";
 
+/// Issue 98: the `capture` refusal reason when `chatMessage.enabled` is off.
+/// One literal, shared by the engine's refusal result and its latched
+/// `capture.refused` line. The wrapper's own diagnostic is the sibling event
+/// `capture.chat_message_disabled` (`plugin/src/plugin.js`); it never parses
+/// this value — the wrapper does not read config.
+pub const CHAT_MESSAGE_DISABLED_REASON: &str = "chat_message_disabled";
+
 /// The metadata key both the writer and the injector read.
 pub const CAPTURE_SUMMARY_SOURCE_METADATA_KEY: &str = "source";
 
@@ -609,6 +616,12 @@ pub struct CaptureService {
     /// (filter ON) — fail-closed: a missing `.with_privacy` weakens config
     /// fidelity (custom markers, the flag), never the filter itself.
     privacy: mem_ai::privacy::PrivacyConfig,
+    /// Issue 98: the resolved `chatMessage.enabled`. The chat-capture path's
+    /// only gate — `capture` refuses before payload validation and enqueue,
+    /// and `hello` advertises this same field, so the two cannot disagree.
+    /// The default `true` coincides with the fail-open direction: an engine
+    /// built without this setter keeps capturing exactly as before the wave.
+    chat_capture_enabled: bool,
 }
 
 impl CaptureService {
@@ -635,6 +648,7 @@ impl CaptureService {
             sound_memory: SoundMemorySettings::default(),
             vault_feeder: None,
             privacy: mem_ai::privacy::PrivacyConfig::default(),
+            chat_capture_enabled: true,
         }
     }
 
@@ -664,6 +678,20 @@ impl CaptureService {
     /// The privacy configuration in force (composition diagnostics/tests).
     pub fn privacy(&self) -> &mem_ai::privacy::PrivacyConfig {
         &self.privacy
+    }
+
+    /// Issue 98 — sets the resolved `chatMessage.enabled`. Builder setter,
+    /// default `true` (fail-open), mirroring `with_privacy`; the existing
+    /// `CaptureService::new` call sites keep their argument lists.
+    pub fn with_chat_capture_enabled(mut self, enabled: bool) -> Self {
+        self.chat_capture_enabled = enabled;
+        self
+    }
+
+    /// The resolved chat-capture flag (the engine's `capture` gate and the
+    /// `hello` advertisement read this one value).
+    pub fn chat_capture_enabled(&self) -> bool {
+        self.chat_capture_enabled
     }
 
     /// The sound-memory settings in force (composition diagnostics/tests).

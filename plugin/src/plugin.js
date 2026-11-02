@@ -289,6 +289,7 @@ function createBridgeState(root) {
     requestCounter: 1, // ids: "hello-1", then "capture-2", ...
     engineCompatible: false,
     engineCapabilities: null, // hello.result.capabilities, or null when absent/unusable
+    engineChatCaptureEnabled: null, // hello.result.config.chat_message_enabled, or null when this child advertised nothing
     engineProtocolLine: null, // hello.result.protocol, for the mismatch line
     capabilityGapsLogged: new Set(), // one line per capability per process
     pendingCaptures: 0,
@@ -330,6 +331,10 @@ function bridge() {
 // capture ids and toast dedupe must not bleed into another's captures or
 // silence another's warnings.
 let capturedSessionId = null;
+// Issue 98: once per process — the idle path runs per turn, so an unlatched
+// "capture skipped" line would be unbounded stderr in exactly the state the
+// user asked for silence.
+let chatCaptureDisabledLogged = false;
 // Process-unique prompt part ids: `Date.now()` collides on a back-to-back pair.
 let compactionPartCounter = 0;
 
@@ -501,6 +506,10 @@ function teardownChild(state, reason) {
   const active = state.child;
   state.child = null;
   state.engineCapabilities = null;
+  // Issue 98 (C6): a dead child's `false` must not leak onto its replacement.
+  // D-98-15 keeps an omitting child from overwriting the cache, so this clear
+  // is the ONLY thing that retires it.
+  state.engineChatCaptureEnabled = null;
   state.engineProtocolLine = null;
   rejectPending(state, reason);
   if (active !== null) {
@@ -609,6 +618,18 @@ async function startBridge(state) {
         ? capabilities
         : null;
     state.engineProtocolLine = engineProtocol;
+    // Issue 98 (C1/C6): store only what THIS handshake advertised. A child that
+    // omits the member leaves the cached value alone — teardownChild is what
+    // retires a dead child's `false`, so a replacement that says nothing
+    // inherits nothing. Only the exact boolean false refuses (fail-open
+    // otherwise).
+    const advertisedConfig =
+      hello !== null && typeof hello === "object" && hello.config !== null && typeof hello.config === "object"
+        ? hello.config
+        : null;
+    if (advertisedConfig !== null && Object.prototype.hasOwnProperty.call(advertisedConfig, "chat_message_enabled")) {
+      state.engineChatCaptureEnabled = advertisedConfig.chat_message_enabled === false ? false : null;
+    }
     state.engineCompatible = true;
     state.bridgeState = "installed";
     return true;
@@ -1128,8 +1149,25 @@ export const server = async function server(input) {
 
   async function fireIdleCapture(sessionID) {
     try {
-      const started = await ensureStarted();
+      // Issue 98 (D-98-7): the value is read from the state object that owns
+      // the child — the same object that answered `hello`, not a second
+      // `bridge()` resolution around the await.
+      const state = bridge();
+      const started = await ensureStartedIn(state);
       if (!started) return;
+      // Issue 98 (C9): the engine advertises its resolved chatMessage.enabled
+      // in hello.result.config. Return BEFORE any host call — readSession,
+      // resolveSessionAgent and session.messages are all skipped, matching
+      // upstream's ordering (the transcript is never fetched). Only an exact
+      // boolean false refuses: an engine that predates the key advertises
+      // nothing and capture continues (fail-open).
+      if (state.engineChatCaptureEnabled === false) {
+        if (!chatCaptureDisabledLogged) {
+          chatCaptureDisabledLogged = true;
+          logWarn("capture.chat_message_disabled", { session_id: sessionID });
+        }
+        return;
+      }
       // Project first, then agent: a host that supplies neither gets exactly one
       // reason (not two) and no host round-trips. No directory => no project_id
       // => the engine would dead-letter it, so nothing is sent.
@@ -1183,7 +1221,7 @@ export const server = async function server(input) {
         transcript: userPrompt,
         metadata,
       };
-      fireCapture(bridge(), payload);
+      fireCapture(state, payload);
     } catch (err) {
       logWarn("session.idle.capture_failed", { message: shortError(err) });
     }

@@ -78,6 +78,13 @@ export function stageStubEngine(pkgDir, {
   capabilities = DEFAULT_STUB_CAPABILITIES,
   skills = [],
   skillsPath = null, // when set, re-read per `skills` request (the re-register case)
+  // Issue 98 knobs (additive; every existing user leaves them unset):
+  // `helloConfig` is emitted verbatim as the hello result's top-level `config`
+  // object; `undefined` drops the key (the pre-issue-98 shape).
+  helloConfig = undefined,
+  // when set, re-read per `hello` handshake (the `skillsPath` idiom), so a
+  // replacement child can advertise a different value than its predecessor.
+  helloConfigPath = null,
   // method → {code, message, data}: answers that method with a JSON-RPC error
   // whose `data` survives to the wrapper (the issue-70 wave-2 T22 knob).
   wireErrors = {},
@@ -95,7 +102,7 @@ export function stageStubEngine(pkgDir, {
   const dir = path.join(pkgDir, "engine", `${process.platform}-${process.arch}`);
   fs.mkdirSync(dir, { recursive: true });
   const binPath = path.join(dir, "opencode-agents-memory");
-  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath: lifecycleLogPath ?? requestLogPath + ".lifecycle" }), {
+  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath: lifecycleLogPath ?? requestLogPath + ".lifecycle" }), {
     mode: 0o755,
   });
   fs.chmodSync(binPath, 0o755);
@@ -105,8 +112,8 @@ export function stageStubEngine(pkgDir, {
 // Static body (no template interpolation inside the script beyond CONFIG):
 // answers the canned protocol-1.0.0 results, records its own pid, exits on
 // SIGTERM or stdin EOF.
-function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath }) {
-  const config = JSON.stringify({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath });
+function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath }) {
+  const config = JSON.stringify({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath });
   const blocks = JSON.stringify({
     restore:
       "## Restored Session Memory\n\n### Memory 1\nRetries are capped at three\n\nTags: project, opencode-mem\n\n### Memory 2\nDeploys go through the staging gate first\n\nTags: project, opencode-mem\n\n",
@@ -119,7 +126,7 @@ function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabiliti
 const CONFIG = ${config};
 const BLOCKS = ${blocks};
 import fs from "node:fs";
-const { injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath } = CONFIG;
+const { injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath } = CONFIG;
 // Issue 70 wave 1's nine wire methods; appended to the hello's advertised set
 // only when the capability object advertises the same key.
 const TOOL_METHODS = ["add", "search", "forget", "list", "profile", "list-shards", "migrate", "export", "import"];
@@ -201,10 +208,20 @@ function respond(parsed) {
   if (method === "inject" && injectMode === "silent") return null;
   let result = null;
   if (method === "hello") {
+    // Issue 98: the resolved chatMessage.enabled, re-read per hello when a path
+    // is given (the skillsPath idiom above). \`undefined\` drops the key, which is
+    // the pre-issue-98 shape the wrapper must treat as fail-open.
+    let helloConfigValue = helloConfig;
+    if (helloConfigPath) {
+      try { helloConfigValue = JSON.parse(fs.readFileSync(helloConfigPath, "utf8")); } catch { /* keep the startup copy */ }
+    }
     result = {
       // \`capabilities === null\` means "no capabilities object at all": the
       // undefined key is dropped by JSON.stringify — the pre-D-43 shape.
       capabilities: capabilities === null ? undefined : capabilities,
+      // Issue 98: the sibling object the wrapper reads for the chat-capture
+      // gate. \`undefined\` drops the key — a build predating the key.
+      config: helloConfigValue === undefined ? undefined : helloConfigValue,
       engine_version: "0.1.0",
       // The base five stay, \`skills\` follows its own key, and the nine issue-70
       // tool methods are APPENDED when their key is true — never rebuild the

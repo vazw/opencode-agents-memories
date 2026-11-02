@@ -333,37 +333,10 @@ async fn profile_decay_poisoned_child() {
     .await;
 }
 
-/// Runs one `#[ignore]`d case in a CHILD of this same test binary, its stderr
-/// on a FILE (`structured_stderr` writes to the raw descriptor, which libtest's
-/// capture never intercepts), and returns what the child wrote there.
-fn run_captured(inner: &str, dir: &TestDir) -> String {
-    let log = dir.path().join("child.err");
-    let stderr = std::fs::File::create(&log).expect("create the child stderr file");
-    let status = std::process::Command::new(std::env::current_exe().expect("this test binary"))
-        .args([
-            "--exact",
-            inner,
-            "--ignored",
-            "--nocapture",
-            "--test-threads=1",
-        ])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::from(stderr))
-        .status()
-        .expect("the child test binary runs");
-    let text = std::fs::read_to_string(&log).unwrap_or_default();
-    assert!(
-        status.success(),
-        "the child case `{inner}` must pass: {status}\n{text}"
-    );
-    text
-}
-
 #[test]
 fn test_poisoned_stamp_is_named_and_the_loop_survives() {
     let dir = TestDir::new("decay-poisoned");
-    let text = run_captured("profile_decay_poisoned_child", &dir);
+    let text = common::run_captured("profile_decay_poisoned_child", &dir);
     for needle in [
         "\"event\":\"profile.decay_failed\"",
         "\"kind\":\"lock_poisoned\"",

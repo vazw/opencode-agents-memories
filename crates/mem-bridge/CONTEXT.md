@@ -226,6 +226,14 @@ the `-32002` code row, the exit-code-75 row, the status-file-format row.
   scope, **74** store-or-IO, **75** busy. Success prints exactly one JSON
   line with counts and a mandatory, non-empty `not_erased` array naming the
   surviving legacy `memories` shard.
+- **Chat capture gate** (issue 98) — `chatMessage.enabled` is enforced on the
+  chat-capture path only: `CaptureService::chat_capture_enabled` is the single
+  resolved value (builder `with_chat_capture_enabled`, default `true` =
+  fail-open), advertised to the wrapper as
+  `hello.result.config.chat_message_enabled` and enforced in `capture`; the
+  refusal is the RESULT `{"accepted":false,"reason":"chat_message_disabled"}`
+  emitted before payload validation and enqueue, announced once per process by
+  `capture.refused`. `add`/manual writes are deliberately ungated.
 
 **Issue 43 W7 additions (retired-shard reaping, ADR-0023):**
 

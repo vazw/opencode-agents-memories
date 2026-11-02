@@ -269,7 +269,11 @@ pub async fn build_composed_runtime(
         raw_context_required: config.sound_memory.raw_context_required,
     })
     .with_vault_feeder(Some(vault_feeder))
-    .with_privacy(mem_ai::privacy::PrivacyConfig::from_core(config));
+    .with_privacy(mem_ai::privacy::PrivacyConfig::from_core(config))
+    // Issue 98 (C1/C2): the resolved `chatMessage.enabled`, chained beside the
+    // other config-derived setters. This ONE call is what keeps the handshake
+    // advertisement and the `capture` refusal on the same value.
+    .with_chat_capture_enabled(config.chat_message.enabled);
 
     let consolidation_active = Arc::new(AtomicBool::new(false));
     let inject = InjectService::new(

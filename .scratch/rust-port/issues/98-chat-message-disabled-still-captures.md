@@ -11,15 +11,16 @@ Upstream stops capturing when the user disables chat-message memory. The port do
 MEASURED:
 
 - Upstream: `capturePrompt` returns `false` before doing anything when the switch is off —
-  `example/opencode-mem/src/index.ts:646`:
-  `if (!isConfigured() || !CONFIG.chatMessage.enabled) return false;`. The V2 adapter treats that `false`
-  as "suppress this turn" (`example/opencode-mem/src/v2/adapter.ts:155-159`).
-- Port, wrapper: `fireIdleCapture` (`plugin/src/plugin.js:1153-1198`) runs unconditionally — it awaits the
-  bridge, reads `client.session.messages`, and fires the capture. `grep -rn 'chatMessage\|enabled'
+  `example/opencode-mem/src/index.ts:670` (v2.39.0, `9086c65`):
+  `if (!isConfigured() || !CONFIG.chatMessage.enabled) return false;` — the same gate also stands at
+  `:735`, `:748` and `:767`. The V2 adapter treats that `false` as "suppress this turn"
+  (`example/opencode-mem/src/v2/adapter.ts:155-159`).
+- Port, wrapper: `fireIdleCapture` (`plugin/src/plugin.js:1129-1190` at `616dc32`) runs unconditionally — it
+  awaits the bridge, reads `client.session.messages`, and fires the capture. `grep -rn 'chatMessage\|enabled'
   plugin/src` returns **nothing**; the wrapper has no config surface at all.
-- Port, engine: the key *is* resolved — `crates/mem-core/src/config/mod.rs:357-386` populates
-  `schema::ChatMessage { enabled, … }` (`schema.rs:555`, default `true` at `:624`) — and outside
-  `config/mod.rs` only the privacy fields are read (`crates/mem-ai/src/privacy/layer.rs:74-77`:
+- Port, engine: the key *is* resolved — `crates/mem-core/src/config/mod.rs:357-386` populates `ChatMessage`
+  (`schema.rs:776-785`, `enabled` at `:777`; `:555`/`:624` are the `DEFAULTS` field and its value) — and
+  outside `config/mod.rs` only the privacy fields are read (`crates/mem-ai/src/privacy/layer.rs:74-77`:
   `filter_injected_prompts`, `injection_markers`). `chat_message.enabled` has **zero** consumers.
   `grep -rn 'chat_message\.' crates --include=*.rs` is the measurement.
 
@@ -252,3 +253,71 @@ unaffected.
 compatibility signal, and default `true` coincides with the fail-open direction.
 
 **Rollback.** Revert the commit. No schema migration, no store format change, no protocol bump.
+
+## Comments
+
+### 2026-11-02 — coordinated gate landed (blueprint `chat-message-capture-gate-r5-20261102-1054`, sha `5335a695f3bd`)
+
+Every RED below was measured at HEAD `616dc32` **before** the change that greens it, and every
+characterization row was closed by applying its named mutant, observing which legs fail, and reverting
+(`cmp -s` verified after each revert). All runs are local; nothing was pushed.
+
+**RED@616dc32 — the five refusal/advertisement rows**
+
+```
+cargo test -p mem-bridge --test capture_chat_message_gate
+test_capture_refused_when_chat_message_disabled        FAILED  left: {"accepted":true}
+test_chat_capture_refusal_precedes_project_id_validation FAILED -32602 data:{"project_id":null,"violation":"missing"}
+test_hello_advertises_chat_message_enabled_outside_capabilities FAILED result["config"] = Null
+test_runtime_less_engine_advertises_true_and_refuses_capture_as_degraded FAILED hello config = Null
+```
+`bridge_fixtures::test_hello_response_schema_equal_after_mask` then failed exactly as designed
+("hello-response.json: response drifted from the frozen schema", left carries `config`,
+right does not) until the fixture was re-frozen with `"config":{"chat_message_enabled":true}`.
+
+`wire_production::test_production_composition_gates_hello_and_capture_from_one_config`:
+`left: Bool(true)`, `right: Bool(false)` — the builder chain missing.
+
+`capture_chat_message_gate::test_first_refused_capture_names_it_once` (child process, stderr on a
+file): **0** `capture.refused` lines before the latch, **1** after; the line is exactly
+`{"component":"capture","event":"capture.refused","level":"warn","reason":"chat_message_disabled"}`.
+
+**RED@616dc32 — the wrapper half (stub-engine harness, issue 91)**
+
+```
+node --test plugin/tests/capture-payload.test.mjs
+test_idle_capture_is_skipped_when_the_engine_advertises_chat_messages_off  FAILED
+  "exactly one named skip line"  0 !== 1   (marker: deadline, 5093 ms)
+```
+Measured with the settle signal swapped to a capture count, so the numbers are observed rather than
+asserted (`.tmp/scratch/issue98-gate/red-probe.mjs`, same fixture):
+`{"captures":1,"messages_calls":1,"chat_message_disabled_lines":0}` — with the key advertised as
+`false`, the unmodified wrapper still read the transcript and posted the capture.
+
+`test_a_replacement_child_that_advertises_nothing_captures_again` (AC8) RED without the
+`teardownChild` clear: `captures 0 !== 1` after a 5167 ms deadline, while the same run's two
+anti-vacuity legs **passed** (2 `hello` handshakes, exactly 1 `capture.chat_message_disabled` line) —
+so the failure is the stale `false`, not a broken fixture.
+
+**Characterization rows — the mutants, applied and reverted**
+
+| row | mutant | observed |
+|---|---|---|
+| AC2 (wrapper) | gate returns unconditionally (`if (true)`) | `test_idle_capture_still_runs_..._on` FAILS: diagnostic count `1 !== 0`, run reaches its 5 s deadline |
+| AC3a/b/c | truthiness gate `if (!state.engineChatCaptureEnabled)` | all three `keeps_capture` rows FAIL: `1 !== 0` diagnostics, ~5.1 s deadline each (fail-open inverted) |
+| AC2 (engine) | gate ignores the getter (`if true`) | `test_capture_accepted_when_chat_messages_are_on` FAILS: `left: {"accepted":false,"reason":"chat_message_disabled"}`, `right: {"accepted":true}` |
+| AC9 | the gate hoisted over the shared write path, so `add` is gated | `test_add_and_manual_writes_ignore_the_chat_capture_gate` FAILS at `capture_chat_message_gate.rs:315` — `add` answered the refusal instead of an id |
+
+**Counts re-derived, not inherited** (`616dc32`, wrapper): 28 `plugin/tests/*.test.mjs` files, **183**
+cases; **11** of them import `plugin/tests/harness/bridge.mjs` and carry **108** cases; after the
+wave: 189 cases in 28 files, `cargo test -p mem-bridge --test capture_chat_message_gate` = 7 passed
++ 1 ignored, `bridge_fixtures` = 23, `wire_methods` = 18, `capture_context` = 7,
+`profile_decay_lifecycle` = 5 passed + 1 ignored, `wire_production` = 2.
+
+**Fixture hazards, both measured and both total:** text pasted into `DRIVER_SOURCE`
+(`capture-payload.test.mjs`) or into `stubEngineSource`'s body (`bridge.mjs`) is evaluated when a file
+is written, so it admits no raw backtick, no `${`, and doubled backslashes (`\\n`, not `\n`). A single
+`\n` makes the emitted driver `SyntaxError: Invalid or unexpected token`; a raw backtick makes
+`node --check plugin/tests/harness/bridge.mjs` exit 1 at `:205` and all 11 importer files (108 cases)
+fail at import. Both checks ran before every `node --test` in this wave: `node --check
+plugin/tests/harness/bridge.mjs` exit 0 and the emitted driver (`.tmp/scratch/issue98-gate/`) exit 0.

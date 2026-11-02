@@ -271,3 +271,62 @@ async fn test_engine_from_composed_wires_every_service_and_calls_the_factory() {
     assert_eq!(exports.len(), 1, "the fake backend saw one export");
     assert_eq!(exports[0].1, output_path);
 }
+
+// ---------------------------------------------------------------------------
+// C2 / AC6 — the end-to-end oracle: a real `Config` with the key off must make
+// `hello` advertise `false` AND `capture` refuse, from the SAME engine.
+//
+// Without this row a missed `.with_chat_capture_enabled(...)` chain in
+// `composition.rs` leaves every other test green and the switch dead, because
+// the whole failure mode is fail-open.
+// ---------------------------------------------------------------------------
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_production_composition_gates_hello_and_capture_from_one_config() {
+    let root = TestDir::new("wire-production-gate-root");
+    let home = TestDir::new("wire-production-gate-home");
+    let env: BTreeMap<String, String> = [("HOME", home.path().to_string_lossy().to_string())]
+        .map(|(key, value)| (key.to_string(), value))
+        .into_iter()
+        .collect();
+    let mut config =
+        Config::load(&ConfigPaths::standard(home.path()), &env).expect("the resolved config loads");
+    config.storage_path = root.path().to_path_buf();
+    config.embedding_dimensions = 8;
+    config.chat_message.enabled = false;
+
+    let embedder = Arc::new(FakeEmbedder::with_vector(unit_vector(0)));
+    let composed = build_composed_runtime(root.path(), &config, embedder, None)
+        .await
+        .expect("the runtime composes");
+    let factory = RecordingFactory::default();
+    let engine = Engine::from_composed(EngineConfig::default(), &composed, &config, Some(&factory));
+
+    let hello = dispatch(&engine, "hello", json!({"client": "probe"})).await;
+    assert_eq!(
+        result(&hello)["config"]["chat_message_enabled"],
+        json!(false),
+        "the resolved config value reaches the handshake through the builder chain"
+    );
+
+    let project_dir = root.path().join("probe-project");
+    std::fs::create_dir_all(&project_dir).expect("create the project directory");
+    let refused = dispatch(
+        &engine,
+        "capture",
+        json!({
+            "session_id": "ses-production-gate",
+            "capture_id": "019a0000-0000-7f00-8000-0000000000a6",
+            "project_id": project_dir.to_string_lossy().to_string(),
+            "agent_id": "agent-1",
+            "transcript": "fix the login bug",
+            "metadata": { "promptId": "prompt-production-gate" },
+        }),
+    )
+    .await;
+    assert_eq!(
+        result(&refused),
+        &json!({"accepted": false, "reason": "chat_message_disabled"}),
+        "the same engine that advertises `false` refuses the capture"
+    );
+}

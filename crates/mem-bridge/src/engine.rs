@@ -170,7 +170,13 @@ impl Default for EngineConfig {
 }
 
 /// The hello handshake result body (frozen, `tests/fixtures/bridge/`).
-fn handshake_result(config: &EngineConfig) -> serde_json::Value {
+///
+/// Issue 98: `chat_message_enabled` travels in its own top-level `config`
+/// object, never inside `capabilities` — that map means "this build answers
+/// method X", every key is `true` by construction, and a config-derived
+/// `false` there would be indistinguishable from an old build that omits the
+/// key (D-98-4).
+fn handshake_result(config: &EngineConfig, chat_message_enabled: bool) -> serde_json::Value {
     serde_json::json!({
         "capabilities": {
             // Issue 68 (D-43): this build's `inject` honours `include.compaction`
@@ -198,6 +204,7 @@ fn handshake_result(config: &EngineConfig) -> serde_json::Value {
             "export": true,
             "import": true,
         },
+        "config": { "chat_message_enabled": chat_message_enabled },
         "engine_version": config.engine_version,
         "methods": RUNTIME_METHODS,
         "protocol": config.protocol,
@@ -229,6 +236,10 @@ pub struct Engine {
     /// dead or expired — never re-waits a later `inject`, and its one named
     /// warn is never re-emitted per request.
     startup_barrier_settled: AtomicBool,
+    /// Issue 98 (C5): latches the one `capture.refused` line this process
+    /// emits. A flag-off engine would otherwise write a line per idle event —
+    /// unbounded stderr in exactly the state the user asked for silence.
+    chat_capture_refused: AtomicBool,
 }
 
 /// The dependency-bearing runtime: composed ONCE by the engine root
@@ -257,6 +268,7 @@ impl Engine {
             runtime: None,
             startup_drain: None,
             startup_barrier_settled: AtomicBool::new(false),
+            chat_capture_refused: AtomicBool::new(false),
         }
     }
 
@@ -466,7 +478,16 @@ impl Engine {
                 error_map::message_for(ErrorKind::InvalidRequest),
             );
         }
-        Response::result(request.id.clone(), handshake_result(&self.config))
+        Response::result(
+            request.id.clone(),
+            handshake_result(
+                &self.config,
+                self.runtime
+                    .as_ref()
+                    .map(|runtime| runtime.capture.chat_capture_enabled())
+                    .unwrap_or(true),
+            ),
+        )
     }
 
     /// The `session_id` data gate shared by every runtime method except
@@ -524,6 +545,33 @@ impl Engine {
         };
         if self.config.degraded_reason.is_some() {
             return degraded_capture(request);
+        }
+
+        // Issue 98 (C7): the chat-capture gate. After the runtime/degraded
+        // checks (a runtime-less or degraded engine still answers -32001) and
+        // BEFORE payload validation and enqueue: a refusal must never depend on
+        // the payload being well-formed. The envelope's session-id gate has
+        // already run.
+        if !runtime.capture.chat_capture_enabled() {
+            // C5: one latched line per process — the no-op must be
+            // distinguishable from a broken engine, but the idle path runs
+            // per turn, so an unlatched line is unbounded noise. No payload,
+            // no transcript, no path: the reason is the whole content.
+            if !self.chat_capture_refused.swap(true, Ordering::SeqCst) {
+                structured_stderr(
+                    "capture.refused",
+                    "warn",
+                    "capture",
+                    serde_json::json!({ "reason": crate::capture::CHAT_MESSAGE_DISABLED_REASON }),
+                );
+            }
+            return Response::result(
+                request.id.clone(),
+                serde_json::json!({
+                    "accepted": false,
+                    "reason": crate::capture::CHAT_MESSAGE_DISABLED_REASON,
+                }),
+            );
         }
 
         // A2, WRITE path: `capture` with a missing or blank `project_id`

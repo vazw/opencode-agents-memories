@@ -51,7 +51,7 @@ The wrapper's **first** message after spawn is `hello`. No runtime method may pr
 ```
 
 ```json
-{"id":"hello-1","jsonrpc":"2.0","result":{"capabilities":{"add":true,"compaction":true,"export":true,"fire_and_forget_capture":true,"forget":true,"import":true,"list":true,"list-shards":true,"migrate":true,"profile":true,"search":true,"skills":true,"standalone":true,"web":true},"engine_version":"0.1.0","methods":["capture","inject","recall","skills","health","shutdown","add","search","forget","list","profile","list-shards","migrate","export","import"],"protocol":"1.0.0"}}
+{"id":"hello-1","jsonrpc":"2.0","result":{"capabilities":{"add":true,"compaction":true,"export":true,"fire_and_forget_capture":true,"forget":true,"import":true,"list":true,"list-shards":true,"migrate":true,"profile":true,"search":true,"skills":true,"standalone":true,"web":true},"config":{"chat_message_enabled":true},"engine_version":"0.1.0","methods":["capture","inject","recall","skills","health","shutdown","add","search","forget","list","profile","list-shards","migrate","export","import"],"protocol":"1.0.0"}}
 ```
 
 Protocol version is one semver line owned by ADR-0007; its current value is `1.0.0`.
@@ -82,6 +82,17 @@ value, never a throw).
 `hello` is **not** a runtime method (D-40): it takes no `session_id` and is not counted in
 the fifteen.
 
+**Issue 98 — the `config` object.** The result carries a second sibling object, `config`,
+whose only key today is `chat_message_enabled`: the engine's **resolved** `chatMessage.enabled`
+(the same value its `capture` gate enforces). It is additive and fail-open — an engine that
+omits the key, or the object, predates issue 98 and the wrapper keeps capturing — and only the
+exact boolean `false` makes the wrapper skip the transcript fetch and the capture. The value
+is read **once per child handshake** (the engine resolves its config at startup; there is no
+hot reload, so a mid-session edit takes effect on the next spawn), and a child that omits the
+member never overwrites what a previous child advertised — the cached value is retired with
+the child itself. It is never a `capabilities` key: that map means "this build answers method
+X", where a config-derived `false` would be indistinguishable from an absent key.
+
 ## 3. The fifteen runtime methods (D-40, D-46)
 
 `session_id` is a **required top-level parameter of every method except `skills`**, which
@@ -95,7 +106,7 @@ never grants access to another session's rows.
 
 | method | blocking | params | result |
 |---|---|---|---|
-| `capture` | no (fire-and-forget ack) | `session_id` (req), `capture_id` (req), `project_id?`, `agent_id?`, `agent_name?`, `parent_session_id?`, `transcript?`, `summary?`, `metadata?` — a capture **persists only when `agent_id` and `project_id` are present and non-empty** (the engine's validation is strict; an empty one dead-letters) | `{"accepted":true}` |
+| `capture` | no (fire-and-forget ack) | `session_id` (req), `capture_id` (req), `project_id?`, `agent_id?`, `agent_name?`, `parent_session_id?`, `transcript?`, `summary?`, `metadata?` — a capture **persists only when `agent_id` and `project_id` are present and non-empty** (the engine's validation is strict; an empty one dead-letters) | `{"accepted":true}` or, when `chatMessage.enabled` is off, `{"accepted":false,"reason":"chat_message_disabled"}` |
 | `inject` | **yes** | `session_id` (req), `project_id?`, `agent_id?`, `token_budget?`, `include?` | `{"block":string\|null,"memory_count":int,"tokens":int,"truncated":bool,"handling_ms":int}` |
 | `recall` | no | `session_id` (req); **canonical** when `projectId` is present (camelCase, no unknown keys): `projectId` (req), `mode?` (`"chronological"\|"semantic"\|"filtered"`), `query?` (semantic only), `since?`, `until?`, `lastNSessions?`, `touchedFiles?`, `agentId?`, `sessionId?` (filter key), `includeFullSessions?`; **legacy** otherwise: `query` (req, string), `limit?`, `scope?`, `tags?` (these keys only) | `{"items":[…],"count":int}` |
 | `skills` | **yes** | `project_id` (req); no `session_id` | `{"skills":[{"id":string,"name":string,"path":string,"content":string,"autoinvoke":bool,"description"?:string}]}` |
@@ -110,6 +121,14 @@ never grants access to another session's rows.
 | `migrate` | **yes** | `session_id` (req), `project_path` (req), `from_path?`, `from_hash?` (16 lowercase hex), `dry_run?`, `allow_linked_source?`; at least one of `from_path`/`from_hash` | `{"actions":[…],"dry_run":bool,"matched_by":string,"migrated_memories":int,"migrated_shards":int,"new_hash":string,"new_path":string\|null,"old_hash":string,"old_path":string\|null}` |
 | `export` | **yes** | `session_id` (req), `project_id` (req), `output_path` (req, absolute `.json`) | `{"container_tag":string,"count":int,"output_path":string,"scope_hash":string}` |
 | `import` | **yes** | `session_id` (req), `project_id` (req), `input_path` (req, absolute `.json`), `dry_run?` | `{"container_tag":string,"dry_run":bool,"imported":int,"rejected":[{"id","reason"}],"skipped":[{"id","reason"}]}` |
+
+**Issue 98 — the `capture` refusal.** When the engine's resolved `chatMessage.enabled` is off,
+`capture` answers `{"accepted":false,"reason":"chat_message_disabled"}` on the normal result
+channel — never an error, so no error code or `capture.failed` line is manufactured. The
+refusal precedes **payload** validation: a caller with a valid envelope and a malformed payload
+gets the refusal, not `-32602`. The envelope's own `session_id` gate still runs first, so a
+`capture` with no `session_id` remains `-32602` with or without this key. `add` and the other
+manual writes are unaffected — the key gates the chat-capture path only.
 
 `skills` (issue 69) returns the **enabled** skills tagged with the request's project plus the
 global ones (`container_tag IS NULL OR container_tag = <project tag>`); an unknown project is

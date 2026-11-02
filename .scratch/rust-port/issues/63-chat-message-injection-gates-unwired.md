@@ -11,17 +11,18 @@ Sequencing parent: issue 94. This issue owns the switch; 85 owns the session-id 
 ## PREMISE — measured, not inherited
 
 `crates/mem-core` resolves the chat-message configuration and hands it to the engine. **Six resolved keys have
-zero readers under `crates/mem-bridge/`** — measured with `grep -rnw '<key>' --include='*.rs' crates/mem-bridge`,
-which returns nothing for every row:
+no `inject`-side reader under `crates/mem-bridge/`** — measured with `grep -rnw '<key>' --include='*.rs'
+crates/mem-bridge`. One of them, `chat_message_enabled`, gained a **capture**-side reader in issue 98 (last
+row of the table); the injection side still gates on none of them.
 
 | key | resolved at | upstream gate | mem-bridge readers |
 |---|---|---|---|
-| `chat_message_enabled` | `crates/mem-core/src/config/mod.rs:360` | `example/opencode-mem/src/index.ts:646` — `if (!isConfigured() \|\| !CONFIG.chatMessage.enabled) return false` | **0** |
-| `exclude_current_session` | `config/mod.rs:366-370` | `index.ts:691-693` — drops rows whose `metadata.sessionID` is the current session | **0** |
-| `max_age_days` | `config/mod.rs:371-375` | `index.ts:695-698` — `cutoff = Date.now() - maxAgeDays * 86400000`, keep `createdAt > cutoff` | **0** |
+| `chat_message_enabled` | `crates/mem-core/src/config/mod.rs:360` | `example/opencode-mem/src/index.ts:670` — `if (!isConfigured() \|\| !CONFIG.chatMessage.enabled) return false`; the same gate also stands at `:735`, `:748`, `:767` | one **capture**-side reader (issue 98): `crates/mem-bridge/src/capture.rs` `chat_capture_enabled` + `engine.rs::call_capture`; the six `inject`-side keys stay at 0 |
+| `exclude_current_session` | `config/mod.rs:366-370` | `services/memory-recall.ts:159-160` — `excludeSessionId` set at `:159` and applied at `:179-218` (`c81a04d` moved it out of `index.ts:691-693`) | **0** |
+| `max_age_days` | `config/mod.rs:371-375` | `services/memory-recall.ts:159-160,179-218` — `createdAfter = Date.now() - maxAgeDays * 86400000` at `:160`, filtered at `:179-218` | **0** |
 | `inject_on` | `config/mod.rs:375-379` | `index.ts:721` — `refreshOnPrompt: () => injectOn === "always"` | **0** |
-| `max_memories` | `config/mod.rs` (resolved; 14 references outside mem-bridge) | `index.ts:684-687` — `listMemories(projectTag, maxMemories)` | **0** |
-| `capture_child_sessions` | `config/mod.rs` (resolved; 7 references outside mem-bridge) | `index.ts:674-676` — skip child/subagent sessions | **0** |
+| `max_memories` | `config/mod.rs` (resolved; 14 references outside mem-bridge) | `services/memory-recall.ts:179-218` — `opts.maxMemories` at `:179`, `:190`, `:201`, `:204`, `:216`, `:218` | **0** |
+| `capture_child_sessions` | `config/mod.rs` (resolved; 7 references outside mem-bridge) | `index.ts:698` — `if (!CONFIG.chatMessage.captureChildSessions && (await isChildSession(...)))`; the same gate also stands at `:754` | **0** |
 
 `InjectService::assemble` (`crates/mem-bridge/src/inject.rs:167`) opens with the A2 `project_id` guard and then
 proceeds. It gates on **nothing else**: no enabled check, no age filter, no session exclusion, no count limit.

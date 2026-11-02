@@ -407,6 +407,15 @@ pub struct RuntimeFixture {
 }
 
 pub async fn build_fixture_runtime(storage_root: &Path) -> RuntimeFixture {
+    build_fixture_runtime_with_chat_capture(storage_root, true).await
+}
+
+/// Issue 98: the same fixture runtime with the chat-capture flag set, so the
+/// engine-side gate is testable without a composed config.
+pub async fn build_fixture_runtime_with_chat_capture(
+    storage_root: &Path,
+    chat_capture_enabled: bool,
+) -> RuntimeFixture {
     let config = store_config(storage_root.to_path_buf());
     let store = Arc::new(EpisodicStore::new(
         storage_root.to_path_buf(),
@@ -428,7 +437,8 @@ pub async fn build_fixture_runtime(storage_root: &Path) -> RuntimeFixture {
         None,
         Arc::new(FixedScopeResolver::default()),
         131_072,
-    );
+    )
+    .with_chat_capture_enabled(chat_capture_enabled);
     let inject = mem_bridge::inject::InjectService::new(
         store.clone(),
         shards.clone(),
@@ -573,6 +583,18 @@ pub async fn build_wire_fixture(
     embedder: Arc<FakeEmbedder>,
     portability: Option<Arc<dyn PortabilityBackend>>,
 ) -> WireFixture {
+    build_wire_fixture_gated(dir, resolver, embedder, portability, true).await
+}
+
+/// Issue 98: the wire fixture with the chat-capture flag set, so the `add`
+/// boundary (AC9) can be observed on a flag-off engine.
+pub async fn build_wire_fixture_gated(
+    dir: TestDir,
+    resolver: Arc<MapScopeResolver>,
+    embedder: Arc<FakeEmbedder>,
+    portability: Option<Arc<dyn PortabilityBackend>>,
+    chat_capture_enabled: bool,
+) -> WireFixture {
     let storage = dir.path().to_path_buf();
     let config = dir.store_config();
     let store = Arc::new(EpisodicStore::new(storage.clone(), config.clone()));
@@ -603,7 +625,8 @@ pub async fn build_wire_fixture(
         None,
         Arc::new(FixedScopeResolver::default()),
         131_072,
-    );
+    )
+    .with_chat_capture_enabled(chat_capture_enabled);
     let inject = mem_bridge::inject::InjectService::new(
         store.clone(),
         shards.clone(),
@@ -744,4 +767,34 @@ pub fn exclusive_root(storage_root: &Path) -> Arc<mem_store::delete_guard::Exclu
         }
     };
     Arc::new(mem_store::delete_guard::ExclusiveRoot::new(lock))
+}
+
+/// Runs one `#[ignore]`d case in a CHILD of this same test binary, its stderr
+/// on a FILE (`structured_stderr` writes to the raw descriptor, which libtest's
+/// capture never intercepts), and returns what the child wrote there.
+///
+/// Moved here verbatim from `profile_decay_lifecycle.rs` (issue 98, D-98-11):
+/// one implementation, two users.
+pub fn run_captured(inner: &str, dir: &TestDir) -> String {
+    let log = dir.path().join("child.err");
+    let stderr = std::fs::File::create(&log).expect("create the child stderr file");
+    let status = std::process::Command::new(std::env::current_exe().expect("this test binary"))
+        .args([
+            "--exact",
+            inner,
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::from(stderr))
+        .status()
+        .expect("the child test binary runs");
+    let text = std::fs::read_to_string(&log).unwrap_or_default();
+    assert!(
+        status.success(),
+        "the child case `{inner}` must pass: {status}\n{text}"
+    );
+    text
 }

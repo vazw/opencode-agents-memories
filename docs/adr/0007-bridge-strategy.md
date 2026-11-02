@@ -310,6 +310,21 @@ Grounds: the handshake is what turns a version mismatch into a D-38 degradation 
 `-32601`/`-32602` errors from an engine that cannot serve the wrapper; the major-equal + floor rule is the
 smallest rule that admits additive engine upgrades while refusing a breaking one.
 
+**Amendment (issue 98, 2026-11-02).** The `hello` result gains a second sibling object beside
+`capabilities`: **`config`**, whose only key today is `chat_message_enabled` — the engine's RESOLVED
+`chatMessage.enabled`, the same value its `capture` gate enforces (`{"config":{"chat_message_enabled":true}}`).
+Three rules bind it. **One, it is never placed inside `capabilities`:** that map's invariant is "this build
+answers method X", every key is `true` by construction and the wrapper's reader is `capabilities[name] === true`,
+so a config-derived `false` there would be indistinguishable from an old build that omits the key — which is
+exactly the case that must keep capturing. **Two, the read is fail-open and presence-conditional:** only the
+exact boolean `false` refuses anything, and a child that omits the member (or the whole object) leaves the
+wrapper's cached value untouched, so a downgraded engine — `plugin/engine/<platform>-<arch>/` is a staged
+binary that upgrades and downgrades — never inherits a dead child's `false`. **Three, it is read once per child
+handshake:** the engine resolves its config at startup and advertises that value; there is no hot reload, so a
+mid-session config edit takes effect on the next engine spawn. No new ADR and no `PROTOCOL_VERSION` bump:
+absence of the key remains the compatibility signal, and the new key's default (`true`) coincides with the
+fail-open direction.
+
 ### D-44 — Errors: the JSON-RPC 2.0 standard codes, plus one reserved implementation-defined code
 
 **The error codes are:** `-32700` parse error (a line that is not valid JSON), `-32600` invalid request (not a
@@ -367,6 +382,15 @@ method; `forget` additionally takes `project_id` (the host directory) and `memor
 canonical W4.2 argument set, discriminated by a present `projectId`, and the frozen legacy
 subset. `docs/bridge-schema.md` §3 carries the same row; the canonical shape has been served
 since issue 22 (`e58e703`), and the legacy shape remains a logged empty page.
+
+**Amendment (issue 98, 2026-11-02).** D-46's `capture` result cell is amended to two shapes:
+`{"accepted":true}` **or** `{"accepted":false,"reason":"chat_message_disabled"}`. The refusal is a RESULT, not
+an error, so D-44's closed error registry is untouched and no `capture.failed` warn line is manufactured by an
+old wrapper that never re-checks the value. It is emitted BEFORE payload validation and before the enqueue —
+a caller with a valid envelope and a malformed payload gets `chat_message_disabled`, never `-32602` — while the
+envelope's own `session_id` gate still runs first, so a `capture` with no `session_id` stays `-32602` with or
+without this key. `add` and the other manual writes are deliberately NOT gated: upstream gates the chat path
+only.
 
 `capture_id` is a client-minted idempotency key (≤ 64 chars). The `capture` ack is returned **before** the
 summarisation and **before** the DB write, so the ack carries no `duplicate` flag: the idempotency check (D-36)
