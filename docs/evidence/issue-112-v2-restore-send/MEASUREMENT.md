@@ -254,3 +254,50 @@ fails, the next discriminating observations are `parent_id` on the compacted ses
 the transcript fallback, which needs an agent-bearing row the slice cannot contain). Query
 `session_message` for rows and `session_v2` for the session: the live table is `session_v2`, and
 `session` is a stale 126-row pre-rename leftover whose query would "prove" the session does not exist.
+
+### 8.5 The re-run: PASSED (`MEASURED` read-only, 2026-11-02T07:12Z)
+
+The owner restarted the host and compacted two sessions. Both wrote a restore row — the first restores
+since `2026-10-30 22:49:04`.
+
+**The loaded code is provably the reviewed commit.** `git hash-object` of the working-tree
+`plugin/dist/plugin.js` and `plugin/dist/v2/legacy-client.js` returns `59d90ef8…` and `af8dd029…`,
+equal to the `HEAD` (`8a13ce3`) tree blobs, and each `src` twin hashes to the same pair.
+
+```
+session_id                     compaction             restore row             gap
+ses_e90309e58ffeUH4XeVmlAW3zpa 14:05:38 (seq 14123)   14:09:08 (seq 14131)    2m45s after the inject
+ses_e9d5dd698ffe5lUV7W7s2KDpbh 14:09:39 (seq 64133)   14:10:19 (seq 64153)      12s after the inject
+```
+
+```sh
+DB="file:$HOME/.local/share/opencode/opencode.db?mode=ro"
+sqlite3 "$DB" "select session_id, datetime(time_created/1000,'unixepoch','localtime'), seq
+  from session_message where type='synthetic'
+  and data like '%\"description\":\"memory context\"%'
+  and time_created > 1793600000000 order by time_created;"
+sqlite3 "$DB" "select seq, type, datetime(time_created/1000,'unixepoch','localtime')
+  from session_message where session_id='ses_e90309e58ffeUH4XeVmlAW3zpa'
+  and time_created > 1793600000000 order by time_created;"
+```
+
+Both rows carry `description: "memory context"`, open `## Restored Session Memory`, hold **10**
+`### Memory` headings (6289 and 10615 bytes), and their sessions have an empty `parent_id` — so the
+restore child gate is not what admitted them. The host restarted at `14:05:14` (serve pid 32490; engine
+pid 672 at `14:05:18`), and the engine logged the two injects per compaction
+(`14:05:38`/`14:06:23` and `14:09:39`/`14:10:07`), consistent with ingest + restore.
+
+Two things this re-run also shows:
+
+- The gate resolved a session whose `session_v2.agent` is `config-main` (model
+  `{"id":"deepseek-v4.1-flash","providerID":"opencode-go","variant":"high"}`) — i.e. the restored
+  `session.get` path returns a real agent string, not the `main` the transcript fallback happened to
+  yield.
+- The delay between the engine's restore inject and the row's admission varies by an order of
+  magnitude (`2m45s` vs `12s`) with no code difference between the two runs — `INFERRED`, not
+  measured: admission waits for the run to release the session. It does not affect the pass; the row
+  is what this issue names.
+
+**The toast was not machine-observed.** `ctx.attention.notify` is unused by decision (ADR-0017
+DECISION 11) and the toast crosses `MemToast` → `tui.js` → `ctx.ui.toast.show`, which needs a TUI
+client to witness — so it is confirmed by eye, not by this file. The row is the oracle.

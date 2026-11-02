@@ -1,7 +1,8 @@
 # 114 — the V2 restore's agent gate: `session.get` restored
 
 Status: done — 2026-11-02 — implemented in the wave that created this file (local commit, nothing
-pushed); the live re-run is owner-run after review.
+pushed); the live re-run is owner-run after review and **PASSED** (2026-11-02 14:09–14:10 +07, see the
+last section).
 
 Issue 112 shipped the V2 post-compaction restore's send and passed review (`18fea68`), then failed live:
 no restore row and no toast were ever produced. This issue records the live evidence, the confirmed
@@ -131,14 +132,26 @@ slice contains no assistant rows at all.
   byte-unchanged in this wave, so the note is a follow-up edit, not a silent leftover.
 - `plugin/src/plugin.js` (ingest) has no child gate by ruling; the capture child gate belongs to issue 63.
 
-## Live verification (owner-run)
+## Live verification — PASSED 2026-11-02T14:09–14:10 +07 (owner-run)
 
-`/compact` a session with at least one visible user message, wait for completion, expect the **Memory
-Restored** toast, then the read-only query in
-`docs/evidence/issue-112-v2-restore-send/MEASUREMENT.md` §8.4 (query `session_message` for the row and
-`session_v2` for the session — not `session`). If it still fails, the next discriminating observations
-are `parent_id` in `session_v2` (a child means the gate, not the agent) and
-`json_extract(data,'$.agent')` on that row (`NULL` means the fallback).
+`/compact` on two sessions after the host restart, then read-only
+(`docs/evidence/issue-112-v2-restore-send/MEASUREMENT.md` §8.5 carries the full block):
+
+```
+ses_e90309e58ffeUH4XeVmlAW3zpa  compaction 14:05:38 → restore row 14:09:08  (10 memories)
+ses_e9d5dd698ffe5lUV7W7s2KDpbh  compaction 14:09:39 → restore row 14:10:19  (10 memories)
+```
+
+Both rows carry `description: "memory context"` and open `## Restored Session Memory`; both sessions
+have an empty `parent_id`. The newest such row before the run was `2026-10-30 22:49:04`, so these are
+the first restores in three days. The loaded `dist` was verified equal to the `8a13ce3` tree blobs by
+`git hash-object` before the run was credited. The **Memory Restored** toast is confirmed by eye, not
+by this file (ADR-0017 DECISION 11 keeps `attention.notify` unused; the toast crosses
+`MemToast` → `tui.js` → `ctx.ui.toast.show`).
+
+If a future run regresses, the next discriminating observations are `parent_id` in `session_v2` (a
+child means the gate, not the agent) and `json_extract(data,'$.agent')` on that row (`NULL` means the
+fallback). Query `session_message` for the row and `session_v2` for the session — not `session`.
 
 ## Parent
 

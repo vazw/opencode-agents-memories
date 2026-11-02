@@ -2,7 +2,8 @@
 
 Status: done — 2026-11-02 — implemented in the wave that created this file (local commit, nothing pushed).
 **Live verification FAILED** after shipping: two restore injections, zero rows — D-112-4 reversed and
-the fix tracked in issue 114 (see the 2026-11-02 comment below).
+the fix tracked in issue 114 (see the 2026-11-02 comment below). **Re-run PASSED 2026-11-02 14:09–14:10
++07** after issue 114: two restore rows written, ten memories each (`MEASUREMENT.md` §8.5).
 
 The 2026-10-21 ruling ("the compaction hook does BOTH halves … the restore mirrors upstream via a
 synthetic no-reply prompt") stands; issue 67's no-send deviation was the outlier. This issue restores
