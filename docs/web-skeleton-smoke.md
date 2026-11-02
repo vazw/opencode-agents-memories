@@ -451,9 +451,13 @@ curl -i http://127.0.0.1:<port>/api/projects/demo-project/sessions
 
 The W6.2 REST surface (issue 24) was smoked **live** against the engine
 binary built from this workspace, on a throwaway store, one request per
-`ROUTE_TABLE` row. The 37 rows below are the whole table: the requests are
-pinned 1:1 to `crates/mem-web/src/api/mod.rs`, so a row added or dropped
-there shows up here as a count mismatch.
+`ROUTE_TABLE` row. The 41-row table has 37 smoke rows as recorded on
+2026-10-21; four rows have no smoke row yet — `GET
+/api/projects/{project_id}/milestones` and `DELETE /api/user-profile` (both
+added after that measurement) and the two port-only rows added by issues 115/116
+(`GET /api/projects`, `GET /api/user-profiles`). The rows below are pinned 1:1
+to `crates/mem-web/src/api/mod.rs`, so a row added or dropped there shows up
+here as a count mismatch.
 
 Every verdict is **derived**, never asserted by hand. An **asserted** row
 passes when the live status is inside its status set *and* the response body
