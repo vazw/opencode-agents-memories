@@ -1,6 +1,10 @@
 # 110 — the capture inbox has no scheduling ("not before") column, so a long retry hint can only dead-letter
 
-Status: ready-for-agent — 2026-11-02 owner ruling: **retire the 30 s ceiling**; add `not_before`.
+Status: done — 2026-11-02 — landed in `11cfc0f` (blueprint `capture-inbox-not-before-r5-20261102-1620`,
+sha `b7dd722d575e`): a nullable `capture_inbox.not_before` (episodic schema v7) with the drain selecting
+`status = 'queued' AND (not_before IS NULL OR not_before <= now)`; any `retryAfterMs` schedules the next
+attempt and consumes no attempt, and `HOST_RETRY_AFTER_CEILING_MS` is deleted (ADR-0029 D-29-12).
+External review pending — this line claims the landing, not an APPROVED verdict.
 
 Filed by issue 108's blueprint (stateless-capture wave) as a TRACKED deferral: the behaviour it names is
 implemented and deliberate, but the missing column is a design gap, not a settled choice.
