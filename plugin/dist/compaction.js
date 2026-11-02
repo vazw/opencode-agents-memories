@@ -7,9 +7,11 @@
 // "unknown" (never a throw, never a skip by accident).
 //
 // The child gate is POSITIVE-EVIDENCE-ONLY (ADR-0017 DECISION 2): a non-empty
-// `parentID` means child; an absent `session.get` (the V2 legacy client exposes
-// none), a null response or a throw means "not a child, proceed". Treating
-// "unknown" as "child" would silently disable the restore for every V2 session.
+// `parentID` means child; a client that exposes no `session.get`, a null
+// response or a throw means "not a child, proceed". Treating "unknown" as
+// "child" would silently disable the restore for every V2 session. The V2
+// legacy client DOES expose `get` (restored by issue 114, commit 8a13ce3); the
+// absent-capability branch is the V1 SDK's, not V2's.
 
 /** Unwraps the SDK's `{data}` envelope (the V1 SDK returns `{data: ...}`). */
 function unwrap(response) {
