@@ -121,7 +121,7 @@ Everything else is port-owned: the wrapper↔engine stdio protocol, the on-disk 
 episodic/facts/profile tiers. See `docs/adr/` for the decisions (ADR-0003 web stack, ADR-0007 bridge
 strategy, ADR-0016 commit gate, and the schema/format ADRs).
 
-The behavioural reference is the vendored `example/opencode-mem/` clone (upstream v2.33.0 at the time
+The behavioural reference is the vendored `example/opencode-mem/` clone (upstream v2.39.0 at the time
 of writing; it is gitignored and never edited). This project is not affiliated with the upstream
 project.
 

@@ -56,8 +56,10 @@ Full process: `docs/agents/workflow.md`.
 ## Reference clone — `example/opencode-mem/`
 
 - Vendored clone of upstream [tickernelz/opencode-mem](https://github.com/tickernelz/opencode-mem) with
-  its own `.git`, gitignored (`/example/`): **`1ddfdad` (v2.33.0), 117 `*.test.ts` files** — the commit and
-  the test count move together; re-derive both before citing either.
+  its own `.git`, gitignored (`/example/`): **`9086c65` (v2.39.0), 140 `*.test.ts` files** — the commit and
+  the test count move together; re-derive both before citing either. (Updated 2026-11-02 from
+  `1ddfdad`/v2.33.0/117 files; the parity matrix is still pinned to an older commit — see
+  `docs/agents/testing.md`.)
 - **Read-only reference:** never edit it, never `git add -f` it. All port work lands in this repo's code.
 - Its `AGENTS.md` governs only that subtree (Bun tooling, Conventional Commits); those rules do not apply.
 - The upstream suite is the behavioural contract, but not every file is mirrored: each takes exactly one

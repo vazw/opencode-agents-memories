@@ -230,7 +230,7 @@ A grilling session was conducted across all five phases, producing concrete, loc
 ## Further Notes
 
 - Phases 2–6 decisions were made via grilling sessions with the user (2026-10-19); the Phase 7 live-swap decisions were measured 2026-10-30 and are recorded above.
-- Decisions are grounded in the upstream reference. The vendored clone has moved since the Phase 2–6 session: currently `1ddfdad` (v2.33.0); re-derive the commit and test count before citing either.
+- Decisions are grounded in the upstream reference. The vendored clone has moved since the Phase 2–6 session: currently `9086c65` (v2.39.0); re-derive the commit and test count before citing either.
 - Storage engine: `turso` crate 0.8.x (not `libsql` — no vector support).
 - Embeddings: `ort = "=2.0.0-rc.14"` + `tokenizers`.
 - Web UI: Leptos CSR + Thaw 0.4 (ADR-0003).

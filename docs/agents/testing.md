@@ -1,6 +1,6 @@
 # Testing conventions
 
-The upstream suite (`example/opencode-mem/tests/`, 110 files, v2.31.3 @ 906038e) is the behavioral contract for this port: every upstream test receives exactly one of three dispositions, making coverage explicit and auditable. Each ported mirror's mapping is recorded in the [mapping registry](#mapping-registry) below; the pin is `docs/agents/upstream-tests-906038e.txt` and `scripts/check-parity-matrix.sh` gates the union (110 rows, one disposition and one repo-grounded evidence cell each). The vendored clone is `1ddfdad` (v2.33.0, 117 files) — the 7 files added after the pin are outside this matrix until the owner re-pins.
+The upstream suite (`example/opencode-mem/tests/`, 110 files, v2.31.3 @ 906038e) is the behavioral contract for this port: every upstream test receives exactly one of three dispositions, making coverage explicit and auditable. Each ported mirror's mapping is recorded in the [mapping registry](#mapping-registry) below; the pin is `docs/agents/upstream-tests-906038e.txt` and `scripts/check-parity-matrix.sh` gates the union (110 rows, one disposition and one repo-grounded evidence cell each). The vendored clone is `9086c65` (v2.39.0, 140 files) — the 30 files added after the pin are outside this matrix until the owner re-pins. (Re-derived 2026-11-02: the clone moved `1ddfdad`/v2.33.0/117 → `9086c65`/v2.39.0/140, so the post-pin gap is 30 files, not the 7 this line recorded.)
 
 ## Where tests live
 
