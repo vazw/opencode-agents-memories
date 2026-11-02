@@ -1,9 +1,29 @@
 # 110 — the capture inbox has no scheduling ("not before") column, so a long retry hint can only dead-letter
 
-Status: needs-triage
+Status: ready-for-agent — 2026-11-02 owner ruling: **retire the 30 s ceiling**; add `not_before`.
 
 Filed by issue 108's blueprint (stateless-capture wave) as a TRACKED deferral: the behaviour it names is
 implemented and deliberate, but the missing column is a design gap, not a settled choice.
+
+## Ruling (owner, 2026-11-02)
+
+Verbatim: *"Retire the ceiling, add not_before."* The rule below is the binding consequence.
+
+The drain selects `status = 'queued' AND (not_before IS NULL OR not_before <= now)`. A failure that
+carries a retry hint writes `not_before = now + retryAfterMs` and stays `queued`, **whatever the hint's
+magnitude** — `HOST_RETRY_AFTER_CEILING_MS` stops being a dead-letter trigger. Dead-lettering remains
+the outcome for failure classes that carry no retry hint (`record_failure`'s other branches), so a
+permanent failure is still not retried forever.
+
+Consequences the implementing wave must state and test:
+
+- the ceiling constant loses its dead-letter role — say whether it is deleted or retained for another
+  purpose, and do not leave it half-used;
+- a `retryAfterMs: 120000` 502 flips from `dead` (attempts 0) to `queued` with `not_before` ≈ now+120 s —
+  the existing `test_108_502_above_the_ceiling_dead_letters` pins the old behaviour and must be
+  **replaced, not deleted**;
+- clock source: the drain's `now` and the writer's `now + retryAfterMs` must come from one source, or a
+  test using a fake clock will disagree with a row written by the real one.
 
 ## Evidence
 
