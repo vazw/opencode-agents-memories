@@ -23,6 +23,7 @@ use mem_ai::provider::{
     ProviderErrorKind,
 };
 use mem_bridge::capture::{CaptureParams, CaptureService};
+use mem_bridge::capture_context::{SUMMARY_OUTPUT_RESERVE_BYTES, SUMMARY_REQUEST_OVERHEAD_BYTES};
 use mem_bridge::capture_prompt::{CaptureSummarizer, ProviderCaptureSummarizer};
 use mem_bridge::capture_provider::{HostStructured, StructuredCapture};
 use mem_bridge::host_endpoint::ProcessClock;
@@ -31,6 +32,9 @@ use mem_core::env::EnvSource;
 use mem_episodic::store::EpisodicStore;
 use mem_store::platform::ProcessProbe;
 use mem_store::serde_json::Value;
+
+/// The production capture budget (upstream `DEFAULT_AUTO_CAPTURE_MAX_CONTEXT_BYTES`).
+const TOTAL: usize = 131_072;
 
 /// The structured reply the fake host gives: the documented
 /// `{"data":{"text": …}}` envelope, carrying a valid capture object as TEXT.
@@ -364,5 +368,55 @@ async fn test_host_prompt_body_carries_the_schema() {
     assert!(
         text.contains(mem_bridge::capture_context::SCHEMA_ANSWER_INSTRUCTION),
         "the schema is presented as an answer contract, not a trailing blob"
+    );
+}
+
+/// Issue 111 — the budget the builder promises is the budget the HOST receives.
+///
+/// `build_bounded_summary_prompt` charges `system + prompt + output_reserve +
+/// overhead <= total`, but the route folds `system` and the user text with a
+/// separator of its own (`prompt_text`). The assertion is made on the recorded
+/// generate body, i.e. the assembled request, not on the context slice.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_issue_111_the_assembled_host_prompt_fits_the_capture_budget() {
+    let state = TestDir::new("issue-111-assembled-prompt-budget");
+    write_service(state.path(), 4021);
+    let transport = FakeHost::new(None);
+    let summarizer = ProviderCaptureSummarizer::new(
+        Arc::new(HostStructured::new(lazy_provider(
+            state.path(),
+            transport.clone(),
+            Arc::new(AliveProbe),
+        ))),
+        "beam-free",
+        TOTAL,
+    );
+    let context = "A".repeat(200_000);
+    summarizer
+        .summarize(&context)
+        .await
+        .expect("the fake host answers a capture");
+
+    let calls = transport.calls();
+    assert_eq!(calls.len(), 1, "one stateless generate call");
+    let body = calls[0]
+        .body
+        .clone()
+        .expect("the generate call carries a body");
+    let prompt = body["prompt"]
+        .as_str()
+        .expect("the route takes a prompt string");
+
+    let output_reserve = usize::min(SUMMARY_OUTPUT_RESERVE_BYTES, TOTAL / 8);
+    let overhead = SUMMARY_REQUEST_OVERHEAD_BYTES;
+    let charged = prompt.len() + output_reserve + overhead;
+    assert!(
+        charged <= TOTAL,
+        "the assembled request fits the budget: {charged} > {TOTAL}"
+    );
+    let slack = TOTAL - charged;
+    assert!(
+        slack <= 64,
+        "the clamp fills the budget rather than over-reserving: {slack} bytes unused"
     );
 }

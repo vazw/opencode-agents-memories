@@ -8,6 +8,7 @@
 //! (not char counts); multi-byte characters are never split because every
 //! slice goes through `slice_utf8_bytes`.
 
+use mem_ai::provider::SYSTEM_USER_SEPARATOR;
 use mem_core::utils::context_limit::truncate_to_max_bytes_with_marker;
 
 /// The custom capture marker (upstream `CONTEXT_TRUNCATION_MARKER`).
@@ -118,15 +119,17 @@ pub fn get_auto_capture_markdown_budget(total_request_bytes: usize) -> usize {
 
 /// Upstream `buildBoundedSummaryPrompt` (`:385-410`): reserve
 /// `min(16,384, floor(total × 0.125))` for model output and subtract the
-/// system-prompt bytes, the schema BLOCK, that reserve and the 1,024 overhead
-/// before truncating `context` + suffix.
+/// system-prompt bytes, the system/user separator, the schema BLOCK, that
+/// reserve and the 1,024 overhead before truncating `context` + suffix.
 ///
 /// The schema block is what this function APPENDS: `SCHEMA_SEPARATOR` +
 /// `SCHEMA_ANSWER_INSTRUCTION` + a newline + the compact JSON. It is charged
 /// exactly as it is spent, which is what keeps
-/// `system + prompt + output_reserve + overhead <= total` true for any
-/// `system_prompt`. The schema goes on AFTER the truncation, so only
-/// `context` is ever cut.
+/// `system + separator + prompt + output_reserve + overhead <= total` true for
+/// any `system_prompt` — the ASSEMBLED request (`system + separator + prompt`)
+/// is the one the host hears, so `SYSTEM_USER_SEPARATOR` is charged
+/// unconditionally here (issue 111; one literal, shared with `prompt_text`).
+/// The schema goes on AFTER the truncation, so only `context` is ever cut.
 pub fn build_bounded_summary_prompt(
     context: &str,
     system_prompt: &str,
@@ -141,6 +144,7 @@ pub fn build_bounded_summary_prompt(
     );
     let user_budget = total_request_bytes
         .saturating_sub(system_prompt.len())
+        .saturating_sub(SYSTEM_USER_SEPARATOR.len())
         .saturating_sub(schema_block_bytes)
         .saturating_sub(output_reserve)
         .saturating_sub(SUMMARY_REQUEST_OVERHEAD_BYTES);

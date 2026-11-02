@@ -18,7 +18,8 @@ use futures::StreamExt;
 use mem_ai::provider::{
     AiProvider, AiProviderStructured, BoxFuture, ChatMessage, CompletionRequest, HostAuthorization,
     HostMethod, HostRequest, HostResponse, OpenCodeHostConfig, OpenCodeHostProvider, ProviderError,
-    ProviderErrorKind, ProviderKind, ProviderRegistry, StaticSecretResolver, Zeroizing,
+    ProviderErrorKind, ProviderKind, ProviderRegistry, SYSTEM_USER_SEPARATOR, StaticSecretResolver,
+    Zeroizing,
 };
 
 /// The generate URL the provider must call, built from `host_config()`.
@@ -513,5 +514,32 @@ async fn test_108_prose_reply_is_a_named_model_output_miss() {
         !error.message.contains("Here is a summary"),
         "the reply text is never echoed: {}",
         error.message
+    );
+}
+
+/// Issue 111 — the constant the budget builder charges IS the bytes the route
+/// spends. The first assertion is a LITERAL and derives nothing: an expectation
+/// built from `SYSTEM_USER_SEPARATOR` moves with the mutant and can never red.
+#[tokio::test]
+async fn test_issue_111_the_host_route_folds_the_system_side_with_the_separator_constant() {
+    let transport = Arc::new(MockTransport::new());
+    let provider = OpenCodeHostProvider::new(host_config(), transport.clone());
+    let request = CompletionRequest::new("beam-free")
+        .with_system("SYS")
+        .with_message(ChatMessage::user("USR"));
+    let mut stream = provider.complete(request);
+    while stream.next().await.is_some() {}
+
+    let calls = transport.calls();
+    let body = calls[0].2.as_ref().expect("a body");
+    assert_eq!(
+        body["prompt"],
+        serde_json::json!("SYS\n\nUSR"),
+        "the folded prompt is system, separator, user — nothing else"
+    );
+    assert_eq!(
+        body["prompt"],
+        serde_json::json!(format!("SYS{SYSTEM_USER_SEPARATOR}USR")),
+        "the spend is the constant the builder charges"
     );
 }

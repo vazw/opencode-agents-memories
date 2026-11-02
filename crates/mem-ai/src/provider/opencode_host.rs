@@ -381,6 +381,11 @@ impl HostState {
     }
 }
 
+/// The bytes `prompt_text` spends between the folded system side and the user
+/// text. `build_bounded_summary_prompt` charges exactly these bytes (issue 111):
+/// one literal, two spenders, or the capture request overshoots its budget.
+pub const SYSTEM_USER_SEPARATOR: &str = "\n\n";
+
 /// The prompt text the route takes: `{"prompt": string}` carries no separate
 /// system field, so the system side is folded in rather than sent separately.
 ///
@@ -402,7 +407,7 @@ fn prompt_text(request: &CompletionRequest) -> String {
     if system.trim().is_empty() {
         return user_text.to_owned();
     }
-    format!("{system}\n\n{user_text}")
+    format!("{system}{SYSTEM_USER_SEPARATOR}{user_text}")
 }
 
 /// Parsed generate outcome.
