@@ -13,10 +13,6 @@
       "import": "./dist/plugin.js",
       "default": "./dist/plugin.js"
     },
-    "./v2": {
-      "import": "./dist/v2/plugin.js",
-      "default": "./dist/v2/plugin.js"
-    },
     "./tui": {
       "import": "./dist/tui.js",
       "default": "./dist/tui.js"

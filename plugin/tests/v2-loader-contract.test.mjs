@@ -23,14 +23,17 @@ const distEntry = path.join(pkgRoot, "dist", "plugin.js");
 const v2Entry = path.join(pkgRoot, "dist", "v2", "plugin.js");
 const tuiEntry = path.join(pkgRoot, "dist", "tui.js");
 
-test("test_v2_loader_contract_exports_map_declares_v2_and_tui", () => {
+test("test_v2_loader_contract_exports_map_declares_server_and_tui_only", () => {
   assert.ok(pkg.exports, "package.json must carry an exports map");
-  // Same `import` + `default` shape as `./server`; no `types` key — the port
-  // has no TypeScript build.
-  assert.deepEqual(pkg.exports["./v2"], {
-    import: "./dist/v2/plugin.js",
-    default: "./dist/v2/plugin.js",
-  });
+  // `./v2` was dead: the host resolves a plugin's server entry as
+  // `entry(["server", ""])` (packages/plugin/src/host.ts:57, opencode v2.2.5 @
+  // 9af7aa2da8) and never asks for `v2`. The V2 adapter is reached by the
+  // relative in-process import inside `dist/plugin.js` (`setup`), driven below.
+  assert.equal(
+    pkg.exports["./v2"],
+    undefined,
+    "no package-resolution path reaches the V2 adapter (issue 113)"
+  );
   assert.deepEqual(pkg.exports["./tui"], {
     import: "./dist/tui.js",
     default: "./dist/tui.js",
