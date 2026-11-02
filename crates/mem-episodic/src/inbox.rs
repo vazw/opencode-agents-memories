@@ -10,6 +10,14 @@
 //! [`MAX_CAPTURE_ATTEMPTS`] consumed attempts: the terminal state is an
 //! episodic-only row, logged with a structured event and NO transcript
 //! payload.
+//!
+//! **One clock (issue 110, D-110-2).** Every stamp this file writes and the
+//! `now` the drain compares against come from [`EpisodicStore::now`], the
+//! store's injectable clock. There is deliberately no wall-clock read here:
+//! a fake-clock test and a real row cannot disagree, and re-adding a second
+//! time source needs a visible import. `not_before` is therefore an absolute
+//! wall-clock instant, so a deadline survives a restart (the row is durable)
+//! but does not survive a backwards clock correction.
 
 use std::sync::Arc;
 
@@ -18,7 +26,6 @@ use mem_store::episodic_sql as sql;
 use mem_store::serde_json::Value as Json;
 
 use crate::error::EpisodicError;
-use crate::ids::now_millis;
 use crate::store::EpisodicStore;
 
 /// The queued-entry capacity bound (blueprint Step 4).
@@ -109,7 +116,7 @@ impl CaptureInbox {
                 message: error.to_string(),
             })
         })?;
-        let now = now_millis();
+        let now = self.store.now();
         let params = vec![
             Value::Text(entry.capture_id.clone()),
             Value::Text(entry.project_id.clone()),
@@ -143,13 +150,19 @@ impl CaptureInbox {
         Ok(())
     }
 
-    /// Dequeues up to `limit` queued entries FIFO.
+    /// Dequeues up to `limit` queued entries FIFO whose retry schedule has
+    /// elapsed.
+    ///
+    /// `now` is read HERE, from the store's one clock (D-110-2), so no call
+    /// site can smuggle in a second time source; a scheduled entry is
+    /// invisible until `not_before <= now`.
     pub async fn dequeue(&self, limit: usize) -> Result<Vec<InboxEntry>, EpisodicError> {
         let db = self.store.ready().await?;
+        let now = self.store.now();
         let rows = db
             .query(
                 sql::SELECT_CAPTURE_INBOX_BATCH,
-                vec![Value::Integer(clamp_limit(limit))],
+                vec![Value::Integer(now), Value::Integer(clamp_limit(limit))],
             )
             .await
             .map_err(EpisodicError::Store)?;
@@ -180,7 +193,7 @@ impl CaptureInbox {
         db.execute(
             sql::BUMP_CAPTURE_INBOX_ATTEMPTS,
             vec![
-                Value::Integer(now_millis()),
+                Value::Integer(self.store.now()),
                 Value::Text(capture_id.to_string()),
             ],
         )
@@ -218,13 +231,43 @@ impl CaptureInbox {
         db.execute(
             sql::DEADLETTER_CAPTURE_INBOX,
             vec![
-                Value::Integer(now_millis()),
+                Value::Integer(self.store.now()),
                 Value::Text(capture_id.to_string()),
             ],
         )
         .await
         .map_err(EpisodicError::Store)?;
         Ok(())
+    }
+
+    /// Issue 110 — schedules the next attempt: stamps
+    /// `not_before = now + delay_ms` (the store's one clock) and leaves the
+    /// row `queued`, consuming NO attempt. Returns the stamped deadline.
+    ///
+    /// An absurd hint saturates at `i64::MAX` rather than wrapping: a wrapped
+    /// negative value would make the row eligible immediately, the silent
+    /// opposite of the hint's intent (D-110-8). A failed write surfaces as
+    /// `Err` — the caller charges the attempt instead of swallowing it.
+    pub async fn schedule_retry(
+        &self,
+        capture_id: &str,
+        delay_ms: u64,
+    ) -> Result<i64, EpisodicError> {
+        let db = self.store.ready().await?;
+        let now = self.store.now();
+        let delay = i64::try_from(delay_ms).unwrap_or(i64::MAX);
+        let not_before = now.saturating_add(delay);
+        db.execute(
+            sql::SCHEDULE_CAPTURE_INBOX_RETRY,
+            vec![
+                Value::Integer(not_before),
+                Value::Integer(now),
+                Value::Text(capture_id.to_string()),
+            ],
+        )
+        .await
+        .map_err(EpisodicError::Store)?;
+        Ok(not_before)
     }
 
     /// The queued-row count.
@@ -242,6 +285,20 @@ impl CaptureInbox {
             Ok(db) => self.attempts_of(db.as_ref(), capture_id).await,
             Err(_) => 0,
         }
+    }
+
+    /// Issue 110 — test/diagnostic seam: the retry schedule of one row
+    /// (`None` = no schedule, i.e. immediately eligible).
+    pub async fn not_before(&self, capture_id: &str) -> Option<i64> {
+        let db = self.store.ready().await.ok()?;
+        let row = query_one(
+            db.as_ref(),
+            sql::SELECT_CAPTURE_INBOX_NOT_BEFORE,
+            vec![Value::Text(capture_id.to_string())],
+        )
+        .await
+        .ok()??;
+        row.i64("not_before")
     }
 }
 

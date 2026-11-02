@@ -544,7 +544,9 @@ impl SkipReason {
 pub enum EntryOutcome {
     /// Both tiers committed (or provider `skip`): the inbox row is done.
     Done,
-    /// Consumed a retryable failure.
+    /// Still queued, will be retried: a retryable failure that either consumed
+    /// one attempt (the ladder) or scheduled the next one (`not_before`, no
+    /// attempt consumed).
     Retryable,
     /// The bounded retry budget was consumed: dead-lettered to an
     /// episodic-only row.
@@ -1058,12 +1060,15 @@ impl CaptureService {
 
     /// Record one failure at the drain seam.
     ///
-    /// Contract: at most ONE attempt bump and at most ONE dead-letter per call.
+    /// Contract: at most ONE attempt bump, ONE dead-letter and ONE schedule
+    /// write per call. Branch order is load-bearing (D-110-3):
     /// - branch 1 (`!retryable`) dead-letters immediately, no bump: a permanent
-    ///   class must not burn five attempts;
-    /// - branch 2 (a `retryAfterMs` above the ceiling) dead-letters immediately,
-    ///   no bump: the engine never re-issues a dead row, so the hint is a
-    ///   bounded refusal, not a sleep;
+    ///   class must not burn five attempts — and it is checked BEFORE the hint,
+    ///   so a permanent class carrying a stale `retryAfterMs` (a reachable host
+    ///   combination) still dies on the first drain;
+    /// - branch 2 (any `retryAfterMs`) SCHEDULES the row for `now + hint` and
+    ///   consumes NO attempt, whatever the hint's magnitude: the former 30 s
+    ///   ceiling is retired, so a long outage no longer loses the capture;
     /// - branch 3 is the existing ladder: bump, then dead-letter when the bump
     ///   reaches five. Bump-then-dead-letter here is one bump plus one
     ///   dead-letter, which is that path by design.
@@ -1078,12 +1083,67 @@ impl CaptureService {
         if !failure.retryable {
             return self.dead_letter_now(entry, failure).await;
         }
-        if failure
-            .retry_after_ms
-            .is_some_and(|ms| ms > crate::capture_prompt::HOST_RETRY_AFTER_CEILING_MS)
-        {
-            return self.dead_letter_now(entry, failure).await;
+        if let Some(ms) = failure.retry_after_ms {
+            return self.schedule_retry(entry, ms, failure).await;
         }
+        self.consume_attempt(entry, failure).await
+    }
+
+    /// Issue 110 — writes the retry schedule (`not_before = now + hint`) and
+    /// reports the row as still queued, so the drain never sleeps behind a
+    /// long outage.
+    ///
+    /// One structured line per SCHEDULING attempt, never the payload: a
+    /// scheduled capture is invisible until its deadline, so without this line
+    /// an operator has no signal on the path that no longer dead-letters. The
+    /// cadence is per failed attempt — a parked row is not dequeued, so it
+    /// writes nothing while it waits.
+    ///
+    /// A failed schedule write falls back to [`Self::consume_attempt`]: the row
+    /// keeps its old (usually NULL) `not_before` and is immediately eligible, so
+    /// the ladder must still charge the attempt — swallowing the error would
+    /// spin forever on a broken store.
+    async fn schedule_retry(
+        &self,
+        entry: &mem_episodic::inbox::InboxEntry,
+        retry_after_ms: u64,
+        failure: Failure,
+    ) -> EntryOutcome {
+        match self
+            .inbox
+            .schedule_retry(&entry.capture_id, retry_after_ms)
+            .await
+        {
+            Ok(not_before) => {
+                let mut structured = serde_json::json!({
+                    "capture_id": &entry.capture_id,
+                    "project_id": &entry.project_id,
+                    "retry_after_ms": retry_after_ms,
+                    "not_before": not_before,
+                    "reason": failure.reason,
+                });
+                if let Some(status) = failure.status {
+                    structured["status"] = serde_json::json!(status);
+                }
+                crate::engine::structured_stderr(
+                    "capture.retry_scheduled",
+                    "warn",
+                    "capture",
+                    structured,
+                );
+                EntryOutcome::Retryable
+            }
+            Err(_) => self.consume_attempt(entry, failure).await,
+        }
+    }
+
+    /// The bounded ladder: consume ONE attempt, then dead-letter when the bump
+    /// reaches five. Also the fallback for a failed schedule write.
+    async fn consume_attempt(
+        &self,
+        entry: &mem_episodic::inbox::InboxEntry,
+        failure: Failure,
+    ) -> EntryOutcome {
         let attempts_after = self
             .inbox
             .bump_attempts(&entry.capture_id)
@@ -1122,7 +1182,7 @@ impl CaptureService {
 
     /// Dead-letters an entry IMMEDIATELY for a failure the retry ladder could
     /// never fix (an invalid raw context, an unknown agent role, a permanent
-    /// host class, or a `retryAfterMs` above the ceiling).
+    /// host class — even one carrying a stale `retryAfterMs`).
     ///
     /// `failure.reason` is one of the fixed message constants — never content,
     /// never the rejected value.

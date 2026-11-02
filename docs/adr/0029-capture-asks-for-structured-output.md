@@ -13,6 +13,9 @@
 - **Amended:** 2026-11-01 (issue 108, the stateless-capture wave) — D-29-7..D-29-11 replace the session
   lifecycle with ONE stateless call, delete the loop guard with its subject, name the parse miss, carry
   retryability on a closed wire token, and record two tracked deferrals.
+- **Amended:** 2026-11-02 (issue 110, the capture-scheduling wave) — D-29-10's dead-letter trigger narrows to
+  the `!retryable` class and its `Deferred` rejection ground loses the "no scheduling column" reason; the
+  >30 s paragraph is folded into the new D-29-12; D-29-11's deferral (1) is resolved.
 
 ## Context
 
@@ -138,26 +141,83 @@ fields only (`field`/`kind`, `providerID`, `modelID`, `capability`, `location`, 
 `status`, `retryAfterMs`, `tag`), and keeps the message fixed per status. `classify_provider_error` branches
 on the token first; `is_retryable()` applies ONLY to the untagged default, because it returns true for every
 5xx and would erase the two 502 classes. `record_failure` dead-letters at once, with no attempt bump, for a
-`!retryable` class or a `retryAfterMs` above `HOST_RETRY_AFTER_CEILING_MS` (30 000 — a policy choice for
-the owner, not a measurement), and otherwise runs the unchanged five-attempt ladder.
-**A >30 s hint dead-letters PERMANENTLY:** dead rows are excluded by `SELECT_CAPTURE_INBOX_BATCH`
-(`status = 'queued'`) and nothing in the tree requeues them; the row and its `payload` survive
-(`DEADLETTER_CAPTURE_INBOX` is an `UPDATE … status='dead'`), so a future requeue tool can recover it.
-`EntryOutcome::Deferred` was rejected on three grounds: it consumes no attempt (nothing bounds the loop), it
-honours no hint without a scheduling column (the next tick re-issues immediately), and it already means "a
-live lock or an unreadable scope shard", so reusing it would erase a diagnostic distinction.
+`!retryable` class — checked BEFORE any hint, so a terminal class carrying a stale `retryAfterMs` still dies
+there. A `retryAfterMs` of ANY magnitude instead SCHEDULES the row and consumes no attempt, and only a
+hintless retryable failure runs the unchanged five-attempt ladder (D-29-12).
+`EntryOutcome::Deferred` was rejected on two grounds: it consumes no attempt (nothing bounds the loop), and
+it already means "a live lock or an unreadable scope shard", so reusing it would erase a diagnostic
+distinction. Its third ground — "it honours no hint without a scheduling column" — is retired with the
+column (D-29-12).
 **Chosen bounded behaviour:** a `ProviderRequestError` with an absent or unknown `reason` stays RETRYABLE —
 `reason` is required with a closed enum, so a conformant host cannot send a permanent 502 without one; the
-cost asymmetry (four extra requests versus permanent loss) decides it, and the ladder bounds it at five.
+cost asymmetry (four extra requests versus permanent loss) decides it, and the ladder bounds it at five
+when the host supplies no hint (D-29-12).
 
-**D-29-11 — Two tracked deferrals.**
-(1) The capture inbox has no scheduling column, so a bounded `retryAfterMs` is honoured as a refusal, not a
-delay, and a >30 s hint is permanent — `.scratch/rust-port/issues/110-capture-inbox-not-before-column.md`.
+**D-29-11 — Two tracked deferrals (one resolved).**
+(1) **RESOLVED by issue 110 (D-29-12).** The capture inbox had no scheduling column, so a bounded
+`retryAfterMs` was honoured as a refusal, not a delay, and a >30 s hint was permanent —
+`.scratch/rust-port/issues/110-capture-inbox-not-before-column.md`; that wave added the column, the drain
+predicate and the schedule write.
 (2) `build_bounded_summary_prompt`'s byte accounting omits the two-byte `\n\n` join that
 `opencode_host::prompt_text` folds between the system prompt and the user text (the schema block itself is
 charged exactly) —
 `.scratch/rust-port/issues/111-summary-prompt-budget-two-byte-gap.md`. Neither is a defect this wave may
 absorb silently.
+
+**D-29-12 — A retry hint schedules; the ceiling retires.**
+`HOST_RETRY_AFTER_CEILING_MS` is DELETED, and this decision is the only place that still spells it, because
+the sentence has to say why it is gone: its single reader was the dead-letter trigger this decision removes,
+so retaining it even as a log threshold would leave a policy that looks retired but still gates a behaviour.
+
+The mechanism is a nullable column and a drain predicate. `capture_inbox.not_before INTEGER` (episodic schema
+**v7**, applied by a probe-then-ALTER leg inside `apply_episodic_schema`, gated on `options.max_known >= 7`,
+**no backup** — one transactional batch plus one pragma converge under the probe, so a restore would have
+nothing to roll back beyond the batch the engine already rolls back itself) holds an absolute unix-millis
+instant; `NULL` means "no schedule", which is exactly the pre-v7 behaviour, so no row is backfilled. The drain
+selects `status = 'queued' AND (not_before IS NULL OR not_before <= ?)`, keeping `status` as the leading
+equality on `idx_capture_inbox_status_created`: the new predicate is a residual filter on the rows that seek
+already returns, so NO index is added. A `(status, not_before, created_at)` index would be a third index
+maintained on every enqueue, attempt bump and schedule write, for a table capped at 1,024 live rows — and it
+would not remove the sorter the `capture_id` tie-break forces, so no sort argument is made.
+
+**A hinted failure never consumes an attempt and never dead-letters, at any magnitude.** `schedule_retry`
+stamps `not_before = now + retryAfterMs` on the row, which stays `queued`; the writer and the drain read ONE
+clock (`EpisodicStore::now()`, the store's injectable seam), so a fake-clock test and a real row cannot
+disagree. The magnitude is the host's: `i64::try_from(ms).unwrap_or(i64::MAX)` then `saturating_add`, never an
+`as` cast — a wrap would go negative and make an absurd hint retry immediately, the silent opposite of the
+intent. No horizon is applied; a ceiling under another name is what the owner retired. A deadline survives a
+process restart (the row is durable) but not a backwards wall-clock correction, which can hold a capture for
+the size of the step; neither direction loses the row, and a monotonic clock would not survive a restart.
+
+**The dead-letter remainder.** A failure still dead-letters on the first drain, with no attempt bump, when the
+class is `!retryable` — and that check runs BEFORE the hint, so a permanent class carrying a stale
+`retryAfterMs` is never scheduled. The branch is reachable, not theoretical: `opencode_host` assigns the
+terminal token for `content_filter` / `authentication` / `invalid_request` and attaches `retryAfterMs` on BOTH
+branches, and the capture classifier copies the hint through unconditionally. A hintless retryable failure
+keeps the five-attempt ladder. A dead-lettered row and its `payload` still survive
+(`DEADLETTER_CAPTURE_INBOX` is an `UPDATE … status='dead'`) and are still recovered only by hand: the
+`requeue-captures` tool remains unshipped.
+
+**Compensating bounds, stated because a hinted class retries indefinitely.** (a) *Capacity*: a parked row
+stays `status = 'queued'` and therefore still occupies one of the `INBOX_CAPACITY` = 1,024 slots; at the cap
+`enqueue` returns `InboxError::Full` and the capture request fails VISIBLY to the caller — that visible
+failure is the accepted trade for retiring silent loss, and it is why a parked row must never be excluded from
+the queued count. (b) *Observability*: `capture.retry_scheduled` — one structured warn line per scheduling
+attempt carrying `capture_id`, `project_id`, `retry_after_ms`, `not_before`, `reason` and `status?`, never the
+payload — is the only signal on a path whose dead-letter line no longer fires. Its cadence is per failed
+attempt, not per tick: a parked row is not dequeued, so it writes nothing while it waits. **Named gap:** a
+hostile or broken `retryAfterMs` near `u64::MAX` parks the row at `i64::MAX` — queued, never eligible,
+functionally a dead-letter that keeps the `queued` status; it is logged exactly ONCE and never again, it keeps
+consuming a capacity slot, and the payload survives, so only that one line with the absurd value makes it
+findable.
+
+**Rollback is a precondition, not a procedure.** Dropping the column would be allowed at the row level (only
+scheduling hints would be lost, which no pre-v7 row ever had), but there is no `DROP COLUMN` step in the tree
+and `EPISODIC_MAX_KNOWN` reverts to 6, so a reverted build refuses a v7 file with
+`SchemaNewerThanBuild { found: 7, supported: 6 }` (D-21-3). Any copy of a live root therefore requires the
+engine STOPPED, `cp -a` of the WHOLE root (a clean close never checkpoints, so committed data may sit entirely
+in the `-wal`), and `PRAGMA user_version` on the copy reading 6 BEFORE the upgrade starts; a copy that cannot
+be shown to be v6 is not a rollback point. The v7 step takes no backup of its own.
 
 ## Consequences
 
@@ -184,7 +244,7 @@ remains outside it:
    rename, and `requeue-captures` is still unshipped. Runtime confirmation that the live host behaves as
    documented is likewise unmeasured: no exchange has ever been captured. **Closed by D-29-7:** issue 108
    removed the create/prompt/delete lifecycle entirely; `requeue-captures` remains unshipped and is named
-   in D-29-10/D-29-11.
+   in D-29-12.
 2. **The wrapper never sends `agent_id`** (`plugin/src/plugin.js`), and `mem-episodic` rejects an empty
    one — `episodic_write_failed`. **Addressed by `95857b7`**; whether that closes persistence live is not
    measured here.

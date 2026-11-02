@@ -97,12 +97,16 @@
   `provider-request-terminal`, `service-unavailable`, `route-moved`,
   `unrecognised`) plus a bounded `detail` built from the declared fields; the
   message stays fixed per status. A permanent class (a `422`, a moved route, a
-  terminal `502`) dead-letters on the first drain and consumes no attempt. A
-  `retryAfterMs` at or below `HOST_RETRY_AFTER_CEILING_MS` (30 s) is retried;
-  ABOVE it the capture is dead-lettered **permanently** — dead rows are
-  excluded by the `status = 'queued'` inbox select and nothing requeues them,
-  so the retained `payload` is the only recovery path (the missing scheduling
-  column is tracked as issue 110). The immediate dead-letter log line
+  terminal `502`) dead-letters on the first drain and consumes no attempt — that
+  check runs BEFORE the hint, so a permanent class carrying a stale
+  `retryAfterMs` still dies there. Any `retryAfterMs` otherwise SCHEDULES the
+  capture rather than retrying immediately or dying: `capture_inbox.not_before
+  = now + retryAfterMs` (the store's one clock, `EpisodicStore::now()`), the row
+  stays `queued`, and the drain selects it only once the deadline has elapsed
+  (`not_before IS NULL OR not_before <= now`) — issue 110, which retired the
+  former ceiling and its dead-letter at any magnitude. The `capture.retry_scheduled`
+  line names the schedule (`capture_id`, `project_id`, `retry_after_ms`,
+  `not_before`, `reason`, `status?`). The immediate dead-letter log line
   (`dead_letter_now`) carries `reason` plus
   `errorKind`/`status`/`detail`/`retryAfterMs` when present; the
   retry-exhausted one carries `reason` plus `errorKind`/`status` and the final

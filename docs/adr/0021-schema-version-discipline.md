@@ -28,7 +28,7 @@ ships the discipline every set uses, W5 migrates the one set that still needs it
 **D-21-1 — One runner, one check.**
 Every set goes through `apply_schema_migrations` — metadata, shards, prompts, profiles, facts, vault, and
 the episodic v1..v5 fold. The version refusal lives there and nowhere else. `apply_episodic_schema` applies
-v6 itself but reuses the runner for v1..v5, so it inherits the same check.
+v6 and v7 itself but reuses the runner for v1..v5, so it inherits the same check.
 
 **D-21-2 — `max_known` is mandatory and per-set.**
 `MigrationOptions` gains `max_known: i64` and **drops `Default`**: a permissive default (`i64::MAX`) would
@@ -41,13 +41,13 @@ maximum. The maximum is a constant **beside the set**, not derived from the migr
 | memory shards | `MEMORY_SHARD_MAX_KNOWN` | 3 (W2's v3) |
 | `user_prompts` | `USER_PROMPTS_MAX_KNOWN` | 2 (W5) |
 | `user_profiles` | `USER_PROFILES_MAX_KNOWN` | 1 |
-| episodic | `EPISODIC_MAX_KNOWN` | 6 |
+| episodic | `EPISODIC_MAX_KNOWN` | 7 (issue 110's v7) |
 | `facts.db` | `FACTS_MAX_KNOWN` | 1 |
 | `vault.db` | `VAULT_MAX_KNOWN` | 1 |
 
-Deriving the maximum from the slice is wrong: `apply_episodic_schema` applies v6 while
-`episodic_migrations()` returns v1..v5, so a derived maximum would refuse every v6 database on the second
-open. `EPISODIC_MAX_KNOWN` is therefore 6, not 5.
+Deriving the maximum from the slice is wrong: `apply_episodic_schema` applies v6 and v7 while
+`episodic_migrations()` returns v1..v5, so a derived maximum would refuse every v6 or v7 database on the
+second open. `EPISODIC_MAX_KNOWN` is therefore 7, not 5.
 
 **D-21-3 — Refuse before the pending check, on `current`, never on `target`.**
 `apply_schema_migrations` reads `user_version` and returns

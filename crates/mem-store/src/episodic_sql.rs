@@ -103,6 +103,15 @@ pub const EPISODIC_V3_INDEXES: [&str; 1] = [
 pub const EPISODIC_V6_ALTERS: [&str; 1] =
     ["ALTER TABLE agent_sessions ADD COLUMN agent_role TEXT NOT NULL DEFAULT 'main'"];
 
+/// v7 additive column (issue 110): the capture inbox's retry schedule.
+///
+/// Nullable and NO default on purpose — `NULL` means "no schedule", which is
+/// exactly the pre-v7 behaviour, so every existing row stays immediately
+/// eligible without a backfill. A `NOT NULL`/`DEFAULT` variant would rewrite
+/// the meaning of those rows and REFUSES on a populated table.
+pub const EPISODIC_V7_ALTERS: [&str; 1] =
+    ["ALTER TABLE capture_inbox ADD COLUMN not_before INTEGER"];
+
 /// v6 DDL: the authoritative raw-context table, keyed by the session's
 /// logical identity — the same triple `agent_sessions` declares UNIQUE.
 ///
@@ -223,8 +232,16 @@ pub const CAPTURE_INBOX_V5_INDEXES: [&str; 2] = [
 /// statement's own write transaction).
 pub const INSERT_CAPTURE_INBOX_CONDITIONAL: &str = "INSERT INTO capture_inbox (capture_id, project_id, session_id, agent_id, payload, created_at, attempts, last_attempt_at, status) SELECT ?, ?, ?, ?, ?, ?, 0, NULL, 'queued' WHERE NOT EXISTS (SELECT 1 FROM capture_inbox WHERE capture_id = ?) AND (SELECT COUNT(*) FROM capture_inbox WHERE status = 'queued') < ?";
 
-/// FIFO dequeue: oldest queued first, capture_id tie-break.
-pub const SELECT_CAPTURE_INBOX_BATCH: &str = "SELECT capture_id, project_id, session_id, agent_id, payload, created_at, attempts, last_attempt_at, status FROM capture_inbox WHERE status = 'queued' ORDER BY created_at ASC, capture_id ASC LIMIT ?";
+/// FIFO dequeue of the entries whose retry schedule has ELAPSED: oldest
+/// queued first, capture_id tie-break.
+///
+/// `status = 'queued'` is the leading equality on
+/// `idx_capture_inbox_status_created`, so `(not_before IS NULL OR not_before
+/// <= ?)` is a residual filter on the rows that seek already returns — it
+/// never changes the access path (D-110-4).
+///
+/// Bind order: now, limit.
+pub const SELECT_CAPTURE_INBOX_BATCH: &str = "SELECT capture_id, project_id, session_id, agent_id, payload, created_at, attempts, last_attempt_at, status FROM capture_inbox WHERE status = 'queued' AND (not_before IS NULL OR not_before <= ?) ORDER BY created_at ASC, capture_id ASC LIMIT ?";
 
 /// D-48 done path: the done/delete statements in one statement — the row
 /// is purged (the inbox never stores terminal rows; the status column
@@ -234,6 +251,16 @@ pub const DELETE_CAPTURE_INBOX_BY_ID: &str = "DELETE FROM capture_inbox WHERE ca
 /// Consume one attempt on a retryable failure.
 pub const BUMP_CAPTURE_INBOX_ATTEMPTS: &str =
     "UPDATE capture_inbox SET attempts = attempts + 1, last_attempt_at = ? WHERE capture_id = ?";
+
+/// Issue 110 — the retry schedule write: the row stays `queued` and becomes
+/// eligible again at `not_before` (a bound absolute instant). Bind order:
+/// not_before, last_attempt_at, capture_id.
+pub const SCHEDULE_CAPTURE_INBOX_RETRY: &str =
+    "UPDATE capture_inbox SET not_before = ?, last_attempt_at = ? WHERE capture_id = ?";
+
+/// Issue 110 — the stored schedule of one row (`NULL` = immediately eligible).
+pub const SELECT_CAPTURE_INBOX_NOT_BEFORE: &str =
+    "SELECT not_before FROM capture_inbox WHERE capture_id = ?";
 
 /// Dead-letter: the terminal episodic-only state.
 pub const DEADLETTER_CAPTURE_INBOX: &str =

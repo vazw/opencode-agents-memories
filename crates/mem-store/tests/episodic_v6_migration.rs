@@ -10,6 +10,10 @@
 //! `ON DELETE` anywhere: an invariant that says "raw context is never
 //! destroyed by consolidation" cannot be implemented by a schema feature
 //! whose only job is to destroy it.
+//!
+//! Since issue 110 the same apply continues to v7
+//! (`capture_inbox.not_before`), so the observed `user_version` is 7; the
+//! assertions below are unchanged in meaning.
 
 mod common;
 
@@ -97,8 +101,8 @@ async fn test_v6_upgrade_preserves_existing_rows_and_defaults() {
     )
     .await
     .expect("v6 apply");
-    assert_eq!(outcome.version, 6);
-    assert_eq!(user_version(&*db).await, 6);
+    assert_eq!(outcome.version, 7);
+    assert_eq!(user_version(&*db).await, 7);
 
     // The existing row survives untouched; `agent_role` defaults to 'main'.
     let row = query_one(
@@ -236,7 +240,7 @@ async fn test_v6_is_idempotent_on_reopen() {
     )
     .await
     .expect("first apply");
-    assert_eq!(first.version, 6);
+    assert_eq!(first.version, 7);
     let second = apply_episodic_schema(
         &*db,
         DIMS,
@@ -245,9 +249,9 @@ async fn test_v6_is_idempotent_on_reopen() {
     )
     .await
     .expect("second apply");
-    assert_eq!(second.version, 6);
+    assert_eq!(second.version, 7);
     assert_eq!(second.pragma, PragmaOutcome::NotAttempted);
-    assert_eq!(user_version(&*db).await, 6);
+    assert_eq!(user_version(&*db).await, 7);
     let columns = table_columns(&*db, "agent_sessions").await;
     assert_eq!(
         columns
@@ -273,7 +277,7 @@ async fn test_v6_database_opens_with_a_v5_only_migration_set() {
     .expect("v6 apply");
 
     // A v5-only binary (the rollback path) sees zero pending migrations and
-    // returns the CURRENT version, 6.
+    // returns the CURRENT version, 7.
     let version = apply_schema_migrations(
         &*db,
         &episodic_migrations(DIMS),
@@ -282,7 +286,7 @@ async fn test_v6_database_opens_with_a_v5_only_migration_set() {
     )
     .await
     .expect("v5-only set over a v6 database");
-    assert_eq!(version, 6, "the runner returns the current version");
+    assert_eq!(version, 7, "the runner returns the current version");
 }
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
@@ -297,8 +301,8 @@ async fn test_fresh_root_reaches_v6_in_one_open() {
     )
     .await
     .expect("fresh apply");
-    assert_eq!(outcome.version, 6);
-    assert_eq!(user_version(&*db).await, 6);
+    assert_eq!(outcome.version, 7);
+    assert_eq!(user_version(&*db).await, 7);
 
     // Fresh root: NO backup (nothing existed to back up).
     let entries: Vec<String> = std::fs::read_dir(&config.storage_path)

@@ -11,7 +11,7 @@
 //! already creates these three columns — a static v2 would duplicate-ALTER
 //! every fresh database. [`crate::schema_migrations::apply_user_prompts_schema`]
 //! owns the probe and applies this table itself (the `apply_episodic_schema` /
-//! `EPISODIC_MAX_KNOWN = 6` split precedent).
+//! `EPISODIC_MAX_KNOWN = 7` split precedent).
 
 /// The v2 column set: `(name, declaration)` in ALTER order.
 pub const USER_PROMPTS_V2_COLUMNS: [(&str, &str); 3] = [

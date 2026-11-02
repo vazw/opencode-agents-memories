@@ -64,16 +64,16 @@ pub const METADATA_MAX_KNOWN: i64 = 2;
 /// Highest `user_prompts` schema version this build knows: 2 because
 /// [`apply_user_prompts_schema`] applies v2 itself, so the migration slice
 /// (`user_prompts_migrations`) stays v1 — the same split
-/// [`EPISODIC_MAX_KNOWN`]` = 6` records.
+/// [`EPISODIC_MAX_KNOWN`]` = 7` records.
 pub const USER_PROMPTS_MAX_KNOWN: i64 = 2;
 /// Highest `user_profiles` schema version this build knows.
 pub const USER_PROFILES_MAX_KNOWN: i64 = 1;
 /// Highest memory-shard schema version this build knows.
 pub const MEMORY_SHARD_MAX_KNOWN: i64 = 3;
 /// Highest episodic schema version this build knows: `apply_episodic_schema`
-/// applies v6 itself while `episodic_migrations()` returns v1..v5, so
-/// deriving this from the slice would refuse every v6 database.
-pub const EPISODIC_MAX_KNOWN: i64 = 6;
+/// applies v6 and v7 itself while `episodic_migrations()` returns v1..v5, so
+/// deriving this from the slice would refuse every v6/v7 database.
+pub const EPISODIC_MAX_KNOWN: i64 = 7;
 
 /// Upstream `getUserVersion`.
 async fn get_user_version(db: &dyn Db) -> Result<i64, StoreError> {
@@ -453,7 +453,11 @@ pub fn episodic_migrations(dimensions: u32) -> Vec<SchemaMigration> {
 // Episodic v6 — the convergent retention schema apply (W7.1)
 // ---------------------------------------------------------------------------
 
-/// Which path stamped `PRAGMA user_version = 6`.
+/// Which path stamped the **v6** `PRAGMA user_version = 6`.
+///
+/// The v7 pragma is a separate `execute` of the `user_prompts`-v2 shape
+/// (D-110-1), so it never reaches this classification: every v6 assertion
+/// about this value stays true.
 ///
 /// This is a MEASURED value, never an assumption: the first-apply test pins
 /// [`V6_PRAGMA_PATH_MEASURED`], which the implementer sets from one real run
@@ -473,9 +477,9 @@ pub enum PragmaOutcome {
 /// The result of [`apply_episodic_schema`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EpisodicSchemaOutcome {
-    /// The database's version after the apply (6 on success).
+    /// The database's version after the apply (7 on success).
     pub version: i64,
-    /// The measured path the version pragma took.
+    /// The measured path the **v6** version pragma took.
     pub pragma: PragmaOutcome,
 }
 
@@ -518,33 +522,45 @@ async fn table_has_column(db: &dyn Db, table: &str, column: &str) -> Result<bool
         .any(|row| row.text("name").as_deref() == Some(column)))
 }
 
-/// Applies the episodic schema fold (v1..v5 through the shared runner) and
-/// then v6 convergently.
+/// Applies the episodic schema fold: v1..v5 through the shared runner, then
+/// v6 and v7 convergently.
 ///
 /// # Convergence (M3)
 ///
-/// The bricking state is a kill between the v6 DDL commit and the version
-/// pragma: a v5 file that already has `agent_role` and both tables. The
-/// pre-flight `PRAGMA table_info(agent_sessions)` guard drops the
-/// non-re-runnable `ALTER` when the column exists, and the tables use
-/// `CREATE … IF NOT EXISTS`, so a re-run converges instead of failing on a
-/// duplicate column.
+/// The bricking state is a kill between a DDL commit and its version pragma:
+/// a v5 file that already has `agent_role` and both retention tables, or a v6
+/// file that already has `capture_inbox.not_before`. The pre-flight
+/// `PRAGMA table_info` guards drop the non-re-runnable `ALTER`s when the
+/// columns exist, and the tables use `CREATE … IF NOT EXISTS`, so a re-run
+/// converges instead of failing on a duplicate column.
 ///
-/// # The pragma path (M14)
+/// # The v6 pragma path (M14)
 ///
-/// The version pragma is the last statement of the v6 write batch. If turso
+/// The v6 version pragma is the last statement of the v6 write batch. If turso
 /// refuses it there, the code retries the batch without it and executes the
 /// pragma separately, reporting [`PragmaOutcome::Fallback`]. The reopen path
-/// reports [`PragmaOutcome::NotAttempted`] — it ran no pragma at all.
+/// reports [`PragmaOutcome::NotAttempted`] — it ran no v6 pragma at all.
+///
+/// # The v7 step (D-110-1)
+///
+/// `probe → ALTER → pragma → verify`, gated on `options.max_known >= 7`: a
+/// build that knows only 6 must never hand back a 7-stamped file it cannot
+/// open again. The `ALTER` runs only when `capture_inbox.not_before` is
+/// absent, so the crash window between the batch and the pragma converges.
+/// This step takes NO backup: one transactional batch plus one pragma
+/// converge under the probe, so a restore would have nothing to roll back
+/// beyond the batch the engine already rolls back itself (the
+/// [`apply_user_prompts_schema`] precedent; the v6 apply, which does back up,
+/// is not the model).
 ///
 /// # Backup
 ///
 /// One backup is taken for an EXISTING database before the v6 batch; a fresh
-/// root takes none. The destination is claimed from the caller's proof, and
-/// with no proof a needed backup refuses **before** the copy
-/// ([`StoreError::NoExclusiveRoot`]). On final failure the runner returns
-/// [`StoreError::MigrationRestorePending`] — it never unlinks a file it has
-/// open. No code path deletes a `.bak`.
+/// root takes none, and the v7 step takes none at all. The destination is
+/// claimed from the caller's proof, and with no proof a needed backup refuses
+/// **before** the copy ([`StoreError::NoExclusiveRoot`]). On final failure the
+/// runner returns [`StoreError::MigrationRestorePending`] — it never unlinks a
+/// file it has open. No code path deletes a `.bak`.
 pub async fn apply_episodic_schema(
     db: &dyn Db,
     dimensions: u32,
@@ -556,85 +572,110 @@ pub async fn apply_episodic_schema(
     // v1..v5 keep their exact existing semantics, backups included. This call
     // returns early when none are pending, so the v6 backup below is reachable
     // with `root: None` on a v5→v6 upgrade and repeats the same refusal.
-    let version =
+    let mut version =
         apply_schema_migrations(db, &episodic_migrations(dimensions), options, root).await?;
-    if version >= 6 {
-        return Ok(EpisodicSchemaOutcome {
-            version: version.max(6),
-            pragma: PragmaOutcome::NotAttempted,
-        });
-    }
+    let mut pragma = PragmaOutcome::NotAttempted;
 
-    // The v6 backup needs the proof before the copy; no checkpoint precedes it.
-    let backup = if current_before > 0 {
-        backup_before_destructive(options.db_path.as_deref(), current_before, root)?
-    } else {
-        None
-    };
+    if version < 6 {
+        // The v6 backup needs the proof before the copy; no checkpoint precedes it.
+        let backup = if current_before > 0 {
+            backup_before_destructive(options.db_path.as_deref(), current_before, root)?
+        } else {
+            None
+        };
 
-    let has_agent_role = table_has_column(db, "agent_sessions", "agent_role").await?;
-    // The v6 statement list has ONE home (`episodic_v6_migration`); this
-    // apply path composes it and drops the non-re-runnable `ALTER` when the
-    // column already exists (M3/M13).
-    let statements: Vec<Statement> = episodic_v6_migration(dimensions)
-        .statements
-        .into_iter()
-        .filter(|statement| {
-            let is_agent_role_alter =
-                crate::episodic_sql::EPISODIC_V6_ALTERS.contains(&statement.sql.as_str());
-            !is_agent_role_alter || !has_agent_role
-        })
-        .collect();
+        let has_agent_role = table_has_column(db, "agent_sessions", "agent_role").await?;
+        // The v6 statement list has ONE home (`episodic_v6_migration`); this
+        // apply path composes it and drops the non-re-runnable `ALTER` when the
+        // column already exists (M3/M13).
+        let statements: Vec<Statement> = episodic_v6_migration(dimensions)
+            .statements
+            .into_iter()
+            .filter(|statement| {
+                let is_agent_role_alter =
+                    crate::episodic_sql::EPISODIC_V6_ALTERS.contains(&statement.sql.as_str());
+                !is_agent_role_alter || !has_agent_role
+            })
+            .collect();
 
-    let pragma = set_user_version_statement(6);
-    let mut with_pragma = statements.clone();
-    with_pragma.push(pragma.clone());
+        let v6_pragma = set_user_version_statement(6);
+        let mut with_pragma = statements.clone();
+        with_pragma.push(v6_pragma.clone());
 
-    let mut failure: Option<StoreError> = None;
-    let mut pragma_outcome = PragmaOutcome::InBatch;
+        let mut failure: Option<StoreError> = None;
+        let mut pragma_outcome = PragmaOutcome::InBatch;
 
-    match db.batch(with_pragma, BatchMode::Write).await {
-        Ok(_) => {
-            // Measure: a batch that "succeeded" but did not stamp the version
-            // still needs the separate execute.
-            if get_user_version(db).await? != 6 {
-                match db.execute(&pragma.sql, pragma.params.clone()).await {
-                    Ok(_) => pragma_outcome = PragmaOutcome::Fallback,
-                    Err(error) => failure = Some(error),
+        match db.batch(with_pragma, BatchMode::Write).await {
+            Ok(_) => {
+                // Measure: a batch that "succeeded" but did not stamp the version
+                // still needs the separate execute.
+                if get_user_version(db).await? != 6 {
+                    match db.execute(&v6_pragma.sql, v6_pragma.params.clone()).await {
+                        Ok(_) => pragma_outcome = PragmaOutcome::Fallback,
+                        Err(error) => failure = Some(error),
+                    }
+                }
+            }
+            Err(original) => {
+                // The pragma is the only refused statement: retry the DDL alone.
+                match db.batch(statements, BatchMode::Write).await {
+                    Ok(_) => match db.execute(&v6_pragma.sql, v6_pragma.params.clone()).await {
+                        Ok(_) => pragma_outcome = PragmaOutcome::Fallback,
+                        Err(_) => failure = Some(original),
+                    },
+                    Err(_) => failure = Some(original),
                 }
             }
         }
-        Err(original) => {
-            // The pragma is the only refused statement: retry the DDL alone.
-            match db.batch(statements, BatchMode::Write).await {
-                Ok(_) => match db.execute(&pragma.sql, pragma.params.clone()).await {
-                    Ok(_) => pragma_outcome = PragmaOutcome::Fallback,
-                    Err(_) => failure = Some(original),
-                },
-                Err(_) => failure = Some(original),
+
+        if let Some(original) = failure {
+            if let (Some(backup_path), Some(db_path)) = (&backup, options.db_path.as_deref()) {
+                return Err(StoreError::MigrationRestorePending(Box::new(
+                    MigrationRestorePending::new(
+                        db_path.to_path_buf(),
+                        backup_path.clone(),
+                        original,
+                    ),
+                )));
             }
+            return Err(original);
         }
+
+        let stamped = get_user_version(db).await?;
+        if stamped != 6 {
+            return Err(StoreError::Internal {
+                message: "episodic v6 apply did not stamp user_version = 6".to_string(),
+            });
+        }
+        version = 6;
+        pragma = pragma_outcome;
     }
 
-    if let Some(original) = failure {
-        if let (Some(backup_path), Some(db_path)) = (&backup, options.db_path.as_deref()) {
-            return Err(StoreError::MigrationRestorePending(Box::new(
-                MigrationRestorePending::new(db_path.to_path_buf(), backup_path.clone(), original),
-            )));
+    if options.max_known >= 7 && version < 7 {
+        // The `ALTER` is not re-runnable: the probe is what makes a file whose
+        // batch committed but whose pragma did not converge (D-110-1).
+        let has_not_before = table_has_column(db, "capture_inbox", "not_before").await?;
+        if !has_not_before {
+            let statements: Vec<Statement> = crate::episodic_sql::EPISODIC_V7_ALTERS
+                .iter()
+                .map(|sql| Statement::new(*sql, Vec::new()))
+                .collect();
+            db.batch(statements, BatchMode::Write).await?;
         }
-        return Err(original);
+        // The v7 pragma is the separate `execute` of the user_prompts-v2 shape,
+        // never part of the batch, so `PragmaOutcome` keeps describing v6.
+        db.execute(&set_user_version_statement(7).sql, Vec::new())
+            .await?;
+        let stamped = get_user_version(db).await?;
+        if stamped != 7 {
+            return Err(StoreError::Internal {
+                message: "episodic v7 apply did not stamp user_version = 7".to_string(),
+            });
+        }
+        version = 7;
     }
 
-    let version = get_user_version(db).await?;
-    if version != 6 {
-        return Err(StoreError::Internal {
-            message: "episodic v6 apply did not stamp user_version = 6".to_string(),
-        });
-    }
-    Ok(EpisodicSchemaOutcome {
-        version,
-        pragma: pragma_outcome,
-    })
+    Ok(EpisodicSchemaOutcome { version, pragma })
 }
 
 // ---------------------------------------------------------------------------

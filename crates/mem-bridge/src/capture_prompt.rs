@@ -91,11 +91,6 @@ pub struct SummarizerFailure {
     pub detail: Option<String>,
 }
 
-/// A `retryAfterMs` above this many milliseconds dead-letters the capture
-/// instead of holding it for a retry. A policy choice, not a measurement: the
-/// drain path must not park a capture behind one long outage.
-pub const HOST_RETRY_AFTER_CEILING_MS: u64 = 30_000;
-
 /// The summarizer seam for captures: `context` is the bounded markdown
 /// context (or the raw transcript when the wrapper sent none). The
 /// implementation runs OFF the serial DB lane.
