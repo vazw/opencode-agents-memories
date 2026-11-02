@@ -617,6 +617,19 @@ impl From<super::ports::DedupReport> for DedupDto {
 /// The session list payload (W6.3 owns the shape; the stub never produces it).
 pub type SessionListDto = Vec<Value>;
 
+/// One `GET /api/projects` row (issue 116, D-6): a project of the roster with
+/// its live-session count, its milestone count and its newest activity stamp.
+///
+/// `project_id` is path-shaped data, not a path: it is returned verbatim.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRowDto {
+    pub project_id: String,
+    pub session_count: i64,
+    pub milestone_count: i64,
+    pub last_activity_at: i64,
+}
+
 /// One `GET /api/projects/{project_id}/milestones` row (W6.6): the milestone's
 /// own camelCase projection — `Milestone` is already `camelCase` on the wire
 /// and never serializes its write-only `embedding` — plus the durable facts it

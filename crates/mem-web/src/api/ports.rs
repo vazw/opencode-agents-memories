@@ -24,7 +24,7 @@ use mem_embed::embedder::EmbedTask;
 use mem_store::error::ShardModelMismatch;
 use serde_json::Value;
 
-use super::dto::MilestoneItemDto;
+use super::dto::{MilestoneItemDto, ProjectRowDto};
 
 /// A resolved shard (upstream `ShardInfo`, minus the registry bookkeeping the
 /// handlers do not read).
@@ -622,6 +622,14 @@ pub trait SessionPort: Send + Sync {
     async fn list_sessions(&self, project_id: &str) -> Result<Vec<Value>, PortError>;
 
     async fn delete_session(&self, project_id: &str, session_id: &str) -> Result<(), PortError>;
+
+    /// The project roster (issue 116, D-6): every project with live sessions or
+    /// milestones, newest activity first, bounded by `limit`.
+    ///
+    /// It lives on this port because the session side of the union is the
+    /// episodic store's, and splitting it into a ninth port would duplicate the
+    /// same handle.
+    async fn projects(&self, limit: usize) -> Result<Vec<ProjectRowDto>, PortError>;
 }
 
 /// The W6.6 milestone-projection seam.
@@ -1010,6 +1018,10 @@ impl SessionPort for UnavailablePort {
     }
 
     async fn delete_session(&self, _project_id: &str, _session_id: &str) -> Result<(), PortError> {
+        Err(PortError::Unavailable)
+    }
+
+    async fn projects(&self, _limit: usize) -> Result<Vec<ProjectRowDto>, PortError> {
         Err(PortError::Unavailable)
     }
 }

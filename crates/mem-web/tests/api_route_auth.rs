@@ -9,10 +9,10 @@
 //! loopback bind** — OpenCode's skill-catalog fetch sends no
 //! `x-opencode-mem-token` — and **require the token on any other bind**.
 //!
-//! **Walks.** The token walk covers the **36 `/api/*` rows** only
+//! **Walks.** The token walk covers the **38 `/api/*` rows** only
 //! (`/api/health` is token-exempt, the two catalog rows are public on a
 //! loopback bind and keep their dedicated D-11 cases). The Host, Basic-auth,
-//! reachability and credential walks cover the other **38** rows. Every row
+//! reachability and credential walks cover the other **40** rows. Every row
 //! gets a **freshly built router and a freshly seeded fake** — the walk's
 //! destructive rows (`DELETE /api/memories/mem_probe_1`,
 //! `DELETE /api/skills/ship-it`) therefore cannot consume the rows that later
@@ -341,8 +341,8 @@ async fn test_every_new_route_requires_the_api_token() {
         );
         assert_no_credentials(&format!("{} {}", row.method, row.path), &response);
     }
-    // 39 rows − `/api/health` − the 2 catalog rows = 36 token-gated rows.
-    assert_eq!(walked, 36, "the token walk covers every /api/* row");
+    // 41 rows − `/api/health` − the 2 catalog rows = 38 token-gated rows.
+    assert_eq!(walked, 38, "the token walk covers every /api/* row");
 }
 
 #[tokio::test]
@@ -370,7 +370,7 @@ async fn test_every_new_route_is_refused_for_a_foreign_host_header() {
         );
         assert_no_credentials(&format!("{} {}", row.method, row.path), &response);
     }
-    assert_eq!(walked, 38, "the Host walk covers every non-health row");
+    assert_eq!(walked, 40, "the Host walk covers every non-health row");
 }
 
 #[tokio::test]
@@ -405,7 +405,7 @@ async fn test_every_new_route_is_gated_by_basic_auth() {
         );
         assert_no_credentials(&format!("{} {}", row.method, row.path), &response);
     }
-    assert_eq!(walked, 38, "the Basic walk covers every non-health row");
+    assert_eq!(walked, 40, "the Basic walk covers every non-health row");
 }
 
 #[tokio::test]
@@ -429,7 +429,7 @@ async fn test_every_new_route_answers_a_reachable_response() {
         assert_no_credentials(&format!("{} {}", row.method, row.path), &response);
     }
     assert_eq!(
-        walked, 38,
+        walked, 40,
         "the reachability walk covers every non-health row"
     );
 }

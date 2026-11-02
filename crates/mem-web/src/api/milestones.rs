@@ -81,34 +81,16 @@ fn milestone_failure(endpoint: &'static str, error: PortError) -> Response {
     }
 }
 
-/// Parses `?limit` under the strict rule: **ASCII digits only**, then
-/// `1..=500`.
+/// Parses this route's `?limit` through the shared strict parser
+/// ([`super::parse_limit`]): **ASCII digits only**, then
+/// `1..=MILESTONE_MAX_LIMIT`, absent or empty meaning the default.
 ///
 /// Absent or empty is the default; a sign, whitespace, a fraction or an
 /// out-of-range value is the fixed `400`. `usize::from_str` alone would accept
 /// `"+5"` and a `trim()`-based parse would accept `" 5"` — both are refused
 /// here, and the refusal never clamps.
 fn milestone_limit(query: &[(String, String)]) -> Result<usize, Response> {
-    let Some(raw) = super::query_first(query, "limit") else {
-        return Ok(MILESTONE_DEFAULT_LIMIT);
-    };
-    if raw.is_empty() {
-        return Ok(MILESTONE_DEFAULT_LIMIT);
-    }
-    if !raw.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(invalid_limit());
-    }
-    let parsed: usize = raw.parse().map_err(|_| invalid_limit())?;
-    if (1..=MILESTONE_MAX_LIMIT).contains(&parsed) {
-        Ok(parsed)
-    } else {
-        Err(invalid_limit())
-    }
-}
-
-/// The fixed `400` of a malformed / out-of-range `?limit`.
-fn invalid_limit() -> Response {
-    envelope::bad_request("Invalid limit parameter")
+    super::parse_limit(query, MILESTONE_DEFAULT_LIMIT, MILESTONE_MAX_LIMIT)
 }
 
 #[cfg(test)]

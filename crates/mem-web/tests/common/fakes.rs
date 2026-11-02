@@ -25,7 +25,7 @@ use mem_embed::embedder::EmbedTask;
 use mem_episodic::milestone::{Contributor, Milestone};
 use serde_json::{Value, json};
 
-use mem_web::api::dto::MilestoneItemDto;
+use mem_web::api::dto::{MilestoneItemDto, ProjectRowDto};
 use mem_web::api::ports::{
     ApiServices, CatalogEntry, CleanupApplied, CleanupPreview, DedupReport, EmbedPort,
     MaintenancePort, MemoryPort, MemoryRow, MemoryUpdate, MigrationReport, MigrationRunReport,
@@ -99,6 +99,8 @@ struct FakeState {
     skills: HashMap<String, Skill>,
     /// Every stored `user_profiles` row (the store's `is_active = 1` set).
     profiles: Vec<ProfileRecord>,
+    /// The project roster the `projects` port answers (issue 116).
+    projects: Vec<ProjectRowDto>,
     changelogs: Vec<ProfileChangelog>,
     pending_cleanup: Option<CleanupPreview>,
     pending_user: Option<String>,
@@ -219,6 +221,23 @@ impl FakeBackend {
         let mut skills = HashMap::new();
         skills.insert(skill.id.clone(), skill);
 
+        // Issue 116: two projects, one of them path-shaped, with distinct
+        // counts so a dropped or renamed field cannot pass unnoticed.
+        let projects = vec![
+            ProjectRowDto {
+                project_id: "/home/vaz/Code/demo".to_string(),
+                session_count: 4,
+                milestone_count: 2,
+                last_activity_at: 300,
+            },
+            ProjectRowDto {
+                project_id: "/home/vaz/x".to_string(),
+                session_count: 1,
+                milestone_count: 0,
+                last_activity_at: 100,
+            },
+        ];
+
         Self {
             state: Mutex::new(FakeState {
                 shards: vec![project.clone(), user.clone()],
@@ -227,6 +246,7 @@ impl FakeBackend {
                 skills,
                 profiles: vec![profile],
                 changelogs: vec![changelog],
+                projects,
                 pending_cleanup: None,
                 pending_user: None,
             }),
@@ -1249,6 +1269,15 @@ impl SessionPort for FakeBackend {
 
     async fn delete_session(&self, _project_id: &str, _session_id: &str) -> Result<(), PortError> {
         Err(PortError::Unavailable)
+    }
+
+    async fn projects(&self, limit: usize) -> Result<Vec<ProjectRowDto>, PortError> {
+        self.record(format!("projects:{limit}"));
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| PortError::Store("lock".into()))?;
+        Ok(state.projects.iter().take(limit).cloned().collect())
     }
 }
 

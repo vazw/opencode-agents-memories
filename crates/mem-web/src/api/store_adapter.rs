@@ -66,7 +66,7 @@ use mem_store::shard_manager::ShardManager;
 use mem_store::vector::{self, MemoryInsert, SearchResult};
 use serde_json::{Value as JsonValue, json};
 
-use super::dto::{MilestoneItemDto, PromotedFactDto};
+use super::dto::{MilestoneItemDto, ProjectRowDto, PromotedFactDto};
 use super::ports::{
     CatalogEntry, CleanupApplied, CleanupPreview, EmbedPort, MemoryPort, MemoryRow, MemoryUpdate,
     MilestonePort, NewMemory, NewSkill, PortError, ProfileChangelog as ChangelogDto,
@@ -978,6 +978,26 @@ impl SessionPort for EpisodicSessionPort {
             // handler's fixed `404 "Session not found"` (no existence leak).
             false => Err(PortError::NotFound),
         }
+    }
+
+    /// The store's one-statement roster (`sql::PROJECT_ROSTER`), mapped field
+    /// for field. The store owns the union, the counts and the order; the
+    /// adapter only renames.
+    async fn projects(&self, limit: usize) -> Result<Vec<ProjectRowDto>, PortError> {
+        self.store
+            .project_roster(limit)
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| ProjectRowDto {
+                        project_id: row.project_id,
+                        session_count: row.session_count,
+                        milestone_count: row.milestone_count,
+                        last_activity_at: row.last_activity_at,
+                    })
+                    .collect()
+            })
+            .map_err(episodic_failure)
     }
 }
 

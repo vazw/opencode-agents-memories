@@ -29,7 +29,7 @@ fn router_with_fakes() -> (std::sync::Arc<common::fakes::FakeBackend>, axum::Rou
 
 #[tokio::test]
 async fn test_the_pinned_route_table_lists_every_upstream_endpoint() {
-    assert_eq!(ROUTE_TABLE.len(), 39, "the pinned table is 39 rows");
+    assert_eq!(ROUTE_TABLE.len(), 41, "the pinned table is 41 rows");
 
     let mut keys: Vec<(&str, &str)> = ROUTE_TABLE
         .iter()
@@ -48,8 +48,8 @@ async fn test_the_pinned_route_table_lists_every_upstream_endpoint() {
         .filter(|row| row.path.starts_with("/api/"))
         .count();
     assert_eq!(
-        api_rows, 37,
-        "33 upstream API entries + 2 session stubs + 1 port-only row + the W6.6 milestone row"
+        api_rows, 39,
+        "33 upstream API entries + 2 session stubs + 1 port-only row + the W6.6 milestone row          + the 2 port-only rows of issues 115 (`GET /api/user-profiles`) and 116          (`GET /api/projects`)"
     );
 
     let catalog_rows = ROUTE_TABLE
@@ -102,6 +102,54 @@ fn test_the_milestone_route_row_is_pinned() {
     assert_eq!(row.method, "GET");
     assert_eq!(row.expectation, RouteExpectation::Success);
     assert_eq!(row.module, "api/milestones.rs");
+}
+
+/// Issues 115/116's port-only rows are pinned beside the W6.6 row: `Success`
+/// GETs with no upstream counterpart, and the erasure row stays LAST.
+#[test]
+fn test_the_port_only_roster_rows_are_pinned_above_the_erasure_row() {
+    let row = ROUTE_TABLE
+        .iter()
+        .find(|row| row.path == "/api/user-profiles")
+        .expect("the identity roster row is pinned");
+    assert_eq!(row.method, "GET");
+    assert_eq!(row.expectation, RouteExpectation::Success);
+    assert_eq!(row.module, "api/profile.rs");
+
+    let row = ROUTE_TABLE
+        .iter()
+        .find(|row| row.path == "/api/projects")
+        .expect("the project roster row is pinned");
+    assert_eq!(row.method, "GET");
+    assert_eq!(row.expectation, RouteExpectation::Success);
+    assert_eq!(row.module, "api/projects.rs");
+
+    // `DELETE /api/user-profile` stays the last row: the shared-router envelope
+    // walk must not delete the fake profile before the profile rows are probed.
+    let last = ROUTE_TABLE.last().expect("the table is not empty");
+    assert_eq!(last.method, "DELETE");
+    assert_eq!(last.path, "/api/user-profile");
+}
+
+/// Regression guard: `GET /api/user-profile` with no `userId` answers the
+/// identity the composition root resolved (`state.user_id`), never a literal
+/// and never the first stored profile.
+///
+/// The wiring line itself (`AppState.user_id = resolve_user_id(..)`) is not
+/// in-process testable — it sits in an async launch future and the probe is
+/// built inside `EnvResolver::resolve`; O1 closes it against a live host. This
+/// case pins the handler side of the contract.
+#[tokio::test]
+async fn test_get_user_profile_defaults_to_the_composed_identity() {
+    // The fake's only stored profile is `USER_ID` and the composed identity is
+    // that same value, so a handler answering a literal would miss it.
+    let (_, router) = router_with_fakes();
+    let response = api_request(router, "GET", "/api/user-profile", Some("test-token"), None).await;
+    assert_eq!(response.status, 200, "{}", response.body_string());
+    let body: serde_json::Value =
+        serde_json::from_str(&response.body_string()).expect("the body is JSON");
+    assert_eq!(body["data"]["exists"], true, "{}", response.body_string());
+    assert_eq!(body["data"]["userId"], USER_ID);
 }
 
 #[tokio::test]

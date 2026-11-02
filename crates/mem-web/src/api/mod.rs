@@ -1,11 +1,11 @@
 //! The REST surface: the pinned route table and the router that registers it.
 //!
 //! Upstream `web-server.ts` dispatches 33 API method+path entries; the pinned
-//! table holds **39 rows** (37 of them `/api/*`, 2 OpenCode catalog paths).
+//! table holds **41 rows** (39 of them `/api/*`, 2 OpenCode catalog paths).
 //! `/api/health` is row 1 and is registered by
-//! [`crate::server::build_router`] (W6.1 shipped it); [`api_router`] makes 31
+//! [`crate::server::build_router`] (W6.1 shipped it); [`api_router`] makes 33
 //! `.route(…)` calls in this file (`grep -c '^\s*\.route('
-//! crates/mem-web/src/api/mod.rs` = 31), plus the two route-layer `DELETE`
+//! crates/mem-web/src/api/mod.rs` = 33), plus the two route-layer `DELETE`
 //! branches on the static `bulk-delete` paths (upstream's `"Invalid ID"`
 //! branch — see the static-shadowing note below).
 //!
@@ -36,6 +36,7 @@ pub mod memories;
 pub mod milestones;
 pub mod ports;
 pub mod profile;
+pub mod projects;
 pub mod prompts;
 pub mod sessions;
 pub mod skills;
@@ -87,11 +88,11 @@ pub struct RouteSpec {
     pub expectation: RouteExpectation,
 }
 
-/// The pinned REST surface (39 rows): upstream's rows plus the port's own
+/// The pinned REST surface (41 rows): upstream's rows plus the port's own
 /// additions.
 ///
 /// Both the contract test and the auth walk iterate this constant.
-pub const ROUTE_TABLE: [RouteSpec; 39] = [
+pub const ROUTE_TABLE: [RouteSpec; 41] = [
     RouteSpec {
         method: "GET",
         path: "/api/health",
@@ -363,6 +364,23 @@ pub const ROUTE_TABLE: [RouteSpec; 39] = [
         module: "api/milestones.rs",
         expectation: RouteExpectation::Success,
     },
+    // Issue 115 — port-only: the identity roster. No upstream counterpart
+    // (upstream's UI assumes a single identity).
+    RouteSpec {
+        method: "GET",
+        path: "/api/user-profiles",
+        upstream_line: "n/a — port-only (issue 115)",
+        module: "api/profile.rs",
+        expectation: RouteExpectation::Success,
+    },
+    // Issue 116 — port-only: the project roster the Agents picker reads.
+    RouteSpec {
+        method: "GET",
+        path: "/api/projects",
+        upstream_line: "n/a — port-only (issue 116)",
+        module: "api/projects.rs",
+        expectation: RouteExpectation::Success,
+    },
     // Issue 48.14 — port-only (47.1-B2′): no upstream counterpart. Appended
     // LAST so the shared-router envelope walk is not perturbed by the fake
     // profile being deleted before the other profile rows are probed.
@@ -380,7 +398,7 @@ pub fn is_catalog_path(path: &str) -> bool {
     path == "/skills/index.json" || (path.starts_with("/skills/") && path.ends_with(".md"))
 }
 
-/// Builds the API router (the 38 non-health table paths + the two static
+/// Builds the API router (the 40 non-health table paths + the two static
 /// `DELETE` route-layer branches).
 ///
 /// The 1 MiB body cap is layered here, so it applies to every API method and
@@ -465,6 +483,9 @@ pub fn api_router() -> Router<Arc<AppState>> {
         )
         .route("/skills/index.json", get(skills::catalog_index))
         .route("/skills/{id}/{file}", get(skills::catalog_file))
+        // Issue 116: port-only project roster (no ROUTE_TABLE row yet — the
+        // surface pin owns every row, D-10).
+        .route("/api/projects", get(projects::list_projects))
         .route(
             "/api/projects/{project_id}/sessions",
             get(sessions::list_sessions),
@@ -535,6 +556,41 @@ fn parse_positive(raw: Option<&str>, default: usize) -> Result<usize, Response> 
             .filter(|parsed| *parsed >= 1)
             .ok_or_else(|| envelope::bad_request("Invalid pagination parameters")),
     }
+}
+
+/// Parses a strict `?limit` (extracted from the milestone route in issue 116
+/// so `/api/projects` shares one rule).
+///
+/// Absent or empty is `default`. Otherwise the raw value must be **ASCII digits
+/// only** and land in `1..=max`: a sign, whitespace, a fraction or an
+/// out-of-range value is the fixed `400 "Invalid limit parameter"`, never a
+/// clamp. `usize::from_str` alone would accept `"+5"`; a `trim()`-based parse
+/// would accept `" 5"`.
+pub fn parse_limit(
+    query: &[(String, String)],
+    default: usize,
+    max: usize,
+) -> Result<usize, Response> {
+    let Some(raw) = query_first(query, "limit") else {
+        return Ok(default);
+    };
+    if raw.is_empty() {
+        return Ok(default);
+    }
+    if !raw.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(invalid_limit());
+    }
+    let parsed: usize = raw.parse().map_err(|_| invalid_limit())?;
+    if (1..=max).contains(&parsed) {
+        Ok(parsed)
+    } else {
+        Err(invalid_limit())
+    }
+}
+
+/// The fixed `400` of a malformed / out-of-range `?limit`.
+pub fn invalid_limit() -> Response {
+    envelope::bad_request("Invalid limit parameter")
 }
 
 /// Parses a required JSON body. A malformed body is a fixed `400` (never an
