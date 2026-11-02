@@ -1,8 +1,10 @@
 # 98 — `chatMessage.enabled` does not gate capture: a user turning memory off keeps writing rows
 
-Status: ready-for-agent — 2026-11-02. Fix site decided: **coordinated gate** — the engine stays the sole
-config authority, the hello handshake advertises the resolved flag, the wrapper gates before any host call,
-and the engine refuses at `capture`. Brief at the end of this file.
+Status: ready-for-human — 2026-11-02. **Coordinated gate landed in `3786a5b`** (blueprint
+`chat-message-capture-gate-r5-20261102-1054`, sha `5335a695f3bd`): the engine stays the sole config
+authority, `hello` advertises the resolved flag in `result.config`, the wrapper gates before any host
+call, and the engine refuses at `capture`. RED→GREEN and the measured mutant transcripts are under
+`## Comments`. Brief at the end of this file.
 
 ## What to build
 
