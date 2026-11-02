@@ -298,6 +298,8 @@ Two things this re-run also shows:
   measured: admission waits for the run to release the session. It does not affect the pass; the row
   is what this issue names.
 
-**The toast was not machine-observed.** `ctx.attention.notify` is unused by decision (ADR-0017
-DECISION 11) and the toast crosses `MemToast` → `tui.js` → `ctx.ui.toast.show`, which needs a TUI
-client to witness — so it is confirmed by eye, not by this file. The row is the oracle.
+**The toast is owner-confirmed, not machine-observed.** `ctx.attention.notify` is unused by decision
+(ADR-0017 DECISION 11) and the toast crosses `MemToast` → `tui.js` → `ctx.ui.toast.show`, which needs a
+TUI client to witness — so the report is `REPORTED` (owner, 2026-11-02): the **Memory Restored** toast
+appeared on the `/compact` that wrote the row above. The row is the oracle this issue names; the toast
+is the corroborating observation.

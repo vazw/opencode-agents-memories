@@ -145,9 +145,9 @@ ses_e9d5dd698ffe5lUV7W7s2KDpbh  compaction 14:09:39 → restore row 14:10:19  (1
 Both rows carry `description: "memory context"` and open `## Restored Session Memory`; both sessions
 have an empty `parent_id`. The newest such row before the run was `2026-10-30 22:49:04`, so these are
 the first restores in three days. The loaded `dist` was verified equal to the `8a13ce3` tree blobs by
-`git hash-object` before the run was credited. The **Memory Restored** toast is confirmed by eye, not
-by this file (ADR-0017 DECISION 11 keeps `attention.notify` unused; the toast crosses
-`MemToast` → `tui.js` → `ctx.ui.toast.show`).
+`git hash-object` before the run was credited. The **Memory Restored** toast appeared too
+(`REPORTED`, owner, 2026-11-02 — it is not machine-observable: ADR-0017 DECISION 11 keeps
+`attention.notify` unused and the toast crosses `MemToast` → `tui.js` → `ctx.ui.toast.show`).
 
 If a future run regresses, the next discriminating observations are `parent_id` in `session_v2` (a
 child means the gate, not the agent) and `json_extract(data,'$.agent')` on that row (`NULL` means the
