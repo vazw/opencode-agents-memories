@@ -16,7 +16,6 @@
 //
 // Upstream reference: example/opencode-mem/src/v2/adapter.ts.
 
-import { logWarn } from "../plugin.js";
 import { eventBelongsToLocation, toLegacyEvent } from "./legacy-client.js";
 
 /**
@@ -90,11 +89,6 @@ export async function registerV2Adapter(ctx, legacyHooks) {
         const event = toLegacyEvent(raw);
         if (event.type === "session.compacted" && event.properties?.sessionID) {
           contexts.delete(event.properties.sessionID);
-          // Issue 67: V2 has no send capability (createLegacyClient exposes no
-          // session.prompt), so the restore half stays a read and the summary
-          // carries the ingest. One fixed line, no session id, no render —
-          // never silence.
-          logWarn("compaction.restore_skipped", { reason: "session.prompt unavailable" });
         }
         await legacyHooks.event({ event });
       }

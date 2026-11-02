@@ -98,7 +98,8 @@ permits and moves `hello-response.json` with it.
 
 **DECISION 5 — V2: the host's `compaction` hook is registered in the adapter, delegates to the V1
 `experimental.session.compacting` closure and appends the render to `event.system`; the restore stays a
-read, announced by a typed line.** Measured **READ** on the host at `8faeb81e92` (v2.2.0); the full chain,
+read, announced by a typed line (the restore half is SUPERSEDED by the 2026-11-02 amendment at the end of
+this decision: it now sends).** Measured **READ** on the host at `8faeb81e92` (v2.2.0); the full chain,
 the re-derivation greps and their output are in
 `docs/evidence/issue-67-v2-compaction-dispatch/MEASUREMENT.md`:
 
@@ -148,6 +149,26 @@ Two decisions are pinned by tests, not prose (`plugin/tests/v2-compaction-hook.t
   this bridge: `typeof ctx.session.prompt` is a function on the real host (`SessionDomain` includes
   `prompt` and `synthetic`, `packages/plugin/src/promise/session.ts:154-174`), and the absence is a
   property of `createLegacyClient`, which the adapter cannot see.
+
+**Amendment 2026-11-02 (issue 112) — the V2 restore SENDS: a visible synthetic, then the toast.** The
+"no send / restore stays a read" half of this decision is superseded (the earlier text is kept as the
+record of what was believed). `createLegacyClient` now exposes `session.prompt`
+(`plugin/src/v2/legacy-client.js`), which maps the V1 `{parts, noReply}` body onto
+`ctx.session.synthetic({sessionID, text, description: "memory context", resume: false})` and every other
+body onto `ctx.session.prompt({sessionID, text, delivery: "queue"})`. `plugin/src/v2/adapter.js` no longer
+emits the unconditional `compaction.restore_skipped` line; the one surviving skip is the agent gate in
+`plugin/src/plugin.js`, announced with `{reason: "agent unresolved"}` and nothing else. `session.get` is
+still deliberately absent (D-112-4 in `.scratch/rust-port/issues/112-v2-compaction-restore-send.md`), so
+the child gate still degrades to *proceed* and `resolveSessionModel` still returns `undefined` on V2 —
+nothing legitimate is lost, because the synthetic route takes no agent/model/variant. `description:
+"memory context"` is load-bearing in both renderers
+(`packages/session-ui/src/timeline/projection.ts:1179-1185`,
+`packages/tui/src/routes/session/rows.ts:392`); `resume: false` keeps the row visible at admission while
+deferring its entry into the model request to the next promotion
+(`packages/core/src/session/session.ts:323`). The test that pinned the old behaviour was replaced, not
+silently dropped: `test_v2_compaction_seam_ingests_then_reads_after_without_a_send` →
+`test_v2_compaction_seam_ingests_then_sends_the_restore_and_toasts`. Re-derivation, and the live
+residual measurement, are in `docs/evidence/issue-112-v2-restore-send/MEASUREMENT.md`.
 
 **The hook covers the summarisation path only.** `compaction.ts:303` chooses
 `native ? compactNatively(...) : summarize(...)` (`:317-321`): a native model never reaches `prepare`, so
@@ -215,6 +236,20 @@ recorded non-use, not an omission.** Three reasons:
 3. It is already out of scope (`.scratch/rust-port/issues/33-compaction-hook.md:46`, `:100`), so
    this is a record, not a scope change: no code, no manifest entry, no test. `plugin/package.json`
    lists exactly one new hook (`experimental.session.compacting`), and this one must not appear.
+
+**DECISION 11 — the restore's notification is the existing toast RPC; `ctx.attention.notify` is a
+recorded non-use, not an omission (issue 112).** A successful restore shows exactly one toast through
+`plugin/src/v2/toast-rpc.js` → `plugin/src/tui.js` → `ctx.ui.toast.show` — already wired, tested
+(`tui-companion.test.mjs`, `v2-toast-rpc.test.mjs`) and auto-loaded by the TUI process for a package
+whose `exports["./tui"]` resolves (`packages/core/src/plugin/module.ts:147-152`,
+`packages/tui/src/plugin/context.tsx:95-104`, `:670`). `ctx.attention.notify({title, message,
+notification: {when: "blurred"}})` exists (`packages/tui/src/plugin/api.tsx:80`) and is deliberately
+**not** used this wave: discriminating a restore from the injection-failure warning would need either
+`title` string-matching or widening the upstream-verbatim `MemToast` schema — a second unproven channel
+on a path that had never delivered a single toast. This is DECISION 10's recorded-non-use pattern. To
+un-defer: add the call beside `notifyRestore` in `plugin/src/plugin.js` with a distinct `title` and a
+`notification: {when: "blurred"}` gate, then widen `MemToast` (or match the title) so the two intents
+stay separable; neither change is in this wave.
 
 ## The renderer, byte-for-byte
 

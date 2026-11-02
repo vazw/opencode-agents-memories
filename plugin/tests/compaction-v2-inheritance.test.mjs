@@ -12,10 +12,11 @@
 // Assertions:
 //   (a) the event crossed the locator and reached the handler — sessionGetCalls
 //       deep-equals ["sess-A"] AND the stub's wire carries one restore inject;
-//       only this pair is an oracle.
-//   (b) toastEmits === [] — a limitation pin (the legacy client exposes no
-//       session.prompt, so nothing can send, and no toast may be sent without a
-//       send).
+//       only this pair is an oracle. With `session.get` deferred the locator's
+//       single call is the whole count, so this is also the pin that no second
+//       host read appeared.
+//   (b) one synthetic restore write (description "memory context") and one
+//       toast — issue 112 made the V2 restore an actual send.
 //   (c) helloCount >= 1 and consoleErrors === [] — liveness/no-throw only.
 
 import test from "node:test";
@@ -64,9 +65,10 @@ test(
       JSON.stringify({
         location: { directory },
         session: {
-          // Empty: resolveSessionAgent finds nothing, so the handler returns
-          // AFTER the inject — the read-before-resolution ordering oracle.
-          context: [],
+          // An agent-bearing assistant message: with `session.get` deferred the
+          // agent resolves from the transcript, and the handler proceeds to the
+          // send. Without it the handler would stop at the agent gate.
+          context: [{ id: "msg-1", type: "assistant", agent: "builder", content: [] }],
           get: { "sess-A": { location: { directory } } },
         },
         // No location on the envelope: the locator takes its session branch
@@ -120,8 +122,10 @@ test(
     );
     assert.equal(restore[0].params.session_id, "sess-A");
 
-    // (b) a limitation pin: no send capability under V2, so no toast.
-    assert.deepEqual(record.toastEmits, [], "no send path, therefore no restore toast");
+    // (b) the restore sends: one synthetic write, one toast.
+    assert.equal(record.toastEmits.length, 1, "one restore, one toast");
+    assert.equal(record.syntheticCalls.length, 1, "one synthetic restore write");
+    assert.equal(record.syntheticCalls[0].description, "memory context");
 
     // (c) liveness and no-throw.
     assert.ok(record.helloCount >= 1, "the engine was reached");

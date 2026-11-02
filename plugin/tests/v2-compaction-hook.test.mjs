@@ -12,9 +12,10 @@
 //   - the child gate is NOT applied on V2 (`createLegacyClient` exposes no
 //     `session.get`, so `readSession` returns null and ADR-0017 D2's
 //     positive-evidence rule says proceed);
-//   - there is NO send on V2 (`createLegacyClient` exposes no `session.prompt`),
-//     so the restore half stays a read and the adapter announces the skip with
-//     one fixed `compaction.restore_skipped` line per forwarded event.
+//   - the restore DOES send on V2 (issue 112): `createLegacyClient.session.prompt`
+//     maps the V1 `noReply` body onto `ctx.session.synthetic`, one toast follows
+//     a successful write, and the legacy adapter no longer emits the issue-67
+//     `compaction.restore_skipped` line.
 //
 // The driver cases run the staged `dist/v2/plugin.js` in a SUBPROCESS
 // (`tests/harness/bridge.mjs`, `mode: "v2-compaction"`): `setup` spawns the
@@ -109,6 +110,12 @@ function capabilityLines(stderr) {
 function restoreSkippedLines(stderr) {
   return structuredLines(stderr).filter(
     (event) => event !== null && typeof event === "object" && event.event === "compaction.restore_skipped"
+  );
+}
+
+function restoreFailedLines(stderr) {
+  return structuredLines(stderr).filter(
+    (event) => event !== null && typeof event === "object" && event.event === "compaction.restore_failed"
   );
 }
 
@@ -341,7 +348,7 @@ test(
 );
 
 test(
-  "test_v2_compaction_seam_ingests_then_reads_after_without_a_send",
+  "test_v2_compaction_seam_ingests_then_sends_the_restore_and_toasts",
   { timeout: 30000 },
   async (t) => {
     const { record, stderr, directory } = await runCompactionCase(t, {
@@ -350,8 +357,8 @@ test(
         return {
           location: { directory },
           session: {
-            // A non-summary assistant message with an agent: the restore read
-            // resolves an agent and then stops at the missing prompt API.
+            // A non-summary assistant message with an agent: with `session.get`
+            // deferred, the agent resolves from this transcript.
             context: [{ id: "msg-1", type: "assistant", agent: "builder", content: [] }],
             get: { "ses-A": { location: { directory } } },
           },
@@ -371,23 +378,115 @@ test(
     assert.equal(injectsOf(record.injects, "ingest").length, 1, "the ingest half ran");
 
     const restore = injectsOf(record.injects, "restore");
-    assert.equal(restore.length, 1, "the inherited restore read still reaches the engine");
+    assert.equal(restore.length, 1, "the inherited restore read reaches the engine");
     assert.equal(restore[0].session_id, "ses-A");
-    assert.deepEqual(record.contextCalls, ["ses-A"], "agent resolution read the session transcript once");
+    assert.deepEqual(record.contextCalls, ["ses-A"], "agent resolution read the transcript once");
 
-    // The no-send pin: the spies are installed, so zero is an observation.
-    assert.equal(record.promptCalls.length, 0, "no session.prompt under V2");
-    assert.equal(record.syntheticCalls.length, 0, "no session.synthetic under V2");
-    assert.deepEqual(record.toastEmits, [], "no send path, therefore no restore toast");
+    // The send: a synthetic write, never a queued prompt.
+    assert.equal(record.syntheticCalls.length, 1, "one synthetic restore write");
+    assert.equal(record.promptCalls.length, 0, "the restore never queues a model turn");
+    assert.equal(record.syntheticCalls[0].description, "memory context");
+    assert.equal(record.syntheticCalls[0].resume, false);
+    assert.ok(
+      record.syntheticCalls[0].text.startsWith("## Restored Session Memory"),
+      `the write carries the engine's restore render (saw ${JSON.stringify(
+        record.syntheticCalls[0].text.slice(0, 40)
+      )})`
+    );
+
+    // D-112-4: `session.get` is not reachable through the legacy client, and the
+    // locator short-circuits on the event's own `location` — zero is the guard.
+    assert.deepEqual(record.sessionGetCalls, [], "no host session read on the restore path");
+
+    assert.equal(record.toastEmits.length, 1, "one successful write, exactly one toast");
+    assert.equal(record.toastEmits[0].name, "toast");
+    assert.deepEqual(record.toastEmits[0].data, {
+      message: "7 memories injected after compaction",
+      title: "Memory Restored",
+      variant: "success",
+      duration: 3000,
+    });
+
+    const skipped = restoreSkippedLines(stderr);
+    assert.equal(
+      skipped.length,
+      0,
+      `the retired skip line must not appear on a successful send (stderr=${stderr})`
+    );
+  }
+);
+
+test(
+  "test_restore_skipped_names_an_unresolved_agent",
+  { timeout: 30000 },
+  async (t) => {
+    const { record, stderr } = await runCompactionCase(t, {
+      fixture: (tmp) => {
+        const directory = path.join(tmp, "project");
+        return {
+          location: { directory },
+          // Empty transcript: no agent is resolvable, so the ONE pre-fix silent
+          // return remains — and it must name its reason.
+          session: { context: [], get: { "ses-A": { location: { directory } } } },
+          compactions: [{ sessionID: "ses-A" }],
+          events: [
+            { type: "session.compaction.ended", location: { directory }, data: { sessionID: "ses-A" } },
+          ],
+          rpc: { registered: true },
+        };
+      },
+    });
+
+    assert.deepEqual(record.compactionErrors, []);
+    assert.equal(injectsOf(record.injects, "restore").length, 1, "the read still precedes the gate");
+    assert.equal(record.syntheticCalls.length, 0, "no agent, no write");
+    assert.equal(record.toastEmits.length, 0, "no write, no toast");
 
     const skipped = restoreSkippedLines(stderr);
     assert.equal(skipped.length, 1, `exactly one compaction.restore_skipped line (stderr=${stderr})`);
+    assert.equal(skipped[0].reason, "agent unresolved");
     assert.deepEqual(
       Object.keys(skipped[0]).sort(),
       ["component", "event", "level", "reason"],
       "the skip line carries fixed fields only (no session id, path, render or error text)"
     );
-    assert.equal(skipped[0].reason, "session.prompt unavailable");
+  }
+);
+
+test(
+  "test_v2_compaction_restore_toasts_only_after_the_write",
+  { timeout: 60000 },
+  async (t) => {
+    const sendFixture = (syntheticRejects) => (tmp) => {
+      const directory = path.join(tmp, "project");
+      return {
+        location: { directory },
+        session: {
+          context: [{ id: "msg-1", type: "assistant", agent: "builder", content: [] }],
+          get: { "ses-A": { location: { directory } } },
+          ...(syntheticRejects ? { syntheticRejects: true } : {}),
+        },
+        compactions: [{ sessionID: "ses-A" }],
+        events: [
+          { type: "session.compaction.ended", location: { directory }, data: { sessionID: "ses-A" } },
+        ],
+        rpc: { registered: true },
+      };
+    };
+
+    const written = await runCompactionCase(t, { fixture: sendFixture(false) });
+    assert.equal(written.record.syntheticCalls.length, 1, "the write happened");
+    assert.equal(written.record.toastEmits.length, 1, "a successful write toasts exactly once");
+
+    const refused = await runCompactionCase(t, { fixture: sendFixture(true) });
+    assert.equal(refused.record.syntheticCalls.length, 0, "the rejected write is not recorded as a success");
+    assert.equal(refused.record.toastEmits.length, 0, "a refused write must never toast");
+    const failed = restoreFailedLines(refused.stderr);
+    assert.equal(
+      failed.length,
+      1,
+      `exactly one compaction.restore_failed line (stderr=${refused.stderr})`
+    );
   }
 );
 

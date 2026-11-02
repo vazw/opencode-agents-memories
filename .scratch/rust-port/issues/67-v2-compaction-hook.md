@@ -145,3 +145,15 @@ the orchestrator records the landing).**
 - **Tests.** `plugin/tests/v2-compaction-hook.test.mjs` (8 cases: 3 in-process, 5 driver); the existing
   exact-key case widened to `["compaction", "context", "prompt"]`. Wrapper suite 122 → 130 (24 → 25
   files), 130/130 green; `dist/v2/adapter.js` a byte copy (`cmp -s`).
+
+**2026-11-02 — the send-path decision above is REVERSED (issue 112).** `createLegacyClient` gains
+`session.prompt`: a V1 `{parts, noReply: true}` body is written through
+`ctx.session.synthetic({sessionID, text, description: "memory context", resume: false})`, and the adapter
+no longer emits the unconditional `compaction.restore_skipped` line. The one surviving skip is the agent
+gate in `plugin/src/plugin.js`, logged as `{reason: "agent unresolved"}`. `session.get` is still absent,
+so the child-gate pin (`test_v2_compaction_hook_does_not_apply_the_child_gate`, `sessionGetCalls === []`)
+stands unchanged. The no-send case was replaced 1:1, never silently dropped:
+`test_v2_compaction_seam_ingests_then_reads_after_without_a_send` →
+`test_v2_compaction_seam_ingests_then_sends_the_restore_and_toasts`. Recorded in ADR-0017 DECISION 5
+(`Amendment 2026-11-02 (issue 112)`) and DECISION 11, with the measurement in
+`docs/evidence/issue-112-v2-restore-send/MEASUREMENT.md`. Wrapper suite 173 → 179, 179/179 green.

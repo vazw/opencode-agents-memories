@@ -351,7 +351,8 @@ function respond(parsed) {
  *          client→`notifyHost`→toast path), lets the supplied host events flow
  *          through the recorded subscription, polls the stub's wire log for the
  *          `capture` line and writes
- *          `{ helloCount, captureLine, injectCount, toastEmits }`.
+ *          `{ helloCount, captureLine, injectCount, toastEmits, sessionGetCalls,
+ *          promptCalls, syntheticCalls, consoleErrors }`.
  *   "v2-tool" — imports the staged `dist/plugin.js`, calls `setup(ctx)` against
  *          an async fake tool surface, invokes the registered
  *          `recall_project_sessions` tool and writes
@@ -376,7 +377,8 @@ function respond(parsed) {
  *          the recorded event stream, awaits cleanup and writes
  *          `{ registeredHooks, systems, compactionErrors, injects, promptCalls,
  *          syntheticCalls, sessionGetCalls, contextCalls, toastEmits,
- *          consoleErrors, helloCount }`.
+ *          consoleErrors, helloCount }`; `fixture.session.syntheticRejects`
+ *          makes the synthetic write reject (the toast-after-write knob).
  */
 export const DRIVER_SOURCE = `import fs from "node:fs";
 import path from "node:path";
@@ -544,6 +546,8 @@ if (mode === "v2") {
   const sessionHooks = new Map();
   const toastEmits = [];
   const sessionGetCalls = [];
+  const promptCalls = [];
+  const syntheticCalls = [];
   const consoleErrors = [];
   const originalConsoleError = console.error;
   console.error = (...args) => {
@@ -566,6 +570,16 @@ if (mode === "v2") {
       get: async ({ sessionID }) => {
         sessionGetCalls.push(sessionID);
         return fixture.session?.get?.[sessionID] ?? null;
+      },
+      // Issue 112 send spies: the restore's write is a synthetic, and a queued
+      // prompt is the mutant. Recording is what makes "zero" an observation.
+      prompt: async (input) => {
+        promptCalls.push(input);
+        return { data: {} };
+      },
+      synthetic: async (input) => {
+        syntheticCalls.push(input);
+        return { data: {} };
       },
     },
     event: {
@@ -628,7 +642,16 @@ if (mode === "v2") {
   const wire = readWire();
   const helloCount = wire.filter((message) => message && message.method === "hello").length;
   const injectCount = wire.filter((message) => message && message.method === "inject").length;
-  writeRecord({ helloCount, captureLine, injectCount, toastEmits, sessionGetCalls, consoleErrors });
+  writeRecord({
+    helloCount,
+    captureLine,
+    injectCount,
+    toastEmits,
+    sessionGetCalls,
+    promptCalls,
+    syntheticCalls,
+    consoleErrors,
+  });
   process.exit(0);
 }
 
@@ -672,6 +695,11 @@ if (mode === "v2-compaction") {
         return { data: {} };
       },
       synthetic: async (input) => {
+        // Issue 112 regression knob: a host that refuses the write must leave
+        // no toast and one typed failure line.
+        if (fixture.session?.syntheticRejects === true) {
+          throw new Error("synthetic rejected");
+        }
         syntheticCalls.push(input);
         return { data: {} };
       },

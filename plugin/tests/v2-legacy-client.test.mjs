@@ -269,6 +269,109 @@ test("test_v2_legacy_client_marks_synthetic_and_compaction_messages", async () =
   assert.deepEqual(data[4].parts, [], "a content-less assistant message maps to no parts");
 });
 
+test("test_v2_legacy_client_routes_no_reply_and_plain_bodies", async () => {
+  const { createLegacyClient } = await import(CLIENT_MODULE);
+  const syntheticCalls = [];
+  const promptCalls = [];
+  const client = createLegacyClient(
+    createContext({
+      session: {
+        synthetic: async (input) => {
+          syntheticCalls.push(input);
+          return { data: { id: "msg-synthetic" } };
+        },
+        prompt: async (input) => {
+          promptCalls.push(input);
+          return { data: { id: "msg-prompt" } };
+        },
+      },
+    }),
+    undefined
+  );
+
+  await client.session.prompt({
+    path: { id: "ses-A" },
+    body: { parts: [{ type: "text", text: "M" }], noReply: true },
+  });
+  await client.session.prompt({
+    path: { id: "ses-A" },
+    body: { parts: [{ type: "text", text: "U" }] },
+  });
+
+  assert.equal(syntheticCalls.length, 1, "the no-reply body is a synthetic write");
+  assert.equal(promptCalls.length, 1, "a plain body is a queued prompt, not a synthetic");
+  assert.deepEqual(syntheticCalls[0].sessionID, "ses-A");
+  assert.equal(syntheticCalls[0].text, "M");
+  assert.deepEqual(promptCalls[0], { sessionID: "ses-A", text: "U", delivery: "queue" });
+});
+
+test("test_v2_legacy_client_synthetic_does_not_wake_the_runner", async () => {
+  const { createLegacyClient } = await import(CLIENT_MODULE);
+  const syntheticCalls = [];
+  const client = createLegacyClient(
+    createContext({
+      session: {
+        synthetic: async (input) => {
+          syntheticCalls.push(input);
+          return { data: {} };
+        },
+      },
+    })
+  );
+
+  await client.session.prompt({
+    path: { id: "ses-A" },
+    body: { parts: [{ type: "text", text: "M" }], noReply: true },
+  });
+
+  assert.equal(syntheticCalls.length, 1);
+  // Strict, not truthiness: an omitted field is `undefined`, the mutant.
+  assert.equal(syntheticCalls[0].resume, false, "the restore must not start a runner turn");
+  assert.equal(syntheticCalls[0].description, "memory context");
+});
+
+test("test_v2_legacy_client_prompt_rejects_when_synthetic_is_unavailable", async () => {
+  const { createLegacyClient } = await import(CLIENT_MODULE);
+  const client = createLegacyClient(
+    createContext({ session: { prompt: async () => ({ data: {} }) } })
+  );
+
+  await assert.rejects(
+    () =>
+      client.session.prompt({
+        path: { id: "ses-A" },
+        body: { parts: [{ type: "text", text: "M" }], noReply: true },
+      }),
+    /session\.synthetic unavailable/,
+    "a host with no synthetic route must throw, never resolve a silent skip"
+  );
+});
+
+test("test_v2_legacy_client_prompt_uses_only_text_parts", async () => {
+  const { createLegacyClient } = await import(CLIENT_MODULE);
+  const syntheticCalls = [];
+  const client = createLegacyClient(
+    createContext({
+      session: {
+        synthetic: async (input) => {
+          syntheticCalls.push(input);
+          return { data: {} };
+        },
+      },
+    })
+  );
+
+  await client.session.prompt({
+    path: { id: "ses-A" },
+    body: {
+      parts: [{ type: "text", text: "A" }, { type: "tool", name: "x" }, { type: "text", text: "B" }],
+      noReply: true,
+    },
+  });
+
+  assert.equal(syntheticCalls[0].text, "A\nB", "a tool part contributes no text and no 'undefined'");
+});
+
 test("test_v2_legacy_client_requires_a_session_id", async () => {
   const { createLegacyClient } = await import(CLIENT_MODULE);
   const client = createLegacyClient(createContext());

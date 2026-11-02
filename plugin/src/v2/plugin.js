@@ -1,5 +1,9 @@
-// V2 plugin entry (W5.2, blueprint D1) — the host contract upstream reaches
-// through `./v2`: `{ id, setup(ctx) }` where `setup` returns an async cleanup.
+// V2 plugin entry (W5.2, blueprint D1): `{ id, setup(ctx) }` where `setup`
+// returns an async cleanup. The host reaches this module only through
+// `plugin/src/plugin.js:1260`'s `await import("./v2/plugin.js")` inside the
+// `setup` the host calls via `server()`; the package's `./v2` export is inert
+// (`packages/plugin/src/host.ts:57` resolves `./server` then `.`), so never
+// assume the host loads `./v2` (issue 112, D-112-8).
 // It is a DIFFERENT entry, not a variant of `server`: different input (`ctx`,
 // not `PluginInput`), different output (a cleanup, not `{ hooks }`), different
 // lifecycle.

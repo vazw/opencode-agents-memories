@@ -3,13 +3,17 @@
 // consumes:
 //   - `session.messages({ path: { id } })` → the transcript the idle capture
 //     parses (`plugin/src/plugin.js:668-677`), in the V1 `{ info, parts }` shape;
+//   - `session.prompt({ path, body })` → the compaction restore's V1 send: a
+//     `noReply` body becomes a `ctx.session.synthetic` write (description
+//     `memory context`), everything else a queued host prompt;
 //   - `tui.showToast({ body })` → the toast RPC event (`./toast-rpc.js`).
 //
 // Everything else upstream's 19-case legacy client carries — structured output,
-// session create/prompt/abort/delete, the provider directory, `noReply`,
-// `legacyToolResult` — is deliberately absent: the port's V1 behaviour consumes
-// no such capability, the summariser lives in Rust, and provider connectivity
-// is issue 62's (never a `client.provider` surface here).
+// session create/abort/delete, the provider directory, `legacyToolResult` — is
+// deliberately absent: the port's V1 behaviour consumes no such capability, the
+// summariser lives in Rust, and provider connectivity is issue 62's (never a
+// `client.provider` surface here). `session.get` is deliberately absent as well:
+// its blast radius is stated in issue 112's D-112-4.
 //
 // Upstream reference: example/opencode-mem/src/v2/legacy-client.ts.
 
@@ -112,6 +116,18 @@ async function showToastViaRpc(toastRpc, input) {
   }
 }
 
+/** The V1 send body carries parts; the V2 synthetic route takes one string. */
+function textFromParts(parts) {
+  if (!Array.isArray(parts)) return "";
+  return parts
+    .filter((part) => part && part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("\n");
+}
+
+/** Upstream's description string (`example/opencode-mem/src/v2/legacy-client.ts:308`). */
+export const MEMORY_CONTEXT_DESCRIPTION = "memory context";
+
 /**
  * Adapts the V2 plugin context to the two V1 client capabilities the wrapper
  * uses. `toastRpc` is the emitter `ctx.rpc.register(MemToast, {})` returned, or
@@ -125,6 +141,28 @@ export function createLegacyClient(ctx, toastRpc) {
         if (!sessionID) throw new Error("session id required");
         const messages = await ctx.session.context({ sessionID });
         return { data: messages.map((message) => legacyMessage(message, sessionID)) };
+      },
+      prompt: async (input) => {
+        const sessionID = sessionIDFrom(input);
+        if (!sessionID) throw new Error("session id required");
+        const body = input?.body ?? {};
+        const text = textFromParts(body.parts);
+        if (!text) throw new Error("prompt text required");
+        if (body.noReply === true) {
+          if (typeof ctx?.session?.synthetic !== "function") {
+            throw new Error("session.synthetic unavailable");
+          }
+          return {
+            data: await ctx.session.synthetic({
+              sessionID,
+              text,
+              description: MEMORY_CONTEXT_DESCRIPTION,
+              resume: false,
+            }),
+          };
+        }
+        if (typeof ctx?.session?.prompt !== "function") throw new Error("session.prompt unavailable");
+        return { data: await ctx.session.prompt({ sessionID, text, delivery: "queue" }) };
       },
     },
     tui: {

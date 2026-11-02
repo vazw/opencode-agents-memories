@@ -1050,7 +1050,12 @@ export const server = async function server(input) {
       );
       if (!result || typeof result.block !== "string" || result.block.length === 0) return;
       const agent = await resolveSessionAgent(client, sessionID, session);
-      if (!agent) return;
+      if (!agent) {
+        // The one surviving skip: the agent gate. Fixed reason string only —
+        // never a session id, path or render (the block is user content).
+        logWarn("compaction.restore_skipped", { reason: "agent unresolved" });
+        return;
+      }
       const resolved = resolveSessionModel(client, sessionID, session);
       if (!client || typeof client.session?.prompt !== "function") return;
       await client.session.prompt({
