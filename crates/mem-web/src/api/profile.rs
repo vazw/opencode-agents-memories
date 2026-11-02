@@ -20,7 +20,8 @@ use serde_json::Value;
 
 use super::dto::{
     ChangelogDto, CleanupPreviewDto, ProfileDto, ProfileErasureDto, ProfileMissingDto,
-    ProfileMutationDto, ProfileSnapshotDto, RefreshProfileDto, safe_to_iso_string,
+    ProfileMutationDto, ProfileRosterItemDto, ProfileSnapshotDto, RefreshProfileDto,
+    safe_to_iso_string,
 };
 use super::envelope;
 use super::ports::PortError;
@@ -29,6 +30,45 @@ use crate::server::AppState;
 
 /// The message of the no-profile answer (upstream's literal).
 const NO_PROFILE_MESSAGE: &str = "No profile found. Keep chatting to build your profile.";
+/// The copy of the missing-profile answer (D-4).
+///
+/// Zero stored profiles → upstream's literal, byte-for-byte: that is the state
+/// upstream's own single-identity install reaches, and the new wording is
+/// unreachable from it. With alternatives stored, the message names the
+/// REQUESTED identity and a count — never another identity, so the missing
+/// path cannot leak a second identity's data. A roster read error falls back to
+/// the literal rather than turning a working GET into a `500`.
+async fn missing_profile_message(state: &AppState, user_id: &str) -> String {
+    match state.api.profile.active_profiles().await {
+        Ok(profiles) => {
+            let others = profiles
+                .iter()
+                .filter(|profile| profile.user_id != user_id)
+                .count();
+            match others {
+                0 => NO_PROFILE_MESSAGE.to_string(),
+                1 => format!("No profile for \"{user_id}\". 1 other profile exists; choose it."),
+                count => {
+                    format!(
+                        "No profile for \"{user_id}\". {count} other profiles exist; choose one."
+                    )
+                }
+            }
+        }
+        Err(error) => {
+            // The identity is deliberately absent from this line: the log must
+            // not become the leak the response refuses to be.
+            tracing::warn!(
+                error = %error,
+                "profile roster read failed; answering the stored missing-profile literal"
+            );
+            NO_PROFILE_MESSAGE.to_string()
+        }
+    }
+}
+
+/// The bound on the identity roster (issue 115): never an unbounded list.
+pub const PROFILE_ROSTER_MAX: usize = 200;
 /// The refresh note (issue 48.13 — D-4).
 const REFRESH_NOTE: &str =
     "Confidence decay runs immediately. Automatic profile learning is disabled in this release.";
@@ -73,10 +113,11 @@ pub async fn get_user_profile(
         Err(error) => return profile_failure("GET /api/user-profile", error),
     };
     let Some(profile) = profile else {
+        let message = missing_profile_message(&state, &user_id).await;
         return envelope::ok(&ProfileMissingDto {
             exists: false,
             user_id,
-            message: NO_PROFILE_MESSAGE,
+            message,
         });
     };
 
@@ -99,6 +140,52 @@ pub async fn get_user_profile(
         total_prompts_analyzed: profile.total_prompts_analyzed,
         profile_data: to_public_profile_data(&data),
     })
+}
+
+/// `GET /api/user-profiles` — the identity roster (issue 115, D-3).
+///
+/// Port-only: upstream has no roster route (its UI assumes one identity).
+/// The page offers every stored identity instead of silently substituting one
+/// for another, so a host whose engine was launched from a different directory
+/// than the one inject resolved stays visible and switchable.
+///
+/// Ordering is `totalPromptsAnalyzed` desc then `user_id` asc — deterministic
+/// in SQL-free Rust because the store's query carries no `ORDER BY`. The list
+/// is bounded at [`PROFILE_ROSTER_MAX`] with a WARN, never silently.
+pub async fn list_profiles(State(state): State<Arc<AppState>>) -> Response {
+    let mut profiles = match state.api.profile.active_profiles().await {
+        Ok(profiles) => profiles,
+        Err(error) => return profile_failure("GET /api/user-profiles", error),
+    };
+    profiles.sort_by(|left, right| {
+        right
+            .total_prompts_analyzed
+            .cmp(&left.total_prompts_analyzed)
+            .then_with(|| left.user_id.cmp(&right.user_id))
+    });
+    if profiles.len() > PROFILE_ROSTER_MAX {
+        tracing::warn!(
+            limit = PROFILE_ROSTER_MAX,
+            profiles = profiles.len(),
+            "profile roster reached the limit bound; the identity list may be truncated"
+        );
+        profiles.truncate(PROFILE_ROSTER_MAX);
+    }
+    let rows: Vec<ProfileRosterItemDto> = profiles
+        .into_iter()
+        .map(|profile| {
+            let is_default = profile.user_id == state.user_id;
+            ProfileRosterItemDto {
+                user_id: profile.user_id,
+                display_name: profile.display_name,
+                version: profile.version,
+                total_prompts_analyzed: profile.total_prompts_analyzed,
+                last_analyzed_at: safe_to_iso_string(Some(profile.last_analyzed_at)),
+                is_default,
+            }
+        })
+        .collect();
+    envelope::ok(&rows)
 }
 
 /// `DELETE /api/user-profile` — the port-only erasure route (issue 48.14,

@@ -57,6 +57,8 @@ pub const NEW_SKILL_ID: &str = "probe-skill";
 pub const CHANGELOG_ID: &str = "probe";
 /// The seeded user identity.
 pub const USER_ID: &str = "probe@example.com";
+/// The second identity [`FakeBackend::seed_second_profile`] adds.
+pub const SECOND_USER_ID: &str = "second@example.com";
 
 const NOW: i64 = 1_700_000_000_000;
 
@@ -95,7 +97,8 @@ struct FakeState {
     memories: Vec<(ShardRef, MemoryRow)>,
     prompts: Vec<PromptRow>,
     skills: HashMap<String, Skill>,
-    profile: Option<ProfileRecord>,
+    /// Every stored `user_profiles` row (the store's `is_active = 1` set).
+    profiles: Vec<ProfileRecord>,
     changelogs: Vec<ProfileChangelog>,
     pending_cleanup: Option<CleanupPreview>,
     pending_user: Option<String>,
@@ -222,7 +225,7 @@ impl FakeBackend {
                 memories: vec![(project, project_memory), (user, user_memory)],
                 prompts: vec![prompt],
                 skills,
-                profile: Some(profile),
+                profiles: vec![profile],
                 changelogs: vec![changelog],
                 pending_cleanup: None,
                 pending_user: None,
@@ -324,7 +327,7 @@ impl FakeBackend {
     /// recorded).
     pub fn set_profile_data(&self, data: Value) {
         let mut state = self.state.lock().expect("fake state lock");
-        if let Some(profile) = state.profile.as_mut() {
+        if let Some(profile) = state.profiles.first_mut() {
             profile.profile_data = data.to_string();
         }
     }
@@ -334,7 +337,7 @@ impl FakeBackend {
     /// any string, so a test can seed broken JSON.
     pub fn set_profile_raw(&self, raw: String) {
         let mut state = self.state.lock().expect("fake state lock");
-        if let Some(profile) = state.profile.as_mut() {
+        if let Some(profile) = state.profiles.first_mut() {
             profile.profile_data = raw;
         }
     }
@@ -342,7 +345,33 @@ impl FakeBackend {
     /// Removes the seeded profile so `active_profile` answers `Ok(None)`
     /// (a test-only seed, never recorded).
     pub fn clear_profile(&self) {
-        self.state.lock().expect("fake state lock").profile = None;
+        self.state.lock().expect("fake state lock").profiles.clear();
+    }
+
+    /// Adds one stored profile row (a test-only seed, never recorded).
+    pub fn seed_profile(&self, profile: ProfileRecord) {
+        self.state
+            .lock()
+            .expect("fake state lock")
+            .profiles
+            .push(profile);
+    }
+
+    /// Adds the second canonical profile ([`SECOND_USER_ID`]) beside the
+    /// seeded one (a test-only seed, never recorded).
+    pub fn seed_second_profile(&self) {
+        self.seed_profile(ProfileRecord {
+            id: "profile_2".to_string(),
+            user_id: SECOND_USER_ID.to_string(),
+            display_name: "Second".to_string(),
+            user_name: "second".to_string(),
+            user_email: SECOND_USER_ID.to_string(),
+            profile_data: seeded_profile_data().to_string(),
+            version: 1,
+            created_at: NOW,
+            last_analyzed_at: NOW,
+            total_prompts_analyzed: 4,
+        });
     }
 
     /// Points one seeded shard's `db_path` at `path` (a test-only seed, never
@@ -379,8 +408,8 @@ impl FakeBackend {
     pub fn seed_pending_cleanup(&self) {
         let mut state = self.state.lock().expect("fake state lock");
         let profile_data = state
-            .profile
-            .as_ref()
+            .profiles
+            .first()
             .map(|profile| profile.profile_data.clone())
             .unwrap_or_else(|| "{}".to_string());
         let parsed: Value = serde_json::from_str(&profile_data).unwrap_or_else(|_| json!({}));
@@ -823,10 +852,19 @@ impl ProfilePort for FakeBackend {
             .lock()
             .map_err(|_| PortError::Store("lock".into()))?;
         Ok(state
-            .profile
-            .as_ref()
-            .filter(|profile| profile.user_id == user_id)
+            .profiles
+            .iter()
+            .find(|profile| profile.user_id == user_id)
             .cloned())
+    }
+
+    async fn active_profiles(&self) -> Result<Vec<ProfileRecord>, PortError> {
+        self.record("active_profiles".to_string());
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| PortError::Store("lock".into()))?;
+        Ok(state.profiles.clone())
     }
 
     async fn delete_profile(&self, profile_id: &str) -> Result<ProfileErasure, PortError> {
@@ -840,16 +878,9 @@ impl ProfilePort for FakeBackend {
             .changelogs
             .retain(|changelog| changelog.profile_id != profile_id);
         let changelogs_deleted = (before - state.changelogs.len()) as u64;
-        let profiles_deleted = if state
-            .profile
-            .as_ref()
-            .is_some_and(|profile| profile.id == profile_id)
-        {
-            state.profile = None;
-            1
-        } else {
-            0
-        };
+        let before_profiles = state.profiles.len();
+        state.profiles.retain(|profile| profile.id != profile_id);
+        let profiles_deleted = (before_profiles - state.profiles.len()) as u64;
         Ok(ProfileErasure {
             profiles_deleted,
             changelogs_deleted,
@@ -900,9 +931,9 @@ impl ProfilePort for FakeBackend {
             .lock()
             .map_err(|_| PortError::Store("lock".into()))?;
         let Some(profile) = state
-            .profile
-            .as_mut()
-            .filter(|profile| profile.id == profile_id)
+            .profiles
+            .iter_mut()
+            .find(|profile| profile.id == profile_id)
         else {
             return Ok(false);
         };
@@ -953,9 +984,9 @@ impl ProfilePort for FakeBackend {
             ));
         };
         let Some(profile) = state
-            .profile
-            .as_mut()
-            .filter(|profile| profile.user_id == user_id)
+            .profiles
+            .iter_mut()
+            .find(|profile| profile.user_id == user_id)
         else {
             return Err(PortError::Invalid("Profile not found".to_string()));
         };

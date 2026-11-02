@@ -978,6 +978,18 @@ body {
   color: var(--muted);
 }
 
+/* Issue 115: the identity line and the identity picker (muted: an identity is
+ * a readout, not an alert). */
+.profile-identity {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0 0 0.5rem;
+}
+
+.profile-identity-select {
+  margin-bottom: 0.75rem;
+}
+
 .profile-version,
 .profile-analyzed {
   color: var(--muted);

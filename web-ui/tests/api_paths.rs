@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 
 use wasm_bindgen_test::wasm_bindgen_test;
-use web_ui::paths::{ENDPOINTS, endpoint, endpoints_for, fill};
+use web_ui::paths::{ENDPOINTS, EndpointId, endpoint, endpoints_for, fill};
 use web_ui::routes::RouteId;
 
 #[wasm_bindgen_test]
@@ -51,6 +51,8 @@ fn test_pinned_endpoints_are_the_exact_rest_set() {
         ("GET", "/api/projects/{project_id}/sessions"),
         ("DELETE", "/api/projects/{project_id}/sessions/{session_id}"),
         ("GET", "/api/projects/{project_id}/milestones"),
+        // Issue 115: the port-only identity roster.
+        ("GET", "/api/user-profiles"),
     ]
     .into_iter()
     .collect();
@@ -91,12 +93,23 @@ fn test_endpoint_accessor_round_trips_every_table_row() {
 }
 
 #[wasm_bindgen_test]
+fn test_profile_roster_spec_matches_the_pinned_template() {
+    // Issue 115: the profile page's picker reads the identity roster from the
+    // port-only route. Mutant: the spec still points at `/api/user-profile`.
+    assert_eq!(
+        endpoint(EndpointId::ListUserProfiles).template,
+        "/api/user-profiles"
+    );
+    assert_eq!(endpoint(EndpointId::ListUserProfiles).method, "GET");
+}
+
+#[wasm_bindgen_test]
 fn test_agents_route_consumes_the_milestone_endpoint() {
     // W6.6: the panel's one fetch is the project-scoped milestone projection.
     assert_eq!(
         ENDPOINTS.len(),
-        35,
-        "the pinned REST table grew by the milestone row"
+        36,
+        "the pinned REST table grew by the identity-roster row"
     );
     let expected: &[&str] = &["/api/projects/{project_id}/milestones"];
     assert_eq!(

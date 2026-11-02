@@ -310,12 +310,34 @@ pub struct DeletedCountDto {
 }
 
 /// The missing-profile answer of `GET /api/user-profile`.
+///
+/// `message` is owned (issue 115, D-4): the zero-profile state still answers
+/// upstream's literal byte-for-byte, but a root that holds OTHER identities
+/// says so and names the requested one, instead of claiming no profile exists
+/// while the picker offers two.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileMissingDto {
     pub exists: bool,
     pub user_id: String,
-    pub message: &'static str,
+    pub message: String,
+}
+
+/// One row of `GET /api/user-profiles` (issue 115 — the identity roster).
+///
+/// Identity-level fields only: no `profile_data`, so a roster read can never
+/// become a second, unguarded profile payload path.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileRosterItemDto {
+    pub user_id: String,
+    pub display_name: String,
+    pub version: i64,
+    pub total_prompts_analyzed: i64,
+    /// `safe_to_iso_string` of the stored stamp.
+    pub last_analyzed_at: String,
+    /// Whether this row is the identity the composition root resolved.
+    pub is_default: bool,
 }
 
 /// The populated profile answer of `GET /api/user-profile`.

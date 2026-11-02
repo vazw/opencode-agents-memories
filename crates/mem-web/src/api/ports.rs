@@ -502,6 +502,15 @@ pub trait PromptPort: Send + Sync {
 pub trait ProfilePort: Send + Sync {
     async fn active_profile(&self, user_id: &str) -> Result<Option<ProfileRecord>, PortError>;
 
+    /// Every stored active profile, in the store's own order (the handler owns
+    /// the documented ordering and the bound).
+    ///
+    /// The roster route (issue 115) needs the whole identity set to offer a
+    /// picker: answering it from `active_profile` would require guessing
+    /// identities. Only identity-level fields are read; `profile_data` never
+    /// leaves the server through this seam.
+    async fn active_profiles(&self) -> Result<Vec<ProfileRecord>, PortError>;
+
     /// Erase one profile and its changelog snapshots (issue 48, B2′). The
     /// handler resolves the profile first; a client never names a
     /// `profile_id` directly.
@@ -855,6 +864,10 @@ impl PromptPort for UnavailablePort {
 #[async_trait]
 impl ProfilePort for UnavailablePort {
     async fn active_profile(&self, _user_id: &str) -> Result<Option<ProfileRecord>, PortError> {
+        Err(PortError::Unavailable)
+    }
+
+    async fn active_profiles(&self) -> Result<Vec<ProfileRecord>, PortError> {
         Err(PortError::Unavailable)
     }
 

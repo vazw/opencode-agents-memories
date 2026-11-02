@@ -450,6 +450,9 @@ pub fn api_router() -> Router<Arc<AppState>> {
             "/api/user-profile/item",
             patch(profile::update_profile_item),
         )
+        // Issue 115: port-only identity roster (no ROUTE_TABLE row yet — the
+        // surface pin owns every row, D-10).
+        .route("/api/user-profiles", get(profile::list_profiles))
         .route(
             "/api/skills",
             get(skills::list_skills).post(skills::create_skill),

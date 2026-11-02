@@ -899,9 +899,81 @@ pub fn profile_view(profile: &ProfileView) -> ProfileScreen {
     }
 }
 
-/// `GET /api/user-profile`.
+/// `GET /api/user-profile` for the composed identity.
 pub fn get_user_profile_spec() -> RequestSpec {
     RequestSpec::get(endpoint(EndpointId::UserProfile).template)
+}
+
+/// `GET /api/user-profile?userId=…` for one chosen identity.
+///
+/// The identity travels as a QUERY value, never as a path segment: it is a
+/// selector bound by the handler, and `build_url` percent-encodes it (an email
+/// with `@` becomes `%40`).
+pub fn get_user_profile_spec_for(user_id: &str) -> RequestSpec {
+    RequestSpec::get(endpoint(EndpointId::UserProfile).template).with_query("userId", user_id)
+}
+
+/// `GET /api/user-profiles` — the identity roster (issue 115).
+pub fn list_user_profiles_spec() -> RequestSpec {
+    RequestSpec::get(endpoint(EndpointId::ListUserProfiles).template)
+}
+
+/// One row of the identity roster, as `GET /api/user-profiles` sends it.
+///
+/// Identity-level fields only: the route never carries `profileData`, so a
+/// roster read cannot become a second profile-payload path.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileRosterItem {
+    pub user_id: String,
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub version: i64,
+    #[serde(default)]
+    pub total_prompts_analyzed: i64,
+    #[serde(default)]
+    pub last_analyzed_at: String,
+    /// Whether this row is the identity the server composed.
+    #[serde(default)]
+    pub is_default: bool,
+}
+
+/// Which identity control the profile page renders.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IdentityControl {
+    /// One stored identity, and it is the composed one: nothing to choose.
+    Hidden,
+    /// Several identities, or none of them the composed one: offer the picker.
+    Picker {
+        options: Vec<ProfileRosterItem>,
+        // The composed identity when the roster carries it; `None` renders the
+        // "— choose an identity —" placeholder. Never defaulted to the first
+        // row (D-3: no silent substitution).
+        selected: Option<String>,
+    },
+}
+
+/// The identity control for a roster and the composed identity.
+///
+/// `Hidden` iff the roster is non-empty, holds exactly one row, and that row is
+/// the composed identity. Every other shape is a `Picker`, whose `selected` is
+/// the composed identity only when the roster actually carries it.
+pub fn profile_identity_control(
+    roster: &[ProfileRosterItem],
+    default_user_id: &str,
+) -> IdentityControl {
+    let selected = roster
+        .iter()
+        .find(|row| row.user_id == default_user_id)
+        .map(|row| row.user_id.clone());
+    if roster.len() == 1 && selected.is_some() {
+        return IdentityControl::Hidden;
+    }
+    IdentityControl::Picker {
+        options: roster.to_vec(),
+        selected,
+    }
 }
 
 /// One profile section list.
@@ -949,6 +1021,12 @@ fn profile_section(
 }
 
 /// The W6.7 Profile screen.
+///
+/// Issue 115: the panel offers every stored identity instead of assuming one.
+/// A single-identity install renders exactly what it rendered before plus one
+/// muted identity line; a root that holds several identities (or none of them
+/// the composed one) renders a picker and never substitutes a row for the
+/// composed identity.
 #[component]
 pub fn ProfilePanel() -> impl IntoView {
     let auth = AuthContext {
@@ -956,25 +1034,116 @@ pub fn ProfilePanel() -> impl IntoView {
         basic: None,
     };
     let state = RwSignal::new(ProfileScreen::Loading);
+    // The identity the rendered answer belongs to (the server's `userId`).
+    let identity = RwSignal::new(String::new());
+    let control = RwSignal::new(IdentityControl::Hidden);
+    let chosen = RwSignal::new(None::<String>);
 
-    let reload = Callback::new({
+    // `None` asks for the composed identity (no `userId` query); `Some(id)` asks
+    // for that identity explicitly.
+    let load_profile = Callback::new({
         let auth = auth.clone();
-        move |_: ()| {
+        move |user_id: Option<String>| {
             let auth = auth.clone();
             state.set(ProfileScreen::Loading);
             leptos::task::spawn_local(async move {
-                match api_request::request::<ProfileView>(&get_user_profile_spec(), &auth).await {
-                    Ok(found) => state.set(profile_view(&found)),
+                let spec = match user_id.as_deref() {
+                    Some(id) => get_user_profile_spec_for(id),
+                    None => get_user_profile_spec(),
+                };
+                match api_request::request::<ProfileView>(&spec, &auth).await {
+                    Ok(found) => {
+                        identity.set(found.user_id.clone().unwrap_or_default());
+                        state.set(profile_view(&found));
+                    }
                     Err(failure) => state.set(ProfileScreen::Error(failure.to_string())),
                 }
             });
         }
     });
-    Effect::new(move |_| reload.run(()));
+
+    // Reload keeps the current selection: a refresh of "this identity" must not
+    // silently walk back to the composed one.
+    let reload = Callback::new(move |_: ()| load_profile.run(chosen.get_untracked()));
+
+    // One roster read on mount decides the control, then one profile read.
+    Effect::new(move |_| {
+        let auth = auth.clone();
+        leptos::task::spawn_local(async move {
+            let roster =
+                api_request::request::<Vec<ProfileRosterItem>>(&list_user_profiles_spec(), &auth)
+                    .await;
+            // A roster read failure is NOT a profile failure: the page still
+            // answers the composed identity, it just cannot offer a picker.
+            let Ok(roster) = roster else {
+                load_profile.run(None);
+                return;
+            };
+            let default_user_id = roster
+                .iter()
+                .find(|row| row.is_default)
+                .map(|row| row.user_id.clone())
+                .unwrap_or_default();
+            let resolved = profile_identity_control(&roster, &default_user_id);
+            let initial = match &resolved {
+                IdentityControl::Hidden => None,
+                IdentityControl::Picker { selected, .. } => selected.clone(),
+            };
+            chosen.set(initial.clone());
+            control.set(resolved);
+            load_profile.run(initial);
+        });
+    });
+
+    let on_select = move |event: web_sys::Event| {
+        let value = event_target_value(&event);
+        if value.is_empty() {
+            return;
+        }
+        chosen.set(Some(value.clone()));
+        load_profile.run(Some(value));
+    };
 
     view! {
         <section class="profile-panel" data-testid="profile-panel">
             <h2>"User profile"</h2>
+            <p class="profile-identity" data-testid="profile-identity">
+                "identity: " <code>{move || identity.get()}</code>
+            </p>
+            {move || match control.get() {
+                IdentityControl::Hidden => ().into_any(),
+                IdentityControl::Picker { options, selected } => {
+                    view! {
+                        <select
+                            id="profile-identity-select"
+                            class="profile-identity-select"
+                            data-testid="profile-identity-select"
+                            on:change=on_select
+                        >
+                            <option value="" prop:selected=selected.is_none() disabled=true>
+                                "— choose an identity —"
+                            </option>
+                            {options
+                                .into_iter()
+                                .map(|row| {
+                                    let is_selected = selected.as_deref() == Some(row.user_id.as_str());
+                                    let label = if row.display_name.trim().is_empty() {
+                                        row.user_id.clone()
+                                    } else {
+                                        format!("{} — {} prompts", row.display_name, row.total_prompts_analyzed)
+                                    };
+                                    view! {
+                                        <option value=row.user_id.clone() prop:selected=is_selected>
+                                            {label}
+                                        </option>
+                                    }
+                                })
+                                .collect_view()}
+                        </select>
+                    }
+                        .into_any()
+                }
+            }}
             <button
                 type="button"
                 class="profile-reload"

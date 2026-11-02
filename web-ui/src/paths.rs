@@ -50,6 +50,7 @@ pub enum EndpointId {
     ListProjectSessions,
     DeleteProjectSession,
     ListProjectMilestones,
+    ListUserProfiles,
 }
 
 /// One pinned endpoint: its identity, its HTTP method and its path template.
@@ -237,6 +238,12 @@ pub const ENDPOINTS: &[EndpointSpec] = &[
         method: "GET",
         template: "/api/projects/{project_id}/milestones",
     },
+    // Issue 115: the port-only identity roster (no upstream counterpart).
+    EndpointSpec {
+        id: EndpointId::ListUserProfiles,
+        method: "GET",
+        template: "/api/user-profiles",
+    },
 ];
 
 /// Compile-time totality: one row per `EndpointId`, in declaration order.
@@ -282,9 +289,10 @@ const _: () = {
         | EndpointId::DeleteSkill
         | EndpointId::ListProjectSessions
         | EndpointId::DeleteProjectSession
-        | EndpointId::ListProjectMilestones => {}
+        | EndpointId::ListProjectMilestones
+        | EndpointId::ListUserProfiles => {}
     }
-    assert!(ENDPOINTS.len() == EndpointId::ListProjectMilestones as usize + 1);
+    assert!(ENDPOINTS.len() == EndpointId::ListUserProfiles as usize + 1);
     let mut i: usize = 0;
     while i < ENDPOINTS.len() {
         assert!(ENDPOINTS[i].id as usize == i);
@@ -318,6 +326,10 @@ const TAG_PATHS: &[&str] = &["/api/tags", "/api/memories", "/api/search"];
 
 const PROFILE_PATHS: &[&str] = &[
     "/api/user-profile",
+    // Issue 115: the identity roster the picker reads. The `ENDPOINTS`
+    // tripwire does not cover these declaration lists, so the row lands here in
+    // the same edit round as the route.
+    "/api/user-profiles",
     "/api/user-profile/changelog",
     "/api/user-profile/snapshot",
     "/api/user-profile/refresh",

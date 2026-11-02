@@ -728,6 +728,16 @@ impl ProfilePort for ProductionProfile {
             .map_err(profile_failure)
     }
 
+    /// The store's `get_all_active_profiles` (`is_active = 1`), mapped field for
+    /// field. The store applies no `ORDER BY`; the handler sorts and bounds.
+    async fn active_profiles(&self) -> Result<Vec<ProfileRecord>, PortError> {
+        self.store
+            .get_all_active_profiles()
+            .await
+            .map(|profiles| profiles.into_iter().map(profile_record).collect())
+            .map_err(profile_failure)
+    }
+
     async fn delete_profile(&self, profile_id: &str) -> Result<ProfileErasure, PortError> {
         self.store
             .delete_profile(profile_id)

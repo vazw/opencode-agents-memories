@@ -23,11 +23,13 @@ use web_ui::core_screens::{
     CleanupStep, cleanup_action_label, cleanup_disabled, cleanup_next, cleanup_status,
 };
 use web_ui::core_screens::{
-    DailyStatsView, HealthStatus, MemoriesView, MemoryPage, ProfileScreen, ProfileView,
-    SettingsScreen, ShardStatsView, StatsView, TagsPage, TagsView, active_shard_count, daily_peak,
-    delete_memory_spec, error_buckets, get_user_profile_spec, health_outcome, health_spec,
-    list_memories_spec, list_tags_spec, memories_view, pin_memory_spec, profile_view, search_spec,
-    settings_view, sorted_shards, stats_spec, tags_view, unpin_memory_spec,
+    DailyStatsView, HealthStatus, IdentityControl, MemoriesView, MemoryPage, ProfileRosterItem,
+    ProfileScreen, ProfileView, SettingsScreen, ShardStatsView, StatsView, TagsPage, TagsView,
+    active_shard_count, daily_peak, delete_memory_spec, error_buckets, get_user_profile_spec,
+    get_user_profile_spec_for, health_outcome, health_spec, list_memories_spec, list_tags_spec,
+    list_user_profiles_spec, memories_view, pin_memory_spec, profile_identity_control,
+    profile_view, search_spec, settings_view, sorted_shards, stats_spec, tags_view,
+    unpin_memory_spec,
 };
 use web_ui::paths::{ENDPOINTS, EndpointId, encode_component};
 
@@ -375,6 +377,101 @@ fn test_get_user_profile_spec_matches_the_pinned_template() {
     assert_eq!(spec.path, "/api/user-profile");
     assert!(spec.query.is_empty());
     assert!(spec.body.is_none());
+}
+
+/// One roster row as the `GET /api/user-profiles` projection sends it.
+fn roster_row(user_id: &str, prompts: i64, is_default: bool) -> ProfileRosterItem {
+    ProfileRosterItem {
+        user_id: user_id.to_string(),
+        display_name: user_id.to_string(),
+        version: 1,
+        total_prompts_analyzed: prompts,
+        last_analyzed_at: "2026-10-01T00:00:00.000Z".to_string(),
+        is_default,
+    }
+}
+
+#[wasm_bindgen_test]
+fn test_profile_roster_decodes_the_camel_case_projection() {
+    let raw = r#"[{
+        "userId": "vaz@siamstr.com",
+        "displayName": "Vaz",
+        "version": 7,
+        "totalPromptsAnalyzed": 1430,
+        "lastAnalyzedAt": "2026-10-01T00:00:00.000Z",
+        "isDefault": true
+    }]"#;
+    let roster: Vec<ProfileRosterItem> =
+        serde_json::from_str(raw).expect("the roster projection decodes");
+    assert_eq!(roster.len(), 1);
+    assert_eq!(roster[0].user_id, "vaz@siamstr.com");
+    assert_eq!(roster[0].total_prompts_analyzed, 1430);
+    assert!(roster[0].is_default);
+}
+
+#[wasm_bindgen_test]
+fn test_profile_roster_spec_reads_the_pinned_template() {
+    let spec = list_user_profiles_spec();
+    assert_eq!(spec.method, "GET");
+    assert_eq!(spec.path, template(EndpointId::ListUserProfiles));
+    assert_eq!(spec.path, "/api/user-profiles");
+    assert!(spec.query.is_empty());
+}
+
+#[wasm_bindgen_test]
+fn test_profile_spec_with_user_id_encodes_the_query() {
+    // Mutant: the identity interpolated into the PATH (a second identity in a
+    // path segment), or the query left unencoded (`?userId=vaz@siamstr.com`).
+    let spec = get_user_profile_spec_for("vaz@siamstr.com");
+    assert_eq!(spec.method, "GET");
+    assert_eq!(spec.path, "/api/user-profile");
+    assert_eq!(
+        spec.query,
+        vec![("userId".to_string(), "vaz@siamstr.com".to_string())]
+    );
+    assert_eq!(
+        build_url(&spec).expect("the spec builds a URL"),
+        "/api/user-profile?userId=vaz%40siamstr.com"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_profile_identity_control_hides_the_picker_for_one_matching_identity() {
+    // Mutant: `Picker` whenever the roster is non-empty.
+    let roster = vec![roster_row("vaz@siamstr.com", 1430, true)];
+    assert_eq!(
+        profile_identity_control(&roster, "vaz@siamstr.com"),
+        IdentityControl::Hidden
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_profile_identity_control_shows_the_picker_when_the_default_is_absent() {
+    // Mutant: `Picker` only when `roster.len() > 1` — here the roster holds one
+    // row, but it is NOT the composed identity, so a picker is required and
+    // nothing may be auto-selected.
+    let roster = vec![roster_row("other@example.com", 3, false)];
+    let IdentityControl::Picker { options, selected } =
+        profile_identity_control(&roster, "vaz@siamstr.com")
+    else {
+        panic!("a roster without the composed identity needs a picker");
+    };
+    assert_eq!(options.len(), 1);
+    assert_eq!(selected, None, "never auto-select the only other identity");
+}
+
+#[wasm_bindgen_test]
+fn test_profile_identity_control_selects_the_default_among_several() {
+    let roster = vec![
+        roster_row("a@example.com", 9, false),
+        roster_row("vaz@siamstr.com", 3, true),
+    ];
+    let IdentityControl::Picker { selected, .. } =
+        profile_identity_control(&roster, "vaz@siamstr.com")
+    else {
+        panic!("two identities need a picker");
+    };
+    assert_eq!(selected.as_deref(), Some("vaz@siamstr.com"));
 }
 
 #[wasm_bindgen_test]
