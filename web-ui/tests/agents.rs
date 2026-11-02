@@ -6,15 +6,17 @@
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_ui::agents::{
     AGENTS_DETAIL_CLASS, AGENTS_DETAIL_TESTID, AGENTS_EMPTY_CLASS, AGENTS_EMPTY_DETAIL,
-    AGENTS_EMPTY_MESSAGE, AGENTS_EMPTY_TESTID, AGENTS_ERROR_CLASS, AGENTS_ERROR_TESTID,
-    AGENTS_FACT_CLASS, AGENTS_FACT_TESTID, AGENTS_LOADING_CLASS, AGENTS_LOADING_TESTID,
-    AGENTS_MILESTONE_CLASS, AGENTS_MILESTONE_TESTID, AGENTS_ROSTER_CLASS, AGENTS_ROSTER_TESTID,
-    AGENTS_ROW_CLASS, AGENTS_ROW_TESTID, AGENTS_UNAVAILABLE_CLASS, AGENTS_UNAVAILABLE_MESSAGE,
-    AGENTS_UNAVAILABLE_TESTID, AgentSummary, AgentsOutcome, AgentsView, ContributorDto,
-    MilestoneDto, ProjectRow, ProjectsOutcome, ProjectsView, PromotedFactDto, agent_detail,
-    agents_view, format_window, list_milestones_spec, list_projects_spec, mount_action,
-    outcome_for_error, outcome_for_projects, project_label, project_option_label, projects_view,
-    roster, selected_project,
+    AGENTS_EMPTY_DETAIL_CLASS, AGENTS_EMPTY_DETAIL_TESTID, AGENTS_EMPTY_MESSAGE,
+    AGENTS_EMPTY_TESTID, AGENTS_ERROR_CLASS, AGENTS_ERROR_TESTID, AGENTS_FACT_CLASS,
+    AGENTS_FACT_TESTID, AGENTS_LOADING_CLASS, AGENTS_LOADING_TESTID, AGENTS_MILESTONE_CLASS,
+    AGENTS_MILESTONE_TESTID, AGENTS_NO_PROJECTS_CLASS, AGENTS_NO_PROJECTS_TESTID,
+    AGENTS_PROJECT_SELECT_CLASS, AGENTS_PROJECT_SELECT_TESTID, AGENTS_ROSTER_CLASS,
+    AGENTS_ROSTER_TESTID, AGENTS_ROW_CLASS, AGENTS_ROW_TESTID, AGENTS_UNAVAILABLE_CLASS,
+    AGENTS_UNAVAILABLE_MESSAGE, AGENTS_UNAVAILABLE_TESTID, AgentSummary, AgentsOutcome, AgentsView,
+    ContributorDto, MilestoneDto, ProjectRow, ProjectsOutcome, ProjectsView, PromotedFactDto,
+    agent_detail, agents_view, format_window, list_milestones_spec, list_projects_spec,
+    mount_action, outcome_for_error, outcome_for_projects, project_label, project_option_label,
+    projects_view, roster, selected_project,
 };
 use web_ui::api::envelope::ApiError;
 
@@ -346,6 +348,12 @@ fn test_agents_view_unavailable_is_not_the_failure_state() {
         AGENTS_MILESTONE_TESTID,
         AGENTS_FACT_TESTID,
         AGENTS_ROW_TESTID,
+        // Issue 116's picker hooks: hand-listed like the rest (nothing derives
+        // these arrays from the `*_TESTID` consts — this is a test-local
+        // convenience, the class-coverage script is the emit↔CSS gate).
+        AGENTS_PROJECT_SELECT_TESTID,
+        AGENTS_NO_PROJECTS_TESTID,
+        AGENTS_EMPTY_DETAIL_TESTID,
     ];
     let classes = [
         AGENTS_LOADING_CLASS,
@@ -357,6 +365,9 @@ fn test_agents_view_unavailable_is_not_the_failure_state() {
         AGENTS_MILESTONE_CLASS,
         AGENTS_FACT_CLASS,
         AGENTS_ROW_CLASS,
+        AGENTS_PROJECT_SELECT_CLASS,
+        AGENTS_NO_PROJECTS_CLASS,
+        AGENTS_EMPTY_DETAIL_CLASS,
     ];
     assert!(testids.iter().all(|hook| !hook.is_empty()));
     assert!(classes.iter().all(|hook| !hook.is_empty()));
