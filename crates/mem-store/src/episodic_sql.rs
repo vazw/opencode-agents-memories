@@ -458,6 +458,38 @@ pub const SELECT_MILESTONE_ID_BY_ID: &str = "SELECT id FROM episodic_milestones 
 /// never reads the vector back (the embedding is write-only, `#[serde(skip)]`).
 pub const LIST_MILESTONES_BY_PROJECT: &str = "SELECT id, project_id, agent_id, summary, contributors, source_count, window_start, window_end, created_at FROM episodic_milestones WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT ?";
 
+/// The project roster (issue 116, D-6): the union of live session projects and
+/// milestone projects, with one count per side and the greatest activity stamp.
+///
+/// The union is the point. Consolidation **hard**-deletes its source sessions
+/// (`DELETE_SESSION_SCOPED`), so a sessions-only roster loses every
+/// well-consolidated project; milestones alone have no history for a project
+/// that was never consolidated.
+///
+/// `last_activity_at` is `COALESCE(session stamp, milestone stamp, 0)`: the
+/// newest LIVE session wins when the project still has one, and the milestone
+/// stamp is the fallback for a fully consolidated project (the consolidation
+/// hard-deletes its sources, so that side is usually `NULL` exactly then).
+/// The soft-delete filter lives in BOTH session subqueries, so a soft-deleted
+/// session is neither counted nor dated.
+///
+/// Deterministic order: `last_activity_at DESC, project_id ASC`. Bind: limit.
+pub const PROJECT_ROSTER: &str = "SELECT p.project_id AS project_id, \
+        COALESCE(s.session_count, 0) AS session_count, \
+        COALESCE(m.milestone_count, 0) AS milestone_count, \
+        COALESCE(s.last_activity_at, m.last_activity_at, 0) AS last_activity_at \
+        FROM (SELECT project_id FROM agent_sessions WHERE deleted_at IS NULL \
+              UNION \
+              SELECT project_id FROM episodic_milestones) AS p \
+        LEFT JOIN (SELECT project_id, COUNT(*) AS session_count, MAX(created_at) AS last_activity_at \
+                   FROM agent_sessions WHERE deleted_at IS NULL GROUP BY project_id) AS s \
+               ON s.project_id = p.project_id \
+        LEFT JOIN (SELECT project_id, COUNT(*) AS milestone_count, MAX(created_at) AS last_activity_at \
+                   FROM episodic_milestones GROUP BY project_id) AS m \
+               ON m.project_id = p.project_id \
+        ORDER BY last_activity_at DESC, project_id ASC \
+        LIMIT ?";
+
 /// The distinct agents owning at least one live session older than the
 /// cutoff (ascending `agent_id`).
 pub const DISTINCT_ELIGIBLE_AGENTS: &str = "SELECT DISTINCT agent_id FROM agent_sessions WHERE project_id = ? AND deleted_at IS NULL AND created_at < ? ORDER BY agent_id";

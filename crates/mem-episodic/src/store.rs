@@ -1090,6 +1090,39 @@ impl EpisodicStore {
             .collect())
     }
 
+    /// The project roster (issue 116, D-6): every project with live sessions
+    /// OR milestones, its live-session count, its milestone count and the
+    /// greatest activity stamp, newest activity first (`project_id` asc on a
+    /// tie).
+    ///
+    /// One statement (`sql::PROJECT_ROSTER`), so both sides are read in one
+    /// consistent snapshot: the union is what keeps a fully consolidated
+    /// project (its sessions hard-deleted) on the screen.
+    pub async fn project_roster(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<ProjectRosterRow>, EpisodicError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let db = self.ready().await?;
+        let rows = db
+            .query(
+                sql::PROJECT_ROSTER,
+                vec![Value::Integer(clamp_limit(limit))],
+            )
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| ProjectRosterRow {
+                project_id: row.text("project_id").unwrap_or_default(),
+                session_count: row.i64("session_count").unwrap_or(0),
+                milestone_count: row.i64("milestone_count").unwrap_or(0),
+                last_activity_at: row.i64("last_activity_at").unwrap_or(0),
+            })
+            .collect())
+    }
+
     /// Executes ONE atomic write batch (`BatchMode::Write`).
     ///
     /// This is the single seam the W4.3 consolidator uses for phase (f): the
@@ -1297,6 +1330,21 @@ pub struct SessionSearchHit {
     pub session: AgentSession,
     /// Similarity in `[0, 1]` (higher is closer).
     pub similarity: f64,
+}
+
+/// One row of [`EpisodicStore::project_roster`] (issue 116).
+///
+/// Counts are per source: `session_count` counts LIVE `agent_sessions` rows
+/// only (a soft-deleted row still exists but is not a live session), and
+/// `milestone_count` counts `episodic_milestones` rows. `last_activity_at` is
+/// the greater of the two sides' newest `created_at`, `0` when neither side
+/// carries one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectRosterRow {
+    pub project_id: String,
+    pub session_count: i64,
+    pub milestone_count: i64,
+    pub last_activity_at: i64,
 }
 
 /// `LIMIT ?` argument clamp (a `usize` beyond `i64` cannot be reached in
