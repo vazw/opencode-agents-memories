@@ -1,9 +1,10 @@
 //! Issue 108 — retryability reaches the capture ladder, carried by the closed
 //! wire token and the decoded detail. Issue 110 — a retry hint SCHEDULES the
 //! row (`not_before = now + retryAfterMs`) instead of dead-lettering it, at any
-//! magnitude, consuming no attempt.
+//! POSITIVE magnitude, consuming no attempt; a `0` hint orders no deferral and
+//! therefore takes the ladder (review R-1).
 //!
-//! Six drains through the REAL `CaptureService` with a scripted summarizer
+//! Eight drains through the REAL `CaptureService` with a scripted summarizer
 //! whose `last_failure()` is produced by the production classifier over a real
 //! decoded host failure (never a hand-written reason). Each row asserts the
 //! drain report AND the inbox attempt counter (and, on the scheduling rows, the
@@ -335,4 +336,94 @@ async fn test_108_parse_miss_is_retryable() {
 
     assert_eq!(report.retryable, 1, "{report:?}");
     assert_eq!(capture.inbox().attempts(capture_id).await, 1);
+}
+
+/// Issue 110 review R-1 — a `retryAfterMs: 0` orders NO deferral (`not_before = now + 0`
+/// is due at once), so it is the ABSENCE of a hint: the ladder charges one attempt per
+/// drain and the fifth drain dead-letters. RED on the reviewed tree — `attempts` stays 0,
+/// `not_before` stays `Some(T0)` and every drain reports `retryable: 1 … dead_lettered: 0`
+/// (one host request and one `capture.retry_scheduled` line per drain, for the life of the row).
+///
+/// Target mutants: (a) the `ms > 0` guard removed (or widened to `>= 0`) -> attempts 0,
+/// no dead-letter, the loop returns; (b) the guard widened to a floor such as `> 1_000`
+/// -> the `1 ms` sibling test goes red.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_110_zero_hint_is_hintless_and_charges_the_ladder() {
+    let failure = decode_generate_failure(
+        502,
+        r#"{"_tag":"ProviderRequestError","providerID":"p","reason":"overloaded","message":"x","retryAfterMs":0}"#,
+    );
+    assert_eq!(
+        failure.retry_after_ms,
+        Some(0),
+        "the host's 0 is decoded, not dropped"
+    );
+
+    let dir = TestDir::new("classes-502-zero-hint");
+    let clock_ms = Arc::new(AtomicI64::new(T0));
+    let capture = service_with_clock(&dir, &failure, clock_ms);
+    let capture_id = "019a0000-0000-7f00-8000-00000000d007";
+
+    capture
+        .enqueue(&CaptureParams {
+            session_id: "sess-classes".to_string(),
+            capture_id: capture_id.to_string(),
+            project_id: "/srv/classes".to_string(),
+            agent_id: "agent-1".to_string(),
+            transcript: Some("user: fix the retry storm in the login handler".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect("enqueue");
+
+    for expected in 1..=4u32 {
+        let report = capture.drain_once().await.expect("drain");
+        assert_eq!(report.retryable, 1, "{report:?}");
+        assert_eq!(report.dead_lettered, 0, "{report:?}");
+        assert_eq!(
+            capture.inbox().attempts(capture_id).await,
+            expected,
+            "a zero hint orders no deferral, so the ladder charges the attempt"
+        );
+        assert_eq!(
+            capture.inbox().not_before(capture_id).await,
+            None,
+            "a zero hint must never stamp a schedule"
+        );
+    }
+
+    let fifth = capture.drain_once().await.expect("fifth drain");
+    assert_eq!(
+        fifth.dead_lettered, 1,
+        "the ladder still terminates at five: {fifth:?}"
+    );
+    assert_eq!(capture.inbox().attempts(capture_id).await, 5);
+}
+
+/// Issue 110 review R-1, the BOUNDARY — a 1 ms hint IS a hint: it schedules, consumes no
+/// attempt, and keeps retrying (by design: the host supplied the rate, D-110-3). This test
+/// is GREEN today and is a guard, not a gate: it exists so the zero-hint fix cannot be
+/// widened into a floor constant that silently overrides a live host's hint.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_110_one_ms_hint_is_still_a_schedule() {
+    let failure = decode_generate_failure(
+        502,
+        r#"{"_tag":"ProviderRequestError","providerID":"p","reason":"rate_limit","message":"x","retryAfterMs":1}"#,
+    );
+    assert_eq!(failure.retry_after_ms, Some(1));
+
+    let dir = TestDir::new("classes-502-one-ms");
+    let clock_ms = Arc::new(AtomicI64::new(T0));
+    let capture = service_with_clock(&dir, &failure, clock_ms);
+    let capture_id = "019a0000-0000-7f00-8000-00000000d008";
+    let report = seed_and_drain(&capture, capture_id).await;
+
+    assert_eq!(report.retryable, 1, "{report:?}");
+    assert_eq!(report.dead_lettered, 0, "{report:?}");
+    assert_eq!(
+        capture.inbox().attempts(capture_id).await,
+        0,
+        "a hint schedules, never charges"
+    );
+    assert_eq!(capture.inbox().not_before(capture_id).await, Some(T0 + 1));
 }

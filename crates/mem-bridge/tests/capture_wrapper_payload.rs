@@ -90,8 +90,11 @@ fn payload_without(key: &str) -> CaptureParams {
     serde_json::from_value(value).expect("params parse")
 }
 
-/// No attempt-based backoff exists (the batch gates on `status = 'queued'`
-/// alone), so five consecutive drains re-pick the same entry until it dies.
+/// No attempt-based backoff exists, and this fixture's summarizer always succeeds
+/// (`FixedSummarizer`), so the only failures it can produce are identity/payload
+/// rejections, which carry no `retryAfterMs`: `not_before` is never stamped and the
+/// drain's `not_before IS NULL OR not_before <= ?` arm leaves the row eligible every
+/// time — five consecutive drains re-pick the same entry until it dies.
 async fn drain_five(service: &CaptureService) -> DrainReport {
     let mut total = DrainReport::default();
     for _ in 0..5 {

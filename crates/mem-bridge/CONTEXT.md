@@ -99,8 +99,9 @@
   message stays fixed per status. A permanent class (a `422`, a moved route, a
   terminal `502`) dead-letters on the first drain and consumes no attempt — that
   check runs BEFORE the hint, so a permanent class carrying a stale
-  `retryAfterMs` still dies there. Any `retryAfterMs` otherwise SCHEDULES the
-  capture rather than retrying immediately or dying: `capture_inbox.not_before
+  `retryAfterMs` still dies there. Any POSITIVE `retryAfterMs` otherwise
+  SCHEDULES the capture rather than retrying immediately or dying (a `0` orders
+  no deferral, so it is hintless and takes the ladder): `capture_inbox.not_before
   = now + retryAfterMs` (the store's one clock, `EpisodicStore::now()`), the row
   stays `queued`, and the drain selects it only once the deadline has elapsed
   (`not_before IS NULL OR not_before <= now`) — issue 110, which retired the

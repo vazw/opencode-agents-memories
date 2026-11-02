@@ -13,9 +13,14 @@
 //!
 //! **One clock (issue 110, D-110-2).** Every stamp this file writes and the
 //! `now` the drain compares against come from [`EpisodicStore::now`], the
-//! store's injectable clock. There is deliberately no wall-clock read here:
-//! a fake-clock test and a real row cannot disagree, and re-adding a second
-//! time source needs a visible import. `not_before` is therefore an absolute
+//! store's injectable clock. There is deliberately no wall-clock read here.
+//! That invariant is CONVENTIONAL, not compiler-enforced: Rust admits a
+//! fully-qualified `crate::ids::now_millis()` or `std::time::SystemTime::now()`
+//! with no `use` line, so a second time source is a visible diff line, never a
+//! compile error. The oracle is the fake-clock tests
+//! (`test_inbox_scheduled_row_is_skipped_until_not_before`,
+//! `test_110_scheduled_capture_is_not_re_attempted_before_its_deadline`): a
+//! mixed clock makes them disagree. `not_before` is therefore an absolute
 //! wall-clock instant, so a deadline survives a restart (the row is durable)
 //! but does not survive a backwards clock correction.
 

@@ -142,8 +142,10 @@ fields only (`field`/`kind`, `providerID`, `modelID`, `capability`, `location`, 
 on the token first; `is_retryable()` applies ONLY to the untagged default, because it returns true for every
 5xx and would erase the two 502 classes. `record_failure` dead-letters at once, with no attempt bump, for a
 `!retryable` class — checked BEFORE any hint, so a terminal class carrying a stale `retryAfterMs` still dies
-there. A `retryAfterMs` of ANY magnitude instead SCHEDULES the row and consumes no attempt, and only a
-hintless retryable failure runs the unchanged five-attempt ladder (D-29-12).
+there. A `retryAfterMs` of ANY **POSITIVE** magnitude instead SCHEDULES the row and consumes no attempt; a
+`retryAfterMs` of **`0`** orders no deferral (`not_before = now + 0` is due at once), so it is treated as the
+ABSENCE of a hint and runs the unchanged five-attempt ladder (D-29-12). Negative hints are already dropped by
+the decoder (`Value::as_u64`), so `0` was the only non-positive value that reached the scheduling branch.
 `EntryOutcome::Deferred` was rejected on two grounds: it consumes no attempt (nothing bounds the loop), and
 it already means "a live lock or an unreadable scope shard", so reusing it would erase a diagnostic
 distinction. Its third ground — "it honours no hint without a scheduling column" — is retired with the
@@ -180,7 +182,7 @@ already returns, so NO index is added. A `(status, not_before, created_at)` inde
 maintained on every enqueue, attempt bump and schedule write, for a table capped at 1,024 live rows — and it
 would not remove the sorter the `capture_id` tie-break forces, so no sort argument is made.
 
-**A hinted failure never consumes an attempt and never dead-letters, at any magnitude.** `schedule_retry`
+**A hinted failure never consumes an attempt and never dead-letters, at any POSITIVE magnitude.** `schedule_retry`
 stamps `not_before = now + retryAfterMs` on the row, which stays `queued`; the writer and the drain read ONE
 clock (`EpisodicStore::now()`, the store's injectable seam), so a fake-clock test and a real row cannot
 disagree. The magnitude is the host's: `i64::try_from(ms).unwrap_or(i64::MAX)` then `saturating_add`, never an
@@ -188,6 +190,20 @@ disagree. The magnitude is the host's: `i64::try_from(ms).unwrap_or(i64::MAX)` t
 intent. No horizon is applied; a ceiling under another name is what the owner retired. A deadline survives a
 process restart (the row is durable) but not a backwards wall-clock correction, which can hold a capture for
 the size of the step; neither direction loses the row, and a monotonic clock would not survive a restart.
+
+**A zero hint is not a hint.** `schedule_retry` with `retryAfterMs: 0` stamps `not_before = now`, which the
+drain predicate (`not_before <= ?`) makes eligible again at once: the row would consume no attempt and never
+reach the ladder — one host request and one `capture.retry_scheduled` line per drain for the life of the row,
+with `attempts` pinned at 0 so nothing in the observability set can find it. The scheduling branch therefore
+requires `retryAfterMs > 0`. This is not the retired ceiling under another name: nothing dead-letters because
+of a hint's MAGNITUDE — the ladder counts futile attempts exactly as it does for a failure that carries no
+hint. `0` is the only non-arbitrary boundary, because the drain has no fixed cadence (it is spawned per
+accepted capture, plus the startup drain, `engine.rs:621,860`), so any positive floor would be an arbitrary
+constant that silently overrides a live host's hint. The input is contract-reachable, not hostile-only:
+`ProviderRequestErrorEncoded.retryAfterMs` declares no positive minimum
+(`docs/evidence/issue-88-host-wire-contract-20261101/`). The decoder stays a faithful decode — a `0` is still
+carried into the failure payloads, where it is the diagnostic that identifies this class — and the
+ladder-versus-schedule policy lives in `mem-bridge`, never in `mem-ai`.
 
 **The dead-letter remainder.** A failure still dead-letters on the first drain, with no attempt bump, when the
 class is `!retryable` — and that check runs BEFORE the hint, so a permanent class carrying a stale

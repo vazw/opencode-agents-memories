@@ -1066,12 +1066,16 @@ impl CaptureService {
     ///   class must not burn five attempts — and it is checked BEFORE the hint,
     ///   so a permanent class carrying a stale `retryAfterMs` (a reachable host
     ///   combination) still dies on the first drain;
-    /// - branch 2 (any `retryAfterMs`) SCHEDULES the row for `now + hint` and
-    ///   consumes NO attempt, whatever the hint's magnitude: the former 30 s
-    ///   ceiling is retired, so a long outage no longer loses the capture;
+    /// - branch 2 (any `retryAfterMs` >= 1 ms) SCHEDULES the row for `now +
+    ///   hint` and consumes NO attempt, whatever the hint's magnitude: the
+    ///   former 30 s ceiling is retired, so a long outage no longer loses the
+    ///   capture. A `retryAfterMs: 0` orders no deferral (`not_before = now` is
+    ///   due immediately), so it is treated as hintless and falls to branch 3
+    ///   (D-29-12);
     /// - branch 3 is the existing ladder: bump, then dead-letter when the bump
     ///   reaches five. Bump-then-dead-letter here is one bump plus one
-    ///   dead-letter, which is that path by design.
+    ///   dead-letter, which is that path by design. It runs for a hintless
+    ///   failure, or one whose hint is `0`.
     ///
     /// `failure` names the cause; it is carried into the dead-letter payload so
     /// no capture ever dies anonymously.
@@ -1083,7 +1087,9 @@ impl CaptureService {
         if !failure.retryable {
             return self.dead_letter_now(entry, failure).await;
         }
-        if let Some(ms) = failure.retry_after_ms {
+        if let Some(ms) = failure.retry_after_ms
+            && ms > 0
+        {
             return self.schedule_retry(entry, ms, failure).await;
         }
         self.consume_attempt(entry, failure).await
