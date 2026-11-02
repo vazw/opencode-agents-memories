@@ -459,7 +459,8 @@ pub const SELECT_MILESTONE_ID_BY_ID: &str = "SELECT id FROM episodic_milestones 
 pub const LIST_MILESTONES_BY_PROJECT: &str = "SELECT id, project_id, agent_id, summary, contributors, source_count, window_start, window_end, created_at FROM episodic_milestones WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT ?";
 
 /// The project roster (issue 116, D-6): the union of live session projects and
-/// milestone projects, with one count per side and the greatest activity stamp.
+/// milestone projects, with one count per side and
+/// `last_activity_at = COALESCE(newest LIVE session stamp, newest milestone stamp, 0)`.
 ///
 /// The union is the point. Consolidation **hard**-deletes its source sessions
 /// (`DELETE_SESSION_SCOPED`), so a sessions-only roster loses every

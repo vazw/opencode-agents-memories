@@ -132,6 +132,35 @@ async fn test_project_roster_counts_live_sessions_only() {
     );
 }
 
+/// A project whose ONLY session is soft-deleted and which has no milestone is
+/// **absent** from the roster (issue 116 Residuals), not present as
+/// `(0, 0, 0)`.
+///
+/// Mutant this case exists for: dropping `deleted_at IS NULL` from the union
+/// arm, which lets the dead project enter with zero counts and offers the
+/// picker a ghost option reading "<label> — 0 sessions · 0 milestones".
+///
+/// The live project carries BOTH a live session and a milestone on purpose: an
+/// `INNER JOIN` substitution would otherwise drop it too and this case would red
+/// for the wrong reason — `test_project_roster_unions_live_sessions_and_milestones`
+/// owns that guard.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_project_roster_omits_a_project_whose_only_sessions_are_soft_deleted() {
+    let dir = TestDir::new("project-roster-soft-deleted-only");
+    let store = EpisodicStore::new(dir.to_path_buf(), dir.store_config());
+
+    raw_insert_session(&store, "l1", "/proj/live", 100, None).await;
+    raw_insert_milestone(&store, "ml1", "/proj/live", 200).await;
+    raw_insert_session(&store, "d1", "/proj/dead", 10, Some(20)).await;
+
+    let rows = store.project_roster(100).await.expect("the roster reads");
+    assert_eq!(
+        tuples(&rows),
+        vec![("/proj/live".to_string(), 1, 1, 100)],
+        "a project with no live session and no milestone is not a roster row"
+    );
+}
+
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_project_roster_orders_by_last_activity_then_id() {
     let dir = TestDir::new("project-roster-order");

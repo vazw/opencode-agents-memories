@@ -1091,9 +1091,12 @@ impl EpisodicStore {
     }
 
     /// The project roster (issue 116, D-6): every project with live sessions
-    /// OR milestones, its live-session count, its milestone count and the
-    /// greatest activity stamp, newest activity first (`project_id` asc on a
-    /// tie).
+    /// OR milestones, its live-session count, its milestone count and
+    /// `last_activity_at = COALESCE(newest LIVE session stamp, newest milestone
+    /// stamp, 0)` — the session stamp WINS whenever the project still holds a
+    /// live session, and the milestone stamp is only the fallback for a fully
+    /// consolidated project. Newest `last_activity_at` first (`project_id` asc
+    /// on a tie).
     ///
     /// One statement (`sql::PROJECT_ROSTER`), so both sides are read in one
     /// consistent snapshot: the union is what keeps a fully consolidated
@@ -1337,8 +1340,10 @@ pub struct SessionSearchHit {
 /// Counts are per source: `session_count` counts LIVE `agent_sessions` rows
 /// only (a soft-deleted row still exists but is not a live session), and
 /// `milestone_count` counts `episodic_milestones` rows. `last_activity_at` is
-/// the greater of the two sides' newest `created_at`, `0` when neither side
-/// carries one.
+/// `COALESCE(newest live-session stamp, newest milestone stamp, 0)`: the newest
+/// LIVE session wins when the project still has one, and the milestone stamp is
+/// the fallback for a fully consolidated project, whose sources consolidation
+/// hard-deleted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectRosterRow {
     pub project_id: String,
