@@ -8,10 +8,12 @@
 //! produces the per-agent drill-down (milestones newest first, each carrying its
 //! server-reported source count and the facts it promoted, deduped by fact id).
 //!
-//! The panel issues its one request on mount (`?project=` seeds the id):
-//! `GET /api/projects/{project_id}/milestones`, the W6.6 route on `mem-web`'s
-//! `ROUTE_TABLE` (39 rows), pinned here as the 35th
-//! [`crate::paths::ENDPOINTS`] row. It renders the documented `Unavailable`
+//! Issue 116: the panel no longer requires a pasted project id. On mount it
+//! fetches the project roster (`GET /api/projects`), picks a project
+//! ([`selected_project`]: the `?project=` seed when it is in the roster, else
+//! the first row, i.e. the newest activity) and then fetches that project's
+//! `GET /api/projects/{project_id}/milestones` — both pinned as
+//! [`crate::paths::ENDPOINTS`] rows. It renders the documented `Unavailable`
 //! state only for the `501` absent-service answer (D-38), never for a real
 //! failure.
 
@@ -226,30 +228,26 @@ fn display_name_for(agent_id: &str, milestones: &[MilestoneDto]) -> String {
 /// What the milestone fetch hands the panel.
 ///
 /// `Unavailable` is the documented 501 absent-service degrade (D-38), not an
-/// error; `NeedsProject` is the pre-input state — there is no project id yet,
-/// so nothing was asked and nothing failed — and only `Failed` means the
-/// request itself failed.
+/// error, and only `Failed` means the request itself failed. The pre-input
+/// `NeedsProject` arm is gone with the pasted id (issue 116): a mount always has
+/// a roster to read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentsOutcome {
     /// Data arrived.
     Loaded(Vec<MilestoneDto>),
     /// The build has no data path (the documented degraded state).
     Unavailable,
-    /// No project id has been entered yet (the mount state, not an error).
-    NeedsProject,
     /// The request itself failed.
     Failed(String),
 }
 
-/// The six arms the panel renders.
+/// The five arms the panel renders.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentsView {
     /// Before any outcome exists (the terminal pre-outcome state only — the
     /// mount always produces an outcome).
     Loading,
-    /// No project id yet: prompt for one, in the informational shape.
-    NeedsProject,
-    /// A loaded scope with no contributing agents.
+    /// A loaded scope with no milestones (and therefore no contributors).
     Empty,
     /// The documented degraded state, carrying its fixed copy.
     Unavailable(&'static str),
@@ -276,7 +274,6 @@ pub fn agents_view(outcome: Option<&AgentsOutcome>) -> AgentsView {
             }
         }
         Some(AgentsOutcome::Unavailable) => AgentsView::Unavailable(AGENTS_UNAVAILABLE_MESSAGE),
-        Some(AgentsOutcome::NeedsProject) => AgentsView::NeedsProject,
         Some(AgentsOutcome::Failed(message)) => AgentsView::Failed(message.clone()),
     }
 }
@@ -290,11 +287,23 @@ pub fn agents_view(outcome: Option<&AgentsOutcome>) -> AgentsView {
 pub const AGENTS_UNAVAILABLE_MESSAGE: &str = "Agent attribution is not available in this build.";
 
 /// The empty-scope copy: an empty scope is the empty state, not an error.
-pub const AGENTS_EMPTY_MESSAGE: &str = "No contributing agents in this project yet.";
+///
+/// Issue 116: it names what is actually empty — the project's MILESTONES — and
+/// no longer claims the project has no contributing agents (a project can have
+/// agents and no milestones yet).
+pub const AGENTS_EMPTY_MESSAGE: &str = "No milestones recorded for this project yet.";
 
-/// The pre-input copy: names the actual next step, promises no picker.
-pub const AGENTS_NEEDS_PROJECT_MESSAGE: &str =
-    "Enter a project id above to list this project's agent roster.";
+/// Why that can be true of a busy project: the mechanism, with no number and no
+/// promise.
+pub const AGENTS_EMPTY_DETAIL: &str = "Milestones are written by the engine's \
+hourly consolidation pass, which only covers sessions older than the configured \
+age window.";
+
+/// The `data-testid` of the empty state's explanatory line.
+pub const AGENTS_EMPTY_DETAIL_TESTID: &str = "agents-empty-detail";
+
+/// The class of the empty state's explanatory line.
+pub const AGENTS_EMPTY_DETAIL_CLASS: &str = "agents-empty-detail";
 
 /// The `data-testid` of the loading note.
 pub const AGENTS_LOADING_TESTID: &str = "agents-loading";
@@ -323,9 +332,6 @@ pub const AGENTS_FACT_TESTID: &str = "agents-fact";
 /// The `data-testid` of one roster row button.
 pub const AGENTS_ROW_TESTID: &str = "agents-row";
 
-/// The `data-testid` of the pre-input prompt.
-pub const AGENTS_PROMPT_TESTID: &str = "agents-prompt";
-
 /// The class of the loading note.
 pub const AGENTS_LOADING_CLASS: &str = "agents-loading";
 
@@ -353,38 +359,26 @@ pub const AGENTS_FACT_CLASS: &str = "agents-fact";
 /// The class of one roster row button.
 pub const AGENTS_ROW_CLASS: &str = "agents-row";
 
-/// The class of the pre-input prompt (muted/dashed: nothing failed).
-pub const AGENTS_PROMPT_CLASS: &str = "agents-prompt";
-
 /// What the panel does when it mounts at a search string.
 ///
 /// The regression this type exists to prevent is a mount that produces **no**
 /// state at all: the panel then stays on `Loading` forever (the shipped B2
-/// bug). Every mount yields an outcome — a fetch or a prompt.
+/// bug). Since issue 116 the mount ALWAYS fetches — the roster needs no project
+/// in hand — and `?project=` only seeds the selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MountAction {
-    /// The project id to seed the input with (empty when none was given).
+    /// The project id to seed the selection with (empty when none was given).
     pub project: String,
-    /// Whether to issue the one milestones request.
+    /// Whether to issue the roster request.
     pub fetch: bool,
-    /// The pre-input notice, when the route carried no project id.
-    pub notice: Option<String>,
 }
 
-/// The mount's one action for a URL search string: `""` prompts, `?project=p1`
-/// seeds and fetches.
+/// The mount's one action for a URL search string: `""` and `?project=p1` both
+/// fetch the roster; the second also seeds the selection.
 pub fn mount_action(search: &str) -> MountAction {
-    match initial_project(search) {
-        Some(project) => MountAction {
-            project,
-            fetch: true,
-            notice: None,
-        },
-        None => MountAction {
-            project: String::new(),
-            fetch: false,
-            notice: Some(AGENTS_NEEDS_PROJECT_MESSAGE.to_string()),
-        },
+    MountAction {
+        project: initial_project(search).unwrap_or_default(),
+        fetch: true,
     }
 }
 
@@ -519,8 +513,153 @@ pub fn agent_detail(agent_id: &str, milestones: &[MilestoneDto]) -> AgentDetailV
 }
 
 // ---------------------------------------------------------------------------
+// The project roster (issue 116)
+// ---------------------------------------------------------------------------
+
+/// One `GET /api/projects` row, as `mem-web` sends it (camelCase).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRow {
+    /// The project scope id — a path-shaped string, returned verbatim.
+    #[serde(default)]
+    pub project_id: String,
+    /// Live `agent_sessions` rows for this project.
+    #[serde(default)]
+    pub session_count: i64,
+    /// `episodic_milestones` rows for this project.
+    #[serde(default)]
+    pub milestone_count: i64,
+    /// The project's newest activity stamp (unix millis).
+    #[serde(default)]
+    pub last_activity_at: i64,
+}
+
+/// What the roster fetch hands the panel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectsOutcome {
+    /// Data arrived (possibly empty).
+    Loaded(Vec<ProjectRow>),
+    /// The documented 501 absent-service degrade (D-38), not an error.
+    Unavailable,
+    /// The request itself failed.
+    Failed(String),
+}
+
+/// The roster's render arms.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectsView {
+    /// Before any outcome exists.
+    Loading,
+    /// The documented degraded state, carrying its fixed copy.
+    Unavailable(&'static str),
+    /// A successful read that found no project at all.
+    NoProjects,
+    /// A failure message — never the unavailable state.
+    Failed(String),
+    /// The rows the picker renders.
+    Ready(Vec<ProjectRow>),
+}
+
+/// Map an optional roster outcome onto the render arms.
+///
+/// `None` is the pre-outcome state; a loaded-but-empty roster is `NoProjects`
+/// (never `Loading`, which would spin, and never `Failed`, which would imply a
+/// broken request).
+pub fn projects_view(outcome: Option<&ProjectsOutcome>) -> ProjectsView {
+    match outcome {
+        None => ProjectsView::Loading,
+        Some(ProjectsOutcome::Loaded(rows)) => {
+            if rows.is_empty() {
+                ProjectsView::NoProjects
+            } else {
+                ProjectsView::Ready(rows.clone())
+            }
+        }
+        Some(ProjectsOutcome::Unavailable) => {
+            ProjectsView::Unavailable(PROJECTS_UNAVAILABLE_MESSAGE)
+        }
+        Some(ProjectsOutcome::Failed(message)) => ProjectsView::Failed(message.clone()),
+    }
+}
+
+/// The fixed copy of the roster's degraded state (a `'static` constant, never a
+/// server body).
+pub const PROJECTS_UNAVAILABLE_MESSAGE: &str = "Project list is not available in this build.";
+
+/// The `data-testid` of the project picker.
+pub const AGENTS_PROJECT_SELECT_TESTID: &str = "agents-project-select";
+
+/// The class of the project picker.
+pub const AGENTS_PROJECT_SELECT_CLASS: &str = "agents-project-select";
+
+/// The `data-testid` of the empty-roster note.
+pub const AGENTS_NO_PROJECTS_TESTID: &str = "agents-no-projects";
+
+/// The class of the empty-roster note.
+pub const AGENTS_NO_PROJECTS_CLASS: &str = "agents-no-projects";
+
+/// The last non-empty path segment of a project id, else the id itself.
+///
+/// Upstream project ids are directories; the picker shows the leaf. A trailing
+/// slash, a bare `/` or an empty id must never render a blank option, so the
+/// fallback is the id verbatim.
+pub fn project_label(project_id: &str) -> String {
+    project_id
+        .rsplit('/')
+        .find(|segment| !segment.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| project_id.to_string())
+}
+
+/// The picker label of one roster row: `"{label} — {n} sessions · {m} milestones"`.
+pub fn project_option_label(row: &ProjectRow) -> String {
+    format!(
+        "{} — {} sessions · {} milestones",
+        project_label(&row.project_id),
+        row.session_count,
+        row.milestone_count
+    )
+}
+
+/// The project the panel selects.
+///
+/// The requested id when the roster carries it; otherwise the first row (the
+/// roster is ordered by newest activity); otherwise `None`. Never `""` and
+/// never a fabricated id — an unknown `?project=` must not pretend to exist.
+pub fn selected_project(roster: &[ProjectRow], requested: Option<&str>) -> Option<String> {
+    if let Some(requested) = requested
+        && let Some(row) = roster.iter().find(|row| row.project_id == requested)
+    {
+        return Some(row.project_id.clone());
+    }
+    roster.first().map(|row| row.project_id.clone())
+}
+
+// ---------------------------------------------------------------------------
 // The one fetch
 // ---------------------------------------------------------------------------
+
+/// The `GET /api/projects` request: the picker's roster.
+pub fn list_projects_spec() -> RequestSpec {
+    RequestSpec::get(paths::endpoint(EndpointId::ListProjects).template)
+}
+
+/// Map an [`ApiError`] onto the roster's outcome; only the `501` is the
+/// documented degrade.
+pub fn outcome_for_projects(error: ApiError) -> ProjectsOutcome {
+    match error {
+        ApiError::Server { status: 501, .. } => ProjectsOutcome::Unavailable,
+        other => ProjectsOutcome::Failed(other.to_string()),
+    }
+}
+
+/// Load the project roster.
+pub async fn load_projects(auth: &AuthContext) -> ProjectsOutcome {
+    match api_request::request::<Vec<ProjectRow>>(&list_projects_spec(), auth).await {
+        Ok(rows) => ProjectsOutcome::Loaded(rows),
+        Err(error) => outcome_for_projects(error),
+    }
+}
 
 /// The `GET /api/projects/{project_id}/milestones` request: the panel's one
 /// request.
@@ -556,146 +695,238 @@ pub async fn load_outcome(project_id: &str, auth: &AuthContext) -> AgentsOutcome
 // The panel
 // ---------------------------------------------------------------------------
 
-/// The W6.6 Agents panel.
+/// The Agents panel.
 ///
-/// The shell has no project context, so the screen takes the project id from
-/// its own input (the demo harness prints the seeded id next to the URL) and
-/// seeds it from `?project=` when present. One `Effect` on mount fetches the
-/// project-scoped milestone projection once; the Load button re-runs it.
+/// Issue 116: mount reads the project roster, picks a project
+/// ([`selected_project`]) and fetches its milestones; the `<select>` switches
+/// projects and the Refresh button re-reads the roster. `?project=` only seeds
+/// the selection, so a bookmarked URL still opens on that project while a host
+/// serving several directories stays switchable.
 ///
-/// The outcome starts `None` (= `Loading`); the documented `Unavailable` state
-/// now renders a real `501` absent-service answer (the D-38 degraded
+/// The draft's outcome starts `None` (= `Loading`); the documented `Unavailable`
+/// state renders a real `501` absent-service answer (the D-38 degraded
 /// composition), never a deferred data path. The selected agent id renders
 /// [`agent_detail`] beneath the roster once `Loaded` arrives.
+///
+/// There is no in-process test for this component (the `web-ui` suite is pure
+/// wasm); browser evidence is O2's, via the chrome-devtools MCP.
 #[component]
 pub fn AgentsPanel() -> impl IntoView {
-    let project_id = RwSignal::new(String::new());
-    let outcome = RwSignal::new(None::<AgentsOutcome>);
-    let selected = RwSignal::new(None::<String>);
     let auth = AuthContext {
         local_token: read_marker_token(),
         basic: None,
     };
+    let projects = RwSignal::new(None::<ProjectsOutcome>);
+    let selected = RwSignal::new(None::<String>);
+    let outcome = RwSignal::new(None::<AgentsOutcome>);
+    let detail_agent = RwSignal::new(None::<String>);
+    // The `?project=` seed, kept apart from the live selection so a refresh
+    // never overrides what the user chose.
+    let seeded = RwSignal::new(String::new());
 
-    let reload = Callback::new({
+    let load_milestones = Callback::new({
+        let auth = auth.clone();
+        move |project: Option<String>| {
+            detail_agent.set(None);
+            match project {
+                Some(project) if !project.is_empty() => {
+                    let auth = auth.clone();
+                    outcome.set(None);
+                    leptos::task::spawn_local(async move {
+                        outcome.set(Some(load_outcome(&project, &auth).await));
+                    });
+                }
+                _ => outcome.set(None),
+            }
+        }
+    });
+
+    let load_roster = Callback::new({
         let auth = auth.clone();
         move |_: ()| {
-            let project = project_id.get_untracked();
-            if project.is_empty() {
-                // One source of truth for the pre-input copy: the same constant
-                // the mount prompt renders.
-                outcome.set(Some(AgentsOutcome::NeedsProject));
-                return;
-            }
             let auth = auth.clone();
+            // The live selection wins over the URL seed; the seed wins over the
+            // roster's first row (`selected_project` applies both rules).
+            let requested = selected
+                .get_untracked()
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| seeded.get_untracked());
             leptos::task::spawn_local(async move {
-                outcome.set(Some(load_outcome(&project, &auth).await));
+                let loaded = load_projects(&auth).await;
+                let roster = match &loaded {
+                    ProjectsOutcome::Loaded(rows) => rows.clone(),
+                    _ => Vec::new(),
+                };
+                let want = Some(requested.as_str()).filter(|value| !value.is_empty());
+                let pick = selected_project(&roster, want);
+                match pick {
+                    Some(project) => {
+                        selected.set(Some(project.clone()));
+                        load_milestones.run(Some(project));
+                    }
+                    None => {
+                        selected.set(None);
+                        load_milestones.run(None);
+                    }
+                }
+                projects.set(Some(loaded));
             });
         }
     });
 
-    // The mount is unconditional: with no `?project=` it renders the prompt
-    // (`NeedsProject`), never the terminal `Loading` state.
+    // The mount is unconditional: the roster needs no project in hand.
     Effect::new(move |_| {
         let action = mount_action(
             &web_sys::window()
                 .and_then(|w| w.location().search().ok())
                 .unwrap_or_default(),
         );
-        project_id.set(action.project);
+        seeded.set(action.project);
         if action.fetch {
-            reload.run(());
-        } else if action.notice.is_some() {
-            outcome.set(Some(AgentsOutcome::NeedsProject));
+            load_roster.run(());
         }
     });
+
+    let on_select = move |event: web_sys::Event| {
+        let value = event_target_value(&event);
+        if value.is_empty() {
+            return;
+        }
+        selected.set(Some(value.clone()));
+        load_milestones.run(Some(value));
+    };
 
     view! {
         <section class="agents-panel" data-testid="agents-panel">
             <h2>"Agents"</h2>
             <p class="agents-hint">"Who contributed to this project's durable memory."</p>
-            <div class="agents-controls">
-                <input
-                    id="agents-project-id"
-                    name="projectId"
-                    type="text"
-                    class="project-input"
-                    data-testid="agents-project-input"
-                    placeholder="project id"
-                    prop:value=move || project_id.get()
-                    on:input=move |event| project_id.set(event_target_value(&event))
-                />
-                <button
-                    type="button"
-                    class="load-agents"
-                    data-testid="load-agents"
-                    on:click=move |_| reload.run(())
-                >
-                    "Load roster"
-                </button>
-            </div>
-            {move || match agents_view(outcome.get().as_ref()) {
-                AgentsView::Loading => view! {
+            {move || match projects_view(projects.get().as_ref()) {
+                ProjectsView::Loading => view! {
                     <p class=AGENTS_LOADING_CLASS data-testid=AGENTS_LOADING_TESTID>
-                        "Loading agents…"
+                        "Loading projects…"
                     </p>
                 }
                     .into_any(),
-                AgentsView::NeedsProject => view! {
-                    <p class=AGENTS_PROMPT_CLASS data-testid=AGENTS_PROMPT_TESTID>
-                        {AGENTS_NEEDS_PROJECT_MESSAGE}
-                    </p>
-                }
-                    .into_any(),
-                AgentsView::Empty => view! {
-                    <p class=AGENTS_EMPTY_CLASS data-testid=AGENTS_EMPTY_TESTID>
-                        {AGENTS_EMPTY_MESSAGE}
-                    </p>
-                }
-                    .into_any(),
-                AgentsView::Unavailable(message) => view! {
+                ProjectsView::Unavailable(message) => view! {
                     <p class=AGENTS_UNAVAILABLE_CLASS data-testid=AGENTS_UNAVAILABLE_TESTID>
                         {message}
                     </p>
                 }
                     .into_any(),
-                AgentsView::Roster(rows) => view! {
-                    <ul class=AGENTS_ROSTER_CLASS data-testid=AGENTS_ROSTER_TESTID>
-                        {rows
-                            .into_iter()
-                            .map(|row| {
-                                let agent_id = row.agent_id.clone();
-                                view! {
-                                    <li>
-                                        <button
-                                            type="button"
-                                            class=AGENTS_ROW_CLASS
-                                            data-testid=AGENTS_ROW_TESTID
-                                            on:click=move |_| selected.set(Some(agent_id.clone()))
-                                        >
-                                            <span class="agents-agent-name">{row.display_name.clone()}</span>
-                                            <span class="agents-agent-id">{row.agent_id.clone()}</span>
-                                            <span class="agents-milestone-count">{row.milestone_count}</span>
-                                            <span class="agents-last-contribution">
-                                                {format_created_at(row.last_contribution)}
-                                            </span>
-                                        </button>
-                                    </li>
-                                }
-                            })
-                            .collect_view()}
-                    </ul>
+                ProjectsView::NoProjects => view! {
+                    <p class=AGENTS_NO_PROJECTS_CLASS data-testid=AGENTS_NO_PROJECTS_TESTID>
+                        "No projects recorded yet."
+                    </p>
                 }
                     .into_any(),
-                AgentsView::Failed(message) => view! {
+                ProjectsView::Failed(message) => view! {
                     <p class=AGENTS_ERROR_CLASS data-testid=AGENTS_ERROR_TESTID>{message}</p>
+                }
+                    .into_any(),
+                ProjectsView::Ready(rows) => view! {
+                    <div class="agents-controls">
+                        <select
+                            id="agents-project-select"
+                            class=AGENTS_PROJECT_SELECT_CLASS
+                            data-testid=AGENTS_PROJECT_SELECT_TESTID
+                            prop:value=move || selected.get().unwrap_or_default()
+                            on:change=on_select
+                        >
+                            {rows
+                                .iter()
+                                .map(|row| {
+                                    view! {
+                                        <option value=row.project_id.clone()>
+                                            {project_option_label(row)}
+                                        </option>
+                                    }
+                                })
+                                .collect_view()}
+                        </select>
+                        <button
+                            type="button"
+                            class="load-agents"
+                            data-testid="load-agents"
+                            on:click=move |_| load_roster.run(())
+                        >
+                            "Refresh"
+                        </button>
+                    </div>
+                    {move || match agents_view(outcome.get().as_ref()) {
+                        AgentsView::Loading => view! {
+                            <p class=AGENTS_LOADING_CLASS data-testid=AGENTS_LOADING_TESTID>
+                                "Loading agents…"
+                            </p>
+                        }
+                            .into_any(),
+                        AgentsView::Empty => view! {
+                            <div>
+                                <p class=AGENTS_EMPTY_CLASS data-testid=AGENTS_EMPTY_TESTID>
+                                    {AGENTS_EMPTY_MESSAGE}
+                                </p>
+                                <p
+                                    class=AGENTS_EMPTY_DETAIL_CLASS
+                                    data-testid=AGENTS_EMPTY_DETAIL_TESTID
+                                >
+                                    {AGENTS_EMPTY_DETAIL}
+                                </p>
+                            </div>
+                        }
+                            .into_any(),
+                        AgentsView::Unavailable(message) => view! {
+                            <p class=AGENTS_UNAVAILABLE_CLASS data-testid=AGENTS_UNAVAILABLE_TESTID>
+                                {message}
+                            </p>
+                        }
+                            .into_any(),
+                        AgentsView::Roster(rows) => view! {
+                            <ul class=AGENTS_ROSTER_CLASS data-testid=AGENTS_ROSTER_TESTID>
+                                {rows
+                                    .into_iter()
+                                    .map(|row| {
+                                        let agent_id = row.agent_id.clone();
+                                        view! {
+                                            <li>
+                                                <button
+                                                    type="button"
+                                                    class=AGENTS_ROW_CLASS
+                                                    data-testid=AGENTS_ROW_TESTID
+                                                    on:click=move |_| {
+                                                        detail_agent.set(Some(agent_id.clone()))
+                                                    }
+                                                >
+                                                    <span class="agents-agent-name">
+                                                        {row.display_name.clone()}
+                                                    </span>
+                                                    <span class="agents-agent-id">
+                                                        {row.agent_id.clone()}
+                                                    </span>
+                                                    <span class="agents-milestone-count">
+                                                        {row.milestone_count}
+                                                    </span>
+                                                    <span class="agents-last-contribution">
+                                                        {format_created_at(row.last_contribution)}
+                                                    </span>
+                                                </button>
+                                            </li>
+                                        }
+                                    })
+                                    .collect_view()}
+                            </ul>
+                        }
+                            .into_any(),
+                        AgentsView::Failed(message) => view! {
+                            <p class=AGENTS_ERROR_CLASS data-testid=AGENTS_ERROR_TESTID>{message}</p>
+                        }
+                            .into_any(),
+                    }}
                 }
                     .into_any(),
             }}
             {move || {
-                let selected_id = selected.get();
-                let outcome = outcome.get();
-                match (selected_id, &outcome) {
+                let agent = detail_agent.get();
+                let loaded = outcome.get();
+                match (agent, &loaded) {
                     (Some(agent_id), Some(AgentsOutcome::Loaded(rows))) => {
                         Some(detail_view(agent_detail(&agent_id, rows)))
                     }

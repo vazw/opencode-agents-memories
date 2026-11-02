@@ -89,15 +89,16 @@ fn test_nav_marks_session_history_live() {
 }
 
 #[wasm_bindgen_test]
-fn test_nav_agents_entry_is_live_with_the_milestone_endpoint() {
-    // W6.6: the route is landed and the panel fetches the project-scoped
-    // milestone projection on mount; it never renders the planned notice.
+fn test_nav_agents_entry_is_live_with_the_project_and_milestone_endpoints() {
+    // W6.6 landed the route; issue 116 added the project roster the picker
+    // reads, so the screen now consumes both templates on mount. It never
+    // renders the planned notice.
     let entry = entry_for(RouteId::Agents);
     assert_eq!(
         entry.state,
         ScreenState::Live {
             owner: Owner::W6_6,
-            endpoints: &["/api/projects/{project_id}/milestones"],
+            endpoints: &["/api/projects", "/api/projects/{project_id}/milestones",],
         }
     );
     assert_eq!(entry.owner, Owner::W6_6);

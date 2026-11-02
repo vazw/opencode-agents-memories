@@ -51,8 +51,9 @@ fn test_pinned_endpoints_are_the_exact_rest_set() {
         ("GET", "/api/projects/{project_id}/sessions"),
         ("DELETE", "/api/projects/{project_id}/sessions/{session_id}"),
         ("GET", "/api/projects/{project_id}/milestones"),
-        // Issue 115: the port-only identity roster.
+        // Issues 115/116: the port-only rosters.
         ("GET", "/api/user-profiles"),
+        ("GET", "/api/projects"),
     ]
     .into_iter()
     .collect();
@@ -104,17 +105,19 @@ fn test_profile_roster_spec_matches_the_pinned_template() {
 }
 
 #[wasm_bindgen_test]
-fn test_agents_route_consumes_the_milestone_endpoint() {
-    // W6.6: the panel's one fetch is the project-scoped milestone projection.
+fn test_agents_route_consumes_the_project_and_milestone_endpoints() {
+    // Issue 116: the panel no longer asks for a pasted id — it reads the
+    // project roster first, then that project's milestones. Mutant: only the
+    // milestone template (the pre-picker screen).
     assert_eq!(
         ENDPOINTS.len(),
-        36,
-        "the pinned REST table grew by the identity-roster row"
+        37,
+        "the pinned REST table grew by the project-roster row"
     );
-    let expected: &[&str] = &["/api/projects/{project_id}/milestones"];
+    let expected: &[&str] = &["/api/projects", "/api/projects/{project_id}/milestones"];
     assert_eq!(
         endpoints_for(RouteId::Agents),
         expected,
-        "Agents consumes the milestone endpoint"
+        "Agents consumes the project roster and the milestone projection"
     );
 }

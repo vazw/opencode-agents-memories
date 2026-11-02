@@ -611,15 +611,27 @@ body {
   border-radius: 0.25rem;
 }
 
-/* The pre-input state: nothing failed, the user has not typed an id yet, so it
- * takes the informational (muted/dashed) shape, never the error bar. */
-.agents-prompt {
+/* Issue 116: the picker replaces the pasted project id. */
+.agents-project-select {
+  flex: 1 1 auto;
+  min-width: 16rem;
+}
+
+/* The successful-but-empty roster: informational, like the empty scope. */
+.agents-no-projects {
   margin-top: 0.75rem;
   padding: 0.5rem 0.75rem;
   color: var(--muted);
   background: var(--bg);
   border: 1px dashed var(--border);
   border-radius: 0.25rem;
+}
+
+/* The empty scope's second line: why a busy project can have no milestone. */
+.agents-empty-detail {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .agents-error {

@@ -51,6 +51,7 @@ pub enum EndpointId {
     DeleteProjectSession,
     ListProjectMilestones,
     ListUserProfiles,
+    ListProjects,
 }
 
 /// One pinned endpoint: its identity, its HTTP method and its path template.
@@ -244,6 +245,12 @@ pub const ENDPOINTS: &[EndpointSpec] = &[
         method: "GET",
         template: "/api/user-profiles",
     },
+    // Issue 116: the port-only project roster the Agents picker reads.
+    EndpointSpec {
+        id: EndpointId::ListProjects,
+        method: "GET",
+        template: "/api/projects",
+    },
 ];
 
 /// Compile-time totality: one row per `EndpointId`, in declaration order.
@@ -290,9 +297,10 @@ const _: () = {
         | EndpointId::ListProjectSessions
         | EndpointId::DeleteProjectSession
         | EndpointId::ListProjectMilestones
-        | EndpointId::ListUserProfiles => {}
+        | EndpointId::ListUserProfiles
+        | EndpointId::ListProjects => {}
     }
-    assert!(ENDPOINTS.len() == EndpointId::ListUserProfiles as usize + 1);
+    assert!(ENDPOINTS.len() == EndpointId::ListProjects as usize + 1);
     let mut i: usize = 0;
     while i < ENDPOINTS.len() {
         assert!(ENDPOINTS[i].id as usize == i);
@@ -366,12 +374,17 @@ const SESSION_PATHS: &[&str] = &[
 
 const STATS_PATHS: &[&str] = &["/api/stats"];
 
-const AGENT_PATHS: &[&str] = &["/api/projects/{project_id}/milestones"];
+const AGENT_PATHS: &[&str] = &[
+    // Issue 116: the picker's roster, then the chosen project's milestones.
+    "/api/projects",
+    "/api/projects/{project_id}/milestones",
+];
 
 /// The path templates a screen consumes, in a stable order.
 ///
 /// `Home` consumes no endpoint (the shell's own landing screen). `Agents`
-/// consumes the milestone template: the panel issues its one fetch on mount.
+/// consumes the project roster and the milestone template: the panel fetches the
+/// roster on mount, selects a project, then fetches that project's milestones.
 pub fn endpoints_for(route: RouteId) -> &'static [&'static str] {
     match route {
         RouteId::Home => &[],

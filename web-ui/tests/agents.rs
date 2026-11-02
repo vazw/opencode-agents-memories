@@ -5,14 +5,16 @@
 
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_ui::agents::{
-    AGENTS_DETAIL_CLASS, AGENTS_DETAIL_TESTID, AGENTS_EMPTY_CLASS, AGENTS_EMPTY_TESTID,
-    AGENTS_ERROR_CLASS, AGENTS_ERROR_TESTID, AGENTS_FACT_CLASS, AGENTS_FACT_TESTID,
-    AGENTS_LOADING_CLASS, AGENTS_LOADING_TESTID, AGENTS_MILESTONE_CLASS, AGENTS_MILESTONE_TESTID,
-    AGENTS_NEEDS_PROJECT_MESSAGE, AGENTS_PROMPT_CLASS, AGENTS_PROMPT_TESTID, AGENTS_ROSTER_CLASS,
-    AGENTS_ROSTER_TESTID, AGENTS_ROW_CLASS, AGENTS_ROW_TESTID, AGENTS_UNAVAILABLE_CLASS,
-    AGENTS_UNAVAILABLE_MESSAGE, AGENTS_UNAVAILABLE_TESTID, AgentSummary, AgentsOutcome, AgentsView,
-    ContributorDto, MilestoneDto, PromotedFactDto, agent_detail, agents_view, format_window,
-    list_milestones_spec, mount_action, outcome_for_error, roster,
+    AGENTS_DETAIL_CLASS, AGENTS_DETAIL_TESTID, AGENTS_EMPTY_CLASS, AGENTS_EMPTY_DETAIL,
+    AGENTS_EMPTY_MESSAGE, AGENTS_EMPTY_TESTID, AGENTS_ERROR_CLASS, AGENTS_ERROR_TESTID,
+    AGENTS_FACT_CLASS, AGENTS_FACT_TESTID, AGENTS_LOADING_CLASS, AGENTS_LOADING_TESTID,
+    AGENTS_MILESTONE_CLASS, AGENTS_MILESTONE_TESTID, AGENTS_ROSTER_CLASS, AGENTS_ROSTER_TESTID,
+    AGENTS_ROW_CLASS, AGENTS_ROW_TESTID, AGENTS_UNAVAILABLE_CLASS, AGENTS_UNAVAILABLE_MESSAGE,
+    AGENTS_UNAVAILABLE_TESTID, AgentSummary, AgentsOutcome, AgentsView, ContributorDto,
+    MilestoneDto, ProjectRow, ProjectsOutcome, ProjectsView, PromotedFactDto, agent_detail,
+    agents_view, format_window, list_milestones_spec, list_projects_spec, mount_action,
+    outcome_for_error, outcome_for_projects, project_label, project_option_label, projects_view,
+    roster, selected_project,
 };
 use web_ui::api::envelope::ApiError;
 
@@ -281,6 +283,31 @@ fn test_agents_view_empty_scope_is_empty_not_error() {
     );
     assert_ne!(view, AgentsView::Unavailable(AGENTS_UNAVAILABLE_MESSAGE));
     assert_ne!(view, AgentsView::Failed(String::new()));
+    // Issue 116: the empty arm's copy names what the user is actually looking
+    // at (milestones), not "no contributing agents".
+    assert!(
+        AGENTS_EMPTY_MESSAGE.contains("milestone"),
+        "the empty copy names the milestone projection: {AGENTS_EMPTY_MESSAGE}"
+    );
+    assert!(
+        !AGENTS_EMPTY_DETAIL.is_empty(),
+        "the empty arm explains how milestones appear"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_agents_empty_copy_names_the_producer() {
+    // The weakest assertion in the plan on purpose: the producer's name is the
+    // point. Mutant: the arm still says "No contributing agents in this
+    // project yet." and explains nothing.
+    let old_copy = "No contributing agents in this project yet.";
+    assert!(!AGENTS_EMPTY_MESSAGE.trim().is_empty());
+    assert!(
+        !AGENTS_EMPTY_DETAIL.trim().is_empty(),
+        "the empty arm carries a second, explanatory line"
+    );
+    assert_ne!(AGENTS_EMPTY_MESSAGE, old_copy);
+    assert_ne!(AGENTS_EMPTY_DETAIL, old_copy);
 }
 
 #[wasm_bindgen_test]
@@ -319,7 +346,6 @@ fn test_agents_view_unavailable_is_not_the_failure_state() {
         AGENTS_MILESTONE_TESTID,
         AGENTS_FACT_TESTID,
         AGENTS_ROW_TESTID,
-        AGENTS_PROMPT_TESTID,
     ];
     let classes = [
         AGENTS_LOADING_CLASS,
@@ -331,7 +357,6 @@ fn test_agents_view_unavailable_is_not_the_failure_state() {
         AGENTS_MILESTONE_CLASS,
         AGENTS_FACT_CLASS,
         AGENTS_ROW_CLASS,
-        AGENTS_PROMPT_CLASS,
     ];
     assert!(testids.iter().all(|hook| !hook.is_empty()));
     assert!(classes.iter().all(|hook| !hook.is_empty()));
@@ -530,36 +555,136 @@ fn test_agent_detail_keeps_the_server_source_count() {
 // ---------------------------------------------------------------------------
 
 #[wasm_bindgen_test]
-fn test_mount_action_without_project_reports_notice_not_loading() {
-    // The distinguishing input is the bare route. The mutant is today's mount:
-    // no `?project=` means the effect produces no state at all, so the panel
-    // renders `Loading` forever. A notice must become an outcome, never a skip.
+fn test_mount_action_fetches_the_roster_without_a_project() {
+    // Issue 116: the bare route no longer has nothing to ask for. Mutant: the
+    // pre-picker mount, which fetched nothing and rendered a "paste an id"
+    // notice — the panel must fetch the ROSTER with no project in hand.
     let action = mount_action("");
     assert_eq!(action.project, "");
-    assert!(!action.fetch, "there is nothing to fetch without a project");
-    assert_eq!(
-        action.notice.as_deref(),
-        Some(AGENTS_NEEDS_PROJECT_MESSAGE),
-        "the pre-input state carries the action-naming copy"
-    );
+    assert!(action.fetch, "the mount fetches the roster unconditionally");
 
-    let outcome = action.notice.map(|_| AgentsOutcome::NeedsProject);
-    let view = agents_view(outcome.as_ref());
-    assert_eq!(view, AgentsView::NeedsProject);
-    assert_ne!(view, AgentsView::Loading, "the panel must not stay loading");
-    assert_ne!(
-        view,
-        AgentsView::Failed(String::new()),
-        "a missing project id is not a failure"
-    );
+    // And with a seeded project it seeds the selection instead of prompting.
+    let seeded = mount_action("?project=p1");
+    assert_eq!(seeded.project, "p1");
+    assert!(seeded.fetch);
 }
 
 #[wasm_bindgen_test]
 fn test_mount_action_with_project_seeds_and_fetches() {
-    // Mutant: `fetch` always false — a seeded route renders a prompt and never
-    // asks the server (half of the B2 regression).
+    // Mutant: `fetch` always false — a seeded route never asks the server.
     let action = mount_action("?project=p1");
     assert_eq!(action.project, "p1");
-    assert!(action.fetch, "a seeded route must issue its one request");
-    assert_eq!(action.notice, None);
+    assert!(action.fetch, "a seeded route must issue its request");
+}
+
+#[wasm_bindgen_test]
+fn test_project_label_uses_the_last_non_empty_segment() {
+    // Mutant: `rsplit('/').next()`, which answers "" for a trailing slash and
+    // for "/", so the picker would render blank options.
+    assert_eq!(project_label("/home/vaz/Code/demo"), "demo");
+    assert_eq!(project_label("/a/b/"), "b");
+    assert_eq!(project_label("/"), "/");
+    assert_eq!(project_label("plain"), "plain");
+    assert_eq!(project_label(""), "");
+}
+
+#[wasm_bindgen_test]
+fn test_project_option_label_carries_the_counts() {
+    let row = ProjectRow {
+        project_id: "/home/vaz/Code/demo".to_string(),
+        session_count: 4,
+        milestone_count: 2,
+        last_activity_at: 300,
+    };
+    let label = project_option_label(&row);
+    assert_eq!(label, "demo — 4 sessions · 2 milestones");
+}
+
+#[wasm_bindgen_test]
+fn test_projects_view_loads_and_seeds_the_select() {
+    // `?project=` naming a row in the roster wins over the newest-activity
+    // default. Mutant: the seed is ignored and the first row is selected.
+    let roster = vec![project("A", 9), project("B", 3)];
+    assert_eq!(
+        projects_view(Some(&ProjectsOutcome::Loaded(roster.clone()))),
+        ProjectsView::Ready(roster.clone())
+    );
+    assert_eq!(
+        selected_project(&roster, Some("B")),
+        Some("B".to_string()),
+        "the requested project is the selection"
+    );
+    assert_eq!(
+        selected_project(&roster, None),
+        Some("A".to_string()),
+        "no request selects the first row (newest activity)"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_projects_view_unknown_requested_project_falls_back_to_the_first() {
+    // Mutant: selects nothing (an empty picker), or fabricates the requested id
+    // as if it existed.
+    let roster = vec![project("A", 9), project("B", 3)];
+    assert_eq!(
+        selected_project(&roster, Some("/gone")),
+        Some("A".to_string()),
+        "an unknown id never becomes the selection"
+    );
+    assert_eq!(
+        selected_project(&[], Some("/gone")),
+        None,
+        "an empty roster selects nothing — never an empty string"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_projects_view_empty_roster_is_no_projects() {
+    // Mutant: an empty roster rendered as Loading (the panel spins forever) or
+    // as Failed (a state that implies a broken request).
+    assert_eq!(
+        projects_view(Some(&ProjectsOutcome::Loaded(vec![]))),
+        ProjectsView::NoProjects
+    );
+    assert_eq!(projects_view(None), ProjectsView::Loading);
+}
+
+#[wasm_bindgen_test]
+fn test_projects_view_maps_unavailable_and_failure_distinctly() {
+    // The 501 absent-service degrade is not a failure, and a failure is not the
+    // degrade: the screen's three arms must not collapse into one.
+    assert_eq!(
+        projects_view(Some(&ProjectsOutcome::Unavailable)),
+        ProjectsView::Unavailable("Project list is not available in this build.")
+    );
+    assert_eq!(
+        projects_view(Some(&ProjectsOutcome::Failed("boom".to_string()))),
+        ProjectsView::Failed("boom".to_string())
+    );
+    assert_eq!(
+        outcome_for_projects(ApiError::Server {
+            status: 501,
+            message: String::new()
+        }),
+        ProjectsOutcome::Unavailable
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_list_projects_spec_reads_the_pinned_template() {
+    let spec = list_projects_spec();
+    assert_eq!(spec.method, "GET");
+    assert_eq!(spec.path, "/api/projects");
+    assert!(spec.query.is_empty());
+    assert!(spec.body.is_none());
+}
+
+/// One roster row for the picker tests.
+fn project(id: &str, last_activity_at: i64) -> ProjectRow {
+    ProjectRow {
+        project_id: id.to_string(),
+        session_count: 1,
+        milestone_count: 0,
+        last_activity_at,
+    }
 }
