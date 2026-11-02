@@ -131,6 +131,11 @@ struct RootWebLauncher {
     /// The daily-stats scan directory, derived from the log sink at the
     /// composition root so the writer and the reader cannot disagree.
     log_dir: PathBuf,
+    /// The launch working directory, resolved ONCE here (issue 115). The web
+    /// surface's identity is upstream's `getTags(process.cwd())`, i.e. this
+    /// directory, not the per-call session directory inject resolves; reading
+    /// it inside the async launch would let the two disagree.
+    cwd: PathBuf,
 }
 
 impl WebLauncher for RootWebLauncher {
@@ -146,6 +151,7 @@ impl WebLauncher for RootWebLauncher {
         } = config;
         let dist = self.dist.clone();
         let core_config = self.config.clone();
+        let cwd = self.cwd.clone();
         Box::pin(async move {
             let dist_dir = match &dist {
                 ResolvedDist::Ready { dir } => dir.clone(),
@@ -240,7 +246,10 @@ impl WebLauncher for RootWebLauncher {
                 log_dir: self.log_dir.clone(),
                 host_allowlist: mem_web::host_allowlist::HostAllowlist::for_bind_host(&host),
                 api,
-                user_id: "unknown".to_owned(),
+                // Issue 115: the web surface uses the inject path's own
+                // resolver and config fields over the LAUNCH cwd. A literal
+                // here is the bug this line replaces.
+                user_id: opencode_agents_memory::web_identity::resolve_user_id(&core_config, &cwd),
                 bind_host: host.clone(),
             };
             match mem_web::server::start(&settings, state).await {
@@ -624,6 +633,7 @@ fn main() {
             dist,
             config: core_config,
             log_dir,
+            cwd,
         }),
         // Issue 70 wave 1: the ONE portability factory the engine seam
         // consults; export/import degrade (-32001) only if it builds none.

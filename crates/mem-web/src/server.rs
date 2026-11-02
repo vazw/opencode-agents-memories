@@ -41,6 +41,10 @@ pub struct AppState {
     pub api: Arc<crate::api::ports::ApiServices>,
     /// The resolved user identity for the profile endpoints (upstream
     /// `getTags(process.cwd()).user.userEmail || "unknown"`).
+    ///
+    /// Resolved by the composition root through the inject path's
+    /// `ProjectScopeResolver`; `"unknown"` only when nothing resolves — never a
+    /// literal at the wiring site (issue 115).
     pub user_id: String,
     /// The **configured** bind host (D-11's loopback rule reads it). `start`
     /// fills it from `settings.host`.

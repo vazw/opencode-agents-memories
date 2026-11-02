@@ -17,3 +17,4 @@
 
 pub mod portability_backend;
 pub mod web_dist;
+pub mod web_identity;
