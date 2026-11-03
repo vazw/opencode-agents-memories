@@ -1325,15 +1325,21 @@ export const server = async function server(input) {
         // the per-message TRANSCRIPT capture is gone (the idle capture owns
         // the transcript); an inject error fails open (no block, no error).
         let block = null;
+        const query = queryFromParts(output);
+        const session_id = typeof hookInput?.sessionID === "string" && hookInput.sessionID.length > 0 ? hookInput.sessionID : "oc-bridge-" + process.pid;
+        writeStructured("info", "inject.requested", { session_id, query_chars: typeof query === "string" ? Array.from(query).length : 0 });
         try {
-          const sessionID = hookInput?.sessionID;
           const state = bridge();
           await ensureStartedIn(state);
-          const result = await sendRequestIn(state, "inject", injectParams(queryFromParts(output), sessionID, state));
+          const result = await sendRequestIn(state, "inject", injectParams(query, session_id, state));
           if (result && typeof result.block === "string" && result.block.length > 0) {
             block = result.block;
           }
+          const block_bytes = block !== null ? Buffer.byteLength(block, "utf8") : 0;
+          const handling_ms = typeof result?.handling_ms === "number" ? result.handling_ms : 0;
+          writeStructured("info", "inject.received", { session_id, block_bytes, handling_ms, status: block_bytes > 0 ? "ok" : "empty" });
         } catch (err) {
+          writeStructured("info", "inject.received", { session_id, block_bytes: 0, handling_ms: 0, status: "error" });
           logWarn("inject.failed", { message: shortError(err) });
           notifyHost(hostInputRef()?.client, "inject.failed");
         }

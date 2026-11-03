@@ -202,3 +202,52 @@ test("test_v2_context_refreshes_only_when_inject_on_says_so", { timeout: 10000 }
     await cleanup();
   }
 });
+
+async function telemetryCase(t, mode, query) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-telemetry-"));
+  const pkgDir = stagePackageTree(tmp);
+  const manifestPath = path.join(tmp, "manifest.json");
+  stageStubEngine(pkgDir, { requestLogPath: path.join(tmp, "requests.ndjson"), manifestPath, injectMode: mode });
+  // Local fixture override: exact block and engine timing, no harness-wide knob.
+  const bin = path.join(pkgDir, "engine", `${process.platform}-${process.arch}`, "opencode-agents-memory");
+  if (mode === "success") {
+    fs.writeFileSync(bin, fs.readFileSync(bin, "utf8").replace(
+      'block: null, memory_count: 0, tokens: 0, truncated: false, handling_ms: 0',
+      'block: "<memory_context>BLOCK_SENTINEL_🚀</memory_context>", memory_count: 1, tokens: 0, truncated: false, handling_ms: 37'));
+  }
+  t.after(() => assertReaped(manifestPath));
+  const driver = path.join(tmp, "driver.mjs");
+  fs.writeFileSync(driver, `import { pathToFileURL } from "node:url";
+process.env.OPENCODE_MEM_STORAGE_ROOT = process.env.DRIVER_STORAGE_ROOT;
+const { server } = await import(pathToFileURL(${JSON.stringify(path.join(pkgDir, "dist/plugin.js"))}));
+const { hooks } = await server({ client: {}, directory: "/work/project" });
+await hooks["chat.message"]({ sessionID: "ses-1" }, { message: { parts: [{ type: "text", text: ${JSON.stringify(query)} }] } });
+process.exit(0);`);
+  const run = await runDriver(driver, [], { ...process.env, DRIVER_STORAGE_ROOT: path.join(tmp, "storage") });
+  assert.equal(run.code, 0, run.stderr);
+  return { raw: run.stderr, events: run.stderr.split("\n").flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } }) };
+}
+
+test("test_wrapper_telemetry_requested_and_received_events", async (t) => {
+  const { events } = await telemetryCase(t, "success", "héllo 🚀");
+  const requested = events.find(e => e.event === "inject.requested");
+  const received = events.find(e => e.event === "inject.received");
+  assert.equal(requested?.query_chars, 7);
+  assert.equal(requested.session_id, "ses-1");
+  assert.equal(received?.block_bytes, Buffer.byteLength("<memory_context>BLOCK_SENTINEL_🚀</memory_context>"));
+  assert.equal(received.handling_ms, 37);
+  assert.equal(received.status, "ok");
+  assert.equal(received.session_id, "ses-1");
+});
+
+test("test_wrapper_telemetry_captures_zero_bytes_and_excludes_content", async (t) => {
+  const empty = await telemetryCase(t, "empty", "QUERY_SENTINEL_SECRET");
+  assert.deepEqual(empty.events.find(e => e.event === "inject.received"),
+    { level: "info", component: "opencode-mem-plugin", event: "inject.received", session_id: "ses-1", block_bytes: 0, handling_ms: 0, status: "empty" });
+  const err = await telemetryCase(t, "error", "QUERY_SENTINEL_SECRET");
+  assert.equal(err.events.find(e => e.event === "inject.received")?.status, "error");
+  assert.equal(err.events.find(e => e.event === "inject.received")?.block_bytes, 0);
+  const nonempty = await telemetryCase(t, "success", "QUERY_SENTINEL_SECRET");
+  assert.equal(nonempty.raw.includes("QUERY_SENTINEL_SECRET"), false);
+  assert.equal(nonempty.raw.includes("BLOCK_SENTINEL_"), false);
+});
