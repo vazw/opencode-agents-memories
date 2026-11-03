@@ -224,8 +224,8 @@ test("test_v2_memory_context_clears_the_injection_after_a_compaction", { timeout
   });
   assert.deepEqual(
     await contextOf(harness.hooks, "ses-1"),
-    [],
-    "a compacted session's stale injection is dropped, not re-injected"
+    ["before compaction"],
+    "issue 124: compaction preserves same-turn context; historical test name retained"
   );
 
   await harness.hooks.get("prompt")({ sessionID: "ses-1", messageID: "msg-2", prompt: { text: "second" } });

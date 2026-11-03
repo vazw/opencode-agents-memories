@@ -119,9 +119,7 @@ export async function registerV2Adapter(ctx, legacyHooks) {
       for await (const raw of ctx.event.subscribe({ signal: controller.signal })) {
         if (!(await eventBelongsToLocation(ctx, raw))) continue;
         const event = toLegacyEvent(raw);
-        if (event.type === "session.compacted" && event.properties?.sessionID) {
-          contexts.delete(event.properties.sessionID);
-        }
+        // Compaction is mid-turn: retain context until policy refresh/cleanup.
         await legacyHooks.event({ event });
       }
     } catch (error) {

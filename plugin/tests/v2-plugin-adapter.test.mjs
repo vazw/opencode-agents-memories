@@ -184,11 +184,12 @@ test("test_v2_adapter_invalidates_the_session_cache_only_for_compaction_at_this_
   const { registerV2Adapter } = await import(ADAPTER_MODULE);
   const harness = createHarness();
   let revision = 1;
+  const delivered = [];
   const cleanup = await registerV2Adapter(harness.ctx, {
     "chat.message": async (input, output) => {
       output.message.parts.push({ type: "text", text: `${input.sessionID}-${revision}` });
     },
-    event: async () => {},
+    event: async ({ event }) => { delivered.push(event); },
   });
 
   const prompt = (sessionID) =>
@@ -227,11 +228,13 @@ test("test_v2_adapter_invalidates_the_session_cache_only_for_compaction_at_this_
   });
   assert.deepEqual(
     await context("ses-1"),
-    [],
-    "a compaction at this location drops the session's cache (H2: properties.sessionID survived)"
+    ["ses-1-1"],
+    "issue 124: preserve same-turn cache; historical test name retained"
   );
   assert.deepEqual(await context("ses-2"), ["ses-2-1"], "other sessions are untouched");
 
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0].type, "session.compacted");
   await prompt("ses-1");
   assert.deepEqual(await context("ses-1"), ["ses-1-2"], "a later prompt re-populates the cache");
 
