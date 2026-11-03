@@ -7,6 +7,18 @@ Issues and PRDs for this repo live as markdown files in `.scratch/` in this git 
 - One feature per directory: `.scratch/<feature-slug>/`
 - The PRD is `.scratch/<feature-slug>/PRD.md`
 - Implementation issues are `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`
+- **A number is unique across every feature directory, not just within one.** The staleness block below
+  keys on `cut -d- -f1` and greps commits for `(issue NN)`, so a number shared by two features lets one
+  feature's commit contradict another feature's status line — measured 2026-11-03, when `.scratch/rust-port/`
+  and `.scratch/web-identity-and-project-picker/` both held 115, 116 and 117 (web `117-zero-milestones-diagnosis`
+  versus rust-port's stderr drain, which `docs/adr/0013` cites). The web trio was renumbered to 120–122.
+  Renumbering an existing issue means: `git mv`, a `*(Renumbered from NN …)*` note under the title naming
+  the reason, and every citing prose reference updated. Take the next free number with:
+
+  ```sh
+  ls .scratch/*/issues/*.md | sed 's#.*/##' | cut -d- -f1 | grep -E '^[0-9]+$' | sort -n | tail -1
+  ```
+
 - Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
 

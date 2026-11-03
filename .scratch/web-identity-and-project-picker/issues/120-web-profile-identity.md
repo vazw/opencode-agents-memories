@@ -1,4 +1,9 @@
-# 115 — the web profile page reports "no profile" because the composition root hardcodes its identity
+# 120 — the web profile page reports "no profile" because the composition root hardcodes its identity
+
+*(Renumbered from 115 on 2026-11-03. The number spaces of `.scratch/*/issues/` had collided: `.scratch/rust-port/`
+already held a 115, a 116 and a 117, and the tracker's staleness block keys only on the bare number, so a
+shared number lets one feature's commit contradict another feature's status line. Numbers are now unique
+across every feature directory; commits that cite `(issue 115)` for this work predate the renumber.)*
 
 Status: done — 2026-11-03 — landed in `73a964f` (resolver + composition-root wiring) and `b4f024b`
 (the roster route, the picker and the honest missing message). Evidence: `tests/web_identity.rs` (6),

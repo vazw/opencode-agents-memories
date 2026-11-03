@@ -35,7 +35,7 @@ project (`episodic_milestones` had no rows at all).
 ## Non-goals
 
 - No second identity resolver, and no identity inferred from the store (that is the defect).
-- No milestone synthesis: the zero-milestone finding is diagnosed and filed as issue 117, not "fixed".
+- No milestone synthesis: the zero-milestone finding is diagnosed and filed as issue 122, not "fixed".
 - No second `agent_sessions`-contributors endpoint (D-8): the roster is the union, in one statement.
 - No schema change, no new config key, no new crate, no migration.
 - `README.md` is untouched (its configuration section is a separate wave in flight).
@@ -68,16 +68,17 @@ walks) — and the auth/Host/Basic walks cover them, because an unlisted route i
   can actually reach (zero profiles).
 - **D-6** the project roster's source of truth is the union of live `agent_sessions` and
   `episodic_milestones`, because consolidation hard-deletes its sources.
-- **D-7** the zero-milestone finding is diagnosed (issue 117), not fixed here.
+- **D-7** the zero-milestone finding is diagnosed (issue 122), not fixed here.
 - **D-10** the surface pin is one step after both routes exist; no full-suite claim is made inside the
   registered-but-unpinned window.
 
 ## Issues
 
-- `issues/115-web-profile-identity.md` — defect A.
-- `issues/116-agents-project-picker.md` — defect B.
-- `issues/117-zero-milestones-diagnosis.md` — the **measured** cause of the empty milestone table (the
-  30-day age window; no code change indicated).
+- `issues/120-web-profile-identity.md` — defect A *(was 115; renumbered 2026-11-03 — the number spaces of
+  `.scratch/*/issues/` collided with `.scratch/rust-port/`'s 115/116/117)*.
+- `issues/121-agents-project-picker.md` — defect B *(was 116)*.
+- `issues/122-zero-milestones-diagnosis.md` — the **measured** cause of the empty milestone table (the
+  30-day age window; no code change indicated) *(was 117)*.
 
 ## Delivery (2026-11-03)
 

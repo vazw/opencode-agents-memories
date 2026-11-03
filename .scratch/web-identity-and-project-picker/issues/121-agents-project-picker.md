@@ -1,4 +1,7 @@
-# 116 — /agents demands a pasted project id and has no project list to offer
+# 121 — /agents demands a pasted project id and has no project list to offer
+
+*(Renumbered from 116 on 2026-11-03 — see the note in issue 120. Commits citing `(issue 116)` for this
+work predate the renumber; the rust-port 116 is the zstd audit bump.)*
 
 Status: done — 2026-11-03 — landed in `deb8bf4` (the store's project-roster statement),
 `2e8817f` (`GET /api/projects` + the surface pin) and `1204f83` (the screen). Evidence:
