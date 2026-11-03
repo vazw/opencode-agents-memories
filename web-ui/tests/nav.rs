@@ -3,7 +3,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use wasm_bindgen_test::wasm_bindgen_test;
-use web_ui::nav::{NavEntry, ScreenState, nav_entries};
+use web_ui::nav::{NavEntry, ScreenState, nav_entries, nav_icon};
 use web_ui::routes::{Owner, ROUTES, RouteId};
 
 fn entry_for(route: RouteId) -> NavEntry {
@@ -230,4 +230,13 @@ fn test_plain_left_click_is_the_only_in_app_navigation() {
     assert!(!is_plain_left_click(0, false, false, false, true));
     assert!(!is_plain_left_click(1, false, false, false, false));
     assert!(!is_plain_left_click(2, false, false, false, false));
+}
+
+#[wasm_bindgen_test]
+fn test_nav_icon_is_injective() {
+    let pointers: std::collections::HashSet<usize> = RouteId::ALL
+        .iter()
+        .map(|route| nav_icon(*route) as *const _ as usize)
+        .collect();
+    assert_eq!(pointers.len(), 10);
 }

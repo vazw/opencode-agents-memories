@@ -222,6 +222,54 @@ struct LinkedPair {
     prompt: Option<usize>,
 }
 
+/// The most `tags=` values a listing applies.
+const TAGS_MAX_VALUES: usize = 32;
+/// The longest `tags=` value (in chars) a listing applies; longer ones drop.
+const TAGS_MAX_CHARS: usize = 128;
+
+/// Trim and ASCII-lowercase, nothing else. The single tag normalizer.
+pub fn normalize_tag(raw: &str) -> String {
+    raw.trim().to_ascii_lowercase()
+}
+
+/// The `tags=` values of a request: normalized, empties and over-long values
+/// dropped, de-duplicated, at most [`TAGS_MAX_VALUES`]. Never rejects.
+fn tags_filter(query: &[(String, String)]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for raw in query_values(query, "tags") {
+        let tag = normalize_tag(raw.as_str());
+        if tag.is_empty() || tag.chars().count() > TAGS_MAX_CHARS || out.contains(&tag) {
+            continue;
+        }
+        out.push(tag);
+        if out.len() == TAGS_MAX_VALUES {
+            break;
+        }
+    }
+    out
+}
+
+/// Whether a row's comma-separated tag column carries any wanted tag, by
+/// whole-tag equality. `wanted` is normalized here (blanks drop); a `wanted`
+/// that is empty afterwards matches everything.
+pub fn tags_match(row_tags: Option<&str>, wanted: &[String]) -> bool {
+    let wanted: Vec<String> = wanted
+        .iter()
+        .map(|tag| normalize_tag(tag))
+        .filter(|tag| !tag.is_empty())
+        .collect();
+    if wanted.is_empty() {
+        return true;
+    }
+    match row_tags {
+        None => false,
+        Some(raw) => raw
+            .split(',')
+            .map(normalize_tag)
+            .any(|tag| !tag.is_empty() && wanted.contains(&tag)),
+    }
+}
+
 /// `GET /api/memories` — upstream `handleListMemories`.
 pub async fn list_memories(
     State(state): State<Arc<AppState>>,
@@ -237,9 +285,10 @@ pub async fn list_memories(
         .map(|tag| tag.trim().to_string())
         .filter(|tag| !tag.is_empty())
         .collect();
-    let include_prompts = query_first(&query, "includePrompts") != Some("false");
+    let tags = tags_filter(&query);
+    let include_prompts = query_first(&query, "includePrompts") != Some("false") && tags.is_empty();
 
-    let memories = match collect_memories(&state, &filter_tags).await {
+    let memories = match collect_memories(&state, &filter_tags, &tags).await {
         Ok(memories) => memories,
         Err(response) => return response,
     };
@@ -356,6 +405,7 @@ pub async fn list_memories(
 async fn collect_memories(
     state: &Arc<AppState>,
     filter_tags: &[String],
+    tags: &[String],
 ) -> Result<Vec<MemoryRow>, Response> {
     let mut seen = std::collections::HashSet::new();
     let mut memories = Vec::new();
@@ -379,6 +429,9 @@ async fn collect_memories(
                 if !(row.container_tag.contains(PROJECT_MARKER)
                     || row.container_tag.contains(USER_MARKER))
                 {
+                    continue;
+                }
+                if !tags_match(row.tags.as_deref(), tags) {
                     continue;
                 }
                 if seen.insert(row.id.clone()) {
@@ -408,6 +461,9 @@ async fn collect_memories(
                 .await
                 .map_err(|error| port_failure("GET /api/memories", error))?;
             for row in rows {
+                if !tags_match(row.tags.as_deref(), tags) {
+                    continue;
+                }
                 if seen.insert(row.id.clone()) {
                     memories.push(row);
                 }

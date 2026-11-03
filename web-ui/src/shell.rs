@@ -10,17 +10,16 @@ use leptos_router::NavigateOptions;
 use leptos_router::components::{Route, Router, Routes};
 use leptos_router::hooks::use_navigate;
 use leptos_router::path;
-use thaw::{
-    Button, ButtonAppearance, ConfigProvider, Layout, LayoutHeader, LayoutSider, NavDrawer,
-    NavDrawerHeader, NavItem,
-};
+use thaw::{ConfigProvider, Icon, LayoutHeader, LayoutSider, NavDrawer, NavDrawerHeader, NavItem};
 
-use crate::nav::{ScreenState, is_plain_left_click, nav_entries, selected_path, state_for};
+use crate::nav::{
+    ScreenState, is_plain_left_click, nav_entries, nav_icon, selected_path, state_for,
+};
 use crate::routes::{resolve, route as route_spec};
 use crate::screens::ScreenBody;
 use crate::theme::{
-    LocalStorageThemeStore, Theme, apply_canvas, palette, read_preference, store_preference,
-    thaw_theme,
+    LocalStorageThemeStore, Scale, Theme, apply_canvas, install_tokens, palette, read_preference,
+    store_preference, thaw_theme, toggle_icon,
 };
 
 /// The application shell.
@@ -30,6 +29,7 @@ pub fn Shell() -> impl IntoView {
 
     let theme = RwSignal::new(read_preference(&LocalStorageThemeStore));
     provide_context(theme);
+    install_tokens(&Scale::default());
 
     // thaw's theme is a separate signal, kept in sync with the preference (D6).
     let thaw_signal: RwSignal<thaw::Theme> = RwSignal::new(thaw_theme(theme.get_untracked()));
@@ -92,7 +92,11 @@ fn ShellView() -> impl IntoView {
     };
 
     view! {
-        <Layout class="app-shell" content_class="app-layout-row">
+        // A plain wrapper, not `thaw::Layout`: Layout nests the page in a Thaw
+        // scroll container (`overflow: scroll`) that never scrolls, which
+        // makes every `position: sticky` descendant inert.
+        <div class="app-shell">
+        <div class="app-layout-row">
             <LayoutSider class="app-sider">
                 <nav aria-label="Primary">
                     <NavDrawer class="app-nav-drawer" selected_value=selected>
@@ -130,6 +134,7 @@ fn ShellView() -> impl IntoView {
                                         <NavItem
                                             value=Signal::derive(move || entry.path.to_string())
                                             href=Signal::derive(move || entry.path.to_string())
+                                            icon=nav_icon(entry.route)
                                         >
                                             {entry.label}
                                             {planned
@@ -147,12 +152,21 @@ fn ShellView() -> impl IntoView {
                     <h1 class="app-title">
                         {move || current_route.get().map(|id| route_spec(id).label)}
                     </h1>
-                    <Button appearance=ButtonAppearance::Subtle on_click=toggle>
-                        {move || match theme.get() {
-                            Theme::Light => "Switch to dark",
-                            Theme::Dark => "Switch to light",
-                        }}
-                    </Button>
+                    <button
+                        type="button"
+                        class="theme-toggle"
+                        on:click=toggle
+                        aria-label=move || match theme.get() {
+                            Theme::Light => "Switch to dark theme",
+                            Theme::Dark => "Switch to light theme",
+                        }
+                        title=move || match theme.get() {
+                            Theme::Light => "Switch to dark theme",
+                            Theme::Dark => "Switch to light theme",
+                        }
+                    >
+                        <Icon icon=Signal::derive(move || toggle_icon(theme.get())) />
+                    </button>
                 </LayoutHeader>
                 <main class="app-main">
                     {move || match current_route.get() {
@@ -179,6 +193,7 @@ fn ShellView() -> impl IntoView {
                     }}
                 </main>
             </div>
-        </Layout>
+        </div>
+        </div>
     }
 }

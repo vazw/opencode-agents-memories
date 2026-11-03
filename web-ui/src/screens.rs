@@ -20,7 +20,9 @@ use leptos::callback::Callable;
 use leptos::prelude::*;
 use serde::Deserialize;
 
-use crate::agents::AgentsPanel;
+use crate::agents::{
+    AgentsPanel, ProjectRow, ProjectsOutcome, load_projects, project_option_label, selected_project,
+};
 use crate::api::auth::{AuthContext, read_marker_token};
 use crate::api::envelope::{ApiEnvelope, ApiError};
 use crate::api_request::{self, RequestSpec};
@@ -215,13 +217,12 @@ pub async fn delete_session(
 
 /// Load the project timeline into the screen's signals.
 fn load_rows(
-    project_id: String,
+    spec: RequestSpec,
     auth: AuthContext,
     rows: RwSignal<Vec<SessionRow>>,
     error: RwSignal<Option<String>>,
 ) {
     leptos::task::spawn_local(async move {
-        let spec = list_sessions_spec(&project_id);
         match api_request::request::<Vec<SessionRow>>(&spec, &auth).await {
             Ok(found) => {
                 error.set(None);
@@ -275,6 +276,7 @@ pub fn initial_project(search: &str) -> Option<String> {
         let key = parts.next().unwrap_or("");
         let value = parts.next().unwrap_or("");
         if key == "project" {
+            let value = crate::paths::decode_component(value);
             let value = value.trim();
             if !value.is_empty() {
                 return Some(value.to_string());
@@ -284,15 +286,25 @@ pub fn initial_project(search: &str) -> Option<String> {
     None
 }
 
+/// The timeline request for a project the user picked.
+///
+/// `Some` only when the id came out of the roster (`selected_project`): a typed
+/// or deep-linked id that is not in the roster never reaches the network, and
+/// an unknown request falls back to the roster's first row.
+pub fn session_request(roster: &[ProjectRow], requested: Option<&str>) -> Option<RequestSpec> {
+    selected_project(roster, requested).map(|id| list_sessions_spec(&id))
+}
+
 /// The W6.3 session-history screen.
 ///
-/// The shell has no project context, so the screen takes the project id from
-/// its own input (the dev harness prints the seeded id next to the URL). The
+/// The project is picked from the `/api/projects` roster (L3), seeded by
+/// `?project=`. The
 /// token comes from [`read_marker_token`] — the marker `mem-web` injects into
 /// the shell — because the session routes are token-gated even on loopback.
 #[component]
 pub fn SessionHistoryPanel() -> impl IntoView {
     let project_id = RwSignal::new(String::new());
+    let roster = RwSignal::new(Vec::<ProjectRow>::new());
     let rows = RwSignal::new(Vec::<SessionRow>::new());
     let error = RwSignal::new(None::<String>);
     let confirm = RwSignal::new(ConfirmState::default());
@@ -307,12 +319,13 @@ pub fn SessionHistoryPanel() -> impl IntoView {
             // A timeline refresh invalidates any arm.
             confirm.set(confirm_next(&confirm.get_untracked(), ConfirmEvent::Cancel).state);
             let project = project_id.get_untracked();
-            if project.is_empty() {
-                rows.set(Vec::new());
-                error.set(Some("Enter a project id to load the timeline".to_string()));
-                return;
+            match session_request(&roster.get_untracked(), Some(project.as_str())) {
+                Some(spec) => load_rows(spec, auth.clone(), rows, error),
+                None => {
+                    rows.set(Vec::new());
+                    error.set(Some("No project selected".to_string()));
+                }
             }
-            load_rows(project, auth.clone(), rows, error);
         }
     });
 
@@ -338,14 +351,36 @@ pub fn SessionHistoryPanel() -> impl IntoView {
         }
     });
 
-    Effect::new(move |_| {
-        if let Some(id) = initial_project(
-            &web_sys::window()
-                .and_then(|w| w.location().search().ok())
-                .unwrap_or_default(),
-        ) {
-            project_id.set(id);
-            reload.run(());
+    // The roster loads on mount; the `?project=` seed picks from it.
+    Effect::new({
+        let auth = auth.clone();
+        move |_| {
+            let seed = initial_project(
+                &web_sys::window()
+                    .and_then(|w| w.location().search().ok())
+                    .unwrap_or_default(),
+            );
+            let auth = auth.clone();
+            leptos::task::spawn_local(async move {
+                match load_projects(&auth).await {
+                    ProjectsOutcome::Loaded(found) => {
+                        match selected_project(&found, seed.as_deref()) {
+                            Some(id) => {
+                                roster.set(found);
+                                project_id.set(id);
+                                reload.run(());
+                            }
+                            None => {
+                                error.set(Some("No projects recorded yet.".to_string()));
+                            }
+                        }
+                    }
+                    ProjectsOutcome::Unavailable => {
+                        error.set(Some("The project roster is unavailable.".to_string()));
+                    }
+                    ProjectsOutcome::Failed(message) => error.set(Some(message)),
+                }
+            });
         }
     });
 
@@ -353,19 +388,32 @@ pub fn SessionHistoryPanel() -> impl IntoView {
         <section class="session-history" data-testid="session-history">
             <h2>"Session history"</h2>
             <p class="session-hint">
-                "Sessions are project-scoped. Enter a project id to list its timeline."
+                "Sessions are project-scoped. Pick a project to list its timeline."
             </p>
             <div class="session-controls">
-                <input
-                    id="session-project-id"
-                    name="projectId"
-                    type="text"
-                    class="project-input"
-                    data-testid="project-input"
-                    placeholder="project id"
+                <select
+                    id="sessions-project-select"
+                    data-testid="sessions-project-select"
                     prop:value=move || project_id.get()
-                    on:input=move |event| project_id.set(event_target_value(&event))
-                />
+                    on:change=move |event| {
+                        project_id.set(event_target_value(&event));
+                        reload.run(());
+                    }
+                >
+                    {move || {
+                        roster
+                            .get()
+                            .iter()
+                            .map(|row| {
+                                view! {
+                                    <option value=row.project_id.clone()>
+                                        {project_option_label(row)}
+                                    </option>
+                                }
+                            })
+                            .collect_view()
+                    }}
+                </select>
                 <button
                     type="button"
                     class="load-sessions"

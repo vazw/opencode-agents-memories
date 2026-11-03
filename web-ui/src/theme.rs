@@ -42,6 +42,11 @@ pub struct Palette {
     pub muted: &'static str,
     pub accent: &'static str,
     pub accent_text: &'static str,
+    pub accent_hover: &'static str,
+    pub accent_pressed: &'static str,
+    pub accent_soft: &'static str,
+    pub surface_hover: &'static str,
+    pub surface_active: &'static str,
     pub warn_bg: &'static str,
     pub warn_border: &'static str,
     pub warn_text: &'static str,
@@ -64,6 +69,11 @@ pub fn palette(theme: Theme) -> Palette {
             muted: "#5a6472",
             accent: "#2f6feb",
             accent_text: "#ffffff",
+            accent_hover: "#4a82f0",
+            accent_pressed: "#2559c4",
+            accent_soft: "#e3ecfd",
+            surface_hover: "#eef0f3",
+            surface_active: "#e3e6ea",
             warn_bg: "#fff6e0",
             warn_border: "#e0b44a",
             warn_text: "#6b4a00",
@@ -78,6 +88,11 @@ pub fn palette(theme: Theme) -> Palette {
             muted: "#a0a8b4",
             accent: "#7aa2f7",
             accent_text: "#0d1117",
+            accent_hover: "#8fb1f9",
+            accent_pressed: "#6690e8",
+            accent_soft: "#1f2a40",
+            surface_hover: "#232830",
+            surface_active: "#2a303a",
             warn_bg: "#2a2417",
             warn_border: "#8a6d2a",
             warn_text: "#f1d9a0",
@@ -102,8 +117,12 @@ pub fn thaw_theme(theme: Theme) -> thaw::Theme {
     set(&mut c.color_neutral_background_1, p.panel);
     set(&mut c.color_neutral_background_3, p.canvas);
     set(&mut c.color_neutral_background_4, p.panel);
-    set(&mut c.color_neutral_background_4_hover, p.canvas);
-    set(&mut c.color_neutral_background_4_pressed, p.canvas);
+    set(&mut c.color_neutral_background_1_hover, p.surface_hover);
+    set(&mut c.color_neutral_background_1_pressed, p.surface_active);
+    set(&mut c.color_neutral_background_4_hover, p.surface_hover);
+    set(&mut c.color_neutral_background_4_pressed, p.surface_active);
+    set(&mut c.color_compound_brand_stroke, p.accent);
+    set(&mut c.color_compound_brand_stroke_pressed, p.accent_pressed);
     set(&mut c.color_neutral_stroke_1, p.border);
     set(&mut c.color_neutral_stroke_1_hover, p.accent);
     set(&mut c.color_stroke_focus_2, p.accent);
@@ -128,6 +147,66 @@ pub fn thaw_theme(theme: Theme) -> thaw::Theme {
     out.common.font_family_numeric = p.font_sans.to_string();
     out.common.font_family_monospace = p.font_mono.to_string();
     out
+}
+
+/// The theme toggle's glyph: the sun while light, the moon while dark.
+pub fn toggle_icon(theme: Theme) -> icondata_core::Icon {
+    match theme {
+        Theme::Light => icondata_mdi::MdiWeatherSunny,
+        Theme::Dark => icondata_mdi::MdiWeatherNight,
+    }
+}
+
+/// The layout scale: the only three measures with a stylesheet consumer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Scale {
+    /// Reading measure (`.memory-content`).
+    pub measure: &'static str,
+    /// Text sider width (`.app-sider`).
+    pub sider_w: &'static str,
+    /// Sticky header height (`.app-header`, the sticky filter bar offset).
+    pub header_h: &'static str,
+}
+
+impl Default for Scale {
+    fn default() -> Self {
+        Self {
+            measure: "72ch",
+            sider_w: "260px",
+            header_h: "56px",
+        }
+    }
+}
+
+/// The CSS for the scale tokens: exactly three `--app-*` names, no colour, no
+/// user-controlled string.
+pub fn token_css(scale: &Scale) -> String {
+    format!(
+        ":root {{ --app-measure: {}; --app-sider-w: {}; --app-header-h: {}; }}",
+        scale.measure, scale.sider_w, scale.header_h
+    )
+}
+
+/// The id of the one token `<style>` element.
+pub const TOKEN_STYLE_ID: &str = "app-tokens";
+
+/// Insert the `<style id="app-tokens">` once; a no-op when it already exists
+/// or there is no document.
+pub fn install_tokens(scale: &Scale) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    if doc.get_element_by_id(TOKEN_STYLE_ID).is_some() {
+        return;
+    }
+    let Ok(style) = doc.create_element("style") else {
+        return;
+    };
+    let _ = style.set_attribute("id", TOKEN_STYLE_ID);
+    style.set_text_content(Some(&token_css(scale)));
+    if let Some(head) = doc.head() {
+        let _ = head.append_child(&style);
+    }
 }
 
 /// Paint the document canvas from the palette. Thaw scopes its variables to the

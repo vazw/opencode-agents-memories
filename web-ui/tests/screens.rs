@@ -13,7 +13,7 @@ use web_ui::api::envelope::ApiError;
 use web_ui::paths::{ENDPOINTS, EndpointId, encode_component};
 use web_ui::screens::{
     SessionRow, delete_outcome, delete_session_spec, format_created_at, initial_project,
-    list_sessions_spec, session_path,
+    list_sessions_spec, session_path, session_request,
 };
 
 /// The pinned template for `id`.
@@ -152,4 +152,32 @@ fn test_initial_project_ignores_absent_or_empty_values() {
     assert_eq!(initial_project(""), None);
     assert_eq!(initial_project("?project="), None);
     assert_eq!(initial_project("?otherproject=x"), None);
+}
+
+fn roster_row(id: &str) -> web_ui::agents::ProjectRow {
+    serde_json::from_str(&format!(
+        r#"{{"projectId":"{id}","sessionCount":1,"milestoneCount":0}}"#
+    ))
+    .expect("a roster row decodes")
+}
+
+#[wasm_bindgen_test]
+fn test_initial_project_percent_decodes() {
+    assert_eq!(
+        initial_project("?project=%2Fhome%2Fvaz%2Fproj"),
+        Some("/home/vaz/proj".to_string())
+    );
+    assert_eq!(initial_project("?project=%20"), None);
+}
+
+#[wasm_bindgen_test]
+fn test_session_request_uses_only_roster_ids() {
+    let roster = vec![roster_row("/a/one"), roster_row("/b/two")];
+    let spec = session_request(&roster, Some("/b/two")).expect("a roster id resolves");
+    assert_eq!(spec.path, list_sessions_spec("/b/two").path);
+    // An unknown id never reaches the request: it falls back to the first row.
+    let spec = session_request(&roster, Some("/nope")).expect("falls back");
+    assert_eq!(spec.path, list_sessions_spec("/a/one").path);
+    assert!(!spec.path.contains("nope"));
+    assert!(session_request(&[], Some("/a/one")).is_none());
 }

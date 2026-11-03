@@ -26,10 +26,11 @@ use web_ui::core_screens::{
     DailyStatsView, HealthStatus, IdentityControl, MemoriesView, MemoryPage, ProfileRosterItem,
     ProfileScreen, ProfileView, SettingsScreen, ShardStatsView, StatsView, TagsPage, TagsView,
     active_shard_count, daily_peak, delete_memory_spec, error_buckets, get_user_profile_spec,
-    get_user_profile_spec_for, health_outcome, health_spec, list_memories_spec, list_tags_spec,
-    list_user_profiles_spec, memories_view, pin_memory_spec, profile_identity_control,
-    profile_view, search_spec, settings_view, sorted_shards, stats_spec, tags_view,
-    unpin_memory_spec,
+    get_user_profile_spec_for, health_outcome, health_spec, initial_tags, list_memories_spec,
+    list_tags_spec, list_user_profiles_spec, memories_request, memories_view, memory_preview,
+    pin_memory_spec, profile_identity_control, profile_view, range_text, search_spec,
+    settings_view, sorted_shards, stats_spec, tags_json, tags_view, unpin_memory_spec,
+    visible_tags,
 };
 use web_ui::paths::{ENDPOINTS, EndpointId, encode_component};
 
@@ -98,8 +99,8 @@ fn test_list_memories_spec_matches_the_pinned_template() {
         vec![
             ("page".to_string(), "2".to_string()),
             ("pageSize".to_string(), "25".to_string()),
-            ("tag".to_string(), "alpha".to_string()),
-            ("tag".to_string(), "beta gamma".to_string()),
+            ("tags".to_string(), "alpha".to_string()),
+            ("tags".to_string(), "beta gamma".to_string()),
             ("includePrompts".to_string(), "false".to_string()),
         ],
         "page/pageSize, one tag per entry, and includePrompts only when false"
@@ -121,7 +122,7 @@ fn test_list_memories_spec_matches_the_pinned_template() {
 
 #[wasm_bindgen_test]
 fn test_search_spec_builds_the_query() {
-    let spec = search_spec("rust async", 1, 10, &["alpha"]);
+    let spec = search_spec("rust async", 1, 10);
     assert_eq!(spec.method, method(EndpointId::Search));
     assert_eq!(spec.path, template(EndpointId::Search));
     assert_eq!(
@@ -130,12 +131,11 @@ fn test_search_spec_builds_the_query() {
             ("q".to_string(), "rust async".to_string()),
             ("page".to_string(), "1".to_string()),
             ("pageSize".to_string(), "10".to_string()),
-            ("tag".to_string(), "alpha".to_string()),
         ]
     );
     assert_eq!(
         build_url(&spec).expect("the spec builds a root-relative URL"),
-        "/api/search?q=rust%20async&page=1&pageSize=10&tag=alpha",
+        "/api/search?q=rust%20async&page=1&pageSize=10",
         "the shared seam percent-encodes every value"
     );
 }
@@ -315,6 +315,8 @@ fn test_tags_view_empty_state() {
     let empty = TagsPage {
         project: Vec::new(),
         user: Vec::new(),
+        memory_tags: Vec::new(),
+        memory_tag_total: 0,
     };
     assert_eq!(tags_view(&empty), TagsView::Empty);
 }
@@ -322,7 +324,7 @@ fn test_tags_view_empty_state() {
 #[wasm_bindgen_test]
 fn test_tags_view_loaded_groups() {
     let page: TagsPage = serde_json::from_str(TAGS_JSON).expect("the tags projection decodes");
-    let TagsView::Loaded { project, user } = tags_view(&page) else {
+    let TagsView::Loaded { project, user, .. } = tags_view(&page) else {
         panic!("a non-empty page renders the loaded branch");
     };
     assert_eq!(project.len(), 1);
@@ -1312,4 +1314,149 @@ fn test_cleanup_unavailable_view_is_distinct_from_the_failure_view() {
         }
     }
     assert_ne!(CLEANUP_UNAVAILABLE_CLASS, CLEANUP_ERROR_CLASS);
+}
+
+fn strings(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| value.to_string()).collect()
+}
+
+#[wasm_bindgen_test]
+fn test_initial_tags_percent_decodes() {
+    assert_eq!(
+        initial_tags("?tags=architecture%20docs"),
+        strings(&["architecture docs"])
+    );
+    assert_eq!(
+        initial_tags("?tags=rust&tags=ops%2Ddrill"),
+        strings(&["rust", "ops-drill"])
+    );
+    assert_eq!(initial_tags("?tags=a&tags=a"), strings(&["a"]));
+    assert_eq!(
+        initial_tags("?tags=&other=1&tags=%20"),
+        Vec::<String>::new()
+    );
+    assert_eq!(initial_tags(""), Vec::<String>::new());
+}
+
+#[wasm_bindgen_test]
+fn test_memories_request_picks_one_mode() {
+    let spec = memories_request("", &strings(&["rust", "architecture"]), 1, 20);
+    assert_eq!(
+        build_url(&spec).expect("builds"),
+        "/api/memories?page=1&pageSize=20&tags=rust&tags=architecture&includePrompts=false"
+    );
+    let spec = memories_request("deploy", &strings(&["rust"]), 1, 20);
+    assert_eq!(
+        build_url(&spec).expect("builds"),
+        "/api/memories?page=1&pageSize=20&tags=rust&includePrompts=false"
+    );
+    let spec = memories_request(" deploy ", &[], 2, 20);
+    assert_eq!(
+        build_url(&spec).expect("builds"),
+        "/api/search?q=deploy&page=2&pageSize=20"
+    );
+    let spec = memories_request("  ", &[], 1, 20);
+    assert_eq!(
+        build_url(&spec).expect("builds"),
+        "/api/memories?page=1&pageSize=20&includePrompts=false"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_request_fixture_matches_ui() {
+    let spec = memories_request("", &strings(&["probe"]), 1, 20);
+    assert_eq!(
+        build_url(&spec).expect("builds"),
+        include_str!("../../crates/mem-web/tests/fixtures/a1_tags_request.txt").trim()
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_range_text_is_one_based() {
+    // Blueprint r4 printed (191,20,3827) -> "3801-3827"; page 191 ends at 3820.
+    assert_eq!(range_text(191, 20, 3827), "3801-3820 of 3827");
+    assert_eq!(range_text(192, 20, 3827), "3821-3827 of 3827");
+    assert_eq!(range_text(1, 20, 3827), "1-20 of 3827");
+    assert_eq!(range_text(1, 20, 0), "0 of 0");
+}
+
+#[wasm_bindgen_test]
+fn test_memory_preview_is_a_lossless_split() {
+    let body: String = "héllo wörld ✓ ".repeat(473); // 6622 chars, multi-byte
+    assert!(body.chars().count() > 6600);
+    let (preview, rest) = memory_preview(&body);
+    let rest = rest.expect("a long body splits");
+    assert_eq!(format!("{preview}{rest}"), body);
+    assert!(
+        preview.chars().count() <= 700,
+        "{}",
+        preview.chars().count()
+    );
+    assert!(
+        preview.chars().count() > 600,
+        "word-boundary cut stays near the limit"
+    );
+    let (short, none) = memory_preview("short");
+    assert_eq!((short.as_str(), none), ("short", None));
+    // No whitespace at all: a hard cut on a char boundary.
+    let (hard, rest) = memory_preview(&"é".repeat(800));
+    assert_eq!(hard.chars().count(), 700);
+    assert_eq!(rest.map(|r| r.chars().count()), Some(100));
+}
+
+#[wasm_bindgen_test]
+fn test_visible_tags_caps_at_four() {
+    let ten: Vec<String> = (0..10).map(|i| format!("t{i}")).collect();
+    let (shown, more) = visible_tags(&ten);
+    assert_eq!((shown.len(), more), (4, 6));
+    let (shown, more) = visible_tags(&ten[..3]);
+    assert_eq!((shown.len(), more), (3, 0));
+}
+
+#[wasm_bindgen_test]
+fn test_tags_json_carries_every_tag() {
+    let ten: Vec<String> = (0..10).map(|i| format!("t{i}")).collect();
+    let back: Vec<String> = serde_json::from_str(&tags_json(&ten)).expect("valid JSON");
+    assert_eq!(back, ten);
+    let odd = strings(&["quote\"tag", "back\\slash"]);
+    let back: Vec<String> = serde_json::from_str(&tags_json(&odd)).expect("valid JSON");
+    assert_eq!(back, odd);
+    assert_eq!(tags_json(&[]), "[]");
+}
+
+#[wasm_bindgen_test]
+fn test_tags_page_carries_ranked_memory_tags() {
+    let page: TagsPage = serde_json::from_str(
+        r#"{"project":[],"user":[],"memoryTags":[{"tag":"rust","count":3},{"tag":"Architecture Docs","count":2}],"memoryTagTotal":4}"#,
+    )
+    .expect("decodes");
+    assert_eq!(page.memory_tag_total, 4);
+    let TagsView::Loaded {
+        memory_tags,
+        memory_tag_total,
+        ..
+    } = tags_view(&page)
+    else {
+        panic!("memory tags alone render the loaded branch");
+    };
+    assert_eq!(memory_tag_total, 4);
+    assert_eq!(memory_tags[1].tag, "Architecture Docs");
+    assert_eq!(memory_tags[0].count, 3);
+    // An older server without the keys still decodes.
+    let old: TagsPage = serde_json::from_str(r#"{"project":[],"user":[]}"#).expect("decodes");
+    assert_eq!(tags_view(&old), TagsView::Empty);
+}
+
+#[wasm_bindgen_test]
+fn test_tags_link_round_trips_a_space_bearing_tag() {
+    let tag = "Architecture Docs & more";
+    let href = format!(
+        "/project-memories?tags={}",
+        web_ui::paths::encode_component(tag)
+    );
+    let search = href
+        .split_once('?')
+        .map(|(_, q)| format!("?{q}"))
+        .unwrap_or_default();
+    assert_eq!(initial_tags(&search), vec![tag.to_string()]);
 }
