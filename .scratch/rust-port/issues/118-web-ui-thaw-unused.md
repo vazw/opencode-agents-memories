@@ -1,8 +1,13 @@
 # 118 — the web UI draws 1 of 58 Thaw components: a hand-rolled design system sits beside the framework
 
-Status: ready-for-human — **wave 1 (theme + shell) is built and structurally verified; staging and the
-live ±2 % height pair are the operator's** (blueprint
-`.tmp/blueprints/blueprint-20261103-1147-webui-thaw-wave1-shell-r6.md`, `blueprint_sha256: 6d54b8762eae`).
+Status: ready-for-human — **wave 1 (theme + shell) is built, staged and live-verified; wave 2 is the next
+scoped unit** (blueprint `.tmp/blueprints/blueprint-20261103-1147-webui-thaw-wave1-shell-r6.md`,
+`blueprint_sha256: 6d54b8762eae`). Live on `:3742` 2026-11-03: `[class*=thaw-]` 1 → **39** on every route,
+`nav[aria-label="Primary"]` 0 → **1** (the app's nav had never carried its label — `shell.rs:59` wrote
+`attr:aria-label`, a literal attribute name), colon-named attributes **0**, canvas painted from the palette
+(`rgb(20, 23, 28)` dark), 196 wasm tests and class census 187/187. The ±2 % height pair held on 9 of 10
+routes; `/tags` read **+4.3 %** (1273 → 1328 px at 1280×800) on a page whose rows are data-derived —
+labelled INFERRED content drift, not a layout change, and the one number here that is not proven.
 Waves 2 and 3 are scoped below but not yet planned.
 
 ## Observation (MEASURED 2026-11-03, chrome-devtools MCP against the live engine at 127.0.0.1:3742)

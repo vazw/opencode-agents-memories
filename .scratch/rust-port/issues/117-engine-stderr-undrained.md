@@ -1,7 +1,7 @@
 # 117 — the engine's structured stderr goes into a pipe the wrapper never drains
 
 
-Status: done — 2026-11-03 — landed 0bfdcf1: engine stderr is drained into ~/.opencode-mem/opencode-mem.log in the log's own [ts] message: {json} shape, bounded by a 256-line queue with a counted drop summary; wrapper appends only, the engine keeps rotation (ADR-0013 amendment 2026-11-03).
+Status: done — 2026-11-03 — landed 0bfdcf1: engine stderr is drained into ~/.opencode-mem/opencode-mem.log in the log's own [ts] message: {json} shape, bounded by a 256-line queue with a counted drop summary; wrapper appends only, the engine keeps rotation (ADR-0013 amendment 2026-11-03). **Live-verified 2026-11-03T19:59Z** (`docs/evidence/deploy-20261103-1959.md`): the restart that loaded this wrapper produced the log's first ever `consolidation.startup_tick` and `profile.decay_tick` lines, in the same file whose two earlier sessions have neither; `engine.stderr_dropped` 0. Residual: `capture.retry_scheduled` and dead-letter counters are still 0 — they need a real retry to close.
 
 *(Renumbered from 102 on 2026-11-03: the rust-port range already occupied 100–114, so the four issues filed by the 2026-11-03 waves are 115–118. Blueprints written before the renumber cite the old path; the blueprint for this issue is `.tmp/blueprints/blueprint-20261103-0952-issue-102-engine-stderr-drain-r2.md`.)*
 
