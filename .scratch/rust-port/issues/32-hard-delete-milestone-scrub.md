@@ -1,8 +1,7 @@
 # 32 — W4.4 · Hard delete & milestone scrub (retention semantics)
 
-Status: ready-for-agent — 2026-10-27 (re-verified at `8023dd8`: the tombstone delete, the verbatim
-`Contributor.summary` and the whole-milestone purge are all real. Owner ruled that the scrub keeps the
-contributor entry with an empty summary, amending issue 43 decision 9. Brief under `## Agent Brief`.)
+Status: ready-for-human — 2026-11-03: AC1/AC2/AC3 landed; AC4 partial (the smoke doc half is missing);
+AC5/AC6 and residual 3 deferred to the retention ruling (ADR-0010 D-1); residuals 1/2/4 settled, 5/6 open.
 
 ## What to build
 
@@ -56,6 +55,42 @@ Wave detail: `.scratch/rust-port/roadmap.md` §W4.4.
   acceptance: it deletes the whole milestone row and thereby destroys a co-contributor's retained summary.
   Issue 43 decision 9 now mandates rewriting the contributor set instead. Re-scope this issue against that
   decision before planning; the two cannot both be implemented.
+
+- **2026-11-03 — wave 1 (deletion + attribution) landed AC1/AC2/AC3; the rest is named, not claimed.**
+  - **AC1 landed.** `crates/mem-episodic/tests/hard_delete.rs` proves the erasure with a direct
+    `SELECT id, summary, length(embedding) FROM agent_sessions WHERE id = ?` returning 0 rows — not an API
+    assertion — plus `raw_context_for_session` → `None`, `segments_for_session` → empty and no
+    `capture_inbox` row. The path is `EpisodicStore::hard_delete_session`
+    (`crates/mem-episodic/src/purge.rs`, the allowlisted module; `store.rs` is inside the lexical barrier
+    `crates/mem-bridge/tests/purge_cli.rs` guards, which is why it lives there).
+  - **AC2 landed.** The milestone row survives: the contributor entry is kept with `summary == ""` and its
+    attribution (`agent_id`, `agent_name`, `created_at`) intact; a co-contributor's summary is untouched.
+    The recap columns (`summary`, `embedding`, `source_count`, `window_start`, `window_end`) are asserted
+    byte-identical across the purge (owner ruling 2026-10-21: *no re-summarization, no re-embed*). The
+    batch statement is `SCRUB_MILESTONE_CONTRIBUTORS`, and `EpisodicPurgeReport.milestones` is renamed
+    `milestones_scrubbed` so the report cannot be read as a delete.
+  - **AC3 landed.** `test_hard_delete_orphans_children_and_the_fk_nulls_the_link`: the child row survives
+    with `orphaned == 1` and `parent_session_id IS NULL` (the FK's `ON DELETE SET NULL`), and the REST
+    delete's `parentSessionId` is now `null`.
+  - **AC4 partial.** The `## Comments` half is this entry. The **smoke-doc half is missing**: no smoke doc
+    exists in the tree for this wave and none was created here. Recorded as the gap.
+  - **AC5, AC6 and residual 3 deferred** together: all three are blocked on the retention ruling and
+    ADR-0010 D-1 (*"no timer, no sweep, no flag"*), which `crates/mem-bridge/tests/purge_cli.rs`'s lexical
+    barrier enforces. Residual 3 (the UI/delete-response copy) cannot state a distinction that has no rule
+    yet.
+  - **Residual 1 settled** (owner, 2026-10-21): the merged recap and its embedding are kept, and are now
+    named in the CLI report's `not_erased()` as tier `milestones-recap` beside the legacy
+    `memories-shard` — a survivor the report does not name is the same lie one level up.
+  - **Residual 2 settled** (owner, 2026-10-21): facts are **kept**. The ruling's premise is corrected, not
+    the ruling: this issue says a promoted fact "carries no session link today", but `fact_provenance`
+    exists (`crates/mem-facts/src/schema.rs` writes one row per contributor) and the triple arm still
+    erases session-sourced facts. The semantic that stands is *the session is gone; the knowledge it
+    produced remains* — so the purge passes an empty milestone-id list to `purge_sources`, and
+    `test_purge_keeps_a_fact_sourced_only_by_a_surviving_milestone` is its discriminator.
+  - **Residual 4 settled** — proven by `test_hard_delete_orphans_children_and_the_fk_nulls_the_link` and the
+    flipped REST assertion (`test_sessions_delete_is_orphan_safe`).
+  - **Residuals 5 and 6 remain OPEN** (age threshold / consolidation interaction; stale vectors after
+    compaction) — untouched by this wave.
 
 ## Agent Brief
 
