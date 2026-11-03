@@ -161,6 +161,10 @@ pub struct EngineConfig {
     /// config default and today's behaviour, so an engine that predates the key
     /// keeps a child's restore off.
     pub capture_child_sessions: bool,
+    /// The resolved `chatMessage.injectOn` (issue 63), advertised as
+    /// `hello.result.config.inject_on` (`"first"` / `"always"`). The wrapper
+    /// reads it per bridge child; missing/invalid means `always` there.
+    pub inject_on: &'static str,
 }
 
 impl Default for EngineConfig {
@@ -174,6 +178,7 @@ impl Default for EngineConfig {
             degraded_reason: None,
             open_guard_override: false,
             capture_child_sessions: false,
+            inject_on: "always",
         }
     }
 }
@@ -220,6 +225,7 @@ fn handshake_result(config: &EngineConfig, chat_message_enabled: bool) -> serde_
         "config": {
             "chat_message_enabled": chat_message_enabled,
             "capture_child_sessions": config.capture_child_sessions,
+            "inject_on": config.inject_on,
         },
         "engine_version": config.engine_version,
         "methods": RUNTIME_METHODS,
@@ -312,6 +318,7 @@ impl Engine {
         // because the `capture` method itself must enforce it.
         let config = EngineConfig {
             capture_child_sessions: core.chat_message.capture_child_sessions,
+            inject_on: core.chat_message.inject_on.as_str(),
             ..config
         };
         let backend = portability.and_then(|factory| {

@@ -51,7 +51,7 @@ The wrapper's **first** message after spawn is `hello`. No runtime method may pr
 ```
 
 ```json
-{"id":"hello-1","jsonrpc":"2.0","result":{"capabilities":{"add":true,"compaction":true,"export":true,"fire_and_forget_capture":true,"forget":true,"import":true,"list":true,"list-shards":true,"migrate":true,"profile":true,"search":true,"skills":true,"standalone":true,"web":true},"config":{"capture_child_sessions":false,"chat_message_enabled":true},"engine_version":"0.1.0","methods":["capture","inject","recall","skills","health","shutdown","add","search","forget","list","profile","list-shards","migrate","export","import"],"protocol":"1.0.0"}}
+{"id":"hello-1","jsonrpc":"2.0","result":{"capabilities":{"add":true,"compaction":true,"export":true,"fire_and_forget_capture":true,"forget":true,"import":true,"list":true,"list-shards":true,"migrate":true,"profile":true,"search":true,"skills":true,"standalone":true,"web":true},"config":{"capture_child_sessions":false,"chat_message_enabled":true,"inject_on":"always"},"engine_version":"0.1.0","methods":["capture","inject","recall","skills","health","shutdown","add","search","forget","list","profile","list-shards","migrate","export","import"],"protocol":"1.0.0"}}
 ```
 
 Protocol version is one semver line owned by ADR-0007; its current value is `1.0.0`.
@@ -83,7 +83,7 @@ value, never a throw).
 the fifteen.
 
 **Issue 98 — the `config` object.** The result carries a second sibling object, `config`,
-whose keys today are `chat_message_enabled` and `capture_child_sessions`: the engine's
+whose keys are `chat_message_enabled`, `capture_child_sessions`, and `inject_on`: the engine's
 **resolved** `chatMessage.enabled` (the same value its `capture` gate enforces), and the
 **resolved** `chatMessage.captureChildSessions` (ADR-0017 amendment 2026-11-03). The first is
 additive and fail-open — an engine that
@@ -108,6 +108,14 @@ behaviour, and the config default). **The bare leaf name is deliberate:** unlike
 preceding `_` is a word character. Do not "harmonise" it into invisibility: the full config
 path `chatMessage.captureChildSessions` is named here and in the engine's doc comment, so
 traceability is kept.
+
+`inject_on` (issues 63/99) advertises resolved `chatMessage.injectOn` as `"first"`
+or `"always"`. Wrapper reads it from `hello.result.config` once per child, never
+from capabilities. A missing/invalid value, including on a replacement child,
+means `always` for legacy-compatible refresh. This is wrapper control, not an
+`inject` wire parameter. Adapter supplies zero-based per-session `turnIndex` to
+the wrapper's `hooks.shouldRefresh`; first turn or absent nonempty cache always
+attempts injection, while `first` can retain a nonempty cache on later turns.
 
 ## 3. The fifteen runtime methods (D-40, D-46)
 

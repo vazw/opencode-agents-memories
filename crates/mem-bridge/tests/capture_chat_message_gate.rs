@@ -241,6 +241,78 @@ fn test_first_refused_capture_names_it_once() {
 }
 
 // ---------------------------------------------------------------------------
+// Issue 63 — the resolved `chatMessage.injectOn` is advertised in the same
+// top-level `config` object (never in `capabilities`). The wrapper treats a
+// missing/invalid value as `always`, so the default here is `always`.
+// ---------------------------------------------------------------------------
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_hello_advertises_inject_on_outside_capabilities() {
+    for configured in ["first", "always"] {
+        let engine = Engine::new(EngineConfig {
+            inject_on: configured,
+            ..EngineConfig::default()
+        });
+        let response = dispatch(&engine, "hello", json!({"client": "probe"})).await;
+        let result = result(&response);
+        assert_eq!(
+            result["config"]["inject_on"],
+            json!(configured),
+            "hello advertises the resolved chatMessage.injectOn"
+        );
+        assert_eq!(
+            result["capabilities"]
+                .as_object()
+                .expect("capabilities is an object")
+                .len(),
+            14,
+            "the capability map keeps exactly its fourteen method keys"
+        );
+        assert!(
+            result["capabilities"].get("inject_on").is_none(),
+            "a config-derived value must never enter the capability map: {}",
+            result["capabilities"]
+        );
+    }
+}
+
+/// The production assembly path (`from_composed`) is the ONE place the config
+/// value reaches the advertisement; a forgotten rebind would ship `always`
+/// while the operator configured `first`.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_composed_engine_advertises_the_configured_inject_on() {
+    use std::collections::BTreeMap;
+
+    let root = common::temp_dir("inject-on-composed-root");
+    let home = common::temp_dir("inject-on-composed-home");
+    let env: BTreeMap<String, String> = [("HOME".to_string(), home.to_string_lossy().to_string())]
+        .into_iter()
+        .collect();
+    let mut config =
+        mem_core::config::Config::load(&mem_core::config::ConfigPaths::standard(&home), &env)
+            .expect("the default config loads");
+    config.storage_path = root.clone();
+    config.embedding_dimensions = 8;
+    config.chat_message.inject_on = mem_core::config::InjectOn::First;
+    let composed = mem_bridge::composition::build_composed_runtime(
+        &root,
+        &config,
+        Arc::new(FakeEmbedder::with_vector(common::unit_vector(0))),
+        None,
+    )
+    .await
+    .expect("the runtime composes");
+    let engine = Engine::from_composed(EngineConfig::default(), &composed, &config, None);
+
+    let response = dispatch(&engine, "hello", json!({"client": "probe"})).await;
+    assert_eq!(
+        result(&response)["config"]["inject_on"],
+        json!("first"),
+        "the composed engine advertises the operator's resolved value"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // AC2 (engine half) — the gate is a gate: with the flag on, a valid capture is
 // accepted exactly as before the wave. Characterization row; its mutant is a
 // gate that ignores the getter and refuses unconditionally.

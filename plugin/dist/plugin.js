@@ -593,6 +593,10 @@ function createBridgeState(root) {
     // assignment in the handshake runs first on every child, so mutating this
     // initializer is measurably unobservable; do not cite it as coverage.
     engineCaptureChildSessions: false,
+    // Issue 63: hello.result.config.inject_on ("first" | "always"), or null
+    // when this child advertised nothing usable. null means "always" (the
+    // legacy-compatible refresh), so a missing/invalid value never freezes a cache.
+    engineInjectOn: null,
     engineProtocolLine: null, // hello.result.protocol, for the mismatch line
     capabilityGapsLogged: new Set(), // one line per capability per process
     pendingCaptures: 0,
@@ -821,6 +825,7 @@ function teardownChild(state, reason) {
   // invariant "no child's advertisement outlives it" needs no argument about
   // call order.
   state.engineCaptureChildSessions = false;
+  state.engineInjectOn = null;
   state.engineProtocolLine = null;
   // Issue 117: a partial line from a dead child is not a line. The QUEUE is
   // deliberately kept — those lines were already received and are the dead
@@ -980,6 +985,14 @@ async function startBridge(state) {
     // `hasOwnProperty` guard, and only the exact boolean `true` opens the gate.
     state.engineCaptureChildSessions =
       advertisedConfig !== null && advertisedConfig.capture_child_sessions === true;
+    // Issue 63: assigned totally like the flag above — a replacement child that
+    // advertises nothing (or junk) must not inherit its predecessor's value.
+    // It is read from `config`, never `capabilities`.
+    state.engineInjectOn =
+      advertisedConfig !== null &&
+      (advertisedConfig.inject_on === "first" || advertisedConfig.inject_on === "always")
+        ? advertisedConfig.inject_on
+        : null;
     state.engineCompatible = true;
     state.bridgeState = "installed";
     return true;
@@ -1391,6 +1404,16 @@ export const server = async function server(input) {
       }
     },
   };
+
+  // Issue 63: the V2 adapter's refresh decision. Not a host hook, so it is
+  // non-enumerable: a V1 host iterating `hooks` never sees it. `turnIndex` is
+  // the adapter's per-session count of prompt-hook invocations (adapter.js).
+  // Only `first` retains a nonempty cache after turn 0; unknown means `always`.
+  Object.defineProperty(hooks, "shouldRefresh", {
+    enumerable: false,
+    value: ({ turnIndex, hasCache }) =>
+      !hasCache || turnIndex === 0 || bridge().engineInjectOn !== "first",
+  });
 
   return { hooks };
 
