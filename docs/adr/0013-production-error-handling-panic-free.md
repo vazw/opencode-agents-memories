@@ -336,7 +336,60 @@ a `#![deny]` attribute in each crate's `lib.rs` (equivalent in effect, but one m
 crate, and it cannot be scoped away from tests per target); a pre-commit hook (a repository write
 outside this decision's scope, and still not a gate anyone is obliged to install).
 
+**Amendment (2026-11-03, engine stderr drain — issue 117).**
+
+- **D-3's stderr seam is a pipe with no reader until the parent drains it.** The engine's machine-readable
+  NDJSON events (`consolidation.startup_tick`, the capture retry and dead-letter events, `degraded`) leave
+  through `structured_stderr` on fd 2, and the wrapper's `spawn(..., stdio: ["pipe","pipe","pipe"])` gives
+  that fd a socket pair nobody read. Both consequences are structural, not incidental: those events are
+  invisible to every reader of the engine log, and a child that keeps writing eventually blocks in
+  `write(2)` on a full socket — a stall that arrives as a hang with no log line.
+- **The wrapper now drains fd 2 into the engine's own log file.** Each line is rendered into that file's
+  existing `[ts] message: {json}` shape with the wire's canonical key order: `[` + a 29-byte local-time
+  stamp with a numeric offset + `"] "` + a message + `": "` + the payload. The message slot holds one of
+  exactly three things — an engine event name matching `/^[A-Za-z0-9_.-]{1,128}$/`, `engine.stderr`, or
+  `engine.stderr_unstructured` — because the frozen reader classifies on that slot, and its counter
+  prefixes, error buckets and generic `": error"` rule would otherwise let a line the wrapper wrote forge
+  a stats increment. A name the charset refuses stays in the payload verbatim.
+- **The shape of the write path, and why.** No synchronous I/O in the read handler: it splits, bounds,
+  renders and pushes only, so the flowing-mode listener keeps the child's socket empty and the engine's
+  `write(2)` never waits on us. The queue holds at most 256 rendered lines and drops the rest with a
+  counted `engine.stderr_dropped` summary rendered by the same renderer (a rate cap was rejected: it needs
+  a timer and would hide a flood instead of counting it). The per-line payload cap is 4096 bytes measured
+  on the payload JSON; the rendered line is longer by its envelope — at most 4259 bytes at the 128-char
+  charset maximum. A batch is **normally** one `write(2)`, so `O_APPEND` appends do not interleave
+  mid-line with the engine's own writes; `appendFile` → `fs.writeFile` retries a partial write, so a batch
+  can in principle be split, which is ordering only and the same class as the rotation race below. An
+  unwritable destination costs one warning per process and one failed write per second (a timestamp
+  comparison, **not** a latch), **and recovers** once the destination returns; a `mkdir` failure and an
+  append failure are one accounting path, the same retry window, the same counted loss and the same flag
+  clear. The engine remains the sole owner of rotation, of the session banner and of the 5 MiB/30-day
+  policy (ADR-0015): the wrapper appends and never renames, rotates, truncates or repairs.
+- **The re-rendering is lossless in the identifier branch and preserves more in the other.** An
+  identifier-shaped `event` moves to the message slot and is removed from the payload, so
+  `{ event: message, ...payload }` reconstructs the input; a name the charset rule refuses is not
+  discarded, so the input is reconstructed from the payload alone and the refused name remains readable.
+- **Rejected alternatives, one line each.** A second `opencode-mem.stderr.log` — a second place to
+  correlate, and invisible to the frozen reader's `list_log_files`. `stdio: [..., "ignore"]` — deletes the
+  diagnosis (the dead-letter `reason` lives on this seam) and cannot meet the issue's third acceptance
+  criterion. Forwarding to the host's stderr — the host's own fd 2 is a self-peering socketpair with no
+  reader, so that channel is unobservable and the bug would reappear one layer up. A `log` wire method —
+  a frozen-schema and Rust change for a diagnostic. Wrapper-side rotation — a second owner of ADR-0015's
+  policy. Honouring `OPENCODE_MEM_LOG_FILE` in the wrapper — the child environment whitelist does not
+  forward that name, so the engine and the wrapper would disagree about one logical log.
+- **Declared consequences.** The file can exceed the 5 MiB cap by at most one drained burst until the
+  engine's next write rotates it. A wrapper line can land between the engine's `rename` and its banner on
+  a rotation race — ordering only, no line is ever split or lost by this renderer. Lines still queued when
+  the host exits are accepted loss, the same class as ADR-0015's write-failure loss, and the final batch
+  is best-effort: the host may exit with an append in flight. A non-zero drop counter at exit dies with
+  the process, and the drop summary is itself best-effort — it is lost while the destination is
+  unwritable, which is exactly when it matters most. **The message slot is not an attestation:** an engine
+  event literally named `engine.stderr_dropped` renders identically to the wrapper's own summary, so a
+  reader must not treat the message as proof of who wrote a line. The frozen stats reader is unaffected:
+  unknown messages fall through its `_ => {}` arm (read, not run).
+
 ## Rejected alternatives
+
 
 - **Removing every panic from the tree, tests included.** The test-side `expect` messages are the
   diagnostic surface (D-1); converting 2,798 of them would make failures harder to read and buy

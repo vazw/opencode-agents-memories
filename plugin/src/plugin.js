@@ -28,7 +28,7 @@
 import pkg from "../package.json" with { type: "json" };
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { accessSync, constants, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { accessSync, appendFile, constants, existsSync, mkdir, mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -233,6 +233,290 @@ export function shortError(err) {
   return text.slice(0, 120);
 }
 
+// ── engine stderr drain (issue 117) ─────────────────────────────────────
+// The engine writes machine-readable NDJSON on fd 2 (`structured_stderr`:
+// consolidation ticks, capture retry and dead-letter events, degraded notices)
+// and everything else — a panic hook, a library's own write — as non-JSON.
+// `spawn(..., stdio: ["pipe","pipe","pipe"])` gives fd 2 a pipe, and a pipe
+// with no reader is both invisible and a place the child blocks in `write(2)`
+// once the socket buffer fills. This drain renders each line into the engine's
+// OWN log file in that file's `[ts] message: {json}` shape: no syscall in the
+// read handler, a bounded queue, and a counted drop summary, so neither a slow
+// nor an unwritable destination can stall the engine or the host's loop.
+//
+// The engine stays the sole owner of rotation, of the session banner and of
+// the 5 MiB/30-day policy (ADR-0015): the wrapper appends whole lines and
+// never renames, rotates, truncates or repairs.
+
+// The cap is on the PAYLOAD JSON, not on the rendered line. The line is
+// `[` + stamp + `"] "` + message + `": "` + payload + `"\n"`, so a payload
+// sitting exactly on the cap still renders a longer line — at most 4259 bytes
+// at the charset maximum (1 + 29 + 2 + 128 + 2 + 4096 + 1).
+const ENGINE_STDERR_MAX_PAYLOAD_BYTES = 4096;
+
+// The single place truncation happens, so the structured and unstructured
+// branches cannot drift apart. The quantity is the PAYLOAD JSON's utf8 length —
+// never the raw line's, the truncated text's or the rendered line's. `text` is
+// a forensic byte dump of that JSON (so it carries the payload's own leading
+// bytes) and `bytes` says how long the whole thing was; re-basing `text` on the
+// payload's CONTENT would leave `bytes` measuring an unnamed quantity. The cut
+// is by byte, not by codepoint: a cut inside a codepoint renders U+FFFD instead
+// of throwing, which is a declared loss and why `truncated` exists — the cost
+// is at most one extra U+FFFD, so `text` stays ≤ 4096 + 2 bytes.
+function capPayload(payloadJson) {
+  const bytes = Buffer.byteLength(payloadJson, "utf8");
+  if (bytes <= ENGINE_STDERR_MAX_PAYLOAD_BYTES) return payloadJson;
+  const text = Buffer.from(payloadJson, "utf8")
+    .subarray(0, ENGINE_STDERR_MAX_PAYLOAD_BYTES)
+    .toString("utf8");
+  return JSON.stringify(canonicalize({ bytes, text, truncated: true }));
+}
+
+// The engine's log sink, resolved per batch: after a rotation the live file is
+// this path, and re-resolving is what follows it. Deliberately NOT
+// `OPENCODE_MEM_LOG_FILE`: childEnvironment() does not forward that name, so
+// the engine cannot see it, and honouring it wrapper-side would split one
+// logical log across two files. `home` is an argument so the path is testable
+// without mutating process.env.
+export function engineLogPath(home = homedir()) {
+  return path.join(home, ".opencode-mem", "opencode-mem.log");
+}
+
+// The file's stamp grammar, which the frozen reader re-validates: exactly 29
+// bytes `YYYY-MM-DDTHH:MM:SS.mmm±HH:MM`, local time with a zero-padded numeric
+// offset (chrono's `%Y-%m-%dT%H:%M:%S%.3f%:z`). A stamp that is not that shape
+// makes `parse_log_line` return None and the whole line is skipped.
+function logTimestamp(date) {
+  const pad = (value, width = 2) => String(value).padStart(width, "0");
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes < 0 ? "-" : "+";
+  const magnitude = Math.abs(offsetMinutes);
+  return (
+    pad(date.getFullYear(), 4) +
+    "-" +
+    pad(date.getMonth() + 1) +
+    "-" +
+    pad(date.getDate()) +
+    "T" +
+    pad(date.getHours()) +
+    ":" +
+    pad(date.getMinutes()) +
+    ":" +
+    pad(date.getSeconds()) +
+    "." +
+    pad(date.getMilliseconds(), 3) +
+    sign +
+    pad(Math.floor(magnitude / 60)) +
+    ":" +
+    pad(magnitude % 60)
+  );
+}
+
+// Renders one engine stderr line into the log's own envelope. The message slot
+// holds one of exactly three things: an engine event name, `engine.stderr`, or
+// `engine.stderr_unstructured` — never free text, because the frozen reader
+// classifies the message and a colon-containing name could forge a stats
+// counter.
+export function engineStderrLogLine(rawLine, date = new Date()) {
+  const line = String(rawLine).replace(/[\r\n]+$/, "");
+  let parsed = null;
+  let parsedOk = true;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    parsedOk = false;
+  }
+  // Not a plain object — unparseable, null, an array, or a scalar. The fold is
+  // mandatory: the reader only recognises a payload that begins with `": {"`,
+  // so a bare null/array/scalar would be swallowed into the message slot, and
+  // reaching for `parsed.event` on null would throw inside the stream handler.
+  if (!parsedOk || typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return (
+      "[" + logTimestamp(date) + "] engine.stderr_unstructured: " +
+      capPayload(JSON.stringify({ text: line })) +
+      "\n"
+    );
+  }
+  // The message slot has a grammar, because the file feeds a frozen classifier:
+  // its counter prefixes and error buckets are matched on the message and
+  // contain a space, and its generic rule needs `": error"`, so this charset
+  // admits neither a space nor a colon (nor `": {"`, the payload delimiter).
+  // An engine line therefore cannot invent a `captures` increment or an error
+  // bucket out of text the wrapper wrote.
+  const eventIsMessage = typeof parsed.event === "string" && /^[A-Za-z0-9_.-]{1,128}$/.test(parsed.event);
+  const message = eventIsMessage ? parsed.event : "engine.stderr";
+  const rest = { ...parsed };
+  // Conditional on purpose: the charset rule protects the MESSAGE slot and says
+  // nothing about the payload, so a refused event name stays in the payload
+  // verbatim. Reconstruction is then exact per branch — identifier branch
+  // `{ event: message, ...payload }` is the input; fallback branch
+  // `JSON.parse(payload)` alone is the input.
+  if (eventIsMessage) delete rest.event;
+  return (
+    "[" + logTimestamp(date) + "] " + message + ": " + capPayload(JSON.stringify(canonicalize(rest))) + "\n"
+  );
+}
+
+// The queue bound, in rendered lines. No rate cap on purpose: a cap needs a
+// timer (keeps the host's loop busy) and would HIDE a flood instead of counting
+// it. A dropped line is counted and surfaced instead.
+const ENGINE_STDERR_MAX_QUEUE = 256;
+// The unterminated-chunk bound: a child that writes a binary blob with no
+// newline must not grow the wrapper's heap without limit.
+const ENGINE_STDERR_MAX_BUFFER = 65536;
+// At most one failed write per second while the destination is unwritable. This
+// is a timestamp comparison, not a latch: once the destination is writable
+// again the next drained line is written.
+const ENGINE_STDERR_RETRY_MS = 1000;
+
+// The stderr `data` handler. It splits, bounds, renders (pure) and pushes —
+// and nothing else: no filesystem call, sync or async, may appear before the
+// enqueue. That rule is what keeps the child's socket empty, because a syscall
+// here would starve the read loop, the socket would fill, and the engine would
+// block in `write(2)` — this issue's failure mode arriving as a hang with no
+// log line.
+function enqueueEngineStderr(state, chunk) {
+  state.stderrBuffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+  let index = state.stderrBuffer.indexOf("\n");
+  while (index >= 0) {
+    const line = state.stderrBuffer.slice(0, index);
+    state.stderrBuffer = state.stderrBuffer.slice(index + 1);
+    index = state.stderrBuffer.indexOf("\n");
+    // The bound is checked BEFORE rendering: a 17 000-line flood must not pay
+    // 17 000 JSON round-trips inside the read handler.
+    if (state.stderrQueue.length >= ENGINE_STDERR_MAX_QUEUE) {
+      state.stderrDropped += 1;
+      continue;
+    }
+    state.stderrQueue.push(engineStderrLogLine(line));
+  }
+  // No newline in sight and past the heap bound: force the blob out as one
+  // (capped, hence truncated) line rather than buffering it forever.
+  if (Buffer.byteLength(state.stderrBuffer, "utf8") > ENGINE_STDERR_MAX_BUFFER) {
+    if (state.stderrQueue.length >= ENGINE_STDERR_MAX_QUEUE) {
+      state.stderrDropped += 1;
+    } else {
+      state.stderrQueue.push(engineStderrLogLine(state.stderrBuffer));
+    }
+    state.stderrBuffer = "";
+  }
+  flushEngineLog(state);
+}
+
+// Writes the queue as one newline-terminated batch. The order below is
+// load-bearing.
+function flushEngineLog(state) {
+  // 1. One write at a time: a mid-flood flush must not synthesise a summary
+  //    while a batch is in flight.
+  if (state.stderrWriting) return;
+  // 2. The drop summary — synthesised through the production renderer, never
+  //    hand-formatted, and flushed as its own batch because the queue was
+  //    empty. The counter is reset here and only here, so the summary appears
+  //    at most once per quiet period (intent, not a measured guarantee: a
+  //    momentary empty queue between two data events can produce a second,
+  //    larger one).
+  if (state.stderrQueue.length === 0 && state.stderrDropped > 0) {
+    const count = state.stderrDropped;
+    state.stderrDropped = 0;
+    state.stderrQueue.push(
+      engineStderrLogLine(
+        JSON.stringify({
+          component: "opencode-mem-plugin",
+          event: "engine.stderr_dropped",
+          level: "warn",
+          count,
+        })
+      )
+    );
+  }
+  // 3.
+  if (state.stderrQueue.length === 0) return;
+  // 4. The retry window: count the batch and stop. No timer, so a permanently
+  //    unwritable destination costs at most one failed write per second rather
+  //    than one per line, and a freshly synthesised summary is counted as the
+  //    one line it is.
+  if (
+    state.stderrSuspendedAt !== 0 &&
+    Date.now() - state.stderrSuspendedAt < ENGINE_STDERR_RETRY_MS
+  ) {
+    state.stderrDropped += state.stderrQueue.length;
+    state.stderrQueue = [];
+    return;
+  }
+  // 5. Take the WHOLE queue before attempting the write, so a failure path can
+  //    never re-enter the flush with a non-empty queue (no spin). A batch is
+  //    normally one `write(2)`, so `O_APPEND` appends do not interleave
+  //    mid-line with the engine's own write; `appendFile` -> `fs.writeFile`
+  //    retries a partial write, so a batch can in principle be split, which is
+  //    the same class as the conceded rotation race: ordering only, never a
+  //    corrupted line inside one renderer's own output.
+  const batch = state.stderrQueue.join("");
+  state.stderrQueue = [];
+  state.stderrWriting = true;
+  const logPath = engineLogPath();
+  const done = (err) => {
+    if (err) {
+      failEngineBatch(state, batch, err);
+      return;
+    }
+    // The flag is cleared on the SUCCESS path only; every error path is
+    // failEngineBatch's, which clears it first thing.
+    state.stderrWriting = false;
+    state.stderrDirReady = true;
+    // Re-flush: this is also what emits a pending drop summary, because the
+    // queue is empty at this moment.
+    flushEngineLog(state);
+  };
+  if (state.stderrDirReady === true) {
+    appendFile(logPath, batch, done);
+    return;
+  }
+  // The engine's `LogSink::init` primes this directory too; a second CREATOR of
+  // a directory is harmless where a second WRITER of the file is the conceded
+  // risk.
+  mkdir(path.dirname(logPath), { recursive: true }, (err) => {
+    if (err) {
+      failEngineBatch(state, batch, err);
+      return;
+    }
+    state.stderrDirReady = true;
+    appendFile(logPath, batch, done);
+  });
+}
+
+// The ONE accounting path for both failure sites — a `mkdir` error and an
+// append error are the same loss, in the same retry window, with the same
+// counted lines and the same one-time warning. It is also the flag's single
+// clearing site: `stderrWriting = false` is its FIRST statement, because a flag
+// cleared only in the success callback latches forever on the branch that never
+// gets one (a `mkdir`/EEXIST failure would disable the drain for the life of
+// the process: no retry, no recovery, no drop summary — the synthesis sits
+// after the flush's first early return).
+//
+// States audit: the only way `stderrWriting` is left true is a live write, and
+// every error path reaches this helper. That invariant is what the recovery
+// fixture measures.
+function failEngineBatch(state, batch, err) {
+  state.stderrWriting = false;
+  state.stderrDirReady = false;
+  state.stderrSuspendedAt = Date.now();
+  // Every batch is whole newline-terminated lines, so this count is exact.
+  state.stderrDropped += batch.split("\n").length - 1;
+  if (!state.stderrFailureLogged) {
+    // Best-effort by nature: on the live host the wrapper's own stderr is a
+    // self-peering socketpair with no reader, so the durable signature is the
+    // counted drop summary once the file is writable again. One warning per
+    // state, not per failure — a per-line warning on a full disk would be a
+    // log-line amplifier inside the thing that cannot write. A failure AFTER a
+    // successful recovery is silent by that same design; do not relax the gate
+    // per failure.
+    logWarn("engine.stderr_log_unwritable", { message: shortError(err) });
+    state.stderrFailureLogged = true;
+  }
+  // No re-flush on purpose: the batch is already taken, so there is nothing to
+  // spin on.
+}
+
 // ── status file (§7, D-38 — wrapper writer n.2) ─────────────────────────
 // When there is no engine or an incompatible engine, the wrapper writes
 // <storage_root>/status recording its OWN pid. Never deletes a status file it
@@ -286,6 +570,18 @@ function createBridgeState(root) {
     startingInstance: null,
     pendingResponses: new Map(), // id → { resolve, reject, timer }
     lineBuffer: "",
+    // Issue 117: the engine stderr drain. Data only, like every field here.
+    // `stderrDropped` is per STATE (per storage root), not per child: it
+    // aggregates every child until a summary is emitted. A non-zero counter at
+    // process exit is lost — the same class as the queued lines, and the only
+    // alternative is synchronous I/O at exit, which the drain forbids.
+    stderrBuffer: "",
+    stderrQueue: [],
+    stderrWriting: false, // a write is in flight for the CURRENT child
+    stderrDirReady: false, // the log directory is known to exist
+    stderrDropped: 0, // lines lost since the last emitted summary
+    stderrFailureLogged: false, // one warning per state, not per failure
+    stderrSuspendedAt: 0, // timestamp of the last failed write; 0 = never
     requestCounter: 1, // ids: "hello-1", then "capture-2", ...
     engineCompatible: false,
     engineCapabilities: null, // hello.result.capabilities, or null when absent/unusable
@@ -523,10 +819,16 @@ function teardownChild(state, reason) {
   // call order.
   state.engineCaptureChildSessions = false;
   state.engineProtocolLine = null;
+  // Issue 117: a partial line from a dead child is not a line. The QUEUE is
+  // deliberately kept — those lines were already received and are the dead
+  // child's last words; the flush loop drains them. Do not "clean up" by
+  // emptying it.
+  state.stderrBuffer = "";
   rejectPending(state, reason);
   if (active !== null) {
     try {
       active.stdout.removeAllListeners("data");
+      active.stderr.removeAllListeners("data");
       active.removeAllListeners("close");
       active.removeAllListeners("error");
       active.stdin.end();
@@ -597,6 +899,32 @@ async function startBridge(state) {
       handleWireLine(state, line);
     }
   });
+
+  // Issue 117: re-establish ALL SEVEN drain fields on the state this call was
+  // handed. The registry is deliberately cross-generation, so a state created
+  // by the pre-drain module carries none of them and the first `data` event
+  // would throw `TypeError: Cannot read properties of undefined (reading
+  // 'length')` inside the stream handler — an unhandled throw on the host's
+  // loop. Absolute reset for the three that describe a write belonging to the
+  // PREVIOUS child (a latched `true` or a stale timestamp must not survive a
+  // respawn; `??=` would keep it); `??=` for the four that describe facts
+  // about the state (queued lines, the destination, the running loss count,
+  // the one-time warning), which must survive it.
+  state.stderrBuffer = "";
+  state.stderrWriting = false;
+  state.stderrSuspendedAt = 0;
+  state.stderrQueue ??= [];
+  state.stderrDirReady ??= false;
+  state.stderrDropped ??= 0;
+  state.stderrFailureLogged ??= false;
+
+  // Attached BEFORE the hello call, so a child that writes before it reads is
+  // already drained. The `error` listener is not decoration: a dying child
+  // yields EPIPE / ERR_STREAM_DESTROYED, and an unhandled `error` event on a
+  // stream is a throw on the host's loop.
+  childProcess.stderr.setEncoding("utf8");
+  childProcess.stderr.on("error", () => {});
+  childProcess.stderr.on("data", (chunk) => enqueueEngineStderr(state, chunk));
 
   childProcess.once("error", (err) => {
     if (state.bridgeState === "cold") {
