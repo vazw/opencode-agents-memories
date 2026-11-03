@@ -442,6 +442,24 @@ pub const INSERT_MILESTONE: &str = "INSERT INTO episodic_milestones (id, project
 /// export/import round trip, so the id is the only stable handle.
 pub const DELETE_MILESTONE: &str = "DELETE FROM episodic_milestones WHERE id = ?";
 
+/// The contributor **scrub**: empties the purged contributor's own retained
+/// summary text in place (owner ruling 2026-10-27, amending issue 43
+/// decision 9: text follows text, who/when is not text).
+///
+/// Deliberately leaves `summary` (the merged recap), `embedding`,
+/// `source_count`, `window_start`, `window_end`, `session_row_id`,
+/// `agent_id`, `agent_name` and `created_at` alone — no re-summarization, no
+/// re-embed (owner residual 1, 2026-10-21). The surviving recap is reported
+/// as a survivor tier (`not_erased`), never silently kept.
+pub const SCRUB_MILESTONE_CONTRIBUTORS: &str =
+    "UPDATE episodic_milestones SET contributors = ? WHERE id = ?";
+
+/// The scope triple of one session row, UNFILTERED by `deleted_at`: the hard
+/// delete needs to see a tombstone in order to answer `false` (D9's
+/// no-existence-leak) without turning the 404 into a 200.
+pub const SELECT_SESSION_SCOPE_BY_ID: &str =
+    "SELECT project_id, session_id, agent_id, deleted_at FROM agent_sessions WHERE id = ?";
+
 /// W6.4 — the milestone id existence probe used by the portability
 /// import's pre-scan.
 ///

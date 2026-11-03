@@ -33,6 +33,9 @@ pub enum EpisodicError {
     },
     /// The `(project_id, session_id, agent_id)` unique triple already exists.
     Conflict,
+    /// Another consolidation or purge holds the in-process write gate for this
+    /// storage root. Carries no path and no content.
+    Busy,
     /// The addressed row does not exist (or is invisible to the caller's
     /// scope/visibility rule); `entity` names it (`child_session`,
     /// `parent_session`).
@@ -92,6 +95,8 @@ impl fmt::Display for EpisodicError {
             Self::Conflict => formatter.write_str(
                 "agent session already exists for this (project_id, session_id, agent_id) scope triple",
             ),
+            Self::Busy => formatter
+                .write_str("another consolidation or purge holds the episodic write gate"),
             Self::NotFound { entity } => write!(formatter, "no such {entity}"),
             Self::Json { message } => {
                 write!(formatter, "invalid JSON payload: {message}")

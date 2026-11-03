@@ -223,7 +223,7 @@ async fn test_purge_removes_raw_context_segments_session_and_inbox_for_the_scope
             raw_context: 1,
             segments: segment_count,
             inbox_rows: 1,
-            milestones: 0,
+            milestones_scrubbed: 0,
         }
     );
     assert!(!report.is_empty());
@@ -338,7 +338,7 @@ async fn test_purge_of_an_unknown_scope_returns_zeros() {
 }
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
-async fn test_purge_deletes_a_milestone_only_when_the_triple_is_a_contributor() {
+async fn test_purge_scrubs_the_triple_contributor_and_keeps_the_co_contributor_summary() {
     let dir = TestDir::new("w71-purge-milestones");
     let store = store(&dir).await;
     insert_session(&store, PROJECT, SESSION, AGENT).await;
@@ -385,15 +385,85 @@ async fn test_purge_deletes_a_milestone_only_when_the_triple_is_a_contributor() 
         .expect("pre-scan");
     assert_eq!(ids, vec!["ms-single".to_string(), "ms-mixed".to_string()]);
 
+    // The derived recap columns are captured before the purge (D6: the scrub
+    // is text-only — the merged summary, its embedding, source_count and the
+    // window survive untouched).
+    let db = store.ready().await.expect("ready");
+    let before = query_one(
+        db.as_ref(),
+        "SELECT summary, length(embedding) AS embedding_len, source_count, \
+         window_start, window_end FROM episodic_milestones WHERE id = ?",
+        vec![Value::Text("ms-mixed".to_string())],
+    )
+    .await
+    .expect("select mixed")
+    .expect("ms-mixed exists");
+
     let report = store.purge_session(&scope()).await.expect("purge");
-    assert_eq!(report.milestones, 2);
+    assert_eq!(report.milestones_scrubbed, 2);
+
+    // The rows SURVIVE: the scrub empties the triple's own summary text in
+    // place and keeps every attribution column.
     let milestones = store.list_milestones(PROJECT, 10).await.expect("list");
+    assert_eq!(milestones.len(), 3, "no milestone row is deleted");
+    let mixed = milestones
+        .iter()
+        .find(|milestone| milestone.id == "ms-mixed")
+        .expect("ms-mixed survives");
+    let triple = mixed
+        .contributors
+        .iter()
+        .find(|contributor| contributor.session_id == SESSION)
+        .expect("the triple's contributor entry survives");
+    assert_eq!(triple.summary, "", "the purged contributor's text is gone");
+    assert_eq!(triple.agent_id, AGENT, "the attribution survives");
+    let co_contributor = mixed
+        .contributors
+        .iter()
+        .find(|contributor| contributor.session_id == "session-other")
+        .expect("the co-contributor survives");
     assert_eq!(
-        milestones.len(),
-        1,
-        "only the other agent's milestone remains"
+        co_contributor.summary, "retained source text",
+        "a co-contributor's text is never rewritten"
     );
-    assert_eq!(milestones[0].id, "ms-other-agent");
+    let single = milestones
+        .iter()
+        .find(|milestone| milestone.id == "ms-single")
+        .expect("ms-single survives");
+    assert_eq!(single.contributors[0].summary, "");
+    let other_agent = milestones
+        .iter()
+        .find(|milestone| milestone.id == "ms-other-agent")
+        .expect("ms-other-agent survives");
+    assert_eq!(
+        other_agent.contributors[0].summary, "retained source text",
+        "another agent's milestone is untouched"
+    );
+
+    let after = query_one(
+        db.as_ref(),
+        "SELECT summary, length(embedding) AS embedding_len, source_count, \
+         window_start, window_end FROM episodic_milestones WHERE id = ?",
+        vec![Value::Text("ms-mixed".to_string())],
+    )
+    .await
+    .expect("select mixed")
+    .expect("ms-mixed exists");
+    for column in [
+        "summary",
+        "embedding_len",
+        "source_count",
+        "window_start",
+        "window_end",
+    ] {
+        assert_eq!(
+            before.i64(column),
+            after.i64(column),
+            "{column} is not recomputed"
+        );
+        assert_eq!(before.text(column), after.text(column), "{column} survives");
+    }
+
     // The other contributor's session row is untouched.
     assert_eq!(
         store
@@ -402,6 +472,107 @@ async fn test_purge_deletes_a_milestone_only_when_the_triple_is_a_contributor() 
             .expect("role")
             .as_deref(),
         Some("main")
+    );
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_purge_scrub_converges_on_the_second_call() {
+    let dir = TestDir::new("w71-purge-scrub-converge");
+    let store = store(&dir).await;
+    insert_session(&store, PROJECT, SESSION, AGENT).await;
+    insert_milestone(
+        &store,
+        MilestoneSeed {
+            id: "ms-mixed",
+            project: PROJECT,
+            agent: AGENT,
+            contributors: vec![("row-a", SESSION, AGENT), ("row-b", "session-other", AGENT)],
+        },
+    )
+    .await;
+
+    let first = store.purge_session(&scope()).await.expect("first purge");
+    assert_eq!(first.milestones_scrubbed, 1);
+    let db = store.ready().await.expect("ready");
+    let scrubbed = query_one(
+        db.as_ref(),
+        "SELECT contributors FROM episodic_milestones WHERE id = ?",
+        vec![Value::Text("ms-mixed".to_string())],
+    )
+    .await
+    .expect("select")
+    .expect("row survives")
+    .text("contributors")
+    .expect("contributors text");
+
+    let second = store.purge_session(&scope()).await.expect("second purge");
+    assert!(second.is_empty(), "a second purge writes nothing");
+    assert_eq!(second.milestones_scrubbed, 0);
+    let again = query_one(
+        db.as_ref(),
+        "SELECT contributors FROM episodic_milestones WHERE id = ?",
+        vec![Value::Text("ms-mixed".to_string())],
+    )
+    .await
+    .expect("select")
+    .expect("row survives")
+    .text("contributors")
+    .expect("contributors text");
+    assert_eq!(again, scrubbed, "the contributors text is byte-identical");
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_purge_refuses_a_milestone_with_unreadable_contributors() {
+    let dir = TestDir::new("w71-purge-unreadable");
+    let store = store(&dir).await;
+    insert_session(&store, PROJECT, SESSION, AGENT).await;
+    store
+        .insert_raw_context(PROJECT, SESSION, AGENT, "raw bytes")
+        .await
+        .expect("raw");
+    insert_milestone(
+        &store,
+        MilestoneSeed {
+            id: "ms-corrupt",
+            project: PROJECT,
+            agent: AGENT,
+            // A valid contributor set on insert; the UPDATE below corrupts it.
+            contributors: vec![("row-b", "session-other", AGENT)],
+        },
+    )
+    .await;
+    let db = store.ready().await.expect("ready");
+    db.execute(
+        "UPDATE episodic_milestones SET contributors = ? WHERE id = ?",
+        vec![
+            Value::Text("not json".to_string()),
+            Value::Text("ms-corrupt".to_string()),
+        ],
+    )
+    .await
+    .expect("corrupt contributors");
+
+    let error = store
+        .purge_session(&scope())
+        .await
+        .expect_err("an undecodable contributors row refuses the purge");
+    assert!(
+        matches!(error, EpisodicError::Json { .. }),
+        "expected a JSON error, got {error:?}"
+    );
+    // Fail-closed: nothing of the triple was erased.
+    assert!(
+        store
+            .raw_context_for_session(PROJECT, SESSION, AGENT)
+            .await
+            .expect("raw")
+            .is_some(),
+        "the raw context survives a refused purge"
+    );
+    assert_eq!(
+        store.count_sessions(Some(PROJECT)).await.expect("count"),
+        1,
+        "the session row survives a refused purge"
     );
 }
 
