@@ -149,6 +149,14 @@ pub fn thaw_theme(theme: Theme) -> thaw::Theme {
     out
 }
 
+/// The theme toggle's glyph: the sun while light, the moon while dark.
+pub fn toggle_icon(theme: Theme) -> icondata_core::Icon {
+    match theme {
+        Theme::Light => icondata_mdi::MdiWeatherSunny,
+        Theme::Dark => icondata_mdi::MdiWeatherNight,
+    }
+}
+
 /// The layout scale: the only three measures with a stylesheet consumer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scale {

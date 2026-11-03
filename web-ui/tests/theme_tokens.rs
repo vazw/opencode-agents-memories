@@ -4,7 +4,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use wasm_bindgen_test::wasm_bindgen_test;
-use web_ui::theme::{Scale, Theme, palette, thaw_theme, token_css};
+use web_ui::theme::{Scale, Theme, palette, thaw_theme, toggle_icon, token_css};
 
 #[wasm_bindgen_test]
 fn test_palette_each_theme_is_its_own() {
@@ -275,4 +275,11 @@ fn test_new_palette_ramps_are_distinct_per_theme() {
         assert_ne!(p.accent_pressed, p.accent);
         assert_ne!(p.accent_soft, p.accent);
     }
+}
+
+#[wasm_bindgen_test]
+fn test_toggle_icon_follows_the_theme() {
+    let light = toggle_icon(Theme::Light) as *const _ as usize;
+    let dark = toggle_icon(Theme::Dark) as *const _ as usize;
+    assert_ne!(light, dark);
 }

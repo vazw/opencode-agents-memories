@@ -15,12 +15,14 @@ use thaw::{
     NavDrawerHeader, NavItem,
 };
 
-use crate::nav::{ScreenState, is_plain_left_click, nav_entries, selected_path, state_for};
+use crate::nav::{
+    ScreenState, is_plain_left_click, nav_entries, nav_icon, selected_path, state_for,
+};
 use crate::routes::{resolve, route as route_spec};
 use crate::screens::ScreenBody;
 use crate::theme::{
     LocalStorageThemeStore, Scale, Theme, apply_canvas, install_tokens, palette, read_preference,
-    store_preference, thaw_theme,
+    store_preference, thaw_theme, toggle_icon,
 };
 
 /// The application shell.
@@ -131,6 +133,7 @@ fn ShellView() -> impl IntoView {
                                         <NavItem
                                             value=Signal::derive(move || entry.path.to_string())
                                             href=Signal::derive(move || entry.path.to_string())
+                                            icon=nav_icon(entry.route)
                                         >
                                             {entry.label}
                                             {planned
@@ -148,7 +151,11 @@ fn ShellView() -> impl IntoView {
                     <h1 class="app-title">
                         {move || current_route.get().map(|id| route_spec(id).label)}
                     </h1>
-                    <Button appearance=ButtonAppearance::Subtle on_click=toggle>
+                    <Button
+                        appearance=ButtonAppearance::Subtle
+                        on_click=toggle
+                        icon=Signal::derive(move || toggle_icon(theme.get()))
+                    >
                         {move || match theme.get() {
                             Theme::Light => "Switch to dark",
                             Theme::Dark => "Switch to light",

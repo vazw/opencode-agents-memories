@@ -99,3 +99,20 @@ pub fn selected_path(pathname: &str) -> Option<&'static str> {
 pub fn is_plain_left_click(button: i16, ctrl: bool, meta: bool, shift: bool, alt: bool) -> bool {
     button == 0 && !(ctrl || meta || shift || alt)
 }
+
+/// The icon of a nav entry (an `icondata_ai` glyph; the visible label is always
+/// rendered beside it, so the icon is never the sole accessible name).
+pub fn nav_icon(route: RouteId) -> icondata_core::Icon {
+    match route {
+        RouteId::Home => icondata_ai::AiHomeOutlined,
+        RouteId::ProjectMemories => icondata_ai::AiDatabaseOutlined,
+        RouteId::Tags => icondata_ai::AiTagsOutlined,
+        RouteId::Profile => icondata_ai::AiUserOutlined,
+        RouteId::Settings => icondata_ai::AiSettingOutlined,
+        RouteId::ExportImport => icondata_ai::AiSwapOutlined,
+        RouteId::SkillLibrary => icondata_ai::AiBookOutlined,
+        RouteId::SessionHistory => icondata_ai::AiHistoryOutlined,
+        RouteId::Agents => icondata_ai::AiTeamOutlined,
+        RouteId::Stats => icondata_ai::AiBarChartOutlined,
+    }
+}
