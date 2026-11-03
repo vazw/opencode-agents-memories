@@ -1,4 +1,4 @@
-# 101 — `cargo audit` is red: three `zstd` vulnerability advisories and ten `zstd-safe` unsound ones
+# 116 — `cargo audit` is red: three `zstd` vulnerability advisories and ten `zstd-safe` unsound ones
 
 Status: ready-for-agent — the fix is a dependency bump plus a decision about `.cargo/audit.toml`;
 it needs a network run, which no wave in this repo has done yet.

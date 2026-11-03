@@ -1,4 +1,4 @@
-# 100 — `capture_inbox` holds 480 dead-lettered captures from 2026-10-31, and nothing can replay them
+# 115 — `capture_inbox` holds 480 dead-lettered captures from 2026-10-31, and nothing can replay them
 
 Status: wontfix — **owner decision 2026-11-03: drop.** The 480 rows and their 4.8 MB of payloads are
 accepted as lost; no replay, no requeue path built for them. The observation below stands as the record

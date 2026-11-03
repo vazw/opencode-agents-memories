@@ -1,4 +1,4 @@
-# 103 — the web UI draws 1 of 58 Thaw components: a hand-rolled design system sits beside the framework
+# 118 — the web UI draws 1 of 58 Thaw components: a hand-rolled design system sits beside the framework
 
 Status: ready-for-agent — **wave 1 (theme + shell) is blueprinted and awaiting the Plan Gate**
 (`.tmp/blueprints/` `…issue-103`-style file will be linked here on approval; the assessment that

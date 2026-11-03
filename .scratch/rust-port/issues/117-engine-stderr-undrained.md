@@ -1,5 +1,7 @@
-# 102 — the engine's structured stderr goes into a pipe the wrapper never drains
+# 117 — the engine's structured stderr goes into a pipe the wrapper never drains
 
+
+*(Renumbered from 102 on 2026-11-03: the rust-port range already occupied 100–114, so the four issues filed by the 2026-11-03 waves are 115–118. Blueprints written before the renumber cite the old path; the blueprint for this issue is `.tmp/blueprints/blueprint-20261103-0952-issue-102-engine-stderr-drain-r2.md`.)*
 Status: ready-for-agent — the fix is a few lines in the wrapper, but the destination of those lines is
 a decision (append to the engine log, or a separate file, or drop them deliberately).
 
