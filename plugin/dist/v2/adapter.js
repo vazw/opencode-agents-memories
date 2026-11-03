@@ -32,9 +32,41 @@ export async function registerV2Adapter(ctx, legacyHooks) {
   // steps of one turn. Plain strings only: this map is the one state that
   // touches both the message path and the event path.
   const contexts = new Map();
+  // Issue 99: per-session zero-based count of accepted prompt-hook invocations
+  // in this adapter lifetime — the `turnIndex` the wrapper's `shouldRefresh`
+  // receives (plugin/src/plugin.js). Cleared on cleanup.
+  const turns = new Map();
+  // Same-session prompts run one after another (a promise chain per session),
+  // so an older completion can never overwrite a newer prompt's cache.
+  // Different sessions never wait on each other.
+  const queues = new Map();
 
-  await ctx.session.hook("prompt", async (event) => {
-    // A fresh user turn: whatever the previous turn injected is stale.
+  function serialized(sessionID, work) {
+    const run = (queues.get(sessionID) ?? Promise.resolve()).then(work);
+    const tail = run.catch(() => {});
+    queues.set(sessionID, tail);
+    tail.then(() => {
+      if (queues.get(sessionID) === tail) queues.delete(sessionID);
+    });
+    return run;
+  }
+
+  // Absent hook (older wrapper) means refresh every prompt: the legacy behaviour.
+  const shouldRefresh = (arg) =>
+    typeof legacyHooks.shouldRefresh === "function" ? legacyHooks.shouldRefresh(arg) !== false : true;
+
+  await ctx.session.hook("prompt", (event) => serialized(event.sessionID, () => onPrompt(event)));
+
+  async function onPrompt(event) {
+    const turnIndex = turns.get(event.sessionID) ?? 0;
+    turns.set(event.sessionID, turnIndex + 1);
+    const hasCache = contexts.has(event.sessionID);
+    // `first` mode keeps a nonempty cache; the cache lives until a refresh,
+    // a compaction-location cleanup or adapter cleanup (staleness is the
+    // documented first-mode tradeoff).
+    if (!shouldRefresh({ turnIndex, hasCache })) return;
+    // A refreshing turn: whatever the previous turn injected is stale (a failed
+    // or empty refresh leaves no block, so the next prompt retries).
     contexts.delete(event.sessionID);
 
     const original = { type: "text", text: event.prompt.text };
@@ -49,7 +81,7 @@ export async function registerV2Adapter(ctx, legacyHooks) {
       .map((part) => part.text)
       .join("\n");
     if (injected) contexts.set(event.sessionID, injected);
-  });
+  }
 
   await ctx.session.hook("context", async (event) => {
     const injected = contexts.get(event.sessionID);
@@ -104,5 +136,7 @@ export async function registerV2Adapter(ctx, legacyHooks) {
     controller.abort();
     await watcher;
     contexts.clear();
+    turns.clear();
+    queues.clear();
   };
 }
