@@ -691,6 +691,12 @@ body {
  * `max-width: 72ch` bounds the line length; nothing truncates.
  * ------------------------------------------------------------------------- */
 
+.memories-tag-note {
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
 .memories-panel {
   padding: 1.25rem 1.5rem;
   background: var(--panel);

@@ -461,3 +461,61 @@ pub fn encode_component(value: &str) -> String {
     }
     encoded
 }
+
+/// Percent-decode a URL component. `%XX` becomes its byte; an invalid or
+/// truncated escape is kept literally; bytes that are not valid UTF-8 stay
+/// percent-encoded (uppercase) rather than becoming a replacement character.
+/// `+` is not treated as a space (`encode_component` never emits it).
+pub fn decode_component(value: &str) -> String {
+    fn hex(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
+    }
+    let bytes = value.as_bytes();
+    let mut raw: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let decoded = if bytes[i] == b'%' && i + 2 < bytes.len() {
+            match (hex(bytes[i + 1]), hex(bytes[i + 2])) {
+                (Some(hi), Some(lo)) => Some((hi << 4) | lo),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        match decoded {
+            Some(byte) => {
+                raw.push(byte);
+                i += 3;
+            }
+            None => {
+                raw.push(bytes[i]);
+                i += 1;
+            }
+        }
+    }
+    let mut out = String::with_capacity(raw.len());
+    let mut rest: &[u8] = &raw;
+    while !rest.is_empty() {
+        match std::str::from_utf8(rest) {
+            Ok(valid) => {
+                out.push_str(valid);
+                break;
+            }
+            Err(error) => {
+                let (good, bad) = rest.split_at(error.valid_up_to());
+                out.push_str(&String::from_utf8_lossy(good));
+                let skip = error.error_len().unwrap_or(bad.len());
+                for &byte in &bad[..skip] {
+                    out.push_str(&format!("%{byte:02X}"));
+                }
+                rest = &bad[skip..];
+            }
+        }
+    }
+    out
+}

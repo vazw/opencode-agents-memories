@@ -26,10 +26,10 @@ use web_ui::core_screens::{
     DailyStatsView, HealthStatus, IdentityControl, MemoriesView, MemoryPage, ProfileRosterItem,
     ProfileScreen, ProfileView, SettingsScreen, ShardStatsView, StatsView, TagsPage, TagsView,
     active_shard_count, daily_peak, delete_memory_spec, error_buckets, get_user_profile_spec,
-    get_user_profile_spec_for, health_outcome, health_spec, list_memories_spec, list_tags_spec,
-    list_user_profiles_spec, memories_view, pin_memory_spec, profile_identity_control,
-    profile_view, search_spec, settings_view, sorted_shards, stats_spec, tags_view,
-    unpin_memory_spec,
+    get_user_profile_spec_for, health_outcome, health_spec, initial_tags, list_memories_spec,
+    list_tags_spec, list_user_profiles_spec, memories_request, memories_view, parse_tag_input,
+    pin_memory_spec, profile_identity_control, profile_view, search_spec, settings_view,
+    sorted_shards, stats_spec, tags_view, unpin_memory_spec,
 };
 use web_ui::paths::{ENDPOINTS, EndpointId, encode_component};
 
@@ -98,8 +98,8 @@ fn test_list_memories_spec_matches_the_pinned_template() {
         vec![
             ("page".to_string(), "2".to_string()),
             ("pageSize".to_string(), "25".to_string()),
-            ("tag".to_string(), "alpha".to_string()),
-            ("tag".to_string(), "beta gamma".to_string()),
+            ("tags".to_string(), "alpha".to_string()),
+            ("tags".to_string(), "beta gamma".to_string()),
             ("includePrompts".to_string(), "false".to_string()),
         ],
         "page/pageSize, one tag per entry, and includePrompts only when false"
@@ -121,7 +121,7 @@ fn test_list_memories_spec_matches_the_pinned_template() {
 
 #[wasm_bindgen_test]
 fn test_search_spec_builds_the_query() {
-    let spec = search_spec("rust async", 1, 10, &["alpha"]);
+    let spec = search_spec("rust async", 1, 10);
     assert_eq!(spec.method, method(EndpointId::Search));
     assert_eq!(spec.path, template(EndpointId::Search));
     assert_eq!(
@@ -130,12 +130,11 @@ fn test_search_spec_builds_the_query() {
             ("q".to_string(), "rust async".to_string()),
             ("page".to_string(), "1".to_string()),
             ("pageSize".to_string(), "10".to_string()),
-            ("tag".to_string(), "alpha".to_string()),
         ]
     );
     assert_eq!(
         build_url(&spec).expect("the spec builds a root-relative URL"),
-        "/api/search?q=rust%20async&page=1&pageSize=10&tag=alpha",
+        "/api/search?q=rust%20async&page=1&pageSize=10",
         "the shared seam percent-encodes every value"
     );
 }
@@ -1312,4 +1311,69 @@ fn test_cleanup_unavailable_view_is_distinct_from_the_failure_view() {
         }
     }
     assert_ne!(CLEANUP_UNAVAILABLE_CLASS, CLEANUP_ERROR_CLASS);
+}
+
+fn strings(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| value.to_string()).collect()
+}
+
+#[wasm_bindgen_test]
+fn test_initial_tags_percent_decodes() {
+    assert_eq!(
+        initial_tags("?tags=architecture%20docs"),
+        strings(&["architecture docs"])
+    );
+    assert_eq!(
+        initial_tags("?tags=rust&tags=ops%2Ddrill"),
+        strings(&["rust", "ops-drill"])
+    );
+    assert_eq!(initial_tags("?tags=a&tags=a"), strings(&["a"]));
+    assert_eq!(
+        initial_tags("?tags=&other=1&tags=%20"),
+        Vec::<String>::new()
+    );
+    assert_eq!(initial_tags(""), Vec::<String>::new());
+}
+
+#[wasm_bindgen_test]
+fn test_memories_request_picks_one_mode() {
+    let spec = memories_request("", &strings(&["rust", "architecture"]), 1, 20);
+    assert_eq!(
+        build_url(&spec).expect("builds"),
+        "/api/memories?page=1&pageSize=20&tags=rust&tags=architecture&includePrompts=false"
+    );
+    let spec = memories_request("deploy", &strings(&["rust"]), 1, 20);
+    assert_eq!(
+        build_url(&spec).expect("builds"),
+        "/api/memories?page=1&pageSize=20&tags=rust&includePrompts=false"
+    );
+    let spec = memories_request(" deploy ", &[], 2, 20);
+    assert_eq!(
+        build_url(&spec).expect("builds"),
+        "/api/search?q=deploy&page=2&pageSize=20"
+    );
+    let spec = memories_request("  ", &[], 1, 20);
+    assert_eq!(
+        build_url(&spec).expect("builds"),
+        "/api/memories?page=1&pageSize=20&includePrompts=false"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_comma_input_reaches_the_tags_request() {
+    let spec = memories_request("", &parse_tag_input("rust, architecture"), 1, 20);
+    assert_eq!(
+        build_url(&spec).expect("builds"),
+        "/api/memories?page=1&pageSize=20&tags=rust&tags=architecture&includePrompts=false"
+    );
+    assert_eq!(parse_tag_input("a,a, ,b"), strings(&["a", "b"]));
+}
+
+#[wasm_bindgen_test]
+fn test_request_fixture_matches_ui() {
+    let spec = memories_request("", &strings(&["probe"]), 1, 20);
+    assert_eq!(
+        build_url(&spec).expect("builds"),
+        include_str!("../../crates/mem-web/tests/fixtures/a1_tags_request.txt").trim()
+    );
 }

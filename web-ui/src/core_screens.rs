@@ -159,10 +159,11 @@ pub fn memories_view(page: &MemoryPage) -> MemoriesView {
     }
 }
 
-/// `GET /api/memories?page=…&pageSize=…[&tag=…][&includePrompts=false]`.
+/// `GET /api/memories?page=…&pageSize=…[&tags=…][&includePrompts=false]`.
 ///
-/// One `tag` pair per filter entry; `includePrompts` is sent only when false
-/// (the server's default is true, so the redundant `true` is omitted).
+/// One `tags` pair per entry (the memory-tag filter; `tag=` is the server's
+/// container-scope parameter and is never sent from here). `includePrompts` is
+/// sent only when false (the server's default is true).
 pub fn list_memories_spec(
     page: usize,
     page_size: usize,
@@ -173,7 +174,7 @@ pub fn list_memories_spec(
         .with_query("page", page.to_string())
         .with_query("pageSize", page_size.to_string());
     for tag in tags {
-        spec = spec.with_query("tag", (*tag).to_string());
+        spec = spec.with_query("tags", (*tag).to_string());
     }
     if !include_prompts {
         spec = spec.with_query("includePrompts", "false");
@@ -181,16 +182,61 @@ pub fn list_memories_spec(
     spec
 }
 
-/// `GET /api/search?q=…&page=…&pageSize=…[&tag=…]`.
-pub fn search_spec(q: &str, page: usize, page_size: usize, tags: &[&str]) -> RequestSpec {
-    let mut spec = RequestSpec::get(endpoint(EndpointId::Search).template)
+/// `GET /api/search?q=…&page=…&pageSize=…` (the search route takes no tag).
+pub fn search_spec(q: &str, page: usize, page_size: usize) -> RequestSpec {
+    RequestSpec::get(endpoint(EndpointId::Search).template)
         .with_query("q", q)
         .with_query("page", page.to_string())
-        .with_query("pageSize", page_size.to_string());
-    for tag in tags {
-        spec = spec.with_query("tag", (*tag).to_string());
+        .with_query("pageSize", page_size.to_string())
+}
+
+/// The one mode rule: tags win; else a non-blank query searches; else list.
+pub fn memories_request(
+    query: &str,
+    tags: &[String],
+    page: usize,
+    page_size: usize,
+) -> RequestSpec {
+    if !tags.is_empty() {
+        let refs: Vec<&str> = tags.iter().map(String::as_str).collect();
+        list_memories_spec(page, page_size, &refs, false)
+    } else if !query.trim().is_empty() {
+        search_spec(query.trim(), page, page_size)
+    } else {
+        list_memories_spec(page, page_size, &[], false)
     }
-    spec
+}
+
+/// The comma input's parser: split on `,`, trim, drop empties, de-duplicate
+/// (first wins).
+pub fn parse_tag_input(raw: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for part in raw.split(',') {
+        let tag = part.trim();
+        if !tag.is_empty() && !out.iter().any(|seen| seen == tag) {
+            out.push(tag.to_string());
+        }
+    }
+    out
+}
+
+/// The `tags=` values of a location search string, percent-decoded, trimmed,
+/// empties dropped, de-duplicated (first wins).
+pub fn initial_tags(search: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for pair in search.trim_start_matches('?').split('&') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        if key != "tags" {
+            continue;
+        }
+        let tag = crate::paths::decode_component(value).trim().to_string();
+        if !tag.is_empty() && !out.contains(&tag) {
+            out.push(tag);
+        }
+    }
+    out
 }
 
 /// `POST /api/memories/{id}/pin` (the id is one percent-encoded segment).
@@ -379,7 +425,12 @@ pub fn MemoriesPanel() -> impl IntoView {
     let page = RwSignal::new(1_usize);
     let page_size = RwSignal::new(20_usize);
     let query = RwSignal::new(String::new());
-    let tag_filter = RwSignal::new(String::new());
+    let tag_filter = RwSignal::new(
+        web_sys::window()
+            .and_then(|window| window.location().search().ok())
+            .map(|search| initial_tags(&search).join(", "))
+            .unwrap_or_default(),
+    );
     let state = RwSignal::new(MemoriesView::Loading);
     let action_error = RwSignal::new(None::<String>);
     let confirm = RwSignal::new(ConfirmState::default());
@@ -394,19 +445,8 @@ pub fn MemoriesPanel() -> impl IntoView {
             let current = page.get_untracked();
             let size = page_size.get_untracked();
             let text = query.get_untracked();
-            let tags: Vec<String> = tag_filter
-                .get_untracked()
-                .split(',')
-                .map(|tag| tag.trim().to_string())
-                .filter(|tag| !tag.is_empty())
-                .collect();
-            let tag_refs: Vec<&str> = tags.iter().map(String::as_str).collect();
-            // A query routes to `/api/search`; an empty query is the listing.
-            let spec = if text.trim().is_empty() {
-                list_memories_spec(current, size, &tag_refs, false)
-            } else {
-                search_spec(text.trim(), current, size, &tag_refs)
-            };
+            let tags = parse_tag_input(&tag_filter.get_untracked());
+            let spec = memories_request(&text, &tags, current, size);
             state.set(MemoriesView::Loading);
             leptos::task::spawn_local(async move {
                 match api_request::request::<MemoryPage>(&spec, &auth).await {
@@ -488,6 +528,18 @@ pub fn MemoriesPanel() -> impl IntoView {
                     "Reload"
                 </button>
             </div>
+            {move || {
+                let has_text = !query.get().trim().is_empty();
+                let has_tags = !parse_tag_input(&tag_filter.get()).is_empty();
+                (has_text && has_tags)
+                    .then(|| {
+                        view! {
+                            <p class="memories-tag-note" data-testid="memories-tag-note">
+                                "Tag filter active: the search text is ignored."
+                            </p>
+                        }
+                    })
+            }}
             {move || {
                 action_error
                     .get()
