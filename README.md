@@ -139,12 +139,12 @@ test-local copy of it.
 
 These resolve (and mostly validate) but no code reads them, so their values change no behaviour.
 They are kept for upstream-config compatibility; none of them is broken. Measured at commit
-`<stamp>`: for each key, `grep -rn '\b<resolved field>\b' crates src --include=*.rs`, filtered of
+`25dec37`: for each key, `grep -rn '\b<resolved field>\b' crates src --include=*.rs`, filtered of
 `*/tests/`, of `crates/mem-core/src/config/` (where a key is defined and resolved) and of comment
 lines (`:[0-9]+:[[:space:]]*//` — a doc comment naming a field is not a reader), returns nothing.
 The filter is textual: an access through an intermediate binding (`let cm = &config.chatMessage;
 cm.maxMemories`) would not be matched. Re-run it before trusting a row. First taken at `1d423e8`;
-re-stamped at `<stamp>` because both pipelines print `0` on every row at both commits — at
+re-stamped at `25dec37` because both pipelines print `0` on every row at both commits — at
 `1d423e8` that is 22 loop rows plus the nested row (**23**), and after this wave it is 21 loop rows
 plus the nested row (**22**); the difference is `chatMessage.captureChildSessions`, which is live
 now and therefore not in the table above.
