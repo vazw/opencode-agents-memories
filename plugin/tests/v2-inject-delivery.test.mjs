@@ -251,3 +251,55 @@ test("test_wrapper_telemetry_captures_zero_bytes_and_excludes_content", async (t
   assert.equal(nonempty.raw.includes("QUERY_SENTINEL_SECRET"), false);
   assert.equal(nonempty.raw.includes("BLOCK_SENTINEL_"), false);
 });
+
+// AC-11: INTEGRATION CONTROL, not a RED claim. Real wrapper (staged dist) + real
+// adapter + stub engine advertising inject_on "first": it records wiring, not a mutant kill.
+test("test_hello_first_policy_survives_midturn_compaction", { timeout: 30000 }, async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-ac11-"));
+  const pkgDir = stagePackageTree(tmp);
+  const requestLogPath = path.join(tmp, "requests.ndjson");
+  const manifestPath = path.join(tmp, "manifest.json");
+  stageStubEngine(pkgDir, { requestLogPath, manifestPath, injectMode: "success", helloConfig: { inject_on: "first" } });
+  const bin = path.join(pkgDir, "engine", `${process.platform}-${process.arch}`, "opencode-agents-memory");
+  fs.writeFileSync(bin, fs.readFileSync(bin, "utf8").replace(
+    "block: null, memory_count: 0, tokens: 0, truncated: false, handling_ms: 0",
+    "block: 'BLOCK-' + params.session_id, memory_count: 1, tokens: 0, truncated: false, handling_ms: 1"));
+  t.after(() => assertReaped(manifestPath));
+  const driver = path.join(tmp, "driver.mjs");
+  const resultPath = path.join(tmp, "result.json");
+  fs.writeFileSync(driver, `import fs from "node:fs";
+import { pathToFileURL } from "node:url";
+process.env.OPENCODE_MEM_STORAGE_ROOT = process.env.DRIVER_STORAGE_ROOT;
+const { server } = await import(pathToFileURL(${JSON.stringify(path.join(pkgDir, "dist/plugin.js"))}));
+const { registerV2Adapter } = await import(pathToFileURL(${JSON.stringify(path.join(pkgDir, "dist/v2/adapter.js"))}));
+const { hooks: legacy } = await server({ client: {}, directory: "/work/project" });
+const v2 = new Map(); let push; const queue = []; let wake;
+const ctx = {
+  location: { directory: "/work/project" },
+  session: { hook: async (n, cb) => v2.set(n, cb), get: async () => ({ location: { directory: "/work/project" } }) },
+  event: { async *subscribe({ signal }) {
+    signal.addEventListener("abort", () => wake?.(), { once: true });
+    while (!signal.aborted) { if (queue.length) yield queue.shift(); else await new Promise(r => { wake = r; }); }
+  } },
+};
+const cleanup = await registerV2Adapter(ctx, legacy);
+const context = async (sessionID) => { const e = { sessionID, system: [] }; await v2.get("context")(e); return e.system.map(p => p.text); };
+const prompt = (sessionID, messageID) => v2.get("prompt")({ sessionID, messageID, prompt: { text: "q" } });
+const out = {};
+await prompt("ses-1", "m1"); out.before = await context("ses-1");
+await prompt("ses-1", "m2"); out.second = await context("ses-1");
+queue.push({ type: "session.compaction.ended", location: { directory: "/work/project" }, properties: { sessionID: "ses-1" } }); wake?.();
+await new Promise(r => setTimeout(r, 300));
+out.after = await context("ses-1");
+await prompt("ses-2", "m1"); out.other = await context("ses-2"); out.firstStill = await context("ses-1");
+await cleanup();
+fs.writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify(out));
+process.exit(0);`);
+  const run = await runDriver(driver, [], { ...process.env, DRIVER_STORAGE_ROOT: path.join(tmp, "storage") });
+  assert.equal(run.code, 0, run.stderr);
+  const out = JSON.parse(fs.readFileSync(resultPath, "utf8"));
+  assert.deepEqual(out, { before: ["BLOCK-ses-1"], second: ["BLOCK-ses-1"], after: ["BLOCK-ses-1"], other: ["BLOCK-ses-2"], firstStill: ["BLOCK-ses-1"] });
+  const injects = fs.readFileSync(requestLogPath, "utf8").split("\n").filter(Boolean)
+    .map(l => JSON.parse(l).got).filter(m => m && m.method === "inject" && m.params.chat_injection === true);
+  assert.deepEqual(injects.map(m => m.params.session_id), ["ses-1", "ses-2"], "one inject per session; first policy and compaction cause no refresh");
+});
