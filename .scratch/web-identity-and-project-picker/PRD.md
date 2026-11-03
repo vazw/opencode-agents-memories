@@ -103,6 +103,6 @@ mechanism is test-proven and both deployed artifacts carry it; what is not yet r
 `◈ memory context` part in a session with a `parentID`.
 
 **Residuals opened by this wave** (tracked under `.scratch/rust-port/issues/`, because none of them is
-specific to the web surface): `100` the live store's 480 dead-lettered captures and the absent requeue
+specific to the web surface): `115` the live store's 480 dead-lettered captures and the absent requeue
 path, `116` the red `cargo audit` (`zstd`/`zstd-safe` advisories), `117` the engine's structured
 stderr going into a pipe the wrapper never drains.
