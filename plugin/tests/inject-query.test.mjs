@@ -45,7 +45,7 @@ async function runCase(t, fixture) {
   const pkgDir = stagePackageTree(tmp);
   const requestLogPath = path.join(tmp, "stub-requests.ndjson");
   const manifestPath = path.join(tmp, "stub-manifest.json");
-  stageStubEngine(pkgDir, { requestLogPath, manifestPath, injectMode: "success" });
+  stageStubEngine(pkgDir, { requestLogPath, manifestPath, injectMode: "success", helloConfig: fixture.helloConfig });
   t.after(() => assertReaped(manifestPath));
 
   const donePath = path.join(tmp, "driver-done.json");
@@ -137,5 +137,25 @@ test("test_no_authored_text_sends_no_query", { timeout: 30000 }, async (t) => {
       undefined,
       "no authored text means no include, never `{query: \"\"}`"
     );
+  }
+});
+
+
+test("test_chat_inject_sends_exclude_session_when_policy_active", async (t) => {
+  const [wire] = await runCase(t, { directory: DIRECTORY, helloConfig: { exclude_current_session: true },
+    outputs: [{ message: { parts: [{ type: "text", text: "question" }] } }] });
+  assert.equal(wire.params.exclude_session, true);
+  assert.equal(wire.params.chat_injection, true);
+  assert.equal(wire.params.session_id, "sess-OTHER");
+  assert.equal(wire.params.include.exclude_session, undefined);
+});
+
+
+test("test_chat_inject_omits_exclude_session_when_policy_inactive", async (t) => {
+  for (const helloConfig of [{ exclude_current_session: false }, {}]) {
+    const [wire] = await runCase(t, { directory: DIRECTORY, helloConfig,
+      outputs: [{ message: { parts: [] } }] });
+    assert.equal(Object.hasOwn(wire.params, "exclude_session"), false);
+    assert.equal(wire.params.chat_injection, true);
   }
 });

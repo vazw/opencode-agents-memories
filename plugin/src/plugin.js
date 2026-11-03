@@ -593,6 +593,7 @@ function createBridgeState(root) {
     // assignment in the handshake runs first on every child, so mutating this
     // initializer is measurably unobservable; do not cite it as coverage.
     engineCaptureChildSessions: false,
+    engineExcludeCurrentSession: false,
     // Issue 63: hello.result.config.inject_on ("first" | "always"), or null
     // when this child advertised nothing usable. null means "always" (the
     // legacy-compatible refresh), so a missing/invalid value never freezes a cache.
@@ -825,6 +826,7 @@ function teardownChild(state, reason) {
   // invariant "no child's advertisement outlives it" needs no argument about
   // call order.
   state.engineCaptureChildSessions = false;
+  state.engineExcludeCurrentSession = false;
   state.engineInjectOn = null;
   state.engineProtocolLine = null;
   // Issue 117: a partial line from a dead child is not a line. The QUEUE is
@@ -988,6 +990,7 @@ async function startBridge(state) {
     // Issue 63: assigned totally like the flag above — a replacement child that
     // advertises nothing (or junk) must not inherit its predecessor's value.
     // It is read from `config`, never `capabilities`.
+    state.engineExcludeCurrentSession = advertisedConfig?.exclude_current_session === true;
     state.engineInjectOn =
       advertisedConfig !== null &&
       (advertisedConfig.inject_on === "first" || advertisedConfig.inject_on === "always")
@@ -1323,7 +1326,10 @@ export const server = async function server(input) {
         // the transcript); an inject error fails open (no block, no error).
         let block = null;
         try {
-          const result = await sendRequest("inject", injectParams(queryFromParts(output)));
+          const sessionID = hookInput?.sessionID;
+          const state = bridge();
+          await ensureStartedIn(state);
+          const result = await sendRequestIn(state, "inject", injectParams(queryFromParts(output), sessionID, state));
           if (result && typeof result.block === "string" && result.block.length > 0) {
             block = result.block;
           }
@@ -1419,11 +1425,11 @@ export const server = async function server(input) {
 
   // ── local closures (kept per-server for the frozen input) ──
 
-  // `injectParams()` carries `project_id` and stamps `currentSessionId()`;
+  // Compaction carries project scope but never chat policy fields;
   // `session_id` is overridden AFTER the spread with the hook's own id.
   function compactionParams(mode, sessionID) {
     return {
-      ...injectParams(),
+      ...(hostProjectId !== null ? { project_id: hostProjectId } : {}),
       session_id: sessionID,
       include: { compaction: mode },
     };
@@ -1516,8 +1522,12 @@ export const server = async function server(input) {
     }
   }
 
-  function injectParams(query) {
-    const params = { session_id: currentSessionId() };
+  function injectParams(query, sessionID, state) {
+    const params = {
+      session_id: typeof sessionID === "string" && sessionID.length > 0 ? sessionID : "oc-bridge-" + process.pid,
+      chat_injection: true,
+    };
+    if (state.engineExcludeCurrentSession === true) params.exclude_session = true;
     if (hostProjectId !== null) params.project_id = hostProjectId;
     if (typeof query === "string" && query.length > 0) {
       params.include = { query };
