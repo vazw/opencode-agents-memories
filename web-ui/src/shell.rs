@@ -19,8 +19,8 @@ use crate::nav::{ScreenState, is_plain_left_click, nav_entries, selected_path, s
 use crate::routes::{resolve, route as route_spec};
 use crate::screens::ScreenBody;
 use crate::theme::{
-    LocalStorageThemeStore, Theme, apply_canvas, palette, read_preference, store_preference,
-    thaw_theme,
+    LocalStorageThemeStore, Scale, Theme, apply_canvas, install_tokens, palette, read_preference,
+    store_preference, thaw_theme,
 };
 
 /// The application shell.
@@ -30,6 +30,7 @@ pub fn Shell() -> impl IntoView {
 
     let theme = RwSignal::new(read_preference(&LocalStorageThemeStore));
     provide_context(theme);
+    install_tokens(&Scale::default());
 
     // thaw's theme is a separate signal, kept in sync with the preference (D6).
     let thaw_signal: RwSignal<thaw::Theme> = RwSignal::new(thaw_theme(theme.get_untracked()));

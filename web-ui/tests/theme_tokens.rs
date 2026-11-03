@@ -4,7 +4,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use wasm_bindgen_test::wasm_bindgen_test;
-use web_ui::theme::{Theme, palette, thaw_theme};
+use web_ui::theme::{Scale, Theme, palette, thaw_theme, token_css};
 
 #[wasm_bindgen_test]
 fn test_palette_each_theme_is_its_own() {
@@ -95,12 +95,32 @@ fn mapped(theme: Theme) -> Vec<(&'static str, String, &'static str)> {
         (
             "color_neutral_background_4_hover",
             c.color_neutral_background_4_hover,
-            p.canvas,
+            p.surface_hover,
         ),
         (
             "color_neutral_background_4_pressed",
             c.color_neutral_background_4_pressed,
-            p.canvas,
+            p.surface_active,
+        ),
+        (
+            "color_neutral_background_1_hover",
+            c.color_neutral_background_1_hover,
+            p.surface_hover,
+        ),
+        (
+            "color_neutral_background_1_pressed",
+            c.color_neutral_background_1_pressed,
+            p.surface_active,
+        ),
+        (
+            "color_compound_brand_stroke",
+            c.color_compound_brand_stroke,
+            p.accent,
+        ),
+        (
+            "color_compound_brand_stroke_pressed",
+            c.color_compound_brand_stroke_pressed,
+            p.accent_pressed,
         ),
         ("color_neutral_stroke_1", c.color_neutral_stroke_1, p.border),
         (
@@ -192,7 +212,7 @@ fn test_thaw_theme_colour_tokens_come_from_the_palette() {
     // pass separates mapped from unmapped.
     for theme in [Theme::Light, Theme::Dark] {
         let rows = mapped(theme);
-        assert_eq!(rows.len(), 25);
+        assert_eq!(rows.len(), 29);
         for (field, got, want) in rows {
             assert_eq!(got, want, "{field} under {theme:?}");
         }
@@ -227,4 +247,32 @@ fn test_thaw_theme_names_its_scheme() {
     let light = thaw_theme(Theme::Light);
     assert_eq!(light.name, "light");
     assert_eq!(light.color.color_scheme, "light");
+}
+
+#[wasm_bindgen_test]
+fn test_token_css_emits_each_app_var_once_and_no_colour() {
+    let css = token_css(&Scale::default());
+    for name in ["--app-measure", "--app-sider-w", "--app-header-h"] {
+        assert_eq!(css.matches(name).count(), 1, "{name} in {css}");
+    }
+    assert_eq!(css.matches("--app-").count(), 3);
+    assert!(!css.contains('#'), "tokens carry no colour: {css}");
+    assert!(css.contains("--app-measure: 72ch"));
+    assert!(css.contains("--app-sider-w: 260px"));
+    assert!(css.contains("--app-header-h: 56px"));
+}
+
+#[wasm_bindgen_test]
+fn test_new_palette_ramps_are_distinct_per_theme() {
+    for theme in [Theme::Light, Theme::Dark] {
+        let p = palette(theme);
+        assert_ne!(
+            p.surface_hover, p.canvas,
+            "hover must leave the canvas colour"
+        );
+        assert_ne!(p.surface_hover, p.surface_active);
+        assert_ne!(p.accent_hover, p.accent);
+        assert_ne!(p.accent_pressed, p.accent);
+        assert_ne!(p.accent_soft, p.accent);
+    }
 }

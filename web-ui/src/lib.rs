@@ -10,6 +10,7 @@ pub mod api_request;
 pub mod confirm;
 pub mod core_screens;
 pub mod export_import;
+pub mod layout;
 pub mod nav;
 pub mod paths;
 pub mod routes;

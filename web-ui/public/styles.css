@@ -32,6 +32,8 @@ body {
   --warn-bg: var(--colorPaletteYellowBackground1);
   --warn-border: var(--colorPaletteYellowBorder1);
   --warn-text: var(--colorPaletteYellowForeground1);
+  --surface-hover: var(--colorNeutralBackground1Hover);
+  --surface-active: var(--colorNeutralBackground1Pressed);
 
   min-height: 100vh;
   background: var(--bg);
@@ -39,6 +41,10 @@ body {
 }
 
 .app-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-height: var(--app-header-h, 56px);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -64,7 +70,7 @@ body {
 }
 
 .app-sider {
-  width: 260px;
+  width: var(--app-sider-w, 260px);
   background: var(--panel);
   border-right: 1px solid var(--border);
 }
@@ -103,6 +109,7 @@ body {
 
 .app-main {
   flex: 1;
+  min-width: 0;
   padding: 1.5rem;
 }
 
@@ -606,7 +613,6 @@ body {
  * ------------------------------------------------------------------------- */
 
 .tags-panel {
-  max-width: 64rem;
   padding: 1.25rem 1.5rem;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -686,7 +692,6 @@ body {
  * ------------------------------------------------------------------------- */
 
 .memories-panel {
-  max-width: 64rem;
   padding: 1.25rem 1.5rem;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -790,7 +795,7 @@ body {
 .memory-content {
   grid-row: 2;
   grid-column: 1 / -1;
-  max-width: 72ch;
+  max-width: var(--app-measure, 72ch);
   overflow-wrap: anywhere;
 }
 
@@ -1236,7 +1241,6 @@ body {
  * ------------------------------------------------------------------------- */
 
 .session-history {
-  max-width: 64rem;
   padding: 1.25rem 1.5rem;
   background: var(--panel);
   border: 1px solid var(--border);
