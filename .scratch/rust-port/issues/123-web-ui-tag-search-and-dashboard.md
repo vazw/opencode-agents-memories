@@ -24,6 +24,20 @@ argued the 72ch measure must not grow:
    of cards, never on longer lines. Any table must render at 1024/1280/1600/1920 with **no horizontal
    overflow**; where a table genuinely cannot fit, a wrapper scrolls and the page still does not.
 3. **`/sessions` project picker is in this wave** (design step 6, acceptance criterion 4) — not deferred.
+4. **Nav stays the text sider, and gains icons.** Verbatim: *"text sider + icon would be better."* The design
+   draft's 64 px icon rail at ≥ 1280 is **rejected**; the 260 px text sider stays at every width ≥ 901, with an
+   icon **and** its visible text label on each of the ten items (an icon alone is never the accessible name).
+   Accepted consequence, arithmetic from the two measured inputs (sider 260, `main` padding 24 each side):
+
+   | viewport | body | cards per row | empty body to the right |
+   |---|---|---|---|
+   | 1024 | 716 | 1 | 188.5 |
+   | 1280 | 972 | **1** | **444.5** |
+   | 1600 | 1292 | 2 | 213 |
+   | 1920 | 1612 | 2 | 533 |
+
+   Two 527.5 px cards plus a 24 px gap need 1079 px, so 1280 stays a single column — the rail was the only way
+   to get two there, and it is now out. Width therefore buys columns only at 1600 and above.
 
 Still open, and the blueprint must propose rather than assume: the `/tags` free-form group and its 100-row
 cap; keep-vs-delete of the user-scope path; Fork 1's sider rule; sub-1024 behaviour (CSS-only today); and
