@@ -5,6 +5,12 @@ bundle `web-ui-321d4859fd9a772f`, engine `0ba4e0f1`). **Part A–E are measured 
 Part F–G are a design pass** that needs an `architect` A/B draft before any blueprint, because two of its
 items change the API surface. Nothing here is `ready-for-agent` until that split is decided.
 
+**Owner ruling 2026-11-03: A1.** The fix is a free-text `tags=` filter, server-side, matching the
+memory `tags` column; `tag=` keeps its scope meaning. A2 (container-tag picker) is rejected — it filters
+projects, not tags, and leaves the clickable chips decorative. The wave is in design; the other two open
+questions (does `/tags` gain a free-form tag group; is user scope dead on this install) are still open
+and the architect's draft proposes an answer for each.
+
 Owner's notes, verbatim, are the source of this file: *"the web still need more care on /project-memories
 page … Search memories with tag return server error 400: Invalid container tag … restyle rendered memories
 list to card and can click on the tag to search this selected tag … on /tags page show only project and
