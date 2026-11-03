@@ -310,6 +310,20 @@ fn test_agents_empty_copy_names_the_producer() {
     );
     assert_ne!(AGENTS_EMPTY_MESSAGE, old_copy);
     assert_ne!(AGENTS_EMPTY_DETAIL, old_copy);
+
+    // Sharper than `assert_ne!`: the shipped copy must still name BOTH the
+    // mechanism and the window's default, so an edit that drops either half
+    // fails instead of passing an inequality against a string nobody ships.
+    // The numeral is the one the engine's config defaults to
+    // (`episodic_consolidation_age_days: 30.0`), not a marketing round number.
+    assert!(
+        AGENTS_EMPTY_DETAIL.contains("hourly consolidation"),
+        "the empty copy names the producer: {AGENTS_EMPTY_DETAIL}"
+    );
+    assert!(
+        AGENTS_EMPTY_DETAIL.contains("30 days"),
+        "the empty copy names the configured window: {AGENTS_EMPTY_DETAIL}"
+    );
 }
 
 #[wasm_bindgen_test]

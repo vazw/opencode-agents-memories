@@ -293,11 +293,14 @@ pub const AGENTS_UNAVAILABLE_MESSAGE: &str = "Agent attribution is not available
 /// agents and no milestones yet).
 pub const AGENTS_EMPTY_MESSAGE: &str = "No milestones recorded for this project yet.";
 
-/// Why that can be true of a busy project: the mechanism, with no number and no
-/// promise.
+/// Why that can be true of a busy project: the mechanism and the window's
+/// default (`episodic_consolidation_age_days: 30.0`), with no promise about
+/// *this* project — an old enough session can still produce no milestone if its
+/// summariser failed or a promotion gate held it back, so the copy states only
+/// what holds unconditionally.
 pub const AGENTS_EMPTY_DETAIL: &str = "Milestones are written by the engine's \
 hourly consolidation pass, which only covers sessions older than the configured \
-age window.";
+age window (30 days by default).";
 
 /// The `data-testid` of the empty state's explanatory line.
 pub const AGENTS_EMPTY_DETAIL_TESTID: &str = "agents-empty-detail";
