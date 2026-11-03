@@ -227,20 +227,33 @@ async fn rollback_archived(
     Ok(())
 }
 
-/// Upstream `rollbackSwap` — `Ok(true)` when any per-item failure was
-/// logged (`rollbackFailed`), `Ok(false)` for a clean rollback.
+/// What a rollback did: whether any per-item step failed (`rollbackFailed`
+/// upstream) and, for the recovery path, the FIRST such error so a typed
+/// refusal (ADR-0022 R-22-2's `ActiveShardConflict`) reaches the caller
+/// instead of being flattened into "rollback could not restore every shard".
+struct RollbackOutcome {
+    failed: bool,
+    first_error: Option<StoreError>,
+}
+
+/// Upstream `rollbackSwap` — `failed` when any per-item failure was logged,
+/// carrying the first error for the journal/recovery decision.
 async fn rollback_swap(
     connections: &ConnectionManager,
     registry: &dyn ShardRegistry,
     state: &PathMigrateSwapState,
     state_path: &Path,
-) -> Result<bool, StoreError> {
+) -> Result<RollbackOutcome, StoreError> {
     let mut rollback_failed = false;
+    let mut first_error: Option<StoreError> = None;
 
     for mv in state.moves.iter().rev() {
         if let Err(error) = rollback_move(connections, registry, &state.old_hash, mv).await {
             tracing::warn!(error = %error.message(), "Path migration source rollback failed");
             rollback_failed = true;
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
         }
     }
 
@@ -250,6 +263,9 @@ async fn rollback_swap(
         {
             tracing::warn!(error = %error.message(), "Path migration target rollback failed");
             rollback_failed = true;
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
         }
     }
 
@@ -283,7 +299,10 @@ async fn rollback_swap(
         })?;
         std::fs::write(state_path, body).map_err(StoreError::from)?;
     }
-    Ok(rollback_failed)
+    Ok(RollbackOutcome {
+        failed: rollback_failed,
+        first_error,
+    })
 }
 
 /// Upstream `recoverInterruptedSwap`: journal missing -> Ok; parse +
@@ -325,7 +344,12 @@ pub async fn recover_interrupted_swap(
                 Ok(())
             }
         }
-        Err(error) => Err(shard_recover_error(&state_path, &error.message())),
+        Err(error) => match error {
+            // ADR-0022 R-22-2: the typed refusal names itself — the caller
+            // needs the conflicting indices, not a swap-file sentence.
+            typed @ StoreError::ActiveShardConflict { .. } => Err(typed),
+            other => Err(shard_recover_error(&state_path, &other.message())),
+        },
     }
 }
 
@@ -367,7 +391,10 @@ async fn rollback_from_journal(
             assert_recovery_path_inside_storage(storage_path, archive)?;
         }
     }
-    rollback_swap(connections, registry, &state, state_path).await?;
+    let outcome = rollback_swap(connections, registry, &state, state_path).await?;
+    if let Some(error) = outcome.first_error {
+        return Err(error);
+    }
     Ok(())
 }
 

@@ -797,6 +797,179 @@ async fn test_recovers_interrupted_swap_during_storage_ready_gate() {
 }
 
 // ---------------------------------------------------------------------------
+// 8b/12 — issue 77 / ADR-0022 R-22-2: the rollback refuses BY NAME
+// ---------------------------------------------------------------------------
+
+/// ADR-0022 R-22-2 (issue 77): an archived target whose rollback registration
+/// conflicts with a different active row makes the FIRST `ensure_ready()`
+/// refuse with the typed `ActiveShardConflict` — not `Internal{…rollback could
+/// not restore every shard}` — and the journal survives for the retry.
+///
+/// R-22-2's falsifier is CLOSED by this fixture: the first open reproduces the
+/// refusal, so the residual is reachable and the issue does not close as a
+/// no-defect. The residual's cost is one refused start, not a wedge — the
+/// SECOND open succeeds and leaves the measured post-state
+/// `[(index 0, inactive), (index 1, active)]`: the restored file wins, because
+/// the second open's reconcile registers the highest parsed file of the tuple
+/// active and the upsert deactivates the loser.
+#[tokio::test]
+async fn test_r222_active_archive_rollback_refuses_the_first_open_by_name() {
+    let config = common::store_config("pm-r222");
+    let (config, connections, shards) = common::real_components(config).await;
+    let storage = config.storage_path.clone();
+    let index1_path = shard_file(&storage, TARGET_HASH, 1);
+    let index0_path = shard_file(&storage, TARGET_HASH, 0);
+    std::fs::create_dir_all(index1_path.parent().expect("projects")).expect("projects dir");
+
+    let factory = mem_store::db::turso_connect_factory();
+    let connect = |path: PathBuf| {
+        let config = config.clone();
+        async move {
+            factory
+                .connect(
+                    path,
+                    ConnectOptions::for_config(&config, Platform::current()),
+                )
+                .await
+                .expect("connect fixture shard")
+        }
+    };
+
+    // The archived target: a real migrated shard at index 1 carrying a marker.
+    let target = connect(index1_path.clone()).await;
+    mem_store::schema_migrations::apply_schema_migrations(
+        target.as_ref(),
+        &mem_store::schema_migrations::memory_shard_migrations(2),
+        &mem_store::schema_migrations::MigrationOptions {
+            db_path: None,
+            label: "r222-fixture",
+            max_known: mem_store::schema_migrations::MEMORY_SHARD_MAX_KNOWN,
+        },
+        None,
+    )
+    .await
+    .expect("schema");
+    insert_vector(
+        target.as_ref(),
+        &record(TARGET_HASH, "r222-marker", 1, None),
+    )
+    .await
+    .expect("insert");
+    // Byte-copies follow: fold the WAL into the main db first. (The
+    // checkpoint PRAGMA produces a row, so it goes through `query`.)
+    let _ = target
+        .query("PRAGMA wal_checkpoint(TRUNCATE)", Vec::new())
+        .await;
+    drop(target);
+    let proof = common::exclusive_root(&storage);
+    let backup = index1_path.with_file_name(format!(
+        "{}.pre-path-migrate-r222.bak",
+        index1_path.file_name().unwrap().to_string_lossy()
+    ));
+    let backup_claim = proof.claim(&backup).expect("the backup is inside the root");
+    mem_store::sqlite_files::copy_sqlite_database(&index1_path, backup_claim).expect("copy to bak");
+    std::fs::remove_file(&index1_path).expect("simulate archived target");
+
+    // The conflicting active row: an empty but migrated shard at index 0.
+    let empty = connect(index0_path.clone()).await;
+    mem_store::schema_migrations::apply_schema_migrations(
+        empty.as_ref(),
+        &mem_store::schema_migrations::memory_shard_migrations(2),
+        &mem_store::schema_migrations::MigrationOptions {
+            db_path: None,
+            label: "r222-empty",
+            max_known: mem_store::schema_migrations::MEMORY_SHARD_MAX_KNOWN,
+        },
+        None,
+    )
+    .await
+    .expect("schema");
+    drop(empty);
+    shards
+        .register_existing_shard(Scope::Project, TARGET_HASH, 0, &index0_path, 0, true)
+        .await
+        .expect("conflicting active row");
+
+    write_swap_fixture(
+        &storage,
+        &PathMigrateSwapState {
+            operation: "path-migrate".to_string(),
+            old_hash: OLD_HASH.to_string(),
+            new_hash: TARGET_HASH.to_string(),
+            moves: Vec::new(),
+            archived_targets: vec![mem_store::shard_path_migration::ArchivedTarget {
+                shard_id: 0,
+                shard_index: 1,
+                original_path: index1_path.clone(),
+                archive_path: Some(backup.clone()),
+                is_active: true,
+                vector_count: 1,
+            }],
+        },
+    );
+
+    let registry: Arc<dyn ShardRegistry> = Arc::new(shards.clone());
+    let gate = Arc::new(mem_store::ready::build_ready_gate(
+        &storage,
+        connections.clone(),
+        Arc::new(shards.clone()),
+        registry.clone(),
+    ));
+
+    // FIRST open: the typed refusal, and the rollback's filesystem half DID run.
+    let error = gate
+        .ensure_ready()
+        .await
+        .expect_err("the first open refuses the conflicting archive rollback");
+    match error {
+        StoreError::ActiveShardConflict {
+            shard_index,
+            active_shard_index,
+            ..
+        } => {
+            assert_eq!(shard_index, 1, "the archived target cannot be activated");
+            assert_eq!(active_shard_index, 0, "index 0 already holds the tuple");
+        }
+        other => panic!("expected ActiveShardConflict, got {other:?}"),
+    }
+    assert!(
+        swap_state_path(&storage).exists(),
+        "the failed rollback keeps the journal for the retry"
+    );
+    assert!(
+        !backup.exists(),
+        "the archive was consumed before the refusal"
+    );
+    assert!(index1_path.exists(), "the archive was restored into place");
+
+    // SECOND open: succeeds; the restored file wins the tuple.
+    gate.ensure_ready().await.expect("the second open recovers");
+    assert!(!swap_state_path(&storage).exists(), "journal gone");
+    assert!(index1_path.exists(), "restored shard present");
+    assert!(index0_path.exists(), "empty target present");
+    let restored = connect(index1_path.clone()).await;
+    assert_eq!(
+        count_all_vectors(restored.as_ref()).await,
+        1,
+        "the restored file still carries its marker"
+    );
+    let rows = shards
+        .get_all_shards(Scope::Project, Some(TARGET_HASH))
+        .await
+        .expect("rows");
+    let mut state: Vec<(u32, bool)> = rows
+        .iter()
+        .map(|shard| (shard.shard_index, shard.is_active))
+        .collect();
+    state.sort_unstable();
+    assert_eq!(
+        state,
+        vec![(0, false), (1, true)],
+        "the restored file wins: index 1 active, index 0 deactivated"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // 9/11
 // ---------------------------------------------------------------------------
 
