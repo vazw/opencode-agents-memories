@@ -76,4 +76,5 @@ walks) — and the auth/Host/Basic walks cover them, because an unlisted route i
 
 - `issues/115-web-profile-identity.md` — defect A.
 - `issues/116-agents-project-picker.md` — defect B.
-- `issues/117-zero-milestones-diagnosis.md` — the INFERRED cause of the empty milestone table.
+- `issues/117-zero-milestones-diagnosis.md` — the **measured** cause of the empty milestone table (the
+  30-day age window; no code change indicated).

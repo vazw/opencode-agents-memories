@@ -1,13 +1,11 @@
-# 117 — episodic_milestones is empty on the live store: the candidate gates (INFERRED)
+# 117 — episodic_milestones is empty on the live store: the age window, measured
 
-Status: ready-for-human — the settling measurement opens the LIVE store, which the coder may not do.
-The work this file names is two read-only queries plus the engine's own consolidation counters:
-`SELECT MIN(created_at), COUNT(*) FROM agent_sessions WHERE deleted_at IS NULL` against the live
-`episodic.db` (read-only, `file:…?mode=ro`), and the engine's `episodic.consolidationAgeDays` value;
-run by the owner or a `debugger` session, never by the coder against the live root.
+Status: measured — the age window alone explains the empty table on this host (2026-11-03T06:08Z,
+read-only); no code change indicated. The run is recorded under **Measurement** below; nothing here
+asks a human to do anything.
 
 Filed by `.scratch/web-identity-and-project-picker` (defect B's second half). **Not** fixed by that
-wave: D-7 says diagnose and file.
+wave: D-7 says diagnose and file — and the diagnosis turned out to need no fix.
 
 ## Observation (MEASURED, 2026-11-02 ~16:50Z, read-only GETs against the live engine)
 
@@ -24,23 +22,54 @@ session table is not. `/agents` therefore renders the new empty state for every 
 **A production writer exists** — this corrects an earlier claim that none does. `consolidation.rs:514`
 writes milestones, driven hourly by `ConsolidationScheduler` (`engine.rs:1638-1646`,
 `CONSOLIDATION_INTERVAL_SECS = 3600`, constant at `engine.rs:1796`). A silent absence of a writer is
-ruled out; the question is which gate keeps the job from producing rows.
+ruled out. A second writer exists too — the portability **import** path
+(`crates/mem-portability/src/service.rs:606`) — which is why an imported root is never in this state.
 
-## Candidate causes (INFERRED — none measured on the live store)
+## Measurement (MEASURED, 2026-11-03T06:08Z, read-only)
+
+```sh
+sqlite3 'file:/home/vaz/.opencode-mem/data/episodic.db?mode=ro' \
+  'SELECT MIN(created_at), MAX(created_at), COUNT(*) FROM agent_sessions WHERE deleted_at IS NULL;'
+→ 1793563141278 | 1793684858627 | 130
+
+now − 30 d = 1791094106169        →  MIN(created_at) > cutoff
+sqlite3 'file:…?mode=ro' 'SELECT COUNT(*) FROM episodic_milestones;'   → 0
+sqlite3 'file:…?mode=ro' 'SELECT COUNT(*) FROM agent_sessions WHERE deleted_at IS NOT NULL;' → 0
+```
+
+The oldest live session is ≈1.4 days old and the newest is minutes old, so **none of the 130 is
+eligible**: the age window alone produces the empty table. Soft-deleted rows are zero, so nothing is
+being hidden by the live-session filter either.
+
+**Disposition:** cause **(1)** is confirmed. Causes **(2)** and **(3)** are **not implicated on this
+host** — (2) because the promotion pipeline is off, so no gate is installed (below); (3) because
+eligibility, not the claim shape, is what fails. The count and the newest stamp move with live traffic
+(127/1793662774787 at 05:39Z, 130/1793684858627 at 06:08Z); the **oldest** stamp is the number that
+matters and it has not moved.
+
+## Candidate causes, as filed (INFERRED at the time; resolved above)
 
 1. **The age window.** `episodic.consolidationAgeDays` defaults to 30
    (`crates/mem-core/src/config/schema.rs:630`). A session becomes eligible only once it is OLDER than
    that window, so a store whose sessions are recent produces nothing until 30 days have passed.
+   **Confirmed by the measurement above.**
 2. **The cross-tier promotion gate.** A milestone is written together with its promotions, and
-   `promotion_due` gates the phase; a failing promotion path (e.g. a provider that does not answer, or
-   the promotion pipeline flag being off) can make the phase skip rather than write.
+   `promotion_due` gates the phase. The **flag-off** install is `NoopCrossTierTask`
+   (`crates/mem-bridge/src/cross_tier.rs:190-193`), whose `promotion_due` returns **`true`**
+   (`crates/mem-episodic/src/cross_tier.rs:96-101`) — a flag-off install can never skip, so the earlier
+   wording here ("the promotion pipeline flag being off can make the phase skip") was backwards. Only
+   the **flag-on** `FactsCrossTierTask` gates, on `updated_at <= now − promotion.ttlFallbackDays`
+   (default 7; `crates/mem-bridge/src/cross_tier.rs:106-113`), and a not-due agent writes nothing at all
+   — including its milestone — because the pure due check precedes the single write batch
+   (`crates/mem-episodic/src/consolidation.rs:427-431`, then the batch at `:452-468`).
+   **Not installed on this host:** `~/.config/opencode/opencode-mem.jsonc` carries no
+   `promotionPipeline` key, so the default `false` (`crates/mem-core/src/config/schema.rs:632`) applies
+   (`/home/vaz/.opencode/` does not exist).
 3. **The per-agent claim.** Consolidation claims sessions per `(project_id, agent_id)`; a claim shape
    mismatch (agent ids that never repeat, or a zero claim cap) would yield no work even with eligible
-   rows.
+   rows. **Not reachable here** — there is no eligible row to claim.
 
-Both (1) and (2) are consistent with every measurement above. Nothing in this file distinguishes them.
-
-## The measurement that settles it
+## If it recurs: the same measurement, and the prohibitions
 
 Run read-only against the live storage root:
 

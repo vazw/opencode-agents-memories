@@ -80,9 +80,30 @@ Network: `GET /api/projects` → 200; the default selection then fetches
 `GET /api/projects/%2Fhome%2Fvaz%2FCode%2FPersonal%2FRust%2Fopencode-agents-memory/milestones`
 → 200, i.e. percent-encoded project ids work end to end against the live router.
 
-The `0 milestones` on every row is the 30-day consolidation age gate plus the
-promotion due gate (issue 117 carries the read-only measurement that settles it),
-not an empty pipeline.
+The `0 milestones` on every row is the consolidation age window, measured rather
+than assumed (read-only, `file:…?mode=ro`, 2026-11-03T06:08Z):
+
+```
+SELECT MIN(created_at), MAX(created_at), COUNT(*) FROM agent_sessions WHERE deleted_at IS NULL;
+→ 1793563141278 | 1793684858627 | 130
+cutoff (now − 30 d) = 1791094106169      → MIN(created_at) > cutoff
+SELECT COUNT(*) FROM episodic_milestones; → 0
+```
+
+Every live session is under 1.5 days old (the oldest is ≈1.4 days), so none of the
+130 is eligible and the age window alone produces the empty roster — the writer is
+not idle-by-flag. (Count and newest stamp move with live traffic: 127 /
+1793662774787 at 05:39Z, 130 / 1793684858627 at 06:08Z; the oldest stamp is the
+number that matters and it has not moved.)
+
+The cross-tier promotion gate is **not** a cause on this host:
+`featureFlags.promotionPipeline` is unset, so the default `false`
+(`crates/mem-core/src/config/schema.rs:632`) composes `NoopCrossTierTask`
+(`crates/mem-bridge/src/cross_tier.rs:190-193`), whose `promotion_due` returns
+`true` (`crates/mem-episodic/src/cross_tier.rs:96-101`) — a flag-off install can
+never skip. Only the flag-on `FactsCrossTierTask` gates, on `updated_at`
+(`crates/mem-bridge/src/cross_tier.rs:106-113`), and no session here reaches it.
+Issue 117 records this run.
 
 ## Deployment note — the staged UI is a separate artifact
 
@@ -99,11 +120,14 @@ byte-matched `web-ui/dist` (`diff -rq` silent at 04:40Z) and the staged wasm
 carried `api/user-profiles`.
 
 Re-measured 2026-11-03T05:17Z, after the empty-state copy change (`8622731`)
-rebuilt `web-ui/dist`: the staged bundle is `web-ui-e16b064079341384…` and the
-fresh build is `web-ui-52c1081f644725c6…`; `diff -rq` reports `index.html`
-differing and both hashed asset pairs `Only in …`. The staged UI is therefore
-stale again — the same failure mode one wave later, and the reason the recipe
-below is written down rather than remembered.
+rebuilt `web-ui/dist`: the staged bundle was then `web-ui-e16b064079341384…` and
+the fresh build `web-ui-52c1081f644725c6…`; `diff -rq` reported `index.html`
+differing and both hashed asset pairs `Only in …` — the same failure mode one
+wave later, and the reason the recipe below is written down rather than
+remembered. Re-staged at 05:24Z and re-measured at 06:09Z:
+`diff -rq web-ui/dist plugin/engine/linux-x64/web-ui/dist` is **silent** (four
+files byte-identical, `web-ui-52c1081f644725c6…`), and the live server serves
+that bundle — the recipe below is the one that was used.
 
 The repeatable recipe (run from `plugin/engine/linux-x64`, where `web-ui/dist` is
 the staged bundle and `../../../web-ui/dist` is the fresh trunk build):
