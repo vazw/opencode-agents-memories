@@ -1,6 +1,6 @@
 # 102 — The decay-sweep stamp is in-memory, so every engine start re-arms the daily gate
 
-Status: ready-for-agent — 2026-11-01. The premise is MEASURED; the *shape* of the fix is a maintainer
+Status: landed — residual (owned by issue 102) — `39dadf3` landed the decay lifecycle on 2026-11-01 (startup tick + periodic), so this is not unstarted work. What remains is the **persisted sweep stamp** and the **duplicate `sync_confidence`**: they are due before the install passes the 30-day grace (≈ 6 days from 2026-11-03), after which every engine start would silently blend the oldest profile items twice.
 decision, because every candidate changes either the storage root's file set or the `user_profiles`
 schema, and this repo's on-disk format carries an explicit refusal rule for newer roots (issue 43
 decisions 2–3). Filed with the issue-90 blueprint rather than left as a disclosed bullet, because issue
