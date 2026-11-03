@@ -1,6 +1,6 @@
 # 123 — the memories screen cannot search by tag (400), and the shell still reads like a prototype
 
-Status: needs-triage — filed from the owner's pass over the live UI (2026-11-03, `http://127.0.0.1:3742`,
+Status: wave 2 implemented on branch `webui-wave2` (not merged) — AC 1, 2, 3, 4, 5, 6 closed with rendered evidence in `docs/evidence/webui-wave2-20261103/README.md`; A1 chosen (`tags=`), `/tags` gains a ranked memory-tag table (user group hidden while empty; no `users/` shard exists), nav stays the 260px text sider with icons (owner ruling). Originally filed `needs-triage` from the owner's pass over the live UI (2026-11-03, `http://127.0.0.1:3742`,
 bundle `web-ui-321d4859fd9a772f`, engine `0ba4e0f1`). **Part A–E are measured defects and named jobs;
 Part F–G are a design pass** that needs an `architect` A/B draft before any blueprint, because two of its
 items change the API surface. Nothing here is `ready-for-agent` until that split is decided.
