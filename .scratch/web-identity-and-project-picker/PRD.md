@@ -98,9 +98,11 @@ sessions is now opt-in through `chatMessage.captureChildSessions` (blueprint
 `89a704c`; ADR-0017 amendment). It is adjacent, not part of defect A: it changes *which sessions get
 memory context after a compaction*, where defect A changed *which identity the page asks for*.
 
-**Observation still open:** the first child-session compaction since the 2026-11-03 restart. The
-mechanism is test-proven and both deployed artifacts carry it; what is not yet recorded is an actual
-`◈ memory context` part in a session with a `parentID`.
+**Observation closed (2026-11-03).** The owner reports `◈ memory context` appearing in a subagent
+compaction after the 16:21 restart — the behavioural proof the tests could only approximate. The three
+gate conditions held at once (key resolving `true`, new wrapper loaded by the host restart, engine
+advertising the flag), so the observation is attributable. Recorded in
+`docs/evidence/child-restore-2026-11-03.md`, with what would have falsified it.
 
 **Residuals opened by this wave** (tracked under `.scratch/rust-port/issues/`, because none of them is
 specific to the web surface): `115` the live store's 480 dead-lettered captures and the absent requeue
