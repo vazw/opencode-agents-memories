@@ -629,3 +629,105 @@ test("test_unknown_child_status_is_named", { timeout: 30000 }, async (t) => {
   );
   assert.ok(captures(run).length <= 1, "the unknown status never duplicates a capture");
 });
+
+// ---------------------------------------------------------------------------
+// Issue 66 — the adapter drops synthetic parts before the boundary.
+//
+// An injected memory block is the wrapper's own text, never the human's. The
+// drop is `synthetic === true` ONLY (`synthetic:false` and absent both reach
+// the transcript), and it applies to the user prompt and to the assistant's
+// text responses — but never to tool calls, which carry no user prose.
+// ---------------------------------------------------------------------------
+
+const SYNTHETIC_TURN = [
+  {
+    info: { id: "u1", role: "user" },
+    parts: [
+      { type: "text", text: "MEMORY-BLOCK", synthetic: true },
+      { type: "text", text: "fix the parser" },
+    ],
+  },
+  { info: { id: "a1", role: "assistant" }, parts: [{ type: "text", text: "done" }] },
+];
+
+test(
+  "test_synthetic_user_part_is_not_the_transcript",
+  { timeout: 30000 },
+  async (t) => {
+    const run = await runCapture(t, { ...caseA(), messages: { "ses-A": SYNTHETIC_TURN } });
+    const sent = captures(run);
+    assert.equal(sent.length, 1, "one capture reached the wire");
+    assert.equal(
+      sent[0].params.transcript,
+      "fix the parser",
+      "the injected block is not the human's prompt"
+    );
+    assert.equal(
+      sent[0].params.metadata.autoCaptureContext.userPrompt,
+      "fix the parser",
+      "and it is not in the raw context either"
+    );
+  }
+);
+
+test(
+  "test_synthetic_false_part_still_reaches_the_transcript",
+  { timeout: 30000 },
+  async (t) => {
+    const run = await runCapture(t, {
+      ...caseA(),
+      messages: {
+        "ses-A": [
+          {
+            info: { id: "u1", role: "user" },
+            parts: [
+              { type: "text", text: "MEMORY-BLOCK", synthetic: false },
+              { type: "text", text: "fix the parser" },
+            ],
+          },
+          { info: { id: "a1", role: "assistant" }, parts: [{ type: "text", text: "done" }] },
+        ],
+      },
+    });
+    const sent = captures(run);
+    assert.equal(sent.length, 1, "one capture reached the wire");
+    assert.equal(
+      sent[0].params.transcript,
+      "MEMORY-BLOCK\nfix the parser",
+      "only the exact boolean true drops a part"
+    );
+  }
+);
+
+test(
+  "test_synthetic_assistant_part_is_not_in_text_responses",
+  { timeout: 30000 },
+  async (t) => {
+    const run = await runCapture(t, {
+      ...caseA(),
+      messages: {
+        "ses-A": [
+          {
+            info: { id: "u1", role: "user" },
+            parts: [{ type: "text", text: "fix the parser" }],
+          },
+          {
+            info: { id: "a1", role: "assistant" },
+            // Both are `type:"text"`, so only the synthetic rule can drop one.
+            parts: [
+              { type: "text", text: "MEMORY-BLOCK", synthetic: true },
+              { type: "text", text: "done" },
+            ],
+          },
+        ],
+      },
+    });
+    const sent = captures(run);
+    assert.equal(sent.length, 1, "one capture reached the wire");
+    assert.deepEqual(
+      sent[0].params.metadata.autoCaptureContext.textResponses,
+      ["done"],
+      "the injected block is not the assistant's answer"
+    );
+  }
+);

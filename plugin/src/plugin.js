@@ -1162,6 +1162,10 @@ function notifyRestore(client, count) {
 function extractText(node) {
   try {
     if (node === null || node === undefined) return null;
+    // Issue 66: an injected block is the wrapper's own text, never the
+    // human's. `null` (not "") so the array branch's filter drops it instead
+    // of leaving a blank line. Only the exact boolean `true` drops a part.
+    if (node.synthetic === true) return null;
     if (typeof node === "string") return node;
     if (Array.isArray(node)) {
       const parts = node.map(extractText).filter((part) => part !== null);
@@ -1637,7 +1641,13 @@ function parseIdleTranscript(messages) {
     if (role === "user") break;
     if (role !== "assistant" || !message.parts || !Array.isArray(message.parts)) continue;
     const textParts = message.parts
-      .filter((part) => part && part.type === "text" && typeof part.text === "string")
+      .filter(
+        (part) =>
+          part &&
+          part.type === "text" &&
+          typeof part.text === "string" &&
+          part.synthetic !== true
+      )
       .map((part) => part.text);
     if (textParts.length > 0 && textParts.join("\n").trim().length > 0) {
       textResponses.push(textParts.join("\n").trim());
