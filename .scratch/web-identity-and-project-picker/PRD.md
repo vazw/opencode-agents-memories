@@ -78,3 +78,31 @@ walks) — and the auth/Host/Basic walks cover them, because an unlisted route i
 - `issues/116-agents-project-picker.md` — defect B.
 - `issues/117-zero-milestones-diagnosis.md` — the **measured** cause of the empty milestone table (the
   30-day age window; no code change indicated).
+
+## Delivery (2026-11-03)
+
+**Defect A and defect B are landed and live.** Nine commits `73a964f` … `a4afb39`, reviewed to
+APPROVED (`…-r3.review-1.md` through `review-8.md`; the first two rounds rejected on a vacuous
+soft-delete oracle, three false doc claims and a stale `AGENTS.md` count). O1 and O2 are evidenced in
+`docs/evidence/web-picker-2026-11-03.md` — the live identity matched against
+`git -C "$(readlink /proc/<pid>/cwd)" config user.email`, both identities in the roster, the picker
+switching, and `/agents` listing 11 projects with per-row counts.
+
+**Issue 117 is a measured disposition, not a hand-off:** the age window alone explains the empty
+milestone table on this host (oldest live session `1793563141278`, cutoff `now − 30 d` above it), and
+the promotion pipeline is off by default, so its gate is not a cause here.
+
+**Not in this PRD's original scope, decided during delivery:** the compaction restore for child
+sessions is now opt-in through `chatMessage.captureChildSessions` (blueprint
+`blueprint-20261103-0724-compaction-child-restore-r3`, stamp `fd875731e949`; commits `be005b4` +
+`89a704c`; ADR-0017 amendment). It is adjacent, not part of defect A: it changes *which sessions get
+memory context after a compaction*, where defect A changed *which identity the page asks for*.
+
+**Observation still open:** the first child-session compaction since the 2026-11-03 restart. The
+mechanism is test-proven and both deployed artifacts carry it; what is not yet recorded is an actual
+`◈ memory context` part in a session with a `parentID`.
+
+**Residuals opened by this wave** (tracked under `.scratch/rust-port/issues/`, because none of them is
+specific to the web surface): `100` the live store's 480 dead-lettered captures and the absent requeue
+path, `101` the red `cargo audit` (`zstd`/`zstd-safe` advisories), `102` the engine's structured
+stderr going into a pipe the wrapper never drains.
