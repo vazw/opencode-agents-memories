@@ -12,7 +12,7 @@ wave: D-7 says diagnose and file — and the diagnosis turned out to need no fix
     GET /api/projects/%2Fhome%2Fvaz%2FCode%2FPersonal%2FRust%2Fopencode-agents-memory/milestones
       → 200 {"success":true,"data":[]}
     GET /api/projects/%2Fhome%2Fvaz%2F.config%2Fopencode/sessions
-      → 200 with real rows (newest createdAt 1793684858627)
+      → 200, 18 rows, newest createdAt 1793618373080 (that project's rows only)
 
 So the routing and the percent-encoded paste flow work; the milestone table itself is empty while the
 session table is not. `/agents` therefore renders the new empty state for every project.
@@ -30,7 +30,10 @@ ruled out. A second writer exists too — the portability **import** path
 
 ## Measurement (MEASURED, 2026-11-03T06:16:41Z, read-only)
 
-The clock travels with the query, so the label below cannot drift from the run:
+The clock travels with the query, so the label below cannot drift from the run.
+**Scope: every live session in every project** — `agent_sessions` has no
+`project_id` predicate here; the per-project figures elsewhere in this file say
+which project they cover:
 
 ```sh
 sqlite3 'file:/home/vaz/.opencode-mem/data/episodic.db?mode=ro' \
@@ -52,9 +55,10 @@ being hidden by the live-session filter either.
 host** — (2) because the promotion pipeline is off, so no gate is installed (below); (3) because
 eligibility, not the claim shape, is what fails. The count and the newest stamp move with live traffic
 (127 / 1793662774787 in review-4's run, whose own query clock read `1793683644415` =
-2026-11-03T05:27:24Z; 130 / 1793684858627 at the 06:16:41Z run above), so the runs are told apart by
-their clocks rather than by a shared label; the **oldest** stamp is the number that matters and it is
-identical in both.
+2026-11-03T05:27:24Z — the same scope, all projects; 130 / 1793684858627 at the 06:16:41Z run above;
+a row carrying `created_at = 1793662774787` still exists, so the earlier pair is a state the store
+really held), so the runs are told apart by their clocks rather than by a shared label; the **oldest**
+stamp is the number that matters and it is identical in both.
 
 ## Candidate causes, as filed (INFERRED at the time; resolved above)
 
