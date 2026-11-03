@@ -27,9 +27,10 @@ use web_ui::core_screens::{
     ProfileScreen, ProfileView, SettingsScreen, ShardStatsView, StatsView, TagsPage, TagsView,
     active_shard_count, daily_peak, delete_memory_spec, error_buckets, get_user_profile_spec,
     get_user_profile_spec_for, health_outcome, health_spec, initial_tags, list_memories_spec,
-    list_tags_spec, list_user_profiles_spec, memories_request, memories_view, parse_tag_input,
-    pin_memory_spec, profile_identity_control, profile_view, search_spec, settings_view,
-    sorted_shards, stats_spec, tags_view, unpin_memory_spec,
+    list_tags_spec, list_user_profiles_spec, memories_request, memories_view, memory_preview,
+    pin_memory_spec, profile_identity_control, profile_view, range_text, search_spec,
+    settings_view, sorted_shards, stats_spec, tags_json, tags_view, unpin_memory_spec,
+    visible_tags,
 };
 use web_ui::paths::{ENDPOINTS, EndpointId, encode_component};
 
@@ -1360,20 +1361,63 @@ fn test_memories_request_picks_one_mode() {
 }
 
 #[wasm_bindgen_test]
-fn test_comma_input_reaches_the_tags_request() {
-    let spec = memories_request("", &parse_tag_input("rust, architecture"), 1, 20);
-    assert_eq!(
-        build_url(&spec).expect("builds"),
-        "/api/memories?page=1&pageSize=20&tags=rust&tags=architecture&includePrompts=false"
-    );
-    assert_eq!(parse_tag_input("a,a, ,b"), strings(&["a", "b"]));
-}
-
-#[wasm_bindgen_test]
 fn test_request_fixture_matches_ui() {
     let spec = memories_request("", &strings(&["probe"]), 1, 20);
     assert_eq!(
         build_url(&spec).expect("builds"),
         include_str!("../../crates/mem-web/tests/fixtures/a1_tags_request.txt").trim()
     );
+}
+
+#[wasm_bindgen_test]
+fn test_range_text_is_one_based() {
+    // Blueprint r4 printed (191,20,3827) -> "3801-3827"; page 191 ends at 3820.
+    assert_eq!(range_text(191, 20, 3827), "3801-3820 of 3827");
+    assert_eq!(range_text(192, 20, 3827), "3821-3827 of 3827");
+    assert_eq!(range_text(1, 20, 3827), "1-20 of 3827");
+    assert_eq!(range_text(1, 20, 0), "0 of 0");
+}
+
+#[wasm_bindgen_test]
+fn test_memory_preview_is_a_lossless_split() {
+    let body: String = "héllo wörld ✓ ".repeat(473); // 6622 chars, multi-byte
+    assert!(body.chars().count() > 6600);
+    let (preview, rest) = memory_preview(&body);
+    let rest = rest.expect("a long body splits");
+    assert_eq!(format!("{preview}{rest}"), body);
+    assert!(
+        preview.chars().count() <= 700,
+        "{}",
+        preview.chars().count()
+    );
+    assert!(
+        preview.chars().count() > 600,
+        "word-boundary cut stays near the limit"
+    );
+    let (short, none) = memory_preview("short");
+    assert_eq!((short.as_str(), none), ("short", None));
+    // No whitespace at all: a hard cut on a char boundary.
+    let (hard, rest) = memory_preview(&"é".repeat(800));
+    assert_eq!(hard.chars().count(), 700);
+    assert_eq!(rest.map(|r| r.chars().count()), Some(100));
+}
+
+#[wasm_bindgen_test]
+fn test_visible_tags_caps_at_four() {
+    let ten: Vec<String> = (0..10).map(|i| format!("t{i}")).collect();
+    let (shown, more) = visible_tags(&ten);
+    assert_eq!((shown.len(), more), (4, 6));
+    let (shown, more) = visible_tags(&ten[..3]);
+    assert_eq!((shown.len(), more), (3, 0));
+}
+
+#[wasm_bindgen_test]
+fn test_tags_json_carries_every_tag() {
+    let ten: Vec<String> = (0..10).map(|i| format!("t{i}")).collect();
+    let back: Vec<String> = serde_json::from_str(&tags_json(&ten)).expect("valid JSON");
+    assert_eq!(back, ten);
+    let odd = strings(&["quote\"tag", "back\\slash"]);
+    let back: Vec<String> = serde_json::from_str(&tags_json(&odd)).expect("valid JSON");
+    assert_eq!(back, odd);
+    assert_eq!(tags_json(&[]), "[]");
 }

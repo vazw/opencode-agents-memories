@@ -17,4 +17,5 @@ pub mod routes;
 pub mod screens;
 pub mod shell;
 pub mod skill_library;
+pub mod state_block;
 pub mod theme;

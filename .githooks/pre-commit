@@ -64,10 +64,10 @@ if [ "$webui" -eq 1 ]; then
     fi
     mkdir -p "$toplevel/.tmp/scratch"
     coverage_log="$toplevel/.tmp/scratch/coverage.log"
-    if ! node "$toplevel/web-ui/scripts/check-class-coverage.mjs" --min-emitted=188 --self-test > "$coverage_log" 2>&1; then
+    if ! node "$toplevel/web-ui/scripts/check-class-coverage.mjs" --min-emitted=184 --self-test > "$coverage_log" 2>&1; then
         printf 'pre-commit: FAIL class coverage — a web-ui class hook has no CSS rule\n' >&2
         tail -n 40 "$coverage_log" >&2
-        printf 'pre-commit: reproduce: node web-ui/scripts/check-class-coverage.mjs --min-emitted=188 --self-test\n' >&2
+        printf 'pre-commit: reproduce: node web-ui/scripts/check-class-coverage.mjs --min-emitted=184 --self-test\n' >&2
         exit 1
     fi
     rm -f "$coverage_log"

@@ -30,6 +30,7 @@ use std::collections::BTreeMap;
 use leptos::callback::Callable;
 use leptos::prelude::*;
 use serde::Deserialize;
+use thaw::{Badge, BadgeAppearance, Card, Pagination};
 
 use crate::api::auth::{AuthContext, read_marker_token};
 use crate::api::envelope::{ApiError, parse_envelope};
@@ -37,6 +38,7 @@ use crate::api_request::{self, RequestSpec};
 use crate::confirm::{ConfirmEvent, ConfirmGate, ConfirmState, confirm_next, dispatch};
 use crate::paths::{EndpointId, endpoint, fill};
 use crate::screens::format_created_at;
+use crate::state_block::{BlockKind, block_kind};
 
 /// Render a timestamp the endpoint supplied.
 ///
@@ -207,19 +209,6 @@ pub fn memories_request(
     }
 }
 
-/// The comma input's parser: split on `,`, trim, drop empties, de-duplicate
-/// (first wins).
-pub fn parse_tag_input(raw: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for part in raw.split(',') {
-        let tag = part.trim();
-        if !tag.is_empty() && !out.iter().any(|seen| seen == tag) {
-            out.push(tag.to_string());
-        }
-    }
-    out
-}
-
 /// The `tags=` values of a location search string, percent-decoded, trimmed,
 /// empties dropped, de-duplicated (first wins).
 pub fn initial_tags(search: &str) -> Vec<String> {
@@ -299,6 +288,58 @@ async fn perform_action(spec: &RequestSpec, auth: &AuthContext) -> Result<(), Ap
     crate::screens::delete_outcome(status, &bytes)
 }
 
+/// How many characters of a memory body a card shows before "Show more".
+pub const PREVIEW_CHARS: usize = 700;
+
+/// Split a body into a preview of at most [`PREVIEW_CHARS`] characters (cut at a
+/// word boundary when one exists) and the rest. Lossless: `preview + rest`
+/// is the original, and the cut is always on a character boundary.
+pub fn memory_preview(content: &str) -> (String, Option<String>) {
+    let Some((limit, _)) = content.char_indices().nth(PREVIEW_CHARS) else {
+        return (content.to_string(), None);
+    };
+    let head = &content[..limit];
+    let cut = head
+        .char_indices()
+        .rev()
+        .find(|(_, c)| c.is_whitespace())
+        .map(|(at, c)| at + c.len_utf8())
+        .filter(|at| *at > 0)
+        .unwrap_or(limit);
+    (content[..cut].to_string(), Some(content[cut..].to_string()))
+}
+
+/// The most tag chips a card renders.
+pub const VISIBLE_TAGS: usize = 4;
+
+/// The first [`VISIBLE_TAGS`] tags and how many more there are.
+pub fn visible_tags(tags: &[String]) -> (&[String], usize) {
+    let shown = tags.len().min(VISIBLE_TAGS);
+    (&tags[..shown], tags.len() - shown)
+}
+
+/// A card's whole tag set as a JSON array (the `data-tags` attribute). Built by
+/// `serde_json`, so a tag containing `"` or `\` cannot break the attribute.
+pub fn tags_json(tags: &[String]) -> String {
+    serde_json::Value::Array(
+        tags.iter()
+            .cloned()
+            .map(serde_json::Value::String)
+            .collect(),
+    )
+    .to_string()
+}
+
+/// "1-20 of 3827" (1-based, inclusive); "0 of 0" when empty.
+pub fn range_text(page: usize, page_size: usize, total: usize) -> String {
+    if total == 0 || page_size == 0 {
+        return format!("0 of {total}");
+    }
+    let start = page.max(1).saturating_sub(1).saturating_mul(page_size) + 1;
+    let end = page.max(1).saturating_mul(page_size).min(total);
+    format!("{start}-{end} of {total}")
+}
+
 /// One rendered memory row with its pin/unpin/delete controls.
 fn memory_row(
     row: MemoryRowView,
@@ -306,6 +347,7 @@ fn memory_row(
     action_error: RwSignal<Option<String>>,
     confirm: RwSignal<ConfirmState>,
     request_delete: Callback<String>,
+    on_tag: Callback<String>,
     auth: AuthContext,
 ) -> impl IntoView {
     let pinned = row.is_pinned;
@@ -353,7 +395,6 @@ fn memory_row(
                 view! {
                     <button
                         type="button"
-                        class="memory-delete"
                         data-testid="memory-delete"
                         on:click=move |_| {
                             confirm
@@ -374,43 +415,76 @@ fn memory_row(
         }
     };
 
-    let tags = if row.tags.is_empty() {
-        "(no tags)".to_string()
-    } else {
-        row.tags.join(", ")
-    };
     let kind = if is_prompt { "prompt" } else { "memory" };
+    let data_tags = tags_json(&row.tags);
+    let (shown, hidden) = visible_tags(&row.tags);
+    let shown: Vec<String> = shown.to_vec();
+    let more_label =
+        (hidden > 0).then(|| format!("{hidden} more tags: {}", row.tags[shown.len()..].join(", ")));
+    let (preview, rest) = memory_preview(&row.content);
 
     view! {
-        <li class="memory-row" data-testid="memory-row">
-            <span class="memory-kind" data-testid="memory-kind">{kind}</span>
-            <span class="memory-content" data-testid="memory-content">{row.content}</span>
-            <span class="memory-tags" data-testid="memory-tags">{tags}</span>
-            <span class="memory-created" data-testid="memory-created">
-                {row.created_at}
-            </span>
-            {pinned
-                .then(|| {
-                    view! {
-                        <span class="memory-pinned" data-testid="memory-pinned">
-                            "pinned"
-                        </span>
-                    }
-                })}
-            {(!is_prompt)
-                .then(move || {
-                    view! {
-                        <button
-                            type="button"
-                            class="memory-pin"
-                            data-testid="memory-pin"
-                            on:click=pin
-                        >
-                            {if pinned { "Unpin" } else { "Pin" }}
-                        </button>
-                        {delete_area}
-                    }
-                })}
+        <li data-testid="memory-row" data-tags=data_tags>
+            <Card class="memory-card">
+                <div class="memory-card-head">
+                    <Badge>{kind}</Badge>
+                    <span data-testid="memory-created">{row.created_at}</span>
+                    {pinned
+                        .then(|| {
+                            view! { <Badge appearance=BadgeAppearance::Outline>"pinned"</Badge> }
+                        })}
+                </div>
+                <div class="memory-content" data-testid="memory-content">
+                    {preview}
+                </div>
+                {rest
+                    .map(|rest| {
+                        view! {
+                            <details>
+                                <summary>"Show more"</summary>
+                                {rest}
+                            </details>
+                        }
+                    })}
+                <div class="memory-card-tags" data-testid="memory-tags">
+                    {shown
+                        .into_iter()
+                        .map(|tag| {
+                            let label = format!("Filter by tag: {tag}");
+                            let value = tag.clone();
+                            view! {
+                                <button
+                                    type="button"
+                                    class="chip"
+                                    aria-label=label
+                                    on:click=move |_| on_tag.run(value.clone())
+                                >
+                                    {tag}
+                                </button>
+                            }
+                        })
+                        .collect_view()}
+                    {more_label
+                        .map(|label| {
+                            view! {
+                                <span class="memory-tag-more" aria-label=label>
+                                    {format!("+{hidden} more")}
+                                </span>
+                            }
+                        })}
+                </div>
+                {(!is_prompt)
+                    .then(move || {
+                        view! {
+                            <div class="memory-card-foot">
+                                <button type="button" data-testid="memory-pin" on:click=pin>
+                                    {if pinned { "Unpin" } else { "Pin" }}
+                                </button>
+                                {delete_area}
+                            </div>
+                        }
+                    })}
+            </Card>
         </li>
     }
 }
@@ -425,10 +499,10 @@ pub fn MemoriesPanel() -> impl IntoView {
     let page = RwSignal::new(1_usize);
     let page_size = RwSignal::new(20_usize);
     let query = RwSignal::new(String::new());
-    let tag_filter = RwSignal::new(
+    let tags = RwSignal::new(
         web_sys::window()
             .and_then(|window| window.location().search().ok())
-            .map(|search| initial_tags(&search).join(", "))
+            .map(|search| initial_tags(&search))
             .unwrap_or_default(),
     );
     let state = RwSignal::new(MemoriesView::Loading);
@@ -442,11 +516,12 @@ pub fn MemoriesPanel() -> impl IntoView {
             // A list refresh invalidates any arm: a stale pending id must never
             // survive to delete a row the user can no longer see.
             confirm.set(confirm_next(&confirm.get_untracked(), ConfirmEvent::Cancel).state);
-            let current = page.get_untracked();
-            let size = page_size.get_untracked();
-            let text = query.get_untracked();
-            let tags = parse_tag_input(&tag_filter.get_untracked());
-            let spec = memories_request(&text, &tags, current, size);
+            let spec = memories_request(
+                &query.get_untracked(),
+                &tags.get_untracked(),
+                page.get_untracked(),
+                page_size.get_untracked(),
+            );
             state.set(MemoriesView::Loading);
             leptos::task::spawn_local(async move {
                 match api_request::request::<MemoryPage>(&spec, &auth).await {
@@ -457,9 +532,22 @@ pub fn MemoriesPanel() -> impl IntoView {
         }
     });
 
-    // The initial load: the panel renders data on mount with no interaction.
-    // Every read in `reload` is untracked, so this effect runs exactly once.
-    Effect::new(move |_| reload.run(()));
+    // Every fetch driven by a filter change goes back to page 1: through the
+    // page effect when the page moves, directly when it was already 1 (never both).
+    let refresh = Callback::new(move |_: ()| {
+        if page.get_untracked() == 1 {
+            reload.run(());
+        } else {
+            page.set(1);
+        }
+    });
+
+    // The initial load and every page change. `reload` reads everything else
+    // untracked, so this effect depends on `page` alone.
+    Effect::new(move |_| {
+        let _ = page.get();
+        reload.run(());
+    });
 
     // The only path from a confirmed gate to the network.
     let request_delete = Callback::new({
@@ -484,21 +572,41 @@ pub fn MemoriesPanel() -> impl IntoView {
         }
     });
 
-    let previous = Callback::new(move |_: ()| {
-        if page.get_untracked() > 1 {
-            page.set(page.get_untracked() - 1);
-            reload.run(());
+    let add_tag = Callback::new(move |tag: String| {
+        let already = tags.with_untracked(|current| current.contains(&tag));
+        if !already {
+            tags.update(|current| current.push(tag));
+            refresh.run(());
         }
     });
-    let next = Callback::new(move |_: ()| {
-        page.set(page.get_untracked() + 1);
-        reload.run(());
+    let remove_tag = move |tag: String| {
+        tags.update(|current| current.retain(|existing| existing != &tag));
+        refresh.run(());
+    };
+    let clear_tags = move |_| {
+        tags.set(Vec::new());
+        refresh.run(());
+    };
+
+    let page_count = Signal::derive(move || match state.get() {
+        MemoriesView::Loaded { total_pages, .. } => total_pages.max(1),
+        _ => 1,
     });
+    let range = move || match state.get() {
+        MemoriesView::Loaded {
+            total,
+            page: current,
+            page_size: size,
+            ..
+        } => range_text(current, size, total),
+        MemoriesView::Empty { total } => format!("0 of {total}"),
+        _ => String::new(),
+    };
 
     view! {
         <section class="memories-panel" data-testid="memories-panel">
             <h2>"Memories"</h2>
-            <div class="memories-controls">
+            <div class="memories-filters" data-testid="memories-filters">
                 <input
                     id="memories-search"
                     name="q"
@@ -508,29 +616,54 @@ pub fn MemoriesPanel() -> impl IntoView {
                     placeholder="Search memories"
                     prop:value=move || query.get()
                     on:input=move |event| query.set(event_target_value(&event))
+                    on:keydown=move |event| {
+                        if event.key() == "Enter" {
+                            refresh.run(());
+                        }
+                    }
                 />
-                <input
-                    id="memories-tags"
-                    name="tags"
-                    type="text"
-                    class="memories-tag-filter"
-                    data-testid="memories-tag-filter"
-                    placeholder="tag,tag"
-                    prop:value=move || tag_filter.get()
-                    on:input=move |event| tag_filter.set(event_target_value(&event))
-                />
+                {move || {
+                    tags.get()
+                        .into_iter()
+                        .map(|tag| {
+                            let label = format!("Remove tag: {tag}");
+                            let value = tag.clone();
+                            view! {
+                                <button
+                                    type="button"
+                                    class="chip"
+                                    aria-label=label
+                                    on:click=move |_| remove_tag(value.clone())
+                                >
+                                    {tag}
+                                </button>
+                            }
+                        })
+                        .collect_view()
+                }}
+                {move || {
+                    (!tags.get().is_empty())
+                        .then(|| {
+                            view! {
+                                <button type="button" data-testid="memories-clear" on:click=clear_tags>
+                                    "Clear"
+                                </button>
+                            }
+                        })
+                }}
                 <button
                     type="button"
                     class="memories-reload"
                     data-testid="memories-reload"
-                    on:click=move |_| reload.run(())
+                    on:click=move |_| refresh.run(())
                 >
                     "Reload"
                 </button>
+                <span class="memories-range" data-testid="memories-range">{range}</span>
             </div>
             {move || {
                 let has_text = !query.get().trim().is_empty();
-                let has_tags = !parse_tag_input(&tag_filter.get()).is_empty();
+                let has_tags = !tags.get().is_empty();
                 (has_text && has_tags)
                     .then(|| {
                         view! {
@@ -552,8 +685,9 @@ pub fn MemoriesPanel() -> impl IntoView {
                     })
             }}
             {move || {
-                match state.get() {
-                    MemoriesView::Loading => {
+                let current = state.get();
+                match (block_kind(&current), current) {
+                    (BlockKind::Loading, _) => {
                         view! {
                             <p class="panel-loading" data-testid="memories-loading">
                                 "Loading memories…"
@@ -561,46 +695,23 @@ pub fn MemoriesPanel() -> impl IntoView {
                         }
                             .into_any()
                     }
-                    MemoriesView::Empty { total } => {
+                    (BlockKind::Empty, MemoriesView::Empty { total }) => {
                         view! {
                             <p class="memories-empty" data-testid="memories-empty">
-                                {format!("No memories yet (total {total}).")}
+                                {format!("No memories match (total {total}).")}
                             </p>
                         }
                             .into_any()
                     }
-                    MemoriesView::Loaded {
-                        rows,
-                        total,
-                        page: current,
-                        page_size: size,
-                        total_pages,
-                    } => {
+                    (BlockKind::Error, MemoriesView::Error(message)) => {
                         view! {
-                            <div class="memories-pager" data-testid="memories-pager">
-                                <button
-                                    type="button"
-                                    class="memories-prev"
-                                    data-testid="memories-prev"
-                                    on:click=move |_| previous.run(())
-                                >
-                                    "Previous"
-                                </button>
-                                <span class="memories-count" data-testid="memories-count">
-                                    {format!(
-                                        "{total} rows · page {current} of {total_pages} · {size} per page",
-                                    )}
-                                </span>
-                                <button
-                                    type="button"
-                                    class="memories-next"
-                                    data-testid="memories-next"
-                                    on:click=move |_| next.run(())
-                                >
-                                    "Next"
-                                </button>
-                            </div>
-                            <ul class="memories-list" data-testid="memories-list">
+                            <p class="memories-error" data-testid="memories-error">{message}</p>
+                        }
+                            .into_any()
+                    }
+                    (_, MemoriesView::Loaded { rows, .. }) => {
+                        view! {
+                            <ul class="memory-list" data-testid="memories-list">
                                 {rows
                                     .into_iter()
                                     .map(|row| {
@@ -610,6 +721,7 @@ pub fn MemoriesPanel() -> impl IntoView {
                                             action_error,
                                             confirm,
                                             request_delete,
+                                            add_tag,
                                             auth.clone(),
                                         )
                                     })
@@ -618,14 +730,12 @@ pub fn MemoriesPanel() -> impl IntoView {
                         }
                             .into_any()
                     }
-                    MemoriesView::Error(message) => {
-                        view! {
-                            <p class="memories-error" data-testid="memories-error">{message}</p>
-                        }
-                            .into_any()
-                    }
+                    _ => ().into_any(),
                 }
             }}
+            <div class="memories-pager" data-testid="memories-pager">
+                <Pagination page=page page_count=page_count/>
+            </div>
         </section>
     }
 }

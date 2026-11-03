@@ -11,7 +11,7 @@ use leptos_router::components::{Route, Router, Routes};
 use leptos_router::hooks::use_navigate;
 use leptos_router::path;
 use thaw::{
-    Button, ButtonAppearance, ConfigProvider, Layout, LayoutHeader, LayoutSider, NavDrawer,
+    Button, ButtonAppearance, ConfigProvider, LayoutHeader, LayoutSider, NavDrawer,
     NavDrawerHeader, NavItem,
 };
 
@@ -95,7 +95,11 @@ fn ShellView() -> impl IntoView {
     };
 
     view! {
-        <Layout class="app-shell" content_class="app-layout-row">
+        // A plain wrapper, not `thaw::Layout`: Layout nests the page in a Thaw
+        // scroll container (`overflow: scroll`) that never scrolls, which
+        // makes every `position: sticky` descendant inert.
+        <div class="app-shell">
+        <div class="app-layout-row">
             <LayoutSider class="app-sider">
                 <nav aria-label="Primary">
                     <NavDrawer class="app-nav-drawer" selected_value=selected>
@@ -187,6 +191,7 @@ fn ShellView() -> impl IntoView {
                     }}
                 </main>
             </div>
-        </Layout>
+        </div>
+        </div>
     }
 }
