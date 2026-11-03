@@ -118,3 +118,9 @@ unstated assumption.
 - [ ] On/off observation for every implemented key.
 - [ ] `max_memories` and `capture_child_sessions` resolved explicitly, not left as "possibly deliberate".
 - [ ] Issue 20 can cite this issue for the four upstream cases it currently cannot claim.
+
+## r3 partial progress (2026-11-04)
+
+Wired for chat: `exclude_current_session`, `max_memories`, `max_age_days` (`chat_injection:true`) and `inject_on`
+(`hello.result.config`, per child; missing/invalid means `always`). Remaining acceptance criteria stay open, including
+the dispositions and census for the other keys. Child capture/restore is unchanged.

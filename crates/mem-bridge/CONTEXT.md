@@ -19,6 +19,10 @@
   The reply's additive `capabilities` object is how the wrapper learns which
   behaviours this build serves — e.g. `compaction` (issue 68) and `skills`
   (issue 69: this build's dispatch answers the `skills` method).
+- **chat injection policy** (issues 63/85/99/124) — `chat_injection:true` on `inject` selects resolved
+  `exclude_current_session`, `max_memories` and `max_age_days`; `hello.result.config.inject_on` is wrapper
+  refresh control (`first`/`always`), never an inject parameter or capability. Compaction keeps the cached
+  block; wrapper telemetry emits `inject.requested`/`inject.received` and omits delivery `path`.
 - **session_id** — the required top-level parameter of every runtime method
   except `skills`, which takes `project_id` instead and carries no session id
   (1..=128 chars); DATA, never authority.

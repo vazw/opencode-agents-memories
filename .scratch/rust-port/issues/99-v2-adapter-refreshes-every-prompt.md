@@ -56,3 +56,9 @@ block is rebuilt every turn).
 `plugin/src/v2/adapter.js:37-39`; `example/opencode-mem/src/v2/adapter.ts:155-169`;
 `example/opencode-mem/src/index.ts:721`; issue 85 (the drift this produces); issue 63 (`inject_on`). Found
 by the 2026-11-01 issue-set audit as a finding with no owning issue.
+
+## r3 progress (2026-11-04)
+
+Implemented in `plugin/src/v2/adapter.js` with `hooks.shouldRefresh` supplied by the wrapper. `first` retains a nonempty cache after
+turn 0; `always`, unknown, empty and failed results refresh/retry. Same-session prompts are serialized per session. Tests live in
+`plugin/tests/v2-inject-delivery.test.mjs`, not a separate `v2-context-refresh` file.

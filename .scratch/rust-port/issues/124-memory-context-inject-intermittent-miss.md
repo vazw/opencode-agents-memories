@@ -145,3 +145,18 @@ Two lines, no content: outgoing `inject` (`session_id`, `query_len`) and returni
 `block_len`, `handling_ms`, `path: "synthetic"|"parts"`). With that, a single restart settles both the
 latency question (B) and whether (A) ever loses a block.
 
+## r3 record (2026-11-04)
+
+A/B: A (synthetic pre-turn message) duplicates the existing `event.system` route and adds another steer;
+B (preserve cache through compaction, instrument lengths) was built. Compaction no longer deletes the session
+cache. Test names `test_v2_memory_context_clears_the_injection_after_a_compaction` and
+`test_v2_adapter_invalidates_the_session_cache_only_for_compaction_at_this_location` were kept but now assert preservation.
+
+Telemetry: `query_len` is `query_chars` (code points); `block_len` is `block_bytes` (UTF-8 bytes); `handling_ms`
+is the engine passthrough. `path` is NOT emitted: only one route remains (parts harvested by the adapter and put on
+`event.system`), and the wrapper receives no host callback saying how it was rendered, so it would be a constant.
+`status` is `ok`/`empty`/`error`. Events use `writeStructured`, with no query, block or error text.
+
+Measurement: NOT RUN. After operator deploy and restart, correlate `inject.requested`/`inject.received` per
+session across a compaction with host-side context delivery. Wrapper receipt is not proof of attachment; if there is
+no compaction or no sink access, the result is inconclusive. A persisting miss despite nonzero block means investigate downstream.

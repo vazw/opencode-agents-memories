@@ -69,3 +69,8 @@ the other.
 
 **Sequencing:** this must land before or with issue 63. Doing 63 first would wire a switch that cannot
 be honoured.
+
+## r3 progress (2026-11-04)
+
+`InjectParams` now has top-level `exclude_session`; chat requests use the hook's `sessionID` and engine policy. Recent and tier-1 rows
+are filtered before the cap. Tests: `inject_session_exclusion.rs`, `inject_chat_gates.rs`, `inject-query.test.mjs`.

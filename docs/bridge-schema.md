@@ -131,7 +131,7 @@ never grants access to another session's rows.
 | method | blocking | params | result |
 |---|---|---|---|
 | `capture` | no (fire-and-forget ack) | `session_id` (req), `capture_id` (req), `project_id?`, `agent_id?`, `agent_name?`, `parent_session_id?`, `transcript?`, `summary?`, `metadata?` — a capture **persists only when `agent_id` and `project_id` are present and non-empty** (the engine's validation is strict; an empty one dead-letters) | `{"accepted":true}` or, when `chatMessage.enabled` is off, `{"accepted":false,"reason":"chat_message_disabled"}` |
-| `inject` | **yes** | `session_id` (req), `project_id?`, `token_budget?`, `include?` | `{"block":string\|null,"memory_count":int,"tokens":int,"truncated":bool,"handling_ms":int}` |
+| `inject` | **yes** | `session_id` (req), `project_id?`, `token_budget?`, `include?`, `exclude_session?`, `max_memories?`, `max_age_days?`, `chat_injection?` | `{"block":string\|null,"memory_count":int,"tokens":int,"truncated":bool,"handling_ms":int}` |
 | `recall` | no | `session_id` (req); **canonical** when `projectId` is present (camelCase, no unknown keys): `projectId` (req), `mode?` (`"chronological"\|"semantic"\|"filtered"`), `query?` (semantic only), `since?`, `until?`, `lastNSessions?`, `touchedFiles?`, `agentId?`, `sessionId?` (filter key), `includeFullSessions?`; **legacy** otherwise: `query` (req, string), `limit?`, `scope?`, `tags?` (these keys only) | `{"items":[…],"count":int}` |
 | `skills` | **yes** | `project_id` (req); no `session_id` | `{"skills":[{"id":string,"name":string,"path":string,"content":string,"autoinvoke":bool,"description"?:string}]}` |
 | `health` | no | `session_id` (req) | `{"ok":bool,"mode":"full"\|"degraded","degraded_reason":string\|null,"protocol":semver,"engine_version":semver,"db":{"path":string,"ready":bool},"open_guard":{"override_active":bool},"uptime_ms":int,"sessions":int}` |
@@ -251,6 +251,8 @@ opens, stats or normalises a file. The timeline/pair/orphan assembly is not
 here — it remains `mem-web/src/api/memories.rs`.
 
 `inject`'s `include?` accepts either the frozen `["summary","metadata"]` array or the additive options object `{"recent_count"?: int, "compaction"?: "ingest"|"restore", "query"?: string}`: `recent_count` bounds the episodic rows, `compaction` selects the session-scoped render (issue 33), and `query` carries the authored prompt (max 2000 code points; absent or blank keeps the tag-listed read). Unknown keys are ignored; no other field exists.
+
+`inject`'s additive top-level fields (issues 63/85): `chat_injection:true` marks a wrapper chat request and makes the engine apply the resolved `chatMessage.excludeCurrentSession`, `maxMemories` and `maxAgeDays`; direct and compaction requests omit it and keep legacy semantics. Explicit `exclude_session`, `max_memories` (emitted-count cap, applied after budget and duplicate suppression) and `max_age_days` (inclusive cutoff) override policy. Wrong-typed values are `-32602` and never reset other fields. The wrapper sends `exclude_session:true` only if hello `config.exclude_current_session` is `true` (the production engine does not advertise it; its chat policy applies the exclusion).
 
 W5.1 shipped `capture` and `inject` as **stubs**:
 
