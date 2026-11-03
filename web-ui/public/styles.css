@@ -1,37 +1,9 @@
 /* The baseline theme + the shell layout for the OpenCode Memory Explorer.
  *
- * Two themes only (light / dark), driven by the `.dark` class on `.app-shell`.
+ * Two themes only (light / dark). Every colour is an alias of a token the
+ * Rust `Palette` writes into the component library's theme; no literal here.
  * The only value the shell persists is the theme preference under the
  * `opencode-mem-theme` key (a UI preference, not a credential). */
-
-:root {
-  --font-sans:
-    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-    sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-
-  --light-bg: #f7f8fa;
-  --light-panel: #ffffff;
-  --light-border: #d9dce1;
-  --light-text: #1b1f24;
-  --light-muted: #5a6472;
-  --light-accent: #2f6feb;
-  --light-accent-text: #ffffff;
-  --light-warn-bg: #fff6e0;
-  --light-warn-border: #e0b44a;
-  --light-warn-text: #6b4a00;
-
-  --dark-bg: #14171c;
-  --dark-panel: #1c2027;
-  --dark-border: #2e3540;
-  --dark-text: #e8eaed;
-  --dark-muted: #a0a8b4;
-  --dark-accent: #7aa2f7;
-  --dark-accent-text: #0d1117;
-  --dark-warn-bg: #2a2417;
-  --dark-warn-border: #8a6d2a;
-  --dark-warn-text: #f1d9a0;
-}
 
 * {
   box-sizing: border-box;
@@ -45,49 +17,28 @@ body {
 }
 
 body {
-  font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.5;
 }
 
 .app-shell {
-  --bg: var(--light-bg);
-  --panel: var(--light-panel);
-  --border: var(--light-border);
-  --text: var(--light-text);
-  --muted: var(--light-muted);
-  --accent: var(--light-accent);
-  --accent-text: var(--light-accent-text);
-  --warn-bg: var(--light-warn-bg);
-  --warn-border: var(--light-warn-border);
-  --warn-text: var(--light-warn-text);
+  --bg: var(--colorNeutralBackground3);
+  --panel: var(--colorNeutralBackground1);
+  --border: var(--colorNeutralStroke1);
+  --text: var(--colorNeutralForeground1);
+  --muted: var(--colorNeutralForeground3);
+  --accent: var(--colorBrandBackground);
+  --accent-text: var(--colorNeutralForegroundOnBrand);
+  --warn-bg: var(--colorPaletteYellowBackground1);
+  --warn-border: var(--colorPaletteYellowBorder1);
+  --warn-text: var(--colorPaletteYellowForeground1);
 
-  display: grid;
-  grid-template-rows: auto 1fr;
-  grid-template-columns: 15rem 1fr;
-  grid-template-areas:
-    "header header"
-    "nav main";
   min-height: 100vh;
   background: var(--bg);
   color: var(--text);
 }
 
-.app-shell.dark {
-  --bg: var(--dark-bg);
-  --panel: var(--dark-panel);
-  --border: var(--dark-border);
-  --text: var(--dark-text);
-  --muted: var(--dark-muted);
-  --accent: var(--dark-accent);
-  --accent-text: var(--dark-accent-text);
-  --warn-bg: var(--dark-warn-bg);
-  --warn-border: var(--dark-warn-border);
-  --warn-text: var(--dark-warn-text);
-}
-
 .app-header {
-  grid-area: header;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -104,64 +55,40 @@ body {
   letter-spacing: 0.01em;
 }
 
-.theme-toggle {
-  font: inherit;
-  font-size: 0.85rem;
-  padding: 0.35rem 0.8rem;
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  cursor: pointer;
+.app-layout-row {
+  display: flex;
+  flex-wrap: nowrap;
+  flex-direction: row;
+  width: 100%;
+  min-height: 100vh;
 }
 
-.theme-toggle:hover {
-  border-color: var(--accent);
-}
-
-.app-nav {
-  grid-area: nav;
-  padding: 1rem 0.75rem;
+.app-sider {
+  width: 260px;
   background: var(--panel);
   border-right: 1px solid var(--border);
 }
 
-.app-nav ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* The selector names an emitted class (the coverage census needs a rule for
+ * it); app rules already win the tie against Thaw's, so the declaration is
+ * redundant. */
+.app-sider .app-nav-drawer {
+  width: 100%;
+}
+
+.app-body {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
 }
 
-.app-nav li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.app-nav a {
-  flex: 1;
-  padding: 0.4rem 0.6rem;
-  color: var(--text);
-  text-decoration: none;
-  border-radius: 0.375rem;
-}
-
-.app-nav a:hover {
-  background: var(--bg);
-  color: var(--accent);
-}
-
-/* The active route. The inset bar is a shape signal, so the state survives
- * monochrome; leptos' `A` emits `aria-current="page"` on the current route. */
-.app-nav a[aria-current="page"] {
-  background: var(--bg);
-  color: var(--accent);
+.app-brand {
+  display: block;
+  padding: 1rem 1rem 0.5rem;
+  font-size: 1.05rem;
   font-weight: 600;
-  box-shadow: inset 2px 0 0 var(--accent);
+  letter-spacing: 0.01em;
 }
 
 .nav-badge {
@@ -175,7 +102,7 @@ body {
 }
 
 .app-main {
-  grid-area: main;
+  flex: 1;
   padding: 1.5rem;
 }
 
@@ -250,7 +177,7 @@ body {
 }
 
 .planned-notice code {
-  font-family: var(--font-mono);
+  font-family: var(--fontFamilyMonospace);
   font-size: 0.85rem;
 }
 
@@ -347,7 +274,7 @@ body {
 }
 
 .skill-id {
-  font-family: var(--font-mono);
+  font-family: var(--fontFamilyMonospace);
   font-size: 0.85rem;
 }
 
@@ -382,14 +309,14 @@ body {
 }
 
 .skill-form-id {
-  font-family: var(--font-mono);
+  font-family: var(--fontFamilyMonospace);
   font-size: 0.85rem;
   color: var(--muted);
 }
 
 .skill-form textarea {
   min-height: 8rem;
-  font-family: var(--font-mono);
+  font-family: var(--fontFamilyMonospace);
   resize: vertical;
 }
 
@@ -410,7 +337,7 @@ body {
 .export-preview {
   margin: 0.5rem 0;
   padding: 0.5rem 0.75rem;
-  font-family: var(--font-mono);
+  font-family: var(--fontFamilyMonospace);
   font-size: 0.9rem;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -423,13 +350,13 @@ body {
 
 .import-input {
   min-height: 8rem;
-  font-family: var(--font-mono);
+  font-family: var(--fontFamilyMonospace);
   resize: vertical;
 }
 
 .import-preview {
   margin-top: 0.5rem;
-  font-family: var(--font-mono);
+  font-family: var(--fontFamilyMonospace);
 }
 
 .import-unsupported {
@@ -442,31 +369,16 @@ body {
 }
 
 @media (max-width: 640px) {
-  .app-shell {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      "header"
-      "nav"
-      "main";
+  .app-layout-row {
+    flex-direction: column;
+    min-height: 0;
   }
 
-  .app-nav {
-    padding: 0.5rem 0.75rem;
+  .app-sider {
+    width: 100%;
+    max-height: 40vh;
     border-right: 0;
     border-bottom: 1px solid var(--border);
-  }
-
-  /* A wrapping strip, not a ten-item stack: at 486 CSS px the stack was the
-   * whole first viewport. No new Rust state, no hidden destinations. */
-  .app-nav ul {
-    flex-flow: row wrap;
-    gap: 0.25rem;
-  }
-
-  .app-nav a {
-    flex: 0 1 auto;
-    padding: 0.3rem 0.5rem;
-    font-size: 0.9rem;
   }
 }
 
@@ -756,7 +668,7 @@ body {
 
 .tag-code,
 .tag-path {
-  font-family: var(--font-mono);
+  font-family: var(--fontFamilyMonospace);
   font-size: 0.85rem;
   overflow-wrap: anywhere;
 }
@@ -1152,7 +1064,7 @@ body {
 }
 
 .stats-generated {
-  font-family: var(--font-mono);
+  font-family: var(--fontFamilyMonospace);
   font-size: 1rem;
 }
 
@@ -1251,7 +1163,7 @@ body {
 
 .stats-hash {
   color: var(--muted);
-  font-family: var(--font-mono);
+  font-family: var(--fontFamilyMonospace);
   font-size: 0.8rem;
 }
 
@@ -1382,7 +1294,7 @@ body {
   grid-row: 1;
   grid-column: 1;
   color: var(--muted);
-  font-family: var(--font-mono);
+  font-family: var(--fontFamilyMonospace);
   font-size: 0.8rem;
   overflow-wrap: anywhere;
 }
@@ -1521,7 +1433,7 @@ body {
 .planned-endpoints {
   margin: 0.25rem 0 0;
   padding-left: 1.25rem;
-  font-family: var(--font-mono);
+  font-family: var(--fontFamilyMonospace);
   font-size: 0.85rem;
 }
 
