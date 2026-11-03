@@ -32,17 +32,25 @@
 //!
 //! # Order and convergence
 //!
-//! Milestone ids are only knowable while the milestones exist, so the facts
-//! leg runs FIRST and the episodic leg second. A crash between the batches
-//! leaves the episodic objects intact and the facts gone; a re-run recomputes
-//! the same ids and finishes. Per-database atomicity is the strongest
+//! The facts leg runs FIRST and the episodic leg second, both under the same
+//! locks. A crash between the batches leaves the episodic objects intact and
+//! the facts gone; a re-run finishes. Per-database atomicity is the strongest
 //! promise across two files.
+//!
+//! The episodic leg now SCRUBS the purged contributor's own summary text out
+//! of each milestone instead of deleting the milestone row, so the milestones
+//! (and their merged recaps) survive. Their promoted facts must survive with
+//! them: `purge_sources` is called with an EMPTY milestone-id list, because
+//! deleting a surviving milestone's facts would destroy co-contributors'
+//! durable knowledge (D12). Facts carrying a session/agent provenance row of
+//! the purged triple are still erased by the triple arm.
 //!
 //! # What is never erased
 //!
-//! The legacy tier-1 `memories` shard. Every success line carries a
-//! mandatory, non-empty `not_erased` array naming it, so `purge.completed`
-//! is never readable as a complete erasure.
+//! The legacy tier-1 `memories` shard, and the merged milestone recap with its
+//! embedding (the scrub is text-only). Every success line carries a mandatory,
+//! non-empty `not_erased` array naming both tiers, so `purge.completed` is
+//! never readable as a complete erasure.
 //!
 //! # Exit codes
 //!
@@ -111,10 +119,20 @@ pub struct NotErasedTier {
 }
 
 /// The single source of `not_erased` (the CLI serializes THIS constant).
-pub const NOT_ERASED: [NotErasedTier; 1] = [NotErasedTier {
-    tier: "memories-shard",
-    reason: "no per-session provenance; Phase 4",
-}];
+///
+/// A survivor the report does not name is the same lie one level up: the
+/// contributor scrub keeps the milestone row, its merged summary and its
+/// embedding, so both tiers are named.
+pub const NOT_ERASED: [NotErasedTier; 2] = [
+    NotErasedTier {
+        tier: "memories-shard",
+        reason: "no per-session provenance; Phase 4",
+    },
+    NotErasedTier {
+        tier: "milestones-recap",
+        reason: "the merged milestone summary and its embedding survive a contributor scrub; no re-summarization, no re-embed (owner ruling 2026-10-21)",
+    },
+];
 
 /// What one purge did, plus what it deliberately left.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -133,8 +151,9 @@ impl PurgeReport {
         self.episodic.is_empty() && self.facts.is_empty()
     }
 
-    /// The tiers this purge did NOT erase (always the one shard entry, so a
-    /// success is never a complete-erasure claim).
+    /// The tiers this purge did NOT erase (always the two survivor entries —
+    /// the shard and the merged milestone recap — so a success is never a
+    /// complete-erasure claim).
     pub fn not_erased(&self) -> &'static [NotErasedTier] {
         &NOT_ERASED
     }
@@ -241,14 +260,7 @@ async fn erase_locked(
     scope: &SessionScope,
     on_leg: &dyn Fn(&'static str),
 ) -> Result<PurgeReport, PurgeError> {
-    // 3. The read-only pre-scan, UNDER both locks.
-    let milestone_ids = store
-        .milestone_ids_for_session(scope)
-        .await
-        .map_err(|error| PurgeError::Failed(error.to_string()))?;
-
-    // 4. Facts FIRST (their milestone ids are only knowable while the
-    // milestones exist), then episodic.
+    // 3. Facts FIRST, then episodic (both under both locks).
     //
     // M22 decides the facts leg HERE, under both locks: a database that a
     // consolidation created after the caller asked for the purge is still
@@ -274,7 +286,10 @@ async fn erase_locked(
                     &scope.project_id,
                     &scope.session_id,
                     &scope.agent_id,
-                    &milestone_ids,
+                    // D12: the milestones SURVIVE (contributor scrub), so
+                    // their promoted facts must survive too — passing the
+                    // pre-scan ids would delete co-contributors' knowledge.
+                    &[],
                 )
                 .await
                 .map_err(|error| PurgeError::Failed(error.to_string()))?;
@@ -416,7 +431,7 @@ fn print_completed(request: &PurgeRequest, report: &PurgeReport) {
             "raw_context": report.episodic.raw_context,
             "segments": report.episodic.segments,
             "inbox_rows": report.episodic.inbox_rows,
-            "milestones": report.episodic.milestones,
+            "milestones_scrubbed": report.episodic.milestones_scrubbed,
             "facts": report.facts.facts,
             "fact_sources": report.facts.fact_sources,
         },

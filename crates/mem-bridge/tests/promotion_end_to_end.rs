@@ -832,7 +832,7 @@ async fn test_purge_after_the_full_pipeline_erases_the_session_and_its_facts() {
     assert_eq!(report.episodic.session_rows, 0, "the row was already gone");
     assert_eq!(report.episodic.raw_context, 1);
     assert_eq!(report.episodic.segments, segment_count);
-    assert_eq!(report.episodic.milestones, 1);
+    assert_eq!(report.episodic.milestones_scrubbed, 1);
     assert_eq!(report.facts.facts, 2);
     assert_eq!(report.facts.fact_sources, 2);
     assert!(!report.not_erased().is_empty());
@@ -844,12 +844,21 @@ async fn test_purge_after_the_full_pipeline_erases_the_session_and_its_facts() {
             .expect("raw")
             .is_none()
     );
+    // The milestone SURVIVES the contributor scrub (issue 32 / D3): the row,
+    // its merged summary and its embedding are kept; only the purged
+    // contributor's own summary text is emptied.
+    let milestones = e2e
+        .store
+        .list_milestones(E2E_PROJECT, 10)
+        .await
+        .expect("milestones");
+    assert_eq!(milestones.len(), 1, "the milestone row survives");
     assert!(
-        e2e.store
-            .list_milestones(E2E_PROJECT, 10)
-            .await
-            .expect("milestones")
-            .is_empty()
+        milestones[0]
+            .contributors
+            .iter()
+            .all(|contributor| contributor.summary.is_empty()),
+        "the purged contributor's own text is erased"
     );
     assert!(
         e2e.facts
@@ -899,7 +908,9 @@ async fn test_purged_milestone_summary_is_only_restorable_by_explicit_recapture(
         ]
     );
 
-    // Purge A: the multi-source facts and the shared milestone go with it.
+    // Purge A: the multi-source facts go (their provenance names A), and the
+    // shared milestone's A-contributor text is scrubbed — the row and its
+    // merged summary survive (D3/D6).
     mem_bridge::purge::purge_session(
         &e2e.store,
         Some(&e2e.facts),
@@ -914,12 +925,30 @@ async fn test_purged_milestone_summary_is_only_restorable_by_explicit_recapture(
             .expect("facts")
             .is_empty()
     );
+    let milestones = e2e
+        .store
+        .list_milestones(E2E_PROJECT, 10)
+        .await
+        .expect("milestones");
+    assert_eq!(milestones.len(), 1, "the shared milestone survives");
+    let contributors = &milestones[0].contributors;
     assert!(
-        e2e.store
-            .list_milestones(E2E_PROJECT, 10)
-            .await
-            .expect("milestones")
-            .is_empty()
+        contributors
+            .iter()
+            .find(|contributor| contributor.session_id == "session-a")
+            .expect("A's contributor entry survives as attribution")
+            .summary
+            .is_empty(),
+        "A's own text is scrubbed"
+    );
+    assert!(
+        !contributors
+            .iter()
+            .find(|contributor| contributor.session_id == "session-b")
+            .expect("B's contributor entry survives")
+            .summary
+            .is_empty(),
+        "B's text is never rewritten"
     );
 
     // Nothing self-heals: B has no session row (consolidation consumed it),

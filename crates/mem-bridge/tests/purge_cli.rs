@@ -196,7 +196,7 @@ async fn test_purge_report_merges_the_two_stores() {
     assert_eq!(report.episodic.raw_context, 1);
     assert_eq!(report.episodic.segments, 1);
     assert_eq!(report.episodic.inbox_rows, 1);
-    assert_eq!(report.episodic.milestones, 1);
+    assert_eq!(report.episodic.milestones_scrubbed, 1);
     assert_eq!(report.facts.facts, 1);
     assert_eq!(report.facts.fact_sources, 1);
     assert_eq!(report.facts_leg, mem_bridge::purge::FactsLeg::Ran);
@@ -228,6 +228,65 @@ async fn test_purge_report_merges_the_two_stores() {
 }
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_purge_keeps_a_fact_sourced_only_by_a_surviving_milestone() {
+    // D12's discriminator: the milestones SURVIVE (as a scrub), so their
+    // promoted facts must survive too. The fact's only provenance row names
+    // the purged milestone but a DIFFERENT triple (an empty session/agent is
+    // not a valid provenance row), so only the milestone arm could erase it.
+    let seeded = seed(TestDir::new("w71-purge-milestone-fact"), false).await;
+    let facts = Arc::new(FactsStore::new(store_config(&seeded.dir)));
+    facts.ready().await.expect("facts ready");
+    facts
+        .insert(FactInput {
+            project_id: PROJECT.to_string(),
+            tier: mem_core::tier::MemoryTier::Semantic,
+            content: "knowledge a co-contributor's milestone produced".to_string(),
+            key: None,
+            source_ref: Some(MILESTONE.to_string()),
+            confidence: None,
+            metadata: None,
+            embedding: None,
+            model_id: None,
+            sources: vec![FactSource {
+                project_id: PROJECT.to_string(),
+                session_id: "session-other".to_string(),
+                agent_id: AGENT.to_string(),
+                milestone_id: MILESTONE.to_string(),
+            }],
+        })
+        .await
+        .expect("insert milestone-sourced fact");
+
+    let report = mem_bridge::purge::purge_session(&seeded.store, Some(&facts), &request())
+        .await
+        .expect("purge");
+    assert_eq!(
+        report.facts.facts, 0,
+        "a fact sourced only through the surviving milestone is kept"
+    );
+    assert_eq!(report.facts.fact_sources, 0);
+    assert_eq!(report.facts_leg, mem_bridge::purge::FactsLeg::Ran);
+    assert_eq!(
+        facts.count(PROJECT).await.expect("facts count"),
+        1,
+        "the co-contributor's durable knowledge survives the purge"
+    );
+
+    // The milestone that carries it survived as a scrub, which is WHY the
+    // fact is kept.
+    let milestones = seeded
+        .store
+        .list_milestones(PROJECT, 10)
+        .await
+        .expect("list");
+    assert_eq!(milestones.len(), 1, "the milestone row survives");
+    assert_eq!(
+        milestones[0].contributors[0].summary, "",
+        "the purged contributor's text was scrubbed"
+    );
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_purge_report_always_names_the_surviving_tier() {
     // The accessor is the subject: the CLI JSON is built FROM it, so the two
     // cannot drift. `NOT_ERASED` is the single source in mem-bridge.
@@ -237,12 +296,14 @@ async fn test_purge_report_always_names_the_surviving_tier() {
         !not_erased.is_empty(),
         "not_erased is mandatory and non-empty"
     );
-    assert_eq!(not_erased.len(), 1, "exactly one surviving tier");
+    assert_eq!(not_erased.len(), 2, "exactly two surviving tiers");
     assert_eq!(not_erased[0].tier, "memories-shard");
+    assert_eq!(not_erased[1].tier, "milestones-recap");
     assert!(!not_erased[0].reason.is_empty(), "the reason is non-empty");
+    assert!(!not_erased[1].reason.is_empty(), "the reason is non-empty");
     assert_eq!(
         mem_bridge::purge::NOT_ERASED,
-        [not_erased[0]],
+        [not_erased[0], not_erased[1]],
         "the accessor returns the constant"
     );
 
@@ -252,6 +313,7 @@ async fn test_purge_report_always_names_the_surviving_tier() {
         .await
         .expect("purge");
     assert_eq!(report.not_erased()[0].tier, "memories-shard");
+    assert_eq!(report.not_erased()[1].tier, "milestones-recap");
 }
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
@@ -318,7 +380,7 @@ async fn test_interrupted_purge_converges_on_retry() {
         .await
         .expect("full purge");
     assert_eq!(report.episodic.raw_context, 1);
-    assert_eq!(report.episodic.milestones, 1);
+    assert_eq!(report.episodic.milestones_scrubbed, 1);
     assert!(report.facts.is_empty(), "the facts were already gone");
 
     // A third call is a total no-op.
@@ -617,14 +679,30 @@ async fn assert_nothing_left(store: &Arc<EpisodicStore>, facts: Option<&Arc<Fact
         0,
         "no session row survives"
     );
+    let milestone_ids = store
+        .milestone_ids_for_session(&scope)
+        .await
+        .expect("milestones");
     assert!(
-        store
-            .milestone_ids_for_session(&scope)
-            .await
-            .expect("milestones")
-            .is_empty(),
-        "no milestone naming the triple survives"
+        !milestone_ids.is_empty(),
+        "the milestone's attribution survives (a scrub, never a delete)"
     );
+    for milestone in store
+        .list_milestones(PROJECT, 100)
+        .await
+        .expect("list milestones")
+        .iter()
+        .filter(|milestone| milestone_ids.contains(&milestone.id))
+    {
+        for contributor in milestone.contributors.iter().filter(|contributor| {
+            contributor.session_id == SESSION && contributor.agent_id == AGENT
+        }) {
+            assert_eq!(
+                contributor.summary, "",
+                "the purged contributor's own text is erased"
+            );
+        }
+    }
     if let Some(facts) = facts {
         assert_eq!(
             facts.count(PROJECT).await.expect("facts count"),
@@ -812,7 +890,7 @@ async fn test_purge_raced_against_a_consolidator_leaves_nothing_behind() {
     assert_eq!(report.episodic.segments, 1);
     assert_eq!(report.episodic.session_rows, 1);
     assert_eq!(report.episodic.inbox_rows, 1);
-    assert_eq!(report.episodic.milestones, 1);
+    assert_eq!(report.episodic.milestones_scrubbed, 1);
     assert_nothing_left(&store, Some(&facts)).await;
 
     // The racing consolidator either lost the gate (busy) or ran AFTER the
@@ -1115,7 +1193,7 @@ async fn test_purge_session_process_exits_zero_and_reports_counts() {
     assert_eq!(event["project_id"], PROJECT);
     assert_eq!(event["counts"]["session_rows"], 1);
     assert_eq!(event["counts"]["raw_context"], 1);
-    assert_eq!(event["counts"]["milestones"], 1);
+    assert_eq!(event["counts"]["milestones_scrubbed"], 1);
     assert_eq!(event["counts"]["facts"], 1);
     assert_eq!(event["counts"]["fact_sources"], 1);
     assert_eq!(event["facts_leg"], "ran");
@@ -1123,13 +1201,17 @@ async fn test_purge_session_process_exits_zero_and_reports_counts() {
         .as_array()
         .expect("not_erased is an array");
     assert!(!not_erased.is_empty(), "not_erased is mandatory");
+    assert_eq!(not_erased.len(), 2, "exactly two surviving tiers");
     assert_eq!(not_erased[0]["tier"], "memories-shard");
-    assert!(
-        not_erased[0]["reason"]
-            .as_str()
-            .is_some_and(|reason| !reason.is_empty()),
-        "the reason is non-empty"
-    );
+    assert_eq!(not_erased[1]["tier"], "milestones-recap");
+    for tier in not_erased {
+        assert!(
+            tier["reason"]
+                .as_str()
+                .is_some_and(|reason| !reason.is_empty()),
+            "every reason is non-empty"
+        );
+    }
 
     // Rows really gone.
     let store = episodic_store(&seeded.dir).await;
@@ -1344,8 +1426,9 @@ async fn test_purge_does_not_touch_the_vault_directories() {
     let not_erased = event["not_erased"]
         .as_array()
         .expect("not_erased is an array");
-    assert_eq!(not_erased.len(), 1, "exactly one surviving tier");
+    assert_eq!(not_erased.len(), 2, "exactly two surviving tiers");
     assert_eq!(not_erased[0]["tier"], "memories-shard");
+    assert_eq!(not_erased[1]["tier"], "milestones-recap");
 
     assert_eq!(
         std::fs::read(vault_dir.join("vault.db")).expect("read back the vault-shaped file"),
