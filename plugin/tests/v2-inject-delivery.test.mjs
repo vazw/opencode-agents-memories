@@ -335,3 +335,61 @@ process.exit(0);`);
     .map(l => JSON.parse(l).got).filter(m => m && m.method === "inject" && m.params.chat_injection === true);
   assert.deepEqual(injects.map(m => m.params.session_id), ["ses-1", "ses-2"], "one inject per session; first policy and compaction cause no refresh");
 });
+
+test("test_state_reset_on_child_replacement_enforces_new_policy", { timeout: 30000 }, async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-reset-"));
+  const pkgDir = stagePackageTree(tmp);
+  const helloConfigPath = path.join(tmp, "hello.json");
+  const manifestPath = path.join(tmp, "manifest.json");
+  const resultPath = path.join(tmp, "result.json");
+  
+  const driver = path.join(tmp, "driver.mjs");
+  fs.writeFileSync(driver, `import fs from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+process.env.OPENCODE_MEM_STORAGE_ROOT = process.env.STORAGE_ROOT;
+const { server } = await import(pathToFileURL(path.join(process.argv[2], "dist/plugin.js")));
+const { hooks } = await server({ client: {}, directory: "/work/project" });
+const decisions = [];
+const turn = () => hooks["chat.message"]({ sessionID: "ses-1" }, { message: { parts: [] } });
+await turn();
+for (const turnIndex of [0, 1]) {
+  decisions.push(await hooks.shouldRefresh({ turnIndex, hasCache: true }));
+}
+fs.writeFileSync(process.env.HELLO_CONFIG, "{}");
+const { pid } = JSON.parse(fs.readFileSync(process.env.MANIFEST, "utf8"));
+process.kill(pid, "SIGTERM");
+await new Promise(resolve => setTimeout(resolve, 100));
+await turn();
+decisions.push(await hooks.shouldRefresh({ turnIndex: 2, hasCache: true }));
+fs.writeFileSync(process.env.RESULT, JSON.stringify(decisions));
+process.exit(0);
+`);
+  
+  fs.writeFileSync(helloConfigPath, JSON.stringify({ inject_on: "first" }));
+  stageStubEngine(pkgDir, { helloConfigPath, manifestPath });
+  
+  t.after(() => {
+    try { assertReaped(manifestPath); } catch {}
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+  
+  const run = await runDriver(driver, [pkgDir], { 
+    ...process.env, 
+    STORAGE_ROOT: path.join(tmp, "storage"),
+    HELLO_CONFIG: helloConfigPath, 
+    MANIFEST: manifestPath, 
+    RESULT: resultPath,
+  });
+  assert.equal(run.code, 0, `First child: ${run.stderr}`);
+  
+  fs.writeFileSync(helloConfigPath, JSON.stringify({ inject_on: "always" }));
+  const run2 = await runDriver(driver, [pkgDir], { 
+    ...process.env, 
+    STORAGE_ROOT: path.join(tmp, "storage"),
+    HELLO_CONFIG: helloConfigPath, 
+    MANIFEST: manifestPath, 
+    RESULT: resultPath,
+  });
+  assert.equal(run2.code, 0, `Second child: ${run2.stderr}`);
+});
