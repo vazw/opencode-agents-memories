@@ -233,3 +233,37 @@ test("test_v2_memory_context_clears_the_injection_after_a_compaction", { timeout
 
   await cleanup();
 });
+
+test("test_v2_memory_context_does_not_leak_stale_cache_across_compaction", { timeout: 5000 }, async () => {
+  const { registerV2Adapter } = await import(ADAPTER_MODULE);
+  const harness = createHarness();
+  let injected = 0;
+  const legacy = {
+    "chat.message": async (inp, out) => {
+      injected++;
+      out.message.parts.push({ type: "text", text: `BLOCK-${injected}`, synthetic: true });
+    },
+    event: async () => {},
+  };
+  // first mode: refresh on turn 0, retain cache on later turns until cleanup.
+  Object.defineProperty(legacy, "shouldRefresh", {
+    enumerable: false,
+    value: ({ turnIndex, hasCache }) => !hasCache || turnIndex === 0,
+  });
+
+  const cleanup = await registerV2Adapter(harness.ctx, legacy);
+
+  // First prompt (turn 0): inject BLOCK-1
+  await harness.hooks.get("prompt")({ sessionID: "ses-1", messageID: "m1", prompt: { text: "first" } });
+  assert.deepEqual(await contextOf(harness.hooks, "ses-1"), ["BLOCK-1"]);
+
+  // Compaction event: must NOT delete cache (same-turn preservation per issue 124/AC-8).
+  await harness.deliver({ type: "session.compaction.ended", location: { directory: "/workspace/project" }, properties: { sessionID: "ses-1" } });
+
+  // Second prompt (turn 1, first mode with cache): does NOT refresh, retains BLOCK-1.
+  await harness.hooks.get("prompt")({ sessionID: "ses-1", messageID: "m2", prompt: { text: "second" } });
+  assert.equal(injected, 1, "compaction does not trigger refresh; turn 1 in first mode keeps cache");
+  assert.deepEqual(await contextOf(harness.hooks, "ses-1"), ["BLOCK-1"], "context persists after compaction same-turn");
+
+  await cleanup();
+});
