@@ -895,6 +895,8 @@ fn episodic_failure(error: EpisodicError) -> PortError {
             PortError::Invalid(format!("invalid {field}: {message}"))
         }
         EpisodicError::NotFound { .. } => PortError::NotFound,
+        // D10: the in-process gate is busy — a retryable 409, never a 500.
+        EpisodicError::Busy => PortError::Busy,
         other => PortError::Store(other.to_string()),
     }
 }
@@ -903,10 +905,13 @@ fn episodic_failure(error: EpisodicError) -> PortError {
 /// layer (D-13).
 ///
 /// The store owns every rule that matters here: the timeline is project-scoped
-/// and newest-first, the soft delete is project-scoped (wrong-project, unknown
-/// and already-deleted all return `false` — no existence leak) and it marks
-/// children orphaned in the same `BatchMode::Write` batch (D-12). The adapter
-/// only translates: `SessionSummary` → JSON and `false` → [`PortError::NotFound`].
+/// and newest-first, the delete is a project-scoped HARD delete (issue 32: the
+/// row, its text, its embedding, its raw context, its segments and its inbox
+/// payloads are erased; children are orphaned; wrong-project, unknown and
+/// already-tombstoned all return `false` — no existence leak), and it refuses
+/// with [`EpisodicError::Busy`] while a consolidation or purge holds the
+/// in-process write gate (mapped to the `409`). The adapter only translates:
+/// `SessionSummary` → JSON and `false` → [`PortError::NotFound`].
 pub struct EpisodicSessionPort {
     store: Arc<EpisodicStore>,
 }
@@ -969,13 +974,15 @@ impl SessionPort for EpisodicSessionPort {
         reject_empty_id(session_id)?;
         match self
             .store
-            .soft_delete_session(project_id, session_id)
+            .hard_delete_session(project_id, session_id)
             .await
             .map_err(episodic_failure)?
         {
             true => Ok(()),
-            // Unknown, wrong-project and already-deleted are one answer: the
-            // handler's fixed `404 "Session not found"` (no existence leak).
+            // Unknown, wrong-project and already-tombstoned are one answer:
+            // the handler's fixed `404 "Session not found"` (no existence
+            // leak). Legacy tombstones are cleared by the CLI purge, never
+            // from REST (D9).
             false => Err(PortError::NotFound),
         }
     }

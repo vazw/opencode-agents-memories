@@ -396,6 +396,10 @@ pub enum PortError {
     /// command — never content and never a path).
     #[error("{0}")]
     ModelMismatch(Box<ShardModelMismatch>),
+    /// Another consolidation or purge holds the episodic write gate for this
+    /// storage root (D10): answered `409`. Carries no path and no content.
+    #[error("another consolidation or purge is running on this storage root")]
+    Busy,
 }
 
 /// The memory store seam.

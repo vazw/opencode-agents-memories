@@ -626,6 +626,11 @@ pub fn port_failure(endpoint: &'static str, error: ports::PortError) -> Response
         // W3: the typed model refusal is answered 409 with its own Display
         // (the operator remedy rides in the message).
         ports::PortError::ModelMismatch(report) => envelope::conflict(&report.to_string()),
+        // D10: a held episodic write gate is a retryable conflict, not a
+        // fault — the message is fixed and carries no detail.
+        ports::PortError::Busy => {
+            envelope::conflict("another consolidation or purge is running on this storage root")
+        }
         // MEASURED status quo (2026-10-27), not an endorsement: `NotFound` and
         // `Invalid` are pre-empted by every handler that documents 404/400/200
         // (sessions, skills, maintenance, profile), and on the generic path

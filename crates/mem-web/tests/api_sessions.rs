@@ -33,7 +33,7 @@ use mem_web::api::ports::ApiServices;
 use mem_web::api::store_adapter::episodic_session_port;
 use mem_web::server::build_router;
 use mem_web::web_auth::WebAuth;
-use serde_json::{Value, json};
+use serde_json::{Value as JsonValue, json};
 
 use common::{RawResponse, TempDir, api_request, app_state_with_api};
 
@@ -193,7 +193,7 @@ impl Fixture {
 }
 
 /// The parsed JSON body of a response.
-fn body_json(response: &RawResponse) -> Value {
+fn body_json(response: &RawResponse) -> JsonValue {
     serde_json::from_str(&response.body_string()).unwrap_or_else(|error| {
         panic!(
             "the response body must be JSON (status {}): {error} / {:?}",
@@ -204,7 +204,7 @@ fn body_json(response: &RawResponse) -> Value {
 }
 
 /// The `data` array of a success envelope.
-fn data_array(response: &RawResponse) -> Vec<Value> {
+fn data_array(response: &RawResponse) -> Vec<JsonValue> {
     let body = body_json(response);
     assert_eq!(
         body["success"],
@@ -548,9 +548,107 @@ async fn test_sessions_delete_is_orphan_safe() {
     );
     assert_eq!(
         only["parentSessionId"],
-        json!(parent),
-        "the write-time flag, not a read-time null, marks the severed link"
+        JsonValue::Null,
+        "the FK `ON DELETE SET NULL` severs the link on the hard delete; \
+         `orphaned` is the surviving marker (D-12)"
     );
+}
+
+/// Issue 32: a REST delete is a HARD delete — the row leaves the store.
+///
+/// The direct `SELECT` is the measurement; the API's `200` would also pass on
+/// a tombstone.
+#[tokio::test]
+async fn test_sessions_delete_erases_the_row_from_the_store() {
+    let fixture = Fixture::new().await;
+    let row = fixture
+        .seed(
+            PROJECT,
+            "demo-session",
+            "agent-parent",
+            "Planner",
+            "Parent session",
+            None,
+            T0,
+        )
+        .await;
+
+    let response = api_request(
+        fixture.router(),
+        "DELETE",
+        &format!("/api/projects/{PROJECT}/sessions/{row}"),
+        Some(TOKEN),
+        None,
+    )
+    .await;
+    assert_eq!(response.status, 200, "body: {}", response.body_string());
+
+    let db = fixture.store.ready().await.expect("the store is open");
+    let surviving = mem_store::db::query_one(
+        db.as_ref(),
+        "SELECT id FROM agent_sessions WHERE id = ?",
+        vec![mem_store::db::Value::Text(row.clone())],
+    )
+    .await
+    .expect("select the row");
+    assert!(surviving.is_none(), "the row is erased, not tombstoned");
+}
+
+/// Issue 32: while a consolidation/purge holds the in-process gate, the
+/// delete answers `409` (D10) and erases nothing.
+#[tokio::test]
+async fn test_sessions_delete_answers_409_while_the_episodic_gate_is_held() {
+    let fixture = Fixture::new().await;
+    let row = fixture
+        .seed(
+            PROJECT,
+            "demo-session",
+            "agent-parent",
+            "Planner",
+            "Parent session",
+            None,
+            T0,
+        )
+        .await;
+
+    let guard =
+        mem_episodic::gate::try_acquire(fixture.store.storage_path()).expect("the gate is free");
+    let response = api_request(
+        fixture.router(),
+        "DELETE",
+        &format!("/api/projects/{PROJECT}/sessions/{row}"),
+        Some(TOKEN),
+        None,
+    )
+    .await;
+    assert_eq!(
+        response.status,
+        409,
+        "a held gate answers 409: {}",
+        response.body_string()
+    );
+    let body = body_json(&response);
+    assert_eq!(body["success"], json!(false));
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|message| !message.is_empty()),
+        "the 409 carries a fixed message: {}",
+        response.body_string()
+    );
+
+    // The row is still listed: the refusal wrote nothing.
+    let list = api_request(
+        fixture.router(),
+        "GET",
+        &format!("/api/projects/{PROJECT}/sessions"),
+        Some(TOKEN),
+        None,
+    )
+    .await;
+    assert_eq!(data_array(&list).len(), 1, "the row survives the refusal");
+
+    drop(guard);
 }
 
 // ---------------------------------------------------------------------------
