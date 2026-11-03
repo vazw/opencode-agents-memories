@@ -58,7 +58,6 @@ async fn fixture(name: &str) -> Fixture {
 fn params(include: Value) -> InjectParams {
     InjectParams {
         project_id: Some("/srv/proj".to_string()),
-        agent_id: None,
         token_budget: Some(2_000),
         include: Some(include),
         user_id: None,

@@ -132,7 +132,6 @@ impl std::error::Error for InjectError {}
 #[serde(crate = "mem_store::serde", default)]
 pub struct InjectParams {
     pub project_id: Option<String>,
-    pub agent_id: Option<String>,
     pub token_budget: Option<u64>,
     /// Either the frozen `["summary","metadata"]` array form or the
     /// additive options object `{recent_count?, query?}`.

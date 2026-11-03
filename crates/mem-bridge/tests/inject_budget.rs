@@ -20,7 +20,6 @@ const HASH: &str = "0123456789abcdef";
 fn params(project_id: &str, include: mem_store::serde_json::Value) -> InjectParams {
     InjectParams {
         project_id: Some(project_id.to_string()),
-        agent_id: None,
         token_budget: Some(2_000),
         include: Some(include),
         user_id: None,
@@ -390,7 +389,6 @@ async fn test_inject_missing_project_returns_empty_block_without_shard_query() {
     let (dir, _store, _shards, service) = fixture("absent").await;
     let missing = InjectParams {
         project_id: None,
-        agent_id: None,
         token_budget: None,
         include: None,
         user_id: None,

@@ -360,7 +360,6 @@ async fn test_capture_metadata_json_survives_quotes_in_session_id() {
     let result = inject
         .assemble(&InjectParams {
             project_id: Some("/srv/proj".to_string()),
-            agent_id: None,
             token_budget: Some(2_000),
             include: None,
             user_id: None,

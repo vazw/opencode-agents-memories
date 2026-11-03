@@ -60,7 +60,6 @@ async fn test_older_sessions_carry_the_similarity_attribute() {
     let result = service
         .assemble(&InjectParams {
             project_id: Some("/srv/proj".to_string()),
-            agent_id: None,
             token_budget: Some(2_000),
             include: Some(json!({ "recent_count": 1, "query": "zzz" })),
             user_id: None,

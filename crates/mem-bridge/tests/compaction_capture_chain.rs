@@ -71,7 +71,6 @@ fn fixture_s() -> Vec<SeedRow<'static>> {
 fn params(session_id: Option<&str>, compaction: &str) -> InjectParams {
     InjectParams {
         project_id: Some(PROJECT.to_string()),
-        agent_id: None,
         token_budget: None,
         include: Some(json!({ "compaction": compaction })),
         user_id: None,
@@ -82,7 +81,6 @@ fn params(session_id: Option<&str>, compaction: &str) -> InjectParams {
 fn restore_params(project_id: &str, session_id: &str) -> InjectParams {
     InjectParams {
         project_id: Some(project_id.to_string()),
-        agent_id: None,
         token_budget: None,
         include: Some(json!({ "compaction": "restore" })),
         user_id: None,
@@ -93,7 +91,6 @@ fn restore_params(project_id: &str, session_id: &str) -> InjectParams {
 fn plain_params() -> InjectParams {
     InjectParams {
         project_id: Some(PROJECT.to_string()),
-        agent_id: None,
         token_budget: None,
         include: None,
         user_id: None,

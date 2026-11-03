@@ -78,7 +78,6 @@ async fn seed_profile(store: &ProfileStore, user_id: &str, data: &ProfileData) {
 fn params(project_id: &str, user_id: Option<&str>, token_budget: Option<u64>) -> InjectParams {
     InjectParams {
         project_id: Some(project_id.to_string()),
-        agent_id: Some("agent-1".to_string()),
         token_budget,
         include: None,
         user_id: user_id.map(str::to_string),

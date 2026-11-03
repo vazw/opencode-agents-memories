@@ -59,7 +59,6 @@ fn policy(enabled: bool) -> ProfileInjectPolicy {
 fn params(user_id: &str) -> InjectParams {
     InjectParams {
         project_id: Some("/srv/proj".to_string()),
-        agent_id: Some("agent-1".to_string()),
         token_budget: Some(2_000),
         include: None,
         user_id: Some(user_id.to_string()),
