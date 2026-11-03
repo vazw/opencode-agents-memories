@@ -133,12 +133,19 @@ function bareInjects(injects) {
 }
 
 async function runCompactionCase(t, options) {
-  const { injectMode = "compaction", capabilities = DEFAULT_STUB_CAPABILITIES, fixture: build } = options;
+  const {
+    injectMode = "compaction",
+    capabilities = DEFAULT_STUB_CAPABILITIES,
+    fixture: build,
+    // ADR-0017 amendment 2026-11-03: emitted verbatim as hello.result.config;
+    // `undefined` drops the key — the pre-wave shape.
+    helloConfig,
+  } = options;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-v2-compaction-hook-"));
   const pkgDir = stagePackageTree(tmp);
   const requestLogPath = path.join(tmp, "stub-requests.ndjson");
   const manifestPath = path.join(tmp, "stub-manifest.json");
-  stageStubEngine(pkgDir, { requestLogPath, manifestPath, injectMode, capabilities });
+  stageStubEngine(pkgDir, { requestLogPath, manifestPath, injectMode, capabilities, helloConfig });
   t.after(() => assertReaped(manifestPath));
 
   const fixture = typeof build === "function" ? build(tmp) : build;
@@ -475,6 +482,52 @@ test(
     );
     assert.equal(record.syntheticCalls.length, 0, "no engine call, no write");
     assert.equal(record.toastEmits.length, 0, "no write, no toast");
+  }
+);
+
+test(
+  "test_v2_compaction_hook_restores_a_child_when_the_key_is_enabled",
+  { timeout: 30000 },
+  async (t) => {
+    // ADR-0017 amendment 2026-11-03, on the route the live host runs: the
+    // engine advertises the resolved `chatMessage.captureChildSessions` and the
+    // exact boolean `true` opens the restore's child gate. The row is
+    // child-shaped AND fully answerable, so the four counts below are the
+    // engine call and the write, never an agent/model artefact.
+    const { record } = await runCompactionCase(t, {
+      helloConfig: { chat_message_enabled: true, capture_child_sessions: true },
+      fixture: (tmp) => {
+        const directory = path.join(tmp, "project");
+        return {
+          location: { directory },
+          session: {
+            context: [],
+            get: {
+              "ses-A": {
+                parentID: "ses-parent",
+                agent: "main",
+                model: { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" },
+                location: { directory },
+              },
+            },
+          },
+          // No `compactions` step: this case is the restore half only.
+          events: [
+            { type: "session.compaction.ended", location: { directory }, data: { sessionID: "ses-A" } },
+          ],
+          rpc: { registered: true },
+        };
+      },
+    });
+
+    assert.deepEqual(record.sessionGetCalls, ["ses-A"], "the restore read the session row");
+    assert.equal(
+      injectsOf(record.injects, "restore").length,
+      1,
+      "an opted-in child reads the restore block"
+    );
+    assert.equal(record.syntheticCalls.length, 1, "one synthetic write per compaction");
+    assert.equal(record.toastEmits.length, 1, "one toast for the restored block");
   }
 );
 

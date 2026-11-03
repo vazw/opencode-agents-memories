@@ -153,6 +153,14 @@ pub struct EngineConfig {
     /// `allowUnguardedOpen`, env winning. Reported by `health` so an operator can
     /// tell a guarded engine from an overridden one.
     pub open_guard_override: bool,
+    /// The resolved `chatMessage.captureChildSessions` (ADR-0017 amendment
+    /// 2026-11-03), advertised as `hello.result.config.capture_child_sessions`.
+    /// In this build it gates the WRAPPER's compaction-restore child gate only:
+    /// the pre-compaction ingest stays ungated (D-114-2) and the pre-turn
+    /// `chat.message` inject is ungated on purpose (D1). `false` is both the
+    /// config default and today's behaviour, so an engine that predates the key
+    /// keeps a child's restore off.
+    pub capture_child_sessions: bool,
 }
 
 impl Default for EngineConfig {
@@ -165,6 +173,7 @@ impl Default for EngineConfig {
             sessions: 0,
             degraded_reason: None,
             open_guard_override: false,
+            capture_child_sessions: false,
         }
     }
 }
@@ -204,7 +213,14 @@ fn handshake_result(config: &EngineConfig, chat_message_enabled: bool) -> serde_
             "export": true,
             "import": true,
         },
-        "config": { "chat_message_enabled": chat_message_enabled },
+        // ADR-0017 amendment 2026-11-03: the restore child gate's key rides this
+        // SAME object, beside issue 98's `chat_message_enabled` and for the same
+        // D-98-4 reason (a config-derived value in `capabilities` is
+        // indistinguishable from an older build that omits it).
+        "config": {
+            "chat_message_enabled": chat_message_enabled,
+            "capture_child_sessions": config.capture_child_sessions,
+        },
         "engine_version": config.engine_version,
         "methods": RUNTIME_METHODS,
         "protocol": config.protocol,
@@ -289,6 +305,15 @@ impl Engine {
         core: &mem_core::config::Config,
         portability: Option<&dyn crate::tools::portability::PortabilityFactory>,
     ) -> Self {
+        // ADR-0017 amendment 2026-11-03: rebind before use. This is the ONE
+        // production assembly path (issue 70), and the restore child gate's
+        // flag is a CONFIG fact, not a service fact — so it does not hang off
+        // `CaptureService` like issue 98's `chat_capture_enabled`, which exists
+        // because the `capture` method itself must enforce it.
+        let config = EngineConfig {
+            capture_child_sessions: core.chat_message.capture_child_sessions,
+            ..config
+        };
         let backend = portability.and_then(|factory| {
             let deps = crate::tools::portability::PortabilityDeps::from_composed(composed, core);
             let backend = factory.build(&deps);

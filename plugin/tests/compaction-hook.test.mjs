@@ -73,13 +73,16 @@ async function runCase(t, options) {
     fixture = withFixture({}),
     stageEngine = true,
     killBoundMs = 30000,
+    // ADR-0017 amendment 2026-11-03: emitted verbatim as hello.result.config;
+    // `undefined` drops the key, which is the pre-wave shape (`harness/bridge.mjs`).
+    helloConfig,
   } = options;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-compaction-"));
   const pkgDir = stagePackageTree(tmp);
   const requestLogPath = path.join(tmp, "stub-requests.ndjson");
   const manifestPath = path.join(tmp, "stub-manifest.json");
   if (stageEngine) {
-    stageStubEngine(pkgDir, { requestLogPath, manifestPath, injectMode });
+    stageStubEngine(pkgDir, { requestLogPath, manifestPath, injectMode, helloConfig });
     t.after(() => assertReaped(manifestPath));
   }
 
@@ -325,6 +328,97 @@ test(
 );
 
 test(
+  "test_child_session_restores_when_the_engine_enables_child_sessions",
+  { timeout: 30000 },
+  async (t) => {
+    // ADR-0017 amendment 2026-11-03: the restore's child gate is opt-in. The
+    // engine advertises the resolved `chatMessage.captureChildSessions` in
+    // hello.result.config; the exact boolean `true` opens the gate for a child,
+    // and the child here is FULLY ANSWERABLE (`agent: "sub"`), so the zeroes in
+    // the closed-arm rows below cannot be an agent-gate artefact.
+    const { record, wire } = await runCase(t, {
+      fixture: {
+        ...fixtureC(),
+        steps: [{ hook: "compacted", sessionID: "sess-K" }],
+      },
+      helloConfig: { chat_message_enabled: true, capture_child_sessions: true },
+    });
+
+    assert.equal(
+      record.promptCalls.filter((call) => call.path.id === "sess-K").length,
+      1,
+      "an opted-in child restores exactly one message"
+    );
+    assert.equal(record.toastBodies.length, 1, "the opted-in child's restore toasts");
+    const restore = injects(wire, "restore");
+    assert.equal(restore.length, 1, "the restore read reached the engine");
+    assert.equal(restore[0].params.session_id, "sess-K", "the child's own id");
+  }
+);
+
+test(
+  "test_child_session_restore_stays_gated_when_the_engine_says_false",
+  { timeout: 30000 },
+  async (t) => {
+    // Fail-closed (D2): the key at its config default. The parent in the same
+    // run still restores, so the gate is on child-ness, not on the flag alone.
+    const { record, wire } = await runCase(t, {
+      fixture: {
+        ...fixtureC(),
+        steps: [
+          { hook: "compacted", sessionID: "sess-K" },
+          { hook: "compacted", sessionID: "sess-A" },
+        ],
+      },
+      helloConfig: { chat_message_enabled: true, capture_child_sessions: false },
+    });
+
+    assert.equal(
+      record.promptCalls.filter((call) => call.path.id === "sess-K").length,
+      0,
+      "`false` keeps a child's restore off"
+    );
+    assert.equal(
+      record.promptCalls.filter((call) => call.path.id === "sess-A").length,
+      1,
+      "the parent in the same run DOES restore (positive control)"
+    );
+    assert.equal(record.toastBodies.length, 1, "only the parent's restore toasts");
+    assert.ok(
+      injects(wire, "restore").every((message) => message.params.session_id !== "sess-K"),
+      "the closed gate returns before the request: no sess-K on the wire"
+    );
+  }
+);
+
+test(
+  "test_child_session_restore_stays_gated_for_a_truthy_non_boolean_value",
+  { timeout: 30000 },
+  async (t) => {
+    // Only the exact boolean `true` is an opt-in: a malformed advertisement
+    // (`"true"`, `1`, an array) closes the gate rather than opening it, so a
+    // degraded or mixed-version engine keeps today's behaviour.
+    const { record, wire } = await runCase(t, {
+      fixture: {
+        ...fixtureC(),
+        steps: [{ hook: "compacted", sessionID: "sess-K" }],
+      },
+      helloConfig: { chat_message_enabled: true, capture_child_sessions: "true" },
+    });
+
+    assert.equal(
+      record.promptCalls.filter((call) => call.path.id === "sess-K").length,
+      0,
+      "a truthy non-boolean never opens the gate"
+    );
+    assert.ok(
+      injects(wire, "restore").every((message) => message.params.session_id !== "sess-K"),
+      "no restore read for the child, even with a truthy string"
+    );
+  }
+);
+
+test(
   "test_child_session_ingest_proceeds_for_a_child_session_by_ruling",
   { timeout: 30000 },
   async (t) => {
@@ -357,6 +451,41 @@ test(
       injects(wire, "ingest").map((message) => message.params.session_id).sort(),
       ["sess-A", "sess-K"],
       "both halves reach the engine; the restore above stays gated for the child"
+    );
+  }
+);
+
+test(
+  "test_child_session_ingest_proceeds_when_the_key_is_false",
+  { timeout: 30000 },
+  async (t) => {
+    // ADR-0017 amendment 2026-11-03 / D-114-2 — a REGRESSION PIN (green before
+    // and after this wave, never a RED). The restore's child gate is opt-in; the
+    // pre-compaction INGEST is not gated at all, so the key being off changes
+    // nothing here. The load-bearing half is the absence of a session read: the
+    // ingest handler never consults a child flag, and a later "consistency" edit
+    // that adds `readSession`/`isChildSession` there reddens this row.
+    const { record, wire } = await runCase(t, {
+      fixture: {
+        ...fixtureC(),
+        steps: [{ hook: "compacting", sessionID: "sess-K" }],
+      },
+      helloConfig: { chat_message_enabled: true, capture_child_sessions: false },
+    });
+
+    assert.deepEqual(
+      record.contextAfter["sess-K"],
+      [INGEST_2],
+      "the child's pre-compaction ingest is ungated by ruling (D-114-2)"
+    );
+    assert.deepEqual(
+      injects(wire, "ingest").map((message) => message.params.session_id),
+      ["sess-K"],
+      "the ingest read reaches the engine for the child"
+    );
+    assert.ok(
+      !record.sessionGetCalls.includes("sess-K"),
+      `the ingest handler never reads the session, so nothing can consult a child flag there (saw ${JSON.stringify(record.sessionGetCalls)})`
     );
   }
 );

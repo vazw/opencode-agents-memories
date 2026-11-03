@@ -69,7 +69,9 @@ property is emergent because `captureChildSessions` defaults to `false`
 (`example/opencode-mem/src/index.ts:674-676`; default `config.ts:318`). In the port that key has
 zero readers under `crates/mem-bridge` (`grep -rn "capture_child_sessions" crates/mem-bridge` →
 nothing at `fc41bbd`), so a child session's capture does write a tier-1 row under the child's own
-`session_id`, and a session-keyed restore would find it. The divergence is recorded rather than
+`session_id`, and a session-keyed restore would find it. *(Annotated 2026-11-03: that zero-reader
+claim is no longer true — see the 2026-11-03 amendment below (the restore's child gate is
+configurable), which keeps the historical claim above as written.)* The divergence is recorded rather than
 papered over: the lane gates both halves on the host's own child predicate
 (`session.get().parentID`, upstream's `isChildSession` at `example/opencode-mem/src/index.ts:240`).
 The gate is **positive-evidence-only**: a non-empty `parentID` means child; an absent
@@ -222,6 +224,67 @@ now resolves its agent from the session ROW. The ingest stays ungated (D-114-2).
   compaction stops being eaten by `capture.agent_unresolved` — new capture rows after compactions are
   expected, and V1 already behaves this way. See issue 114 for the child-count evidence and the
   `session_v2` table gotcha.
+
+**Amendment 2026-11-03 — the restore's child gate is configurable; the ingest stays ungated.**
+
+The restore's child gate (DECISION 2, the issue-114 amendment) is now **opt-in**. The key is
+`chatMessage.captureChildSessions` — upstream's own flag, and the only existing surface for this
+question; this amendment adds no config key, flips no default, and touches no schema. The wrapper
+opens the gate only for the measured-value opt-in, and the compile-time shape is three named parts:
+
+- **Engine side.** The resolved leaf is carried as `EngineConfig::capture_child_sessions`
+  (`crates/mem-bridge/src/engine.rs`), set by `from_composed` — the ONE production assembly path
+  (issue 70) — from `core.chat_message.capture_child_sessions`, and advertised as
+  `hello.result.config.capture_child_sessions`. It rides the **`config` object**, never
+  `capabilities`: that map means "this build answers method X" (D-98-4), where a config-derived
+  `false` is indistinguishable from an older build that omits the key.
+- **Wrapper side, fail-closed.** The gate is `isChildSession(session) && captureChildSessions !== true`
+  (`plugin/src/plugin.js`, `handleCompacted`). Only the exact boolean `true` opens it: absent `config`,
+  absent key, `false`, `"true"`, `1`, `null` and `[]` all leave a child's restore off. The
+  advertisement is assigned **totally** on every handshake, with no `hasOwnProperty` guard, because
+  absence is a value in this direction — the deliberate inverse of issue 98's guarded lattice, where
+  an omitting replacement child must not overwrite a predecessor's `false` (D-98-15). `teardownChild`
+  resets it too, so "no child's advertisement outlives it" needs no argument about call order.
+- **Why fail-closed is the opposite of issue 98's direction.** Issue 98 chose fail-open because its
+  closed direction *lost data*. Here the open direction injects `◈ memory context` into subagents of a
+  mixed-version pair that no install asked for; closed is exactly today's behaviour, it agrees with
+  the config default (`false`), and there is therefore one meaning of "off" across config, wire and
+  wrapper. A wrapper newer than its engine is silently inert — that is the blast radius, not a defect,
+  and the diagnostic is this paragraph plus the config docs rather than a new stderr line.
+
+**Why the port gates explicitly where upstream gates nothing — a reasoned inversion, not an oversight.**
+Upstream consults `captureChildSessions` at exactly two sites — prompt capture
+(`example/opencode-mem/src/index.ts:698`) and the V2 pre-turn `memoryContext.load` injection
+(`:754-755`) — and **not** in its own compaction restore (`:1335-1380`; `grep -c isChildSession` over
+that slice → `0`). Its ungated restore is nevertheless *inert* for children: the capture skip at `:698`
+returns before `userPromptManager.savePrompt(...)` at `:703`, so no session row is ever written for a
+child, the restore's session-id search (`:1344-1348`) returns nothing, and it bails at `:1350-1352`
+before any prompt. Upstream gets "a child's compaction restores nothing" **for free, from capture**.
+The port inverted the capture half on purpose (D-114-2 below): the pre-compaction **ingest** is
+ungated, so a child's transcript *is* stored, the restore *would* find content, and the end state would
+diverge. The wrapper must therefore gate the restore **explicitly**; the gate is the port's replacement
+for an inertness upstream never had to write down.
+
+**Three surfaces a reader will be tempted to "harmonise"; only one of them moves.**
+
+1. **Gated** — the compaction restore (`handleCompacted`), on `captureChildSessions`, this amendment.
+2. **Deliberately ungated** — the pre-compaction **ingest** (`experimental.session.compacting`),
+   by D-114-2 (issue 114, 2026-11-02, unchanged by this amendment). Gating it would remove child
+   ingest from every default install, since the key defaults `false`.
+3. **Deliberately ungated and untouched by this key** — the pre-turn `chat.message` inject
+   (`plugin/src/plugin.js`, upstream's `:754` analogue). A later wave must not "restore consistency"
+   by gating it: that is a second, separate ruling that changes every default install's chat path.
+
+**D-114-2's scale reason, and what this store actually shows.** The ruling cites 2583 of 2639 live
+session rows being children (**REPORTED**; this amendment did not re-derive it, and the store is
+live). Our own **MEASURED**, read-only (`file:…?mode=ro`) counter-evidence: at
+**2026-11-03T06:44Z** — `PRAGMA user_version` `7`, `COUNT(*) FROM agent_sessions` `132`,
+`COUNT(*) … WHERE parent_session_id IS NOT NULL AND parent_session_id <> ''` `0`; at
+**2026-11-03T07:21Z** the same three readings are `7`, `141`, `0`; at **2026-11-03T07:37Z**, `7`,
+`145`, `0`. The row count is live — it grew by thirteen across those readings — so every count above
+carries its timestamp and the durable observations are `user_version` `7` and **zero** children. The
+column exists and is never populated. **The ruling's number is not re-derivable from this store; the
+ruling stands on the ruling, not on the number.**
 
 **The hook covers the summarisation path only.** `compaction.ts:303` chooses
 `native ? compactNatively(...) : summarize(...)` (`:317-321`): a native model never reaches `prepare`, so

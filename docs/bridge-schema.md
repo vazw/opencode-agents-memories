@@ -51,7 +51,7 @@ The wrapper's **first** message after spawn is `hello`. No runtime method may pr
 ```
 
 ```json
-{"id":"hello-1","jsonrpc":"2.0","result":{"capabilities":{"add":true,"compaction":true,"export":true,"fire_and_forget_capture":true,"forget":true,"import":true,"list":true,"list-shards":true,"migrate":true,"profile":true,"search":true,"skills":true,"standalone":true,"web":true},"config":{"chat_message_enabled":true},"engine_version":"0.1.0","methods":["capture","inject","recall","skills","health","shutdown","add","search","forget","list","profile","list-shards","migrate","export","import"],"protocol":"1.0.0"}}
+{"id":"hello-1","jsonrpc":"2.0","result":{"capabilities":{"add":true,"compaction":true,"export":true,"fire_and_forget_capture":true,"forget":true,"import":true,"list":true,"list-shards":true,"migrate":true,"profile":true,"search":true,"skills":true,"standalone":true,"web":true},"config":{"capture_child_sessions":false,"chat_message_enabled":true},"engine_version":"0.1.0","methods":["capture","inject","recall","skills","health","shutdown","add","search","forget","list","profile","list-shards","migrate","export","import"],"protocol":"1.0.0"}}
 ```
 
 Protocol version is one semver line owned by ADR-0007; its current value is `1.0.0`.
@@ -83,8 +83,10 @@ value, never a throw).
 the fifteen.
 
 **Issue 98 — the `config` object.** The result carries a second sibling object, `config`,
-whose only key today is `chat_message_enabled`: the engine's **resolved** `chatMessage.enabled`
-(the same value its `capture` gate enforces). It is additive and fail-open — an engine that
+whose keys today are `chat_message_enabled` and `capture_child_sessions`: the engine's
+**resolved** `chatMessage.enabled` (the same value its `capture` gate enforces), and the
+**resolved** `chatMessage.captureChildSessions` (ADR-0017 amendment 2026-11-03). The first is
+additive and fail-open — an engine that
 omits the key, or the object, predates issue 98 and the wrapper keeps capturing — and only the
 exact boolean `false` makes the wrapper skip the transcript fetch and the capture. The value
 is read **once per child handshake** (the engine resolves its config at startup; there is no
@@ -92,6 +94,20 @@ hot reload, so a mid-session edit takes effect on the next spawn), and a child t
 member never overwrites what a previous child advertised — the cached value is retired with
 the child itself. It is never a `capabilities` key: that map means "this build answers method
 X", where a config-derived `false` would be indistinguishable from an absent key.
+
+`capture_child_sessions` (ADR-0017 amendment 2026-11-03) is the resolved
+`chatMessage.captureChildSessions`, and it gates the wrapper's **compaction-restore child gate
+only**: the pre-compaction ingest is ungated by ruling (D-114-2), and the pre-turn
+`chat.message` inject is ungated too, on purpose. Unlike `chat_message_enabled` it is
+**fail-closed** — only the exact boolean `true` opens that gate, so an engine that omits the
+key, or advertises `false`, `"true"`, `1` or `null`, keeps a child's restore off (today's
+behaviour, and the config default). **The bare leaf name is deliberate:** unlike
+`chat_message_enabled`'s flattened form, this key keeps the resolved leaf's own name
+(`capture_child_sessions`) so the config census that greps resolved leaf identifiers sees it —
+`\b` does not match inside a flattened `chat_message_capture_child_sessions`, because the
+preceding `_` is a word character. Do not "harmonise" it into invisibility: the full config
+path `chatMessage.captureChildSessions` is named here and in the engine's doc comment, so
+traceability is kept.
 
 ## 3. The fifteen runtime methods (D-40, D-46)
 

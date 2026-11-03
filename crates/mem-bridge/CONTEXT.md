@@ -239,6 +239,12 @@ the `-32002` code row, the exit-code-75 row, the status-file-format row.
   refusal is the RESULT `{"accepted":false,"reason":"chat_message_disabled"}`
   emitted before payload validation and enqueue, announced once per process by
   `capture.refused`. `add`/manual writes are deliberately ungated.
+- **Restore child gate** (ADR-0017 amendment 2026-11-03) — the compaction
+  restore's child gate is opt-in: the resolved `chatMessage.captureChildSessions`
+  is advertised as `hello.result.config.capture_child_sessions`
+  (`EngineConfig::capture_child_sessions`, set by `from_composed`); the wrapper
+  opens it only for the exact boolean `true` (fail-closed). The ingest (D-114-2)
+  and the pre-turn `chat.message` inject (ADR-0017 D1) stay ungated.
 
 **Issue 43 W7 additions (retired-shard reaping, ADR-0023):**
 

@@ -338,3 +338,43 @@ async fn test_add_and_manual_writes_ignore_the_chat_capture_gate() {
         "the manual write is readable back"
     );
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0017 amendment 2026-11-03 — the resolved
+// `chatMessage.captureChildSessions` travels in the SAME top-level `config`
+// object as `chat_message_enabled`, and never in `capabilities` (D-98-4: a
+// config-derived value there is indistinguishable from an older build that
+// omits the key).
+// ---------------------------------------------------------------------------
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_hello_advertises_capture_child_sessions_outside_capabilities() {
+    let engine = Engine::new(EngineConfig {
+        capture_child_sessions: true,
+        ..EngineConfig::default()
+    });
+
+    let response = dispatch(&engine, "hello", json!({"client": "probe"})).await;
+    let result = result(&response);
+
+    assert_eq!(
+        result["config"]["capture_child_sessions"],
+        json!(true),
+        "hello advertises the resolved chatMessage.captureChildSessions"
+    );
+    assert_eq!(
+        result["capabilities"]
+            .as_object()
+            .expect("capabilities is an object")
+            .len(),
+        14,
+        "the capability map keeps exactly its fourteen method keys"
+    );
+    assert!(
+        result["capabilities"]
+            .get("capture_child_sessions")
+            .is_none(),
+        "a config-derived value must never enter the capability map: {}",
+        result["capabilities"]
+    );
+}

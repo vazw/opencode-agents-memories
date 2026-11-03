@@ -290,6 +290,13 @@ function createBridgeState(root) {
     engineCompatible: false,
     engineCapabilities: null, // hello.result.capabilities, or null when absent/unusable
     engineChatCaptureEnabled: null, // hello.result.config.chat_message_enabled, or null when this child advertised nothing
+    // ADR-0017 amendment 2026-11-03: hello.result.config.capture_child_sessions,
+    // read by the compaction restore's child gate. FAIL-CLOSED: only the exact
+    // boolean `true` opens that gate, and this `false` is what an unanswered /
+    // pre-handshake read sees (D2). Defence-in-depth only — the total
+    // assignment in the handshake runs first on every child, so mutating this
+    // initializer is measurably unobservable; do not cite it as coverage.
+    engineCaptureChildSessions: false,
     engineProtocolLine: null, // hello.result.protocol, for the mismatch line
     capabilityGapsLogged: new Set(), // one line per capability per process
     pendingCaptures: 0,
@@ -510,6 +517,11 @@ function teardownChild(state, reason) {
   // D-98-15 keeps an omitting child from overwriting the cache, so this clear
   // is the ONLY thing that retires it.
   state.engineChatCaptureEnabled = null;
+  // ADR-0017 amendment 2026-11-03: belt-and-braces. The handshake assigns the
+  // restore flag totally, so this reset is redundant today — it is here so the
+  // invariant "no child's advertisement outlives it" needs no argument about
+  // call order.
+  state.engineCaptureChildSessions = false;
   state.engineProtocolLine = null;
   rejectPending(state, reason);
   if (active !== null) {
@@ -630,6 +642,13 @@ async function startBridge(state) {
     if (advertisedConfig !== null && Object.prototype.hasOwnProperty.call(advertisedConfig, "chat_message_enabled")) {
       state.engineChatCaptureEnabled = advertisedConfig.chat_message_enabled === false ? false : null;
     }
+    // ADR-0017 amendment 2026-11-03: deliberately NOT issue 98's guarded
+    // lattice. The restore's child gate is fail-closed, so ABSENCE IS A VALUE
+    // (D2): a replacement child that advertises nothing must resolve to `false`,
+    // never inherit a predecessor's `true`. Assigned totally, with no
+    // `hasOwnProperty` guard, and only the exact boolean `true` opens the gate.
+    state.engineCaptureChildSessions =
+      advertisedConfig !== null && advertisedConfig.capture_child_sessions === true;
     state.engineCompatible = true;
     state.bridgeState = "installed";
     return true;
@@ -1061,9 +1080,21 @@ export const server = async function server(input) {
     try {
       if (typeof sessionID !== "string" || sessionID.length === 0) return;
       if (!(await compactionCapability())) return;
+      // ADR-0017 amendment 2026-11-03: capture the state ONCE, after the
+      // capability await (which awaits `ensureStarted`, so this child's
+      // handshake has run) — the D-98-7 idiom. `bridge()` re-resolves
+      // `path.resolve(storageRoot())`, so re-calling it after the
+      // `readSession` await could consult ANOTHER root's child.
+      const state = bridge();
       const client = hostInputRef()?.client;
       const session = await readSession(client, sessionID);
-      if (isChildSession(session)) return;
+      // The restore's child gate is OPT-IN, and FAIL-CLOSED: only the exact
+      // boolean `true` from hello.result.config.capture_child_sessions opens it,
+      // so an engine that omits the key (or a mixed-version pair) keeps today's
+      // behaviour. The pre-compaction ingest is NOT gated here and must stay
+      // ungated (D-114-2); the pre-turn `chat.message` inject is ungated on
+      // purpose and is not this gate's business (D1).
+      if (isChildSession(session) && state.engineCaptureChildSessions !== true) return;
       const result = await sendRequest(
         "inject",
         compactionParams("restore", sessionID),

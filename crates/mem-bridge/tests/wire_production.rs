@@ -330,3 +330,55 @@ async fn test_production_composition_gates_hello_and_capture_from_one_config() {
         "the same engine that advertises `false` refuses the capture"
     );
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0017 amendment 2026-11-03 — the resolved
+// `chatMessage.captureChildSessions` reaches `hello` through the ONE production
+// assembly path (`from_composed`, issue 70), not only through a fixture engine.
+//
+// Both arms share one `Config` and one composed runtime: only the resolved leaf
+// moves between them, so the value can only come from `from_composed`'s rebind.
+// Arm B is compared as `false`, never as `Null`, so an absent key cannot pass
+// it — the fail-closed direction D2 chose.
+// ---------------------------------------------------------------------------
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_production_composition_advertises_the_resolved_capture_child_sessions() {
+    let root = TestDir::new("wire-production-child-root");
+    let home = TestDir::new("wire-production-child-home");
+    let env: BTreeMap<String, String> = [("HOME", home.path().to_string_lossy().to_string())]
+        .map(|(key, value)| (key.to_string(), value))
+        .into_iter()
+        .collect();
+    let mut config =
+        Config::load(&ConfigPaths::standard(home.path()), &env).expect("the resolved config loads");
+    config.storage_path = root.path().to_path_buf();
+    config.embedding_dimensions = 8;
+
+    // Arm A — the key on. `None` keeps the portability factory out of the row.
+    config.chat_message.capture_child_sessions = true;
+    let embedder = Arc::new(FakeEmbedder::with_vector(unit_vector(0)));
+    let composed = build_composed_runtime(root.path(), &config, embedder, None)
+        .await
+        .expect("the runtime composes");
+    let engine = Engine::from_composed(EngineConfig::default(), &composed, &config, None);
+
+    let hello = dispatch(&engine, "hello", json!({"client": "probe"})).await;
+    assert_eq!(
+        result(&hello)["config"]["capture_child_sessions"],
+        json!(true),
+        "the resolved config value reaches the handshake through the builder chain"
+    );
+
+    // Arm B — the resolved default. No `hasOwnProperty` guard, no special case:
+    // the same assembly path, a `false` leaf, and the handshake says so.
+    config.chat_message.capture_child_sessions = false;
+    let engine = Engine::from_composed(EngineConfig::default(), &composed, &config, None);
+
+    let hello = dispatch(&engine, "hello", json!({"client": "probe"})).await;
+    assert_eq!(
+        result(&hello)["config"]["capture_child_sessions"],
+        json!(false),
+        "the default leaf is advertised as `false`, never omitted"
+    );
+}

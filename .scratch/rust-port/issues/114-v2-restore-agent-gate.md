@@ -127,6 +127,10 @@ slice contains no assistant rows at all.
 
 ## Follow-ups (recorded, not done here)
 
+- Follow-up 2026-11-03 — the restore's child gate is now opt-in via `chatMessage.captureChildSessions`
+  (ADR-0017 amendment 2026-11-03, `blueprint-20261103-0724-compaction-child-restore-r3`); D-114-2's
+  ingest ruling is unchanged.
+
 - DONE d481ed9 (this issue's follow-up): the module note in plugin/src/compaction.js no
   longer claims the V2 legacy client exposes no `session.get`. It now names the
   absent-capability branch as the V1 SDK's and cites 8a13ce3. Both twins moved together
