@@ -95,3 +95,53 @@ sqlite3 "file:$HOME/.local/share/opencode/opencode.db?mode=ro" \
 ```
 
 Zero across the whole session means the block never reached it.
+
+> **Caveat added after the owner's observation below:** persistence is not proof for the *late* case. A block
+> that arrives mid-turn may be visible to the model and to the TUI yet never be folded into the stored
+> message. The wave-1 planner (`ses_e5e5e5f88ffe`) is exactly that: its first user message carries **no**
+> marker (`instr` finds none), yet at message seq 18 its reasoning uses the literal string
+> `<memory_context>` — either it received a block that was never persisted, or it read the tag out of a repo
+> document while working. Not resolved.
+
+## Owner observation, 2026-11-03 — the mechanism
+
+*"I've observed sometime when compacted agent have the time to execute 2-3 tool before `memory context`
+pop-up."*
+
+That is a **race, seen from the outside**: the block is delivered late, mid-turn, after the model has already
+started working. It fits the code exactly — `chat.message` awaits an `inject` RPC (default budget
+`REQUEST_TIMEOUT_MS = 15000`, `plugin/src/plugin.js:57`) and only then mutates `output.message.parts`, while
+the host does not hold the model turn for that promise. So three outcomes, one cause:
+
+| arrival | what the transcript shows |
+|---|---|
+| before the turn starts | block folded into the first user message (the three probe sessions) |
+| after the turn starts | block pops up mid-turn, after 2–3 tool calls (owner's observation) |
+| after the message is finalized | block is **lost** — nothing persisted, model never had it (the three misses) |
+
+Consequence for the fix: **the latency is irrelevant, the ordering is the defect.** Making `inject` faster
+narrows the window; it cannot close it. Delivery has to stop depending on a hook returning before the host
+proceeds.
+
+## Two candidate fixes (both need a wrapper change + a host restart)
+
+- **(A) Deterministic delivery — the block becomes its own synthetic message.** `legacy-client.js` already
+  exposes `client.session.synthetic({sessionID, text, description: "memory context", resume:false})`
+  (`plugin/src/v2/legacy-client.js:140,176`), and that is the description the TUI renders as
+  `◈memory context`. Writing the block that way appends a message to the session instead of mutating an
+  in-flight one: it can be late by one step, but it cannot be lost, and it carries an explicit label. Cost: an
+  extra session entry per turn with a block, and the block is no longer inside the same message (budget
+  accounting shifts).
+- **(B) Narrow the window.** Cache the assembled block per `(project, query-hash)` and prefetch at session
+  start, so the hook usually returns in a few ms. Cheap, but it is a race mitigation, not a fix — and a cold
+  engine start (the 5 s `HELLO_TIMEOUT_MS` handshake) reproduces the window immediately.
+
+(A) is the shape worth building; (B) is worth keeping only if a probe shows the inject RPC is slow enough to
+matter (no `handling_ms` reaches any log today, so that is currently unmeasured).
+
+## What the next build must log
+
+Two lines, no content: outgoing `inject` (`session_id`, `query_len`) and returning (`session_id`,
+`block_len`, `handling_ms`, `path: "synthetic"|"parts"`). With that, a single restart settles both the
+latency question (B) and whether (A) ever loses a block.
+
