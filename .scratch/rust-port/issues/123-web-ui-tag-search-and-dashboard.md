@@ -27,16 +27,19 @@ argued the 72ch measure must not grow:
 4. **Nav stays the text sider, and gains icons.** Verbatim: *"text sider + icon would be better."* The design
    draft's 64 px icon rail at ≥ 1280 is **rejected**; the 260 px text sider stays at every width ≥ 901, with an
    icon **and** its visible text label on each of the ten items (an icon alone is never the accessible name).
-   Accepted consequence, arithmetic from the two measured inputs (sider 260, `main` padding 24 each side):
+   Accepted consequence, arithmetic from the two measured inputs (sider 260, `main` padding 24 each side),
+   **corrected 2026-11-03 against the browser**: the first cut of this table omitted the 14–15 px scrollbar
+   and assumed a left-anchored panel. Measured bodies are 701 / 958 / 1277 / 1597; the grid is centred, so
+   the slack is symmetric, not a right-hand void:
 
-   | viewport | body | cards per row | empty body to the right |
+   | viewport | body | cards per row | slack (centred) |
    |---|---|---|---|
-   | 1024 | 716 | 1 | 188.5 |
-   | 1280 | 972 | **1** | **444.5** |
-   | 1600 | 1292 | 2 | 213 |
-   | 1920 | 1612 | 2 | 533 |
+   | 1024 | 701 | 1 | 174 |
+   | 1280 | 958 | **1** | **431** |
+   | 1600 | 1277 | 2 | 151 |
+   | 1920 | 1597 | 2 | 471 |
 
-   Two 527.5 px cards plus a 24 px gap need 1079 px, so 1280 stays a single column — the rail was the only way
+   Two 551.5 px cards plus a 24 px gap need 1127 px, so 1280 stays a single column — the rail was the only way
    to get two there, and it is now out. Width therefore buys columns only at 1600 and above.
 
 Still open, and the blueprint must propose rather than assume: the `/tags` free-form group and its 100-row
