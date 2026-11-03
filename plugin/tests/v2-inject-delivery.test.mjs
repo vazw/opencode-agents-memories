@@ -201,6 +201,38 @@ test("test_v2_context_refreshes_only_when_inject_on_says_so", { timeout: 10000 }
     assert.deepEqual(await h.contextOf("ses-1"), ["fresh-m2"], "older completion must not overwrite newer");
     await cleanup();
   }
+
+  // 5) Per-session turns isolation: concurrent sessions must not pollute each other's turn index.
+  {
+    const h = createAdapterHarness();
+    let ses1Calls = 0, ses2Calls = 0;
+    const legacy = {
+      "chat.message": async (inp, out) => {
+        if (inp.sessionID === "ses-1") ses1Calls++;
+        else if (inp.sessionID === "ses-2") ses2Calls++;
+        out.message.parts.push({ type: "text", text: `block-${inp.sessionID}`, synthetic: true });
+      },
+      event: async () => {},
+    };
+    Object.defineProperty(legacy, "shouldRefresh", {
+      enumerable: false,
+      value: ({ turnIndex, hasCache }) => !hasCache || turnIndex === 0,
+    });
+    const cleanup = await registerV2Adapter(h.ctx, legacy);
+
+    // ses-1 turns 0, 1:
+    await h.prompt("ses-1", "m1");
+    assert.equal(ses1Calls, 1, "ses-1 turn 0 injects");
+    await h.prompt("ses-1", "m2");
+    assert.equal(ses1Calls, 1, "ses-1 turn 1 retains cache (first mode)");
+
+    // ses-2 turn 0 must inject independently (not use ses-1's turn count):
+    await h.prompt("ses-2", "m1");
+    assert.equal(ses2Calls, 1, "ses-2 turn 0 must inject despite ses-1 at turn 2");
+    assert.deepEqual(await h.contextOf("ses-2"), ["block-ses-2"], "ses-2 has its own block");
+
+    await cleanup();
+  }
 });
 
 async function telemetryCase(t, mode, query) {
