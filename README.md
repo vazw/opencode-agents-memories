@@ -153,12 +153,12 @@ now and therefore not in the table above.
 |---|---|
 | `maxProfileItems` | the injection caps are `userProfileInject{Preferences,Patterns,Workflows}` (issue 44.9) |
 | `autoUpdate` | the binary ships through the OS package manager; there is no self-update path (issue 27) |
-| `chatMessage.excludeCurrentSession`, `chatMessage.injectOn` | only `chatMessage.enabled`, `chatMessage.filterInjectedPrompts` and `chatMessage.injectionMarkers` are read |
+| `chatMessage.excludeCurrentSession`, `chatMessage.injectOn` | only `chatMessage.enabled`, `chatMessage.filterInjectedPrompts`, `chatMessage.injectionMarkers` and `chatMessage.captureChildSessions` are read |
 | `chatMessage.maxAgeDays` | assigned from the file and never consulted |
 | `chatMessage.maxMemories` | the nested key is unread; the **top-level** `maxMemories` is the `search` default. Shared field name, so its census is the separate command below |
 | `similarityThreshold` | `search` takes no threshold parameter in this build |
 | `aiSessionRetentionDays`, `autoCleanupRetentionDays` | `autoCleanupEnabled` is read; neither count is |
-| `autoCaptureMaxIterations`, `autoCaptureIterationTimeout`, `autoCaptureLanguage` | only `autoCaptureMaxRetries` and `autoCaptureMaxContextBytes` are read; the capture prompt's language line is fixed in code |
+| `autoCaptureMaxIterations`, `autoCaptureIterationTimeout`, `autoCaptureLanguage` | only `autoCaptureEnabled`, `autoCaptureMaxRetries` and `autoCaptureMaxContextBytes` are read; the capture prompt's language line is fixed in code |
 | `opencodeTimeoutMs` | resolved and clamped, never consulted |
 | `memoryTemperature` | normalized and never read; the manual provider reads `forceToolChoice` and its endpoint/model/key |
 | `memoryExtraParams` | parsed and copied, never read, for the same reason |
