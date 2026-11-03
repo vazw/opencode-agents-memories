@@ -30,7 +30,10 @@ use std::collections::BTreeMap;
 use leptos::callback::Callable;
 use leptos::prelude::*;
 use serde::Deserialize;
-use thaw::{Badge, BadgeAppearance, Card, Pagination};
+use thaw::{
+    Badge, BadgeAppearance, Card, Pagination, Table, TableBody, TableCell, TableHeader,
+    TableHeaderCell, TableRow,
+};
 
 use crate::api::auth::{AuthContext, read_marker_token};
 use crate::api::envelope::{ApiError, parse_envelope};
@@ -771,6 +774,20 @@ pub struct TagsPage {
     pub project: Vec<TagInfo>,
     #[serde(default)]
     pub user: Vec<TagInfo>,
+    /// Memory tags ranked by use (older servers omit the key).
+    #[serde(default)]
+    pub memory_tags: Vec<MemoryTagInfo>,
+    /// Distinct memory tags matching the query (before the limit window).
+    #[serde(default)]
+    pub memory_tag_total: usize,
+}
+
+/// One ranked memory tag of `GET /api/tags`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct MemoryTagInfo {
+    pub tag: String,
+    #[serde(default)]
+    pub count: u64,
 }
 
 /// One rendered tag row.
@@ -804,13 +821,15 @@ pub enum TagsView {
     Loaded {
         project: Vec<TagRowView>,
         user: Vec<TagRowView>,
+        memory_tags: Vec<MemoryTagInfo>,
+        memory_tag_total: usize,
     },
     Error(String),
 }
 
 /// Map the tags payload onto the render shape.
 pub fn tags_view(page: &TagsPage) -> TagsView {
-    if page.project.is_empty() && page.user.is_empty() {
+    if page.project.is_empty() && page.user.is_empty() && page.memory_tags.is_empty() {
         return TagsView::Empty;
     }
     let map = |info: &TagInfo| TagRowView {
@@ -824,6 +843,8 @@ pub fn tags_view(page: &TagsPage) -> TagsView {
     TagsView::Loaded {
         project: page.project.iter().map(map).collect(),
         user: page.user.iter().map(map).collect(),
+        memory_tags: page.memory_tags.clone(),
+        memory_tag_total: page.memory_tag_total,
     }
 }
 
@@ -836,7 +857,7 @@ pub fn list_tags_spec() -> RequestSpec {
 fn tag_group(title: &'static str, test_id: &'static str, tags: Vec<TagRowView>) -> impl IntoView {
     let count = tags.len();
     view! {
-        <section class="tag-group" data-testid=test_id>
+        <section class="tag-group" id=test_id data-testid=test_id>
             <h3>{format!("{title} ({count})")}</h3>
             <ul class="tag-list">
                 {tags
@@ -914,10 +935,52 @@ pub fn TagsPanel() -> impl IntoView {
                         }
                             .into_any()
                     }
-                    TagsView::Loaded { project, user } => {
+                    TagsView::Loaded { project, user, memory_tags, memory_tag_total } => {
+                        let shown = memory_tags.len();
                         view! {
                             {tag_group("Project", "tag-group-project", project)}
-                            {tag_group("User", "tag-group-user", user)}
+                            <section class="tag-group" data-testid="tag-group-memory">
+                                <h3>
+                                    {format!("Memory tags ({shown} of {memory_tag_total})")}
+                                </h3>
+                                <Card class="tags-card">
+                                    <div class="tags-scroll" id="memory-tags-table" data-testid="memory-tags-table">
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHeaderCell>"Tag"</TableHeaderCell>
+                                                    <TableHeaderCell>"Memories"</TableHeaderCell>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {memory_tags
+                                                    .into_iter()
+                                                    .map(|row| {
+                                                        let href = format!(
+                                                            "/project-memories?tags={}",
+                                                            crate::paths::encode_component(&row.tag),
+                                                        );
+                                                        view! {
+                                                            <TableRow>
+                                                                <TableCell>
+                                                                    <a class="tags-tag" href=href>{row.tag}</a>
+                                                                </TableCell>
+                                                                <TableCell>
+                                                                    <Badge appearance=BadgeAppearance::Tint>
+                                                                        {row.count.to_string()}
+                                                                    </Badge>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        }
+                                                    })
+                                                    .collect_view()}
+                                            </TableBody>
+                                        </Table>
+                                    </div>
+                                </Card>
+                            </section>
+                            {(!user.is_empty())
+                                .then(|| tag_group("User", "tag-group-user", user))}
                         }
                             .into_any()
                     }

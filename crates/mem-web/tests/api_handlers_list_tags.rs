@@ -107,3 +107,96 @@ async fn test_list_tags_deduplicates_a_tag_present_in_two_shards() {
         "the tag appears once: {data}"
     );
 }
+
+/// Seeds the rank fixture: rust x3, "Architecture Docs" x2, deploy x1 on top of
+/// the base rows (project row tagged `probe`, user row untagged).
+fn seed_rank_fixture(backend: &common::fakes::FakeBackend) {
+    let shard = backend.project_shard();
+    for (id, tags) in [
+        ("r1", "rust"),
+        ("r2", "rust"),
+        ("r3", "rust, Architecture Docs"),
+        ("r4", "Architecture Docs"),
+        ("r5", "deploy"),
+        ("r6", " "),
+    ] {
+        let mut row = memory_row(id, PROJECT_TAG);
+        row.tags = Some(tags.to_string());
+        backend.seed_memory(&shard, row);
+    }
+}
+
+async fn tags_with(router: axum::Router, query: &str) -> Value {
+    let path = format!("/api/tags{query}");
+    let response = api_request(router, "GET", &path, Some(API_TOKEN), None).await;
+    assert_eq!(response.status, 200, "{}", response.body_string());
+    let body: Value = serde_json::from_str(&response.body_string()).expect("JSON");
+    body["data"].clone()
+}
+
+fn ranked(data: &Value) -> Vec<(String, u64)> {
+    data["memoryTags"]
+        .as_array()
+        .expect("memoryTags is an array")
+        .iter()
+        .map(|e| {
+            (
+                e["tag"].as_str().unwrap_or_default().to_string(),
+                e["count"].as_u64().unwrap_or(0),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn test_rank_memory_tags_orders_and_narrows() {
+    let (backend, router) = router();
+    seed_rank_fixture(&backend);
+    let data = tags_with(router.clone(), "").await;
+    assert_eq!(
+        ranked(&data),
+        vec![
+            ("rust".to_string(), 3),
+            ("Architecture Docs".to_string(), 2),
+            ("deploy".to_string(), 1),
+            ("probe".to_string(), 1),
+        ]
+    );
+    assert_eq!(data["memoryTagTotal"], 4);
+    let data = tags_with(router, "?tagQuery=ARCH").await;
+    assert_eq!(ranked(&data), vec![("Architecture Docs".to_string(), 2)]);
+    assert_eq!(
+        data["memoryTagTotal"], 1,
+        "total is counted after the query"
+    );
+}
+
+#[tokio::test]
+async fn test_tags_response_carries_memory_tags() {
+    let (backend, router) = router();
+    seed_rank_fixture(&backend);
+    let data = tags_with(router.clone(), "?tagLimit=2").await;
+    assert_eq!(
+        ranked(&data),
+        vec![
+            ("rust".to_string(), 3),
+            ("Architecture Docs".to_string(), 2)
+        ]
+    );
+    assert_eq!(data["memoryTagTotal"], 4);
+    assert!(data.get("memory_tags").is_none(), "camelCase only: {data}");
+    let data = tags_with(router, "?tagLimit=2&tagOffset=2").await;
+    assert_eq!(
+        ranked(&data),
+        vec![("deploy".to_string(), 1), ("probe".to_string(), 1)]
+    );
+}
+
+#[tokio::test]
+async fn test_tags_api_keeps_the_user_array() {
+    let (_, router) = router();
+    let data = tags_with(router, "").await;
+    assert!(data["user"].is_array());
+    assert_eq!(data["user"].as_array().map(Vec::len), Some(1));
+    assert_eq!(data["project"].as_array().map(Vec::len), Some(1));
+}

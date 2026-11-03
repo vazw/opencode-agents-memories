@@ -653,6 +653,32 @@ body {
   font-size: 1rem;
 }
 
+.tags-panel .tags-card {
+  width: 100%;
+  max-width: calc(var(--app-measure, 72ch) + 48px);
+  margin: 0;
+  box-shadow: none;
+  background: var(--panel);
+  outline: 1px solid var(--border);
+  outline-offset: -1px;
+}
+
+.tags-scroll {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.tags-scroll table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.tags-tag {
+  overflow-wrap: anywhere;
+  font-family: var(--fontFamilyMonospace);
+  font-size: 0.85rem;
+}
+
 .tag-list {
   margin: 0;
   padding: 0;

@@ -342,6 +342,8 @@ pub fn ExportImportPanel() -> impl IntoView {
     let tags = RwSignal::new(TagsPage {
         project: vec![],
         user: vec![],
+        memory_tags: vec![],
+        memory_tag_total: 0,
     });
     let profile = RwSignal::new(None::<ProfileView>);
     let truncated = RwSignal::new(false);

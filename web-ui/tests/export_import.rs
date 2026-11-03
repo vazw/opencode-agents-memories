@@ -16,6 +16,8 @@ fn test_export_document_has_the_explorer_shape() {
         tags: &TagsPage {
             project: vec![],
             user: vec![],
+            memory_tags: vec![],
+            memory_tag_total: 0,
         },
         profile: None,
         truncated: false,
@@ -49,6 +51,8 @@ fn test_export_document_excludes_prompt_rows() {
         tags: &TagsPage {
             project: vec![],
             user: vec![],
+            memory_tags: vec![],
+            memory_tag_total: 0,
         },
         profile: None,
         truncated: false,
@@ -67,6 +71,8 @@ fn test_export_document_records_truncation() {
         tags: &TagsPage {
             project: vec![],
             user: vec![],
+            memory_tags: vec![],
+            memory_tag_total: 0,
         },
         profile: None,
         truncated: true,
@@ -127,6 +133,8 @@ fn test_import_preview_counts_an_explorer_export() {
         tags: &TagsPage {
             project: vec![],
             user: vec![],
+            memory_tags: vec![],
+            memory_tag_total: 0,
         },
         profile: None,
         truncated: false,

@@ -315,6 +315,8 @@ fn test_tags_view_empty_state() {
     let empty = TagsPage {
         project: Vec::new(),
         user: Vec::new(),
+        memory_tags: Vec::new(),
+        memory_tag_total: 0,
     };
     assert_eq!(tags_view(&empty), TagsView::Empty);
 }
@@ -322,7 +324,7 @@ fn test_tags_view_empty_state() {
 #[wasm_bindgen_test]
 fn test_tags_view_loaded_groups() {
     let page: TagsPage = serde_json::from_str(TAGS_JSON).expect("the tags projection decodes");
-    let TagsView::Loaded { project, user } = tags_view(&page) else {
+    let TagsView::Loaded { project, user, .. } = tags_view(&page) else {
         panic!("a non-empty page renders the loaded branch");
     };
     assert_eq!(project.len(), 1);
@@ -1420,4 +1422,41 @@ fn test_tags_json_carries_every_tag() {
     let back: Vec<String> = serde_json::from_str(&tags_json(&odd)).expect("valid JSON");
     assert_eq!(back, odd);
     assert_eq!(tags_json(&[]), "[]");
+}
+
+#[wasm_bindgen_test]
+fn test_tags_page_carries_ranked_memory_tags() {
+    let page: TagsPage = serde_json::from_str(
+        r#"{"project":[],"user":[],"memoryTags":[{"tag":"rust","count":3},{"tag":"Architecture Docs","count":2}],"memoryTagTotal":4}"#,
+    )
+    .expect("decodes");
+    assert_eq!(page.memory_tag_total, 4);
+    let TagsView::Loaded {
+        memory_tags,
+        memory_tag_total,
+        ..
+    } = tags_view(&page)
+    else {
+        panic!("memory tags alone render the loaded branch");
+    };
+    assert_eq!(memory_tag_total, 4);
+    assert_eq!(memory_tags[1].tag, "Architecture Docs");
+    assert_eq!(memory_tags[0].count, 3);
+    // An older server without the keys still decodes.
+    let old: TagsPage = serde_json::from_str(r#"{"project":[],"user":[]}"#).expect("decodes");
+    assert_eq!(tags_view(&old), TagsView::Empty);
+}
+
+#[wasm_bindgen_test]
+fn test_tags_link_round_trips_a_space_bearing_tag() {
+    let tag = "Architecture Docs & more";
+    let href = format!(
+        "/project-memories?tags={}",
+        web_ui::paths::encode_component(tag)
+    );
+    let search = href
+        .split_once('?')
+        .map(|(_, q)| format!("?{q}"))
+        .unwrap_or_default();
+    assert_eq!(initial_tags(&search), vec![tag.to_string()]);
 }

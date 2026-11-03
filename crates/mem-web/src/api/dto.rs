@@ -64,9 +64,21 @@ pub struct TagInfoDto {
 
 /// `GET /api/tags` data.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct TagsDto {
     pub project: Vec<TagInfoDto>,
     pub user: Vec<TagInfoDto>,
+    /// Memory tags ranked by use (count descending, tag ascending).
+    pub memory_tags: Vec<MemoryTagDto>,
+    /// Distinct memory tags matching the query, before `tagLimit`/`tagOffset`.
+    pub memory_tag_total: usize,
+}
+
+/// One ranked memory tag.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MemoryTagDto {
+    pub tag: String,
+    pub count: u64,
 }
 
 /// One memory timeline item of `GET /api/memories`.
