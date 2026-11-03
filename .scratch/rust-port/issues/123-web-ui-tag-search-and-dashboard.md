@@ -11,6 +11,24 @@ projects, not tags, and leaves the clickable chips decorative. The wave is in de
 questions (does `/tags` gain a free-form tag group; is user scope dead on this install) are still open
 and the architect's draft proposes an answer for each.
 
+**Owner rulings 2026-11-03, part 2 — width, measure, `/sessions`.** Asked directly, after the design draft
+argued the 72ch measure must not grow:
+
+1. **Line length — keep 72ch fixed, but the card must match it.** Verbatim: *"Keep fixed but make sure it
+   match the card size, no look like a half wrap text."* The defect this names is real and measured: memory
+   text is capped at 72ch (≈503 px) inside a panel that runs to 1024 px, so the text occupies half its own
+   card. Fix the **card**, not the measure — no content card may be wider than its measure plus padding.
+2. **Wide screens — derive from the line length, and no table overflow.** Verbatim: *"match line length, no
+   overflow table."* The design draft's `--app-canvas-max: 1440px` is therefore **dead**: the canvas is
+   sized from the measure and its padding, and the width that measure frees up is spent on **more columns**
+   of cards, never on longer lines. Any table must render at 1024/1280/1600/1920 with **no horizontal
+   overflow**; where a table genuinely cannot fit, a wrapper scrolls and the page still does not.
+3. **`/sessions` project picker is in this wave** (design step 6, acceptance criterion 4) — not deferred.
+
+Still open, and the blueprint must propose rather than assume: the `/tags` free-form group and its 100-row
+cap; keep-vs-delete of the user-scope path; Fork 1's sider rule; sub-1024 behaviour (CSS-only today); and
+whether Home tiles / stats shards / profile tabs / toasts stay in wave 3.
+
 Owner's notes, verbatim, are the source of this file: *"the web still need more care on /project-memories
 page … Search memories with tag return server error 400: Invalid container tag … restyle rendered memories
 list to card and can click on the tag to search this selected tag … on /tags page show only project and
@@ -129,8 +147,10 @@ grep -n 'memory-content' -A5 web-ui/public/styles.css
 # 793:  max-width: 72ch;
 ```
 
-Ten panel caps at **64rem = 1024 px** and a single **72ch** measure on memory text, with exactly **one**
-breakpoint (`max-width: 640px`) for a ten-route dashboard. On the 1280-wide gate window the app is a
+**Re-derived 2026-11-03 (the first cut of this issue said "ten panel caps at 64rem" — wrong):** the sheet
+holds **6 × `64rem`** (lines 230, 609, 689, 841, 956, 1239), **1 × `72rem`** (1004), **1 × `52rem`** (159),
+**1 × `22rem`**, **1 × `14rem`**, the **`72ch`** measure on memory text (793), and exactly **one** breakpoint
+(`max-width: 640px`, line 371) for a ten-route dashboard. On the 1280-wide gate window the app is a
 1024 px column with dead margins and text that never reflows for the screen.
 
 Ask: fluid widths (`clamp()` / `min()` against the viewport, a large-screen density that actually uses
