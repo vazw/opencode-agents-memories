@@ -1278,7 +1278,7 @@ body {
 /* ---------------------------------------------------------------------------
  * Sessions (W6.3)
  *
- * `.project-input` is shared with Agents, so it is styled here once.
+ * The project picker is a native select over the `/api/projects` roster.
  * ------------------------------------------------------------------------- */
 
 .session-history {
@@ -1304,9 +1304,9 @@ body {
   margin: 0.75rem 0;
 }
 
-.project-input {
+.session-controls select {
   flex: 1 1 14rem;
-  max-width: 22rem;
+  max-width: 32rem;
 }
 
 .load-sessions {
