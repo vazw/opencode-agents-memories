@@ -638,6 +638,9 @@ let capturedSessionId = null;
 // "capture skipped" line would be unbounded stderr in exactly the state the
 // user asked for silence.
 let chatCaptureDisabledLogged = false;
+// Issue 86: same one-line-per-process latch — `session.get` is unknown on every
+// turn of a host that exposes no `get`, so an unlatched line would be unbounded.
+let childStatusUnknownLogged = false;
 // Process-unique prompt part ids: `Date.now()` collides on a back-to-back pair.
 let compactionPartCounter = 0;
 
@@ -1536,6 +1539,21 @@ export const server = async function server(input) {
       }
       const client = hostInputRef()?.client;
       const session = await readSession(client, sessionID);
+      // Issue 86: `null` is "unknown" (no host `get`, the call threw, or a
+      // non-object answer) — named once per process, then read as NOT a child
+      // (fail-open, like the compaction legs).
+      if (session === null && !childStatusUnknownLogged) {
+        childStatusUnknownLogged = true;
+        logWarn("capture.child_status_unknown", { session_id: sessionID });
+      }
+      // Opt-in and fail-closed, exactly like the compaction legs: only the
+      // exact boolean `true` from hello.result.config.capture_child_sessions
+      // opens the gate, so a child's work is never filed as the human's.
+      // Returns BEFORE the transcript fetch, which would be wasted.
+      if (isChildSession(session) && state.engineCaptureChildSessions !== true) {
+        logWarn("capture.child_session_skipped", { session_id: sessionID });
+        return;
+      }
       const agentId = await resolveSessionAgent(client, sessionID, session);
       // Fail closed, no sentinel: a capture row must describe the agent that
       // produced it. Checked before the transcript fetch, which would be wasted.
@@ -1576,6 +1594,9 @@ export const server = async function server(input) {
         session_id: sessionID,
         agent_id: agentId,
         project_id: hostProjectId,
+        // Issue 86: a child's capture is attributed to its parent, and a
+        // non-child's payload stays byte-identical (D13).
+        ...(isChildSession(session) ? { parent_session_id: session.parentID } : {}),
         capture_id: reuseCaptureId(promptId),
         transcript: userPrompt,
         metadata,

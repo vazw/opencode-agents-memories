@@ -516,3 +516,116 @@ test(
     );
   }
 );
+
+// ---------------------------------------------------------------------------
+// Issue 86 — the child gate: a child session's work is never captured as the
+// human's, and when the engine opts in the capture is stamped with its parent.
+//
+// `isChildSession` is `parentID` being a non-empty string; a `null` session
+// (the host exposes no `session.get`, or the call threw) reads as NOT a child
+// and is named once per process (`capture.child_status_unknown`), exactly like
+// the compaction legs.
+// ---------------------------------------------------------------------------
+
+test(
+  "test_child_session_capture_is_skipped_by_default",
+  { timeout: 30000 },
+  async (t) => {
+    const run = await runCapture(t, {
+      ...caseA(),
+      sessions: { "ses-A": { agent: "build", parentID: "ses-parent" } },
+      expectCaptures: 0,
+      expectEvent: "capture.child_session_skipped",
+    });
+    // The line proves the gate ran; the capture count is the criterion.
+    const named = namedEvents(run.stderr, "capture.child_session_skipped");
+    assert.equal(named.length, 1, "exactly one named skip line");
+    assert.equal(named[0].session_id, "ses-A");
+    assert.equal(captures(run).length, 0, "a child's work is not the human's");
+    assert.equal(
+      run.messagesCalls.length,
+      0,
+      "the gate returns BEFORE the transcript fetch"
+    );
+    assert.equal(
+      run.marker,
+      "settled",
+      "the named event settled the driver; a deadline is not a pass"
+    );
+  }
+);
+
+test(
+  "test_child_session_capture_is_written_with_its_parent_when_the_engine_opts_in",
+  { timeout: 30000 },
+  async (t) => {
+    const run = await runCapture(t, {
+      ...caseA(),
+      sessions: { "ses-A": { agent: "build", parentID: "ses-parent" } },
+      helloConfig: { capture_child_sessions: true },
+      expectCaptures: 1,
+      expectEvent: null,
+    });
+    const sent = captures(run);
+    assert.equal(sent.length, 1, "the opt-in writes the child's capture");
+    assert.equal(sent[0].params.parent_session_id, "ses-parent");
+    assert.equal(sent[0].params.agent_id, "build");
+    assert.equal(sent[0].params.session_id, "ses-A");
+    assert.equal(run.messagesCalls.length, 1, "the transcript is still fetched");
+    assert.equal(
+      namedEvents(run.stderr, "capture.child_session_skipped").length,
+      0,
+      "an opted-in child is not named as skipped"
+    );
+  }
+);
+
+test("test_unknown_child_status_still_captures", { timeout: 30000 }, async (t) => {
+  // The driver's `get` answers `{data: null}`: unknown status reads as NOT a
+  // child (fail-open, like the compaction legs). The agent comes from the
+  // message so the capture is not dropped at `capture.agent_unresolved`.
+  const run = await runCapture(t, {
+    ...caseA(),
+    sessions: {},
+    messages: {
+      "ses-A": [
+        {
+          info: { id: "u1", role: "user", agent: "build" },
+          parts: [{ type: "text", text: "fix the parser" }],
+        },
+        { info: { id: "a1", role: "assistant" }, parts: [{ type: "text", text: "done" }] },
+      ],
+    },
+    expectCaptures: 1,
+    expectEvent: null,
+  });
+  assert.equal(captures(run).length, 1, "an unknown child status still captures");
+  assert.equal(captures(run)[0].params.parent_session_id, undefined);
+});
+
+test("test_unknown_child_status_is_named", { timeout: 30000 }, async (t) => {
+  const run = await runCapture(t, {
+    ...caseA(),
+    sessions: {},
+    messages: {
+      "ses-A": [
+        {
+          info: { id: "u1", role: "user", agent: "build" },
+          parts: [{ type: "text", text: "fix the parser" }],
+        },
+        { info: { id: "a1", role: "assistant" }, parts: [{ type: "text", text: "done" }] },
+      ],
+    },
+    expectCaptures: 1,
+    expectEvent: "capture.child_status_unknown",
+  });
+  const named = namedEvents(run.stderr, "capture.child_status_unknown");
+  assert.equal(named.length, 1, "exactly one named unknown-status line");
+  assert.equal(named[0].session_id, "ses-A");
+  assert.equal(
+    run.marker,
+    "settled",
+    "the named event settled the driver; a deadline is not a pass"
+  );
+  assert.ok(captures(run).length <= 1, "the unknown status never duplicates a capture");
+});
