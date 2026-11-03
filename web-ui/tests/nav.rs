@@ -193,3 +193,41 @@ fn test_nav_entry_count_matches_the_route_table() {
     assert_eq!(nav_entries().len(), ROUTES.len());
     assert_eq!(nav_entries().len(), RouteId::ALL.len());
 }
+
+#[wasm_bindgen_test]
+fn test_selected_path_normalizes_a_trailing_slash() {
+    assert_eq!(
+        web_ui::nav::selected_path("/project-memories/"),
+        Some("/project-memories")
+    );
+    assert_eq!(
+        web_ui::nav::selected_path("/project-memories"),
+        Some("/project-memories")
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_selected_path_refuses_the_api_surface() {
+    assert_eq!(web_ui::nav::selected_path("/api/health"), None);
+    assert_eq!(web_ui::nav::selected_path("/api"), None);
+    assert_eq!(web_ui::nav::selected_path("/no-such-route"), None);
+}
+
+#[wasm_bindgen_test]
+fn test_selected_path_matches_every_declared_route() {
+    for spec in ROUTES {
+        assert_eq!(web_ui::nav::selected_path(spec.path), Some(spec.path));
+    }
+}
+
+#[wasm_bindgen_test]
+fn test_plain_left_click_is_the_only_in_app_navigation() {
+    use web_ui::nav::is_plain_left_click;
+    assert!(is_plain_left_click(0, false, false, false, false));
+    assert!(!is_plain_left_click(0, true, false, false, false));
+    assert!(!is_plain_left_click(0, false, true, false, false));
+    assert!(!is_plain_left_click(0, false, false, true, false));
+    assert!(!is_plain_left_click(0, false, false, false, true));
+    assert!(!is_plain_left_click(1, false, false, false, false));
+    assert!(!is_plain_left_click(2, false, false, false, false));
+}

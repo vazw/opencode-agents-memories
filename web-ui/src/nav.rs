@@ -4,7 +4,7 @@
 //! A planned screen is visibly marked in the shell but stays navigable.
 
 use crate::paths::endpoints_for;
-use crate::routes::{ROUTES, RouteId, route};
+use crate::routes::{ROUTES, RouteId, resolve, route};
 
 pub use crate::routes::Owner;
 
@@ -86,4 +86,16 @@ pub fn nav_entries() -> Vec<NavEntry> {
             state: state_for(spec.id),
         })
         .collect()
+}
+
+/// The route path a pathname selects in the nav, normalised (`/tags/` and
+/// `/tags?x` both select `/tags`). `None` for `/api/**` and unknown paths.
+pub fn selected_path(pathname: &str) -> Option<&'static str> {
+    resolve(pathname).map(|id| route(id).path)
+}
+
+/// Whether a click is the plain primary-button click the shell routes in-app.
+/// Modified or non-primary clicks keep the browser's own new-tab behaviour.
+pub fn is_plain_left_click(button: i16, ctrl: bool, meta: bool, shift: bool, alt: bool) -> bool {
+    button == 0 && !(ctrl || meta || shift || alt)
 }
