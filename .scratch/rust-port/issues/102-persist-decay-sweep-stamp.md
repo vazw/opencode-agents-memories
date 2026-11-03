@@ -1,6 +1,6 @@
 # 102 — The decay-sweep stamp is in-memory, so every engine start re-arms the daily gate
 
-Status: needs-triage — 2026-11-01. The premise is MEASURED; the *shape* of the fix is a maintainer
+Status: ready-for-agent — 2026-11-01. The premise is MEASURED; the *shape* of the fix is a maintainer
 decision, because every candidate changes either the storage root's file set or the `user_profiles`
 schema, and this repo's on-disk format carries an explicit refusal rule for newer roots (issue 43
 decisions 2–3). Filed with the issue-90 blueprint rather than left as a disclosed bullet, because issue
@@ -80,3 +80,26 @@ is correct and the over-decay is bounded, so landing 90 first is intended.
 - Plan gate 1 for the issue-90 blueprint: `.tmp/progress/profile-decay.gate-1.md` §Gate 2 (adjudicated the
   bound and required this issue to exist). `.tmp/` is gitignored — the arithmetic above is therefore
   reproduced here in full rather than referenced.
+
+## Comment — 2026-11-03: exposure is zero today, and the runway is ~6 days
+
+MEASURED (read-only) and reasoned after a triage cross-check found this issue ranked too low:
+
+- `crates/mem-profile/src/profile_store.rs:413` — `last_decay_sweep: Mutex::new(None)`, **in memory
+  only**, never persisted; `sweep_is_due` at `:1076` therefore returns true on **every engine start**.
+- `crates/mem-bridge/src/engine.rs:1678` — `spawn_profile_decay_lifecycle` runs a startup tick, added by
+  `39dadf3` (2026-11-01), so this is live now.
+- `profile_store.rs:1473` — `confidence = blended * decay_factor(item, now)`; `decay_items` never
+  advances `last_seen`, so a second pass multiplies the already-decayed value again.
+- `profile_store.rs:288` and `:1456` both call `sync_confidence` → **twice per pass**.
+- `crates/mem-profile/src/decay.rs:53-55` — `decay_factor` is exactly `1.0` inside the grace window.
+
+**Why nothing is decaying yet (owner: the install is 24 days old):** the grace is
+`userProfileConfidenceDecayDays = 30` — the default (`schema.rs:602`) and the live value
+(`~/.config/opencode/opencode-mem.jsonc:252`). No profile item can be older than the install, so every
+`decay_factor` is `1.0` today and the double blend multiplies by one. **Exposure now: zero.**
+
+**The runway is ≈ 6 days.** From the day the install passes 30 days, every engine start applies the
+blend to the oldest items — silently, irreversibly, and twice per pass. The fix (persist the stamp, and
+remove the duplicate `sync_confidence`) must land **before** that, not when someone notices a number
+moving.
