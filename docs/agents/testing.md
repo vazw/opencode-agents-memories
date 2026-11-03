@@ -8,7 +8,7 @@ The upstream suite (`example/opencode-mem/tests/`, 110 files, v2.31.3 @ 906038e)
 - Shared helpers live in `crates/<crate>/tests/common/mod.rs` (std-only, headed by `#![allow(dead_code)]`; no dev-dependencies).
 - Test names are `test_<behavior>_<condition>`.
 - Crate-internal tests (`#[cfg(test)]` in `src/`) are only for private items — integration tests assert through the crate's public interface.
-- Focused command: `cargo test -p <crate> --test <file>`. Full battery (all exit 0): `cargo fmt --all --check`, `cargo build --workspace` (0 warnings), the two clippy gates of ADR-0013 D-5 — `cargo clippy --workspace --lib -- -A clippy::all -D clippy::unwrap_used -D clippy::expect_used` and `cargo clippy --workspace --all-targets -- -D warnings -A clippy::await_holding_lock -A clippy::assertions_on_constants -A clippy::doc_lazy_continuation` — and `cargo test --workspace`. The pre-commit hook (`.githooks/pre-commit`, ADR-0016) runs those same two gates in the root workspace plus a staged-file `rustfmt --check`: it is a floor under the commit, not the battery. The single unexcluded form `cargo clippy --workspace --all-targets -- -D warnings` exits 101 on the **root** workspace with 19 pre-existing errors across three lints (re-derived 2026-11-03 with `--keep-going`, without which cargo stops at the first failing crate and under-reports: 15 `clippy::await_holding_lock` in `crates/mem-skills/tests/skills_manager.rs`, 1 `clippy::doc_lazy_continuation` in `crates/mem-bridge/src/vault_feeder.rs:15:5`, 2 `clippy::assertions_on_constants` in `crates/mem-vault/tests/no_write_path.rs` and 1 more in `crates/mem-web/tests/dedup_offload.rs`), which is why all three exclusions are load-bearing. The pre-commit hook's `web-ui` phase runs **both** gates in that separate workspace, panic families first: the 7 pre-existing `web-ui` panic sites were repaired on 2026-10-25 (7 → 0, ADR-0016 D-3). `web-ui`'s own suite is wasm-only: `cd web-ui && cargo test --target wasm32-unknown-unknown` (wasm-bindgen-test-runner + Chromium, **159 tests at the W6.6 landing**, 170 after the 2026-11-02 web-ui repair wave, **185 after the 2026-11-03 identity/picker wave**).
+- Focused command: `cargo test -p <crate> --test <file>`. Full battery (all exit 0): `cargo fmt --all --check`, `cargo build --workspace` (0 warnings), the two clippy gates of ADR-0013 D-5 — `cargo clippy --workspace --lib -- -A clippy::all -D clippy::unwrap_used -D clippy::expect_used` and `cargo clippy --workspace --all-targets -- -D warnings -A clippy::await_holding_lock -A clippy::assertions_on_constants -A clippy::doc_lazy_continuation` — and `cargo test --workspace`. The pre-commit hook (`.githooks/pre-commit`, ADR-0016) runs those same two gates in the root workspace plus a staged-file `rustfmt --check`: it is a floor under the commit, not the battery. The single unexcluded form `cargo clippy --workspace --all-targets -- -D warnings` exits 101 on the **root** workspace with 19 pre-existing errors across three lints (re-derived 2026-11-03 with `--keep-going`, without which cargo stops at the first failing crate and under-reports: 15 `clippy::await_holding_lock` in `crates/mem-skills/tests/skills_manager.rs`, 1 `clippy::doc_lazy_continuation` in `crates/mem-bridge/src/vault_feeder.rs:15:5`, 2 `clippy::assertions_on_constants` in `crates/mem-vault/tests/no_write_path.rs` and 1 more in `crates/mem-web/tests/dedup_offload.rs`), which is why all three exclusions are load-bearing. The pre-commit hook's `web-ui` phase runs **both** gates in that separate workspace, panic families first: the 7 pre-existing `web-ui` panic sites were repaired on 2026-10-25 (7 → 0, ADR-0016 D-3). `web-ui`'s own suite is wasm-only: `cd web-ui && cargo test --target wasm32-unknown-unknown` (wasm-bindgen-test-runner + Chromium, **159 tests at the W6.6 landing**, 170 after the 2026-11-02 web-ui repair wave, **185 after the 2026-11-03 identity/picker wave**, **196 after the 2026-11-03 Thaw wave 1**: 185 + 7 theme-token oracles + 4 nav oracles, measured).
 
 ### `web-ui` class coverage (a scripted gate, not a unit test)
 
@@ -16,7 +16,7 @@ The Memory Explorer's stylesheet must wire every class token its Rust can emit. 
 script, not a wasm test:
 
 ```sh
-cd web-ui && node scripts/check-class-coverage.mjs --self-test --min-emitted=185
+cd web-ui && node scripts/check-class-coverage.mjs --self-test --min-emitted=187
 ```
 
 - It classifies **every** `class=` site in `web-ui/src/**/*.rs` as literal / const / balanced
@@ -28,13 +28,13 @@ cd web-ui && node scripts/check-class-coverage.mjs --self-test --min-emitted=185
   fixture 9 is the *unresolvable identifier inside a block* discriminator — a block that yields one
   known token and one identifier the const map cannot resolve must still report 1 residue, or a known
   branch would buy an unknown one a silent pass.
-- Census and triple: `sites=202 literal=182 const=19 brace=1 residue=0` and
-  `emitted=185 hooks=185 missing=0 dead=0 unresolved=0`.
+- Census and triple: `sites=205 literal=185 const=19 brace=1 residue=0` and
+  `emitted=187 hooks=187 missing=0 dead=0 unresolved=0` (Thaw wave 1: 185 − 3 (`dark`, `app-nav`, `theme-toggle`) + 5 (`app-layout-row`, `app-sider`, `app-nav-drawer`, `app-body`, `app-brand`), measured as 184 after the stylesheet step and 187 after the shell step; `app-layout-row` is counted through `Layout`'s `content_class=` because the extractor's finder `/class\s*=/g` has no left boundary — tightening it re-derives this number).
 - Arc: the baseline at `81ba4ca` was `sites=187 literal=173 const=13 brace=1 residue=0` /
   `emitted=175 hooks=58 missing=117 dead=0`. The repair wave closed all 117 and added six hooks
   (`skills-empty`, four `confirm-gate*`, `agents-prompt` — the last retired by issues 115/116), so
-  **175/58/117 → 181/181/0 at that wave** (185/185/0 today — see the census above). The `--min-emitted=185` floor is a ratchet: a
-  deleted rule is caught as `missing>0`, a wholesale stylesheet revert as `emitted<185`.
+  **175/58/117 → 181/181/0 at that wave** (187/187/0 today — see the census above). The `--min-emitted=187` floor is a ratchet: a
+  deleted rule is caught as `missing>0`, a wholesale stylesheet revert as `emitted<187`.
 - `.githooks/pre-commit` runs the same command whenever a `web-ui/` path is staged (missing `node`
   fails the commit — never a silent skip), and `scripts/test-pre-commit.sh` case 17 proves the gate
   names the unwired hook: a fixture carrying the real `web-ui/src` and the post-wave stylesheet with

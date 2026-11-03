@@ -1,9 +1,9 @@
 # 118 — the web UI draws 1 of 58 Thaw components: a hand-rolled design system sits beside the framework
 
-Status: ready-for-agent — **wave 1 (theme + shell) is blueprinted and awaiting the Plan Gate**
-(`.tmp/blueprints/` `…issue-103`-style file will be linked here on approval; the assessment that
-produced this issue is `.tmp/progress/webui-thaw-assessment-20261103-0955.md`). Waves 2 and 3 are
-scoped below but not yet planned.
+Status: ready-for-human — **wave 1 (theme + shell) is built and structurally verified; staging and the
+live ±2 % height pair are the operator's** (blueprint
+`.tmp/blueprints/blueprint-20261103-1147-webui-thaw-wave1-shell-r6.md`, `blueprint_sha256: 6d54b8762eae`).
+Waves 2 and 3 are scoped below but not yet planned.
 
 ## Observation (MEASURED 2026-11-03, chrome-devtools MCP against the live engine at 127.0.0.1:3742)
 
@@ -80,3 +80,25 @@ All waves:
 - `docs/adr/0003-web-explorer-ui-stack.md` — the frozen stack and why.
 - `.tmp/progress/webui-thaw-assessment-20261103-0955.md` — the full per-screen critique and the
   16-row effort/risk table this issue compresses.
+
+## Wave 1 outcome (MEASURED 2026-11-03, `web-ui/dist` served at 127.0.0.1:8123 through the chrome-devtools MCP, 1280×800, isolated context)
+
+| Claim | Before (`:3742`, bundle `52c1081f…`) | After (preview, own build) |
+|---|---|---|
+| `[class*=thaw-]` elements, 10 routes | 1 | **39** on every route |
+| Thaw components in `shell.rs` | 1 | 7 (`ConfigProvider`, `Layout`, `LayoutSider`, `NavDrawer`, `NavDrawerHeader`, `NavItem`, `Button`) |
+| literal colours / `thaw` in `styles.css` | 20 / 0 | 0 / 0 |
+| `html` background | `rgba(0, 0, 0, 0)` | dark `rgb(20, 23, 28)`, light `rgb(247, 248, 250)` |
+| `.thaw-config-provider` bg / type | `rgb(41, 41, 41)` (stock) / 14px/20px | `rgb(28, 32, 39)` dark, `rgb(255, 255, 255)` light / **14px/20px** |
+| `nav[aria-label="Primary"]` | **0**; nav attribute list `["class","attr:aria-label"]` | **1**, `["aria-label"]`, `colonAttrs []` |
+| nav item selected / `aria-current` | 0 / 1 | 1 / 1 |
+| scrollbar container `clientHeight === scrollHeight` | n/a | equal on all 10 routes; 5000 px injected block: `slack 4488`, sider and shell bottoms both 5288.1 |
+| wasm suite / class census | 185 / `emitted=185` | **196** / `emitted=187 hooks=187 missing=0 dead=0 unresolved=0` (184 after the stylesheet step) |
+
+The labelling defect the wave fixes (R-E): `shell.rs:59` shipped `<nav class="app-nav" attr:aria-label="Primary">`,
+which this build renders as an attribute *named* `attr:aria-label`, so the nav never had its landmark.
+
+Not judged here (needs the live data, after the operator stages the bundle): the ±2 % `docH` pair against
+`before.json`, `slack > 0` on the four tall routes, and the two `data-testid` selects (R11) — the preview has
+no API. Note `.githooks/pre-commit` still passes `--min-emitted=185`; raising it is outside this wave's footprint.
+
