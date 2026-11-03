@@ -64,6 +64,7 @@ async fn test_older_sessions_carry_the_similarity_attribute() {
             include: Some(json!({ "recent_count": 1, "query": "zzz" })),
             user_id: None,
             session_id: None,
+            ..Default::default()
         })
         .await
         .expect("assemble");

@@ -364,6 +364,10 @@ async fn test_capture_metadata_json_survives_quotes_in_session_id() {
             include: None,
             user_id: None,
             session_id: None,
+            exclude_session: None,
+            max_memories: None,
+            max_age_days: None,
+            chat_injection: None,
         })
         .await
         .expect("assemble");

@@ -62,6 +62,7 @@ fn params(include: Value) -> InjectParams {
         include: Some(include),
         user_id: None,
         session_id: None,
+        ..Default::default()
     }
 }
 

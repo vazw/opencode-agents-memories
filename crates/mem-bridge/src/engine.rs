@@ -694,8 +694,16 @@ impl Engine {
                 ),
             }
         }
-        let inject_params: InjectParams =
-            serde_json::from_value(request.params.clone()).unwrap_or_default();
+        let inject_params: InjectParams = match serde_json::from_value(request.params.clone()) {
+            Ok(params) => params,
+            Err(_) => {
+                return Response::error(
+                    request.id.clone(),
+                    error_map::code_for(ErrorKind::InvalidParams),
+                    error_map::message_for(ErrorKind::InvalidParams),
+                );
+            }
+        };
         match runtime.inject.assemble(&inject_params).await {
             Ok(result) => Response::result(
                 request.id.clone(),

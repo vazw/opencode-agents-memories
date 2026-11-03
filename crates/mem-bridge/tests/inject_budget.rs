@@ -24,6 +24,7 @@ fn params(project_id: &str, include: mem_store::serde_json::Value) -> InjectPara
         include: Some(include),
         user_id: None,
         session_id: None,
+        ..Default::default()
     }
 }
 
@@ -393,6 +394,7 @@ async fn test_inject_missing_project_returns_empty_block_without_shard_query() {
         include: None,
         user_id: None,
         session_id: None,
+        ..Default::default()
     };
     let blank_project = InjectParams {
         project_id: Some("   ".to_string()),

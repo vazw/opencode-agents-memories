@@ -75,6 +75,7 @@ fn params(session_id: Option<&str>, compaction: &str) -> InjectParams {
         include: Some(json!({ "compaction": compaction })),
         user_id: None,
         session_id: session_id.map(str::to_string),
+        ..Default::default()
     }
 }
 
@@ -85,6 +86,7 @@ fn restore_params(project_id: &str, session_id: &str) -> InjectParams {
         include: Some(json!({ "compaction": "restore" })),
         user_id: None,
         session_id: Some(session_id.to_string()),
+        ..Default::default()
     }
 }
 
@@ -95,6 +97,7 @@ fn plain_params() -> InjectParams {
         include: None,
         user_id: None,
         session_id: None,
+        ..Default::default()
     }
 }
 

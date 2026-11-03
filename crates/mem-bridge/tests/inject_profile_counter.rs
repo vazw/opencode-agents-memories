@@ -63,6 +63,7 @@ fn params(user_id: &str) -> InjectParams {
         include: None,
         user_id: Some(user_id.to_string()),
         session_id: None,
+        ..Default::default()
     }
 }
 

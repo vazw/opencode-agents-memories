@@ -144,6 +144,14 @@ pub struct InjectParams {
     /// The hook's own session id. The compaction leg keys the tier-1 read on
     /// it; every other path ignores it (the field is additive and optional).
     pub session_id: Option<String>,
+    /// Exclude episodic rows from the requesting session when explicitly set.
+    pub exclude_session: Option<bool>,
+    /// Cap the EMITTED memory count (after budget and duplicate suppression).
+    pub max_memories: Option<u32>,
+    /// Drop memory rows older than this many days.
+    pub max_age_days: Option<u32>,
+    /// True only for wrapper chat requests.
+    pub chat_injection: Option<bool>,
 }
 
 /// The result body (frozen response schema).
@@ -267,6 +275,31 @@ struct ProfileTier {
     policy: ProfileInjectPolicy,
 }
 
+pub type InjectClock = Arc<dyn Fn() -> i64 + Send + Sync>;
+
+/// The chat injection policy: limits applied to wrapper chat requests only.
+///
+/// Every field is inert by default (`None` = no restriction), so an engine that
+/// never calls [`InjectService::with_chat_policy`] keeps the legacy semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChatInjectionPolicy {
+    pub max_memories: Option<u32>,
+    pub exclude_current_session: bool,
+    pub max_age_days: Option<u32>,
+}
+
+impl ChatInjectionPolicy {
+    /// The resolved `chatMessage` knobs (issue 63). `max_memories` is always
+    /// resolved by the config layer, so it is always a cap here.
+    pub fn from_core(config: &mem_core::config::Config) -> Self {
+        Self {
+            max_memories: Some(config.chat_message.max_memories),
+            exclude_current_session: config.chat_message.exclude_current_session,
+            max_age_days: config.chat_message.max_age_days,
+        }
+    }
+}
+
 pub struct InjectService {
     store: Arc<EpisodicStore>,
     shards: Arc<ShardManager>,
@@ -282,6 +315,8 @@ pub struct InjectService {
     /// an unwired service still answers the compaction modes; the production
     /// composition rebinds it from `config.compaction`.
     compaction: CompactionPolicy,
+    clock: Option<InjectClock>,
+    chat_policy: Option<ChatInjectionPolicy>,
 }
 
 impl InjectService {
@@ -303,7 +338,22 @@ impl InjectService {
             probe,
             profile: None,
             compaction: CompactionPolicy::default(),
+            clock: None,
+            chat_policy: None,
         }
+    }
+
+    /// Wires config-derived chat limits. Direct and compaction requests remain
+    /// governed solely by explicit parameters.
+    pub fn with_chat_policy(mut self, policy: ChatInjectionPolicy) -> Self {
+        self.chat_policy = Some(policy);
+        self
+    }
+
+    /// Injects the assembly clock (the age cutoff's one time source).
+    pub fn with_clock(mut self, clock: InjectClock) -> Self {
+        self.clock = Some(clock);
+        self
     }
 
     /// Wires the profile tier (issue 44). Additive on purpose: the other five
@@ -319,6 +369,14 @@ impl InjectService {
     pub fn with_compaction(mut self, policy: CompactionPolicy) -> Self {
         self.compaction = policy;
         self
+    }
+
+    /// The injected clock, else the wall clock (one read per assembly).
+    fn now(&self) -> i64 {
+        match &self.clock {
+            Some(clock) => clock(),
+            None => now_millis(),
+        }
     }
 
     /// Assembles the injection block.
@@ -369,8 +427,36 @@ impl InjectService {
             bb.cmp(&ab).then(b.created_at.cmp(&a.created_at))
         });
 
+        // Resolution order (issue 63): explicit top-level parameter wins, then
+        // wrapper-chat request policy, then the direct-request default (no
+        // restriction / no exclusion).
+        let is_chat = params.chat_injection.unwrap_or(false);
+        let chat_policy = if is_chat { self.chat_policy } else { None };
+
+        let should_exclude = params
+            .exclude_session
+            .or_else(|| chat_policy.map(|p| p.exclude_current_session))
+            .unwrap_or(false);
+        let excluded_session = should_exclude
+            .then(|| params.session_id.as_deref().filter(|id| !id.is_empty()))
+            .flatten();
+
+        let max_age_days = params
+            .max_age_days
+            .or_else(|| chat_policy.and_then(|p| p.max_age_days));
+        let age_cutoff = age_cutoff_millis(max_age_days, self.now());
+
+        let max_memories = params
+            .max_memories
+            .or_else(|| chat_policy.and_then(|p| p.max_memories));
+
         let mut episodic: Vec<Candidate> = Vec::new();
         for row in &recent {
+            if excluded_session == Some(row.session_id.as_str())
+                || age_cutoff.is_some_and(|cutoff| row.created_at < cutoff)
+            {
+                continue;
+            }
             seen.insert(row.id.clone());
             episodic.push(Candidate {
                 id: row.id.clone(),
@@ -404,7 +490,10 @@ impl InjectService {
                 .await
                 .map_err(store_error)?;
             for hit in &hits {
-                if seen.insert(hit.session.id.clone()) {
+                if excluded_session != Some(hit.session.session_id.as_str())
+                    && !age_cutoff.is_some_and(|cutoff| hit.session.created_at < cutoff)
+                    && seen.insert(hit.session.id.clone())
+                {
                     episodic.push(Candidate {
                         id: hit.session.id.clone(),
                         // D7: the attribute is baked in before `greedy`, so
@@ -443,6 +532,15 @@ impl InjectService {
         if let Tier1Leg::Scored(rows) | Tier1Leg::TagListed(rows) = tier1 {
             let mut skipped_metadata = 0u64;
             for row in rows {
+                let session =
+                    mem_store::vector::resolve_session_id(None, row.metadata_text.as_deref());
+                if session
+                    .as_deref()
+                    .is_some_and(|id| excluded_session == Some(id))
+                    || age_cutoff.is_some_and(|cutoff| row.created_at < cutoff)
+                {
+                    continue;
+                }
                 if !seen.insert(row.id.clone()) {
                     continue;
                 }
@@ -465,10 +563,6 @@ impl InjectService {
                         // budget pass, against the ACTUALLY INCLUDED episodic
                         // rows: a budget-dropped episode row must not suppress
                         // its capture summary (neither would render).
-                        let session = mem_store::vector::resolve_session_id(
-                            None,
-                            row.metadata_text.as_deref(),
-                        );
                         summaries_section.push(Candidate {
                             id: row.id,
                             line: scored_row_line(san(&row.content), row.similarity),
@@ -521,6 +615,13 @@ impl InjectService {
                         .as_ref()
                         .is_some_and(|session| accepted_sessions.contains(session)))
             });
+        }
+
+        // 5c. The cap counts EMITTED rows: applied after the budget pass and
+        // the suppression, so a rejected or suppressed candidate never costs
+        // a slot. `included` keeps priority order, so the prefix is the top N.
+        if let Some(max_memories) = max_memories {
+            included.truncate(max_memories as usize);
         }
 
         if included.is_empty() {
@@ -938,6 +1039,16 @@ fn now_millis() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// Age cutoff in unix milliseconds. An unrepresentably early cutoff means all
+/// representable timestamps are eligible.
+fn age_cutoff_millis(max_age_days: Option<u32>, now: i64) -> Option<i64> {
+    max_age_days.and_then(|days| {
+        i64::from(days)
+            .checked_mul(86_400_000)
+            .and_then(|duration| now.checked_sub(duration))
+    })
 }
 
 /// The CHECKED token→byte mapping (D-W5.3-3): reject overflow, never wrap.

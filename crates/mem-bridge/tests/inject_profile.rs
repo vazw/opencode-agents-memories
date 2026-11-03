@@ -82,6 +82,7 @@ fn params(project_id: &str, user_id: Option<&str>, token_budget: Option<u64>) ->
         include: None,
         user_id: user_id.map(str::to_string),
         session_id: None,
+        ..Default::default()
     }
 }
 
