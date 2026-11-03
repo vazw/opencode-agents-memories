@@ -147,7 +147,7 @@ Child mechanics (proven executable by `crates/mem-core/tests/fixture_recipe.rs` 
 | `tests/opencode-provider.test.ts` | port | `crates/mem-ai/tests/provider/opencode_provider.rs` | W2.1; host provider over HTTP host-fetch (recorded divergence: no host token-count endpoint → `count_tokens` = ceil(chars/4)) |
 | `tests/anthropic-provider.test.ts` | port | `crates/mem-ai/tests/provider/remote_providers.rs` | W2.2; exemplar adapter on shared plumbing, mock transport (no real keys/network); name/endpoint/auth/request + SSE + structured asserted through the W2.1 trait |
 | `tests/openai-chat-completion-provider.test.ts` | port | `crates/mem-ai/tests/provider/remote_providers.rs` | W2.2; same seam; retry/timeout/structured uniformity via shared plumbing |
-| `tests/minimax-provider.test.ts` | port | `crates/mem-ai/tests/provider/remote_providers.rs` | W2.2; same seam |
+| `tests/minimax-provider.test.ts` | port | `crates/mem-ai/tests/provider/remote_providers.rs` | W2.2; same seam. Its example-template case stays N-A — the port has no `memoryModel` template — while the shipped example's honesty is now guarded by `crates/mem-core/tests/config_example.rs`. |
 | `tests/atlas-cloud-provider.test.ts` | port | `crates/mem-ai/tests/provider/remote_providers.rs` | W2.2; same seam; conservative secret-shape rule keeps arbitrary keys usable |
 | `tests/orcarouter-provider.test.ts` | port | `crates/mem-ai/tests/provider/remote_providers.rs` | W2.2; same seam; OpenAI-responses and Gemini adapters have no upstream test file — covered by the same file's trait-seam cases |
 | `tests/privacy.test.ts` | port | `crates/mem-ai/tests/privacy/privacy_tags.rs` | W2.3; 12 upstream cases (strip + fully-private predicate) |
@@ -233,6 +233,14 @@ Modules with no upstream test (e.g. `src/utils/math.ts`) get direct unit coverag
 W3.2 additions in this class (registry rows intentionally omitted, named by the wave test plan): `crates/mem-profile/tests/analysis_prompt.rs` (the builder and truncation contract — upstream asserts it only through mocked subprocesses, and the schema artifact had no assertion at all: `test_analysis_schema_requires_arrays_and_closes_objects`), `crates/mem-profile/tests/learning_round.rs` (round-level language/truncation integration through a spy gateway) and `crates/mem-profile/tests/provider_gateway.rs` (the local `StructuredCompletion` seam + `ProviderAnalysisGateway` prompt pairing — upstream's provider is mocked in every case).
 
 W4.1 net-new (R10): `crates/mem-episodic/tests/record_shape.rs`, `crates/mem-episodic/tests/migration.rs` and `crates/mem-episodic/tests/store_roundtrip.rs` define the episodic schema/record shape with no upstream oracle, so they get no registry row.
+
+This wave's net-new suite (registry row intentionally omitted per the convention above):
+`crates/mem-core/tests/config_example.rs` (6) guards the shipped `opencode-mem.example.jsonc` in two
+independent directions — a test-local `deny_unknown_fields` mirror of `FileConfig` rejects a
+misspelled key, and a production-side test hands each of the example's 35 leaf keys an object value
+and requires `Config::load` to answer `InvalidShape`, so a key that is unknown to the real schema
+cannot ship even if the mirror is taught it — plus same-home resolution equality against the no-file
+defaults. Upstream has no shipped-example test to port.
 
 W4.2 net-new (R10): `timeline_query.rs`, `semantic_query.rs`, `orphan_linkage.rs` and `recall_tool_schema.rs` define the timeline/query/recall semantics with no upstream oracle, so they get no registry row; `migration.rs`, `record_shape.rs` and `store_roundtrip.rs` are extended in place.
 

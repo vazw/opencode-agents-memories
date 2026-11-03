@@ -37,6 +37,7 @@ store you have not backed up.
 | `plugin/` | the OpenCode plugin — plain Node ESM, no npm dependencies; `dist/` bundles, `engine/` staging, `skills/memory-usage/` |
 | `web-ui/` | Leptos 0.7 + Thaw 0.4.8 CSR explorer (an excluded wasm workspace, built with `trunk`) |
 | `example/opencode-mem/` | vendored upstream reference clone — read-only, gitignored, not part of the build |
+| `opencode-mem.example.jsonc` | shipped config example — curated, every live key at its default (see Configuration) |
 | `docs/` | ADRs, agent/testing documentation, evidence runs |
 
 The workspace is Rust **edition 2024**. Dependencies live once in `[workspace.dependencies]`; the
@@ -90,24 +91,126 @@ git config core.hooksPath .githooks
    }
    ```
 
-3. The plugin reads the same `~/.config/opencode/opencode-mem.jsonc` as upstream (camelCase, unknown
-   keys tolerated). Defaults: `storagePath` `~/.opencode-mem/data`, `embeddingModel`
-   `Xenova/nomic-embed-text-v1`. The engine's web server listens on **3742** by default
-   (`mem_bridge::engine::DEFAULT_WEB_PORT`; `OPENCODE_MEM_WEB_PORT` overrides it at launch). The
-   `webServerPort` key in `opencode-mem.jsonc` is read by the standalone `mem-web` server, not by the
-   plugin's engine launch — measured 2026-10-31: the live engine bound 3742 while the config said 4747.
+3. Configuration is read from `~/.config/opencode/opencode-mem.jsonc` (camelCase; unknown keys are
+   tolerated). `opencode-mem.example.jsonc` at the repo root is the shipped example. Path precedence,
+   the keys this build parses but does not read, the `OPENCODE_MEM_*` overrides and the
+   `webServerPort`-versus-engine-port distinction are in [Configuration](#configuration).
 
 Two operational caveats:
 
-- **The embedder never downloads.** It reads `$TMPDIR/.opencode-mem-onnx/Xenova/nomic-embed-text-v1/`;
-  provision that cache (weights plus a canonical v2.0 `tokenizer.json`) before relying on
-  `search`/`add`. Without it, the rest of the store still works and `search`/`add` answer `-32603`.
+- **The embedder never downloads.** It reads `<storagePath>/.cache/<embeddingModel>/` (default
+  `~/.opencode-mem/data/.cache/Xenova/nomic-embed-text-v1`) and needs the weights plus a canonical
+  v2.0 `tokenizer.json`; `scripts/provision-onnx-cache.sh` writes exactly that. Without it, the rest
+  of the store still works and `search`/`add` answer `-32603`.
 - **Opening an upstream store migrates it in place** (`metadata.db` 1→2, `user-prompts.db` 1→2,
   project shards 2→3 lazily on first write). The migration is additive but this build refuses a store
   written by a newer build, so back up the store before the first open. The backup/restore and
   provisioning sequence is documented in `docs/runbooks/live-swap.md`.
 
 A local plugin does not auto-update.
+
+## Configuration
+
+The engine resolves one global file and, when the host launches it for a project, one project file,
+layered lowest to highest:
+
+| order | source |
+|---|---|
+| 1 (lowest) | built-in defaults (`DEFAULTS`, `crates/mem-core/src/config/schema.rs`) |
+| 2 | `~/.config/opencode/opencode-mem.jsonc`, then `~/.config/opencode/opencode-mem.json` |
+| 3 | `<project>/.opencode/opencode-mem.jsonc`, then `<project>/.opencode/opencode-mem.json` |
+| 4 (highest) | environment-derived values (home resolution, secret references, the fallbacks below) |
+
+Within one side the first candidate that parses wins: an existing but unparseable `.jsonc` is logged
+and skipped, and the `.json` candidate is tried instead.
+
+`opencode-mem.example.jsonc` at the repo root is the shipped example. It is **curated, not
+exhaustive**: every live key in it is set to its built-in default, so copying it verbatim changes
+nothing, and a key it does not list is at its default. For the complete key list read `FileConfig`
+and `DEFAULTS` in `crates/mem-core/src/config/schema.rs`.
+
+**Unknown keys are tolerated by design** (upstream forward compatibility). A misspelled key is
+accepted, resolves to nothing and changes no behaviour — silently, because nothing validates key
+names at runtime. Compare an edit against `FileConfig`; `crates/mem-core/tests/config_example.rs`
+keeps the shipped example itself honest, and it does so against the real schema, not only against a
+test-local copy of it.
+
+### Keys that parse but this build does not read
+
+These resolve (and mostly validate) but no code reads them, so their values change no behaviour.
+They are kept for upstream-config compatibility; none of them is broken. Measured at commit
+`<stamp>`: for each key, `grep -rn '\b<resolved field>\b' crates src --include=*.rs`, filtered of
+`*/tests/`, of `crates/mem-core/src/config/` (where a key is defined and resolved) and of comment
+lines (`:[0-9]+:[[:space:]]*//` — a doc comment naming a field is not a reader), returns nothing.
+The filter is textual: an access through an intermediate binding (`let cm = &config.chatMessage;
+cm.maxMemories`) would not be matched. Re-run it before trusting a row. First taken at `1d423e8`;
+re-stamped at `<stamp>` because both pipelines print `0` on every row at both commits — at
+`1d423e8` that is 22 loop rows plus the nested row (**23**), and after this wave it is 21 loop rows
+plus the nested row (**22**); the difference is `chatMessage.captureChildSessions`, which is live
+now and therefore not in the table above.
+
+| key | note |
+|---|---|
+| `maxProfileItems` | the injection caps are `userProfileInject{Preferences,Patterns,Workflows}` (issue 44.9) |
+| `autoUpdate` | the binary ships through the OS package manager; there is no self-update path (issue 27) |
+| `chatMessage.excludeCurrentSession`, `chatMessage.injectOn` | only `chatMessage.enabled`, `chatMessage.filterInjectedPrompts` and `chatMessage.injectionMarkers` are read |
+| `chatMessage.maxAgeDays` | assigned from the file and never consulted |
+| `chatMessage.maxMemories` | the nested key is unread; the **top-level** `maxMemories` is the `search` default. Shared field name, so its census is the separate command below |
+| `similarityThreshold` | `search` takes no threshold parameter in this build |
+| `aiSessionRetentionDays`, `autoCleanupRetentionDays` | `autoCleanupEnabled` is read; neither count is |
+| `autoCaptureMaxIterations`, `autoCaptureIterationTimeout`, `autoCaptureLanguage` | only `autoCaptureMaxRetries` and `autoCaptureMaxContextBytes` are read; the capture prompt's language line is fixed in code |
+| `opencodeTimeoutMs` | resolved and clamped, never consulted |
+| `memoryTemperature` | normalized and never read; the manual provider reads `forceToolChoice` and its endpoint/model/key |
+| `memoryExtraParams` | parsed and copied, never read, for the same reason |
+| `userProfileMaxContextBytes`, `userProfileDisplay{Preferences,Patterns,Workflows}` | profile rendering uses the `userProfileInject*` caps |
+| `showAutoCaptureToasts`, `showUserProfileToasts`, `showErrorToasts` | no toast surface in this build |
+
+`chatMessage.captureChildSessions` is deliberately **not** in this table: it is read. It gates the
+memory-context restore for child sessions at compaction time; capture — the milestone write — stays
+ungated (ruling D-114-2), because the write and the restore are different lanes. Its default is
+`false`, and the shipped example carries that default so the opt-in is discoverable. The
+child-session restore wave landed before this census was taken, so this section was re-derived
+after it.
+
+The `chatMessage.maxMemories` row is verified by its own pipeline, because the bare field name also
+matches the **read** top-level key and would be a false positive:
+
+```sh
+grep -rn 'chat_message\.max_memories\|chat_message_max_memories' crates src --include=*.rs \
+  | grep -v '/tests/' | grep -v 'crates/mem-core/src/config/' \
+  | grep -vE ':[0-9]+:[[:space:]]*//' | wc -l    # 0
+```
+
+### Global-only and project-dropped keys
+
+A project file that carries any of `embeddingApiUrl`, `embeddingApiKey`, `memoryProvider`,
+`memoryApiUrl`, `memoryApiKey` is **rejected** — key presence is enough, even `null` — because
+provider transport and keys are a global decision. `autoCleanupEnabled` and
+`autoCleanupRetentionDays` are accepted in a project file and ignored.
+
+### Environment
+
+| variable | effect |
+|---|---|
+| `HOME`, `USERPROFILE` | home used for `~` expansion and the config paths |
+| `OPENCODE_MEM_STORAGE_ROOT` | the engine's storage root (DBs, lock, status); `--storage-root` wins over it. **`storagePath` in the JSONC does not move the store** — it is the embedder's `<storagePath>/.cache` root |
+| `OPENCODE_MEM_MODE` | engine launch mode (`stdio`, `standalone`, …) |
+| `OPENCODE_MEM_WEB_HOST`, `OPENCODE_MEM_WEB_PORT` | the engine's own web bind (default `127.0.0.1:3742`) |
+| `OPENCODE_MEM_WEB_DIST` | packaged UI directory (`--web-dist` wins) |
+| `OPENCODE_MEM_LOG_FILE` | log file (default `~/.opencode-mem/opencode-mem.log`) |
+| `OPENCODE_MEM_ALLOW_UNGUARDED_OPEN` | the guard override: any non-empty value enables it, `0`/`false`/`no`/`off` disable it, and it wins over `allowUnguardedOpen` |
+| `OPENAI_API_KEY` | embedding key fallback, used only when `embeddingApiUrl` is set and `embeddingApiKey` is absent (an explicit `""` blocks the fallback) |
+| `ATLASCLOUD_API_KEY` | memory key fallback when `memoryProvider` is `atlas-cloud` and `memoryApiKey` is unset |
+
+`memoryApiKey`, `embeddingApiKey`, `webServerAuthPassword` and `webServerApiToken` accept
+`env://NAME` or `file:///path` instead of a literal secret; a missing variable or file is a config
+error.
+
+### The two ports
+
+`webServerPort` (default 4747) configures the standalone `mem-web` server. The engine's own server
+binds **3742** (`mem_bridge::engine::DEFAULT_WEB_PORT`) and `OPENCODE_MEM_WEB_PORT` overrides it at
+launch — measured 2026-10-31: the live engine bound 3742 while the config said 4747.
 
 ## Compatibility and upstream
 

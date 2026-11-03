@@ -83,6 +83,15 @@ them, and prefer a description over a numeral when the numeral cannot be kept ch
 - Dependencies live once in `[workspace.dependencies]`, consumed as `{ workspace = true }`: `turso` 0.8,
   `tokio`, `ort` + `tokenizers`, `axum` 0.8 + `tower-http`, `serde`/`jsonc-parser`, `tracing`, `chrono`,
   `zeroize`. Check that table before adding a crate to a member.
+- `opencode-mem.example.jsonc` at the repo root is the shipped config example: curated, every live
+  key at its built-in default, keys that parse but are unread marked as such. Its guard is
+  `crates/mem-core/tests/config_example.rs` — a misspelled key fails the test-local
+  `deny_unknown_fields` mirror, and a key that is not a `FileConfig` field fails a production-side
+  check that hands every shipped key an object value and requires `ConfigError::InvalidShape`.
+  Were one of the six `Value`-typed keys shipped, the same check would red it too, one way or
+  the other: memoryExtraParams, opencodeVariant and opencodeTimeoutMs accept the object and the
+  load answers Ok, while memoryTemperature, embeddingDtype and injectionMarkers surface as
+  InvalidValue/InvalidValueExpected. Add a key to the example and to the mirror together.
 
 ## Commands
 

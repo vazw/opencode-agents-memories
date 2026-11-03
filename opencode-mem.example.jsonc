@@ -1,0 +1,115 @@
+// opencode-mem.example.jsonc — the shipped example for THIS port.
+//
+// Copy it to one of the two config paths:
+//   ~/.config/opencode/opencode-mem.jsonc          (global)
+//   <project>/.opencode/opencode-mem.jsonc         (project; layers over the global file)
+//
+// CURATED, not exhaustive. Every live key is set to its built-in default, so
+// copying this file verbatim changes nothing (proved by
+// crates/mem-core/tests/config_example.rs). A key that is not listed here is at
+// its default; the complete key list is `FileConfig` and the defaults are
+// `DEFAULTS`, both in crates/mem-core/src/config/schema.rs.
+//
+// Unknown keys are TOLERATED by design (upstream forward compatibility), so a
+// misspelled key resolves to nothing — silently. Nothing validates key names at
+// runtime: compare an edit against schema.rs.
+//
+// Not shown on purpose, because their PRESENCE (not their value) changes
+// behaviour: memoryProvider, memoryModel, memoryApiUrl, memoryApiKey,
+// forceToolChoice, opencodeProvider, opencodeModel, opencodeVariant,
+// opencodeBaseUrl, embeddingApiUrl, embeddingApiKey, embeddingDimensions,
+// embeddingQueryPrefix, embeddingDocumentPrefix, embeddingMaxTokens,
+// chatMessage.injectionMarkers, userEmailOverride, userNameOverride — and every
+// secret. Set those only when you mean to.
+//
+// Also not shown, because nothing in this build reads them (see the README's
+// inert table): memoryTemperature, memoryExtraParams, chatMessage.maxAgeDays,
+// opencodeTimeoutMs.
+{
+  // The embedder's model cache root is "<storagePath>/.cache". This key does NOT
+  // move the store: the store root is the launch root (--storage-root /
+  // OPENCODE_MEM_STORAGE_ROOT / $HOME/.opencode-mem/data).
+  "storagePath": "~/.opencode-mem/data",
+  "embeddingModel": "Xenova/nomic-embed-text-v1",
+
+  // Container-tag prefix for this project's memories.
+  "containerTagPrefix": "opencode",
+  // Render the learned user profile into the model's context.
+  "injectProfile": true,
+  // Default result count for `search` when the call omits `limit`.
+  "maxMemories": 10,
+
+  // Parsed for upstream compatibility and deliberately unread: the injection
+  // caps are userProfileInject{Preferences,Patterns,Workflows} below.
+  "maxProfileItems": 5,
+
+  "autoCaptureEnabled": true,
+  "autoCaptureMaxRetries": 3,
+  // UTF-8 budget for the captured markdown context; integral, >= 16384.
+  "autoCaptureMaxContextBytes": 131072,
+
+  "autoCleanupEnabled": true,
+  "deduplicationEnabled": true,
+  "deduplicationSimilarityThreshold": 0.9,
+
+  // The standalone mem-web server. The ENGINE's own server binds 3742 by default
+  // (mem_bridge::engine::DEFAULT_WEB_PORT) and OPENCODE_MEM_WEB_PORT overrides
+  // that at launch — this key does not.
+  "webServerEnabled": true,
+  "webServerHost": "127.0.0.1",
+  "webServerPort": 4747,
+
+  // false = the mixed-version open guard is ON. OPENCODE_MEM_ALLOW_UNGUARDED_OPEN
+  // wins over this key when both are set.
+  "allowUnguardedOpen": false,
+
+  // Parsed with no reader in this build: the binary ships through the OS package
+  // manager, so there is no self-update path (issue 27).
+  "autoUpdate": true,
+
+  // False by default. The key itself is never shown in an example file.
+  // cipher: aes128gcm | aes256gcm | aegis256 | aegis256x2 | aegis128l | aegis128x2 | aegis128x4
+  "databaseEncryptionEnabled": false,
+  "databaseEncryptionCipher": "aes256gcm",
+
+  "memory": {
+    "defaultScope": "project"        // "project" | "all-projects"
+  },
+
+  "compaction": {
+    "enabled": true,
+    "memoryLimit": 10
+  },
+
+  "chatMessage": {
+    "enabled": true,
+    "filterInjectedPrompts": true,
+    // Live, not unread: this key gates the compaction-time memory-context restore
+    // for child sessions. Capture (the milestone write) stays ungated — ruling
+    // D-114-2. Default false; set true to opt in.
+    "captureChildSessions": false
+  },
+
+  // Flat keys — this port has no "userProfile" object. The three inject caps are
+  // the real replacement for maxProfileItems.
+  "userProfileAnalysisInterval": 10,
+  "userProfileStaleDays": 2,
+  "userProfileInjectPreferences": 5,
+  "userProfileInjectPatterns": 5,
+  "userProfileInjectWorkflows": 3,
+
+  // Port-owned tiers (upstream has no equivalent).
+  "episodic": {
+    "consolidationAgeDays": 30
+  },
+  "featureFlags": {
+    "soundMemory": false,
+    "promotionPipeline": false
+  },
+  "soundMemory": {
+    "rawContextRequired": false
+  },
+  "promotion": {
+    "ttlFallbackDays": 7
+  }
+}
