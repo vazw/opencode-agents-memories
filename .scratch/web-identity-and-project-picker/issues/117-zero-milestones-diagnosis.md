@@ -1,21 +1,24 @@
 # 117 — episodic_milestones is empty on the live store: the age window, measured
 
-Status: measured — the age window alone explains the empty table on this host (2026-11-03T06:08Z,
+Status: measured — the age window alone explains the empty table on this host (2026-11-03T06:16:41Z,
 read-only); no code change indicated. The run is recorded under **Measurement** below; nothing here
 asks a human to do anything.
 
 Filed by `.scratch/web-identity-and-project-picker` (defect B's second half). **Not** fixed by that
 wave: D-7 says diagnose and file — and the diagnosis turned out to need no fix.
 
-## Observation (MEASURED, 2026-11-02 ~16:50Z, read-only GETs against the live engine)
+## Observation (re-attested read-only at 2026-11-03T06:17:22Z)
 
     GET /api/projects/%2Fhome%2Fvaz%2FCode%2FPersonal%2FRust%2Fopencode-agents-memory/milestones
       → 200 {"success":true,"data":[]}
     GET /api/projects/%2Fhome%2Fvaz%2F.config%2Fopencode/sessions
-      → 200 with real rows
+      → 200 with real rows (newest createdAt 1793684858627)
 
 So the routing and the percent-encoded paste flow work; the milestone table itself is empty while the
 session table is not. `/agents` therefore renders the new empty state for every project.
+
+The wave's overview filed the same two GETs first; its instant (`~16:50Z` on 2026-11-02) is
+**UNATTESTED** here — no clock was captured with that run. The re-run above is what dates the claim.
 
 ## What is NOT the cause
 
@@ -25,27 +28,33 @@ writes milestones, driven hourly by `ConsolidationScheduler` (`engine.rs:1638-16
 ruled out. A second writer exists too — the portability **import** path
 (`crates/mem-portability/src/service.rs:606`) — which is why an imported root is never in this state.
 
-## Measurement (MEASURED, 2026-11-03T06:08Z, read-only)
+## Measurement (MEASURED, 2026-11-03T06:16:41Z, read-only)
+
+The clock travels with the query, so the label below cannot drift from the run:
 
 ```sh
 sqlite3 'file:/home/vaz/.opencode-mem/data/episodic.db?mode=ro' \
-  'SELECT MIN(created_at), MAX(created_at), COUNT(*) FROM agent_sessions WHERE deleted_at IS NULL;'
-→ 1793563141278 | 1793684858627 | 130
+  "SELECT MIN(created_at), MAX(created_at), COUNT(*), \
+          CAST(strftime('%s','now') AS INTEGER)*1000 AS now_ms \
+     FROM agent_sessions WHERE deleted_at IS NULL;"
+→ 1793563141278 | 1793684858627 | 130 | 1793686601000      -- now_ms = 2026-11-03T06:16:41Z
 
-now − 30 d = 1791094106169        →  MIN(created_at) > cutoff
+cutoff (now_ms − 30 d) = 1791094601000                     → MIN(created_at) > cutoff
 sqlite3 'file:…?mode=ro' 'SELECT COUNT(*) FROM episodic_milestones;'   → 0
 sqlite3 'file:…?mode=ro' 'SELECT COUNT(*) FROM agent_sessions WHERE deleted_at IS NOT NULL;' → 0
 ```
 
-The oldest live session is ≈1.4 days old and the newest is minutes old, so **none of the 130 is
+The oldest live session is 1.43 days old and the newest is minutes old, so **none of the 130 is
 eligible**: the age window alone produces the empty table. Soft-deleted rows are zero, so nothing is
 being hidden by the live-session filter either.
 
 **Disposition:** cause **(1)** is confirmed. Causes **(2)** and **(3)** are **not implicated on this
 host** — (2) because the promotion pipeline is off, so no gate is installed (below); (3) because
 eligibility, not the claim shape, is what fails. The count and the newest stamp move with live traffic
-(127/1793662774787 at 05:39Z, 130/1793684858627 at 06:08Z); the **oldest** stamp is the number that
-matters and it has not moved.
+(127 / 1793662774787 in review-4's run, whose own query clock read `1793683644415` =
+2026-11-03T05:27:24Z; 130 / 1793684858627 at the 06:16:41Z run above), so the runs are told apart by
+their clocks rather than by a shared label; the **oldest** stamp is the number that matters and it is
+identical in both.
 
 ## Candidate causes, as filed (INFERRED at the time; resolved above)
 

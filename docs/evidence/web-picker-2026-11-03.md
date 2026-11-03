@@ -81,20 +81,25 @@ Network: `GET /api/projects` → 200; the default selection then fetches
 → 200, i.e. percent-encoded project ids work end to end against the live router.
 
 The `0 milestones` on every row is the consolidation age window, measured rather
-than assumed (read-only, `file:…?mode=ro`, 2026-11-03T06:08Z):
+than assumed. The run below carries its own clock — the label is the query's
+`now`, not a note taken from a shell (read-only, `file:…?mode=ro`):
 
 ```
-SELECT MIN(created_at), MAX(created_at), COUNT(*) FROM agent_sessions WHERE deleted_at IS NULL;
-→ 1793563141278 | 1793684858627 | 130
-cutoff (now − 30 d) = 1791094106169      → MIN(created_at) > cutoff
-SELECT COUNT(*) FROM episodic_milestones; → 0
+SELECT MIN(created_at), MAX(created_at), COUNT(*),
+       CAST(strftime('%s','now') AS INTEGER)*1000 AS now_ms
+  FROM agent_sessions WHERE deleted_at IS NULL;
+→ 1793563141278 | 1793684858627 | 130 | 1793686601000      -- now_ms = 2026-11-03T06:16:41Z
+cutoff (now_ms − 30 d) = 1791094601000                     → MIN(created_at) > cutoff
+SELECT COUNT(*) FROM episodic_milestones;                  → 0
+SELECT COUNT(*) FROM agent_sessions WHERE deleted_at IS NOT NULL; → 0
 ```
 
-Every live session is under 1.5 days old (the oldest is ≈1.4 days), so none of the
-130 is eligible and the age window alone produces the empty roster — the writer is
-not idle-by-flag. (Count and newest stamp move with live traffic: 127 /
-1793662774787 at 05:39Z, 130 / 1793684858627 at 06:08Z; the oldest stamp is the
-number that matters and it has not moved.)
+The oldest live session is 1.43 days old and the newest is minutes old, so none of
+the 130 is eligible and the age window alone produces the empty roster — the
+writer is not idle-by-flag. The pair drifts with traffic (127 / 1793662774787 in
+review-4's run, whose own query clock read `1793683644415` = 2026-11-03T05:27:24Z),
+so the two runs are identified by their clocks rather than by a shared label; the
+**oldest** stamp is the number that matters and it is identical in both.
 
 The cross-tier promotion gate is **not** a cause on this host:
 `featureFlags.promotionPipeline` is unset, so the default `false`
@@ -108,26 +113,28 @@ Issue 117 records this run.
 ## Deployment note — the staged UI is a separate artifact
 
 The first restart served the **previous** UI: `plugin/engine/linux-x64/web-ui/dist`
-held a 2026-11-02 bundle whose wasm contained no `/api/user-profiles` call (0
-occurrences), so the profile page rendered but the picker never mounted and the
-browser never requested the roster. Staging the engine binary alone is not a
-release.
+held a bundle built 2026-11-01T22:27:34Z (02 Nov 05:27 +07 — its wasm's own mtime)
+whose wasm contained no `/api/user-profiles` call (0 occurrences), so the profile
+page rendered but the picker never mounted and the browser never requested the
+roster. Staging the engine binary alone is not a release.
 
 The bundled UI was staged the way `plugin/scripts/stage-engine.sh` does it —
 old bundle moved aside to `web-ui/dist.old-20261103T0440Z`, then
 `cp -R ../../../web-ui/dist/. web-ui/dist/` — after which all four files
-byte-matched `web-ui/dist` (`diff -rq` silent at 04:40Z) and the staged wasm
-carried `api/user-profiles`.
+byte-matched `web-ui/dist` (`diff -rq` silent when that staging was made) and the
+staged wasm carried `api/user-profiles`.
 
-Re-measured 2026-11-03T05:17Z, after the empty-state copy change (`8622731`)
-rebuilt `web-ui/dist`: the staged bundle was then `web-ui-e16b064079341384…` and
-the fresh build `web-ui-52c1081f644725c6…`; `diff -rq` reported `index.html`
-differing and both hashed asset pairs `Only in …` — the same failure mode one
-wave later, and the reason the recipe below is written down rather than
-remembered. Re-staged at 05:24Z and re-measured at 06:09Z:
-`diff -rq web-ui/dist plugin/engine/linux-x64/web-ui/dist` is **silent** (four
-files byte-identical, `web-ui-52c1081f644725c6…`), and the live server serves
-that bundle — the recipe below is the one that was used.
+Re-measured 2026-11-03T05:17:33Z (the build's own file mtimes), after the
+empty-state copy change (`8622731`) rebuilt `web-ui/dist`: the staged bundle was
+then `web-ui-e16b064079341384…` and the fresh build `web-ui-52c1081f644725c6…`;
+`diff -rq` reported `index.html` differing and both hashed asset pairs `Only in
+…` — the same failure mode one wave later, and the reason the recipe below is
+written down rather than remembered. Re-staged at 05:24Z (the
+`dist.old-20261103T0524Z` stamp) and re-measured at 2026-11-03T06:17:22Z, the
+clock printed in the same command: `diff -rq` between `web-ui/dist` and the
+staged copy is **silent** (four files byte-identical, `web-ui-52c1081f644725c6…`),
+and the live server serves that bundle — the recipe below is the one that was
+used.
 
 The repeatable recipe (run from `plugin/engine/linux-x64`, where `web-ui/dist` is
 the staged bundle and `../../../web-ui/dist` is the fresh trunk build):
