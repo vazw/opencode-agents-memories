@@ -1,7 +1,9 @@
 # 100 — `capture_inbox` holds 480 dead-lettered captures from 2026-10-31, and nothing can replay them
 
-Status: ready-for-human — the decision is drop-or-replay, and replaying runs 480 provider calls
-against the owner's account. No code exists yet to do either; the evidence below is complete.
+Status: wontfix — **owner decision 2026-11-03: drop.** The 480 rows and their 4.8 MB of payloads are
+accepted as lost; no replay, no requeue path built for them. The observation below stands as the record
+of what was there, and the last acceptance criterion (make a dead set visible on its own) still wants
+an owner: this decision resolves the *backlog*, not the silence that hid it.
 
 ## Observation (MEASURED 2026-11-03, read-only `file:…?mode=ro` on the live store)
 
@@ -55,3 +57,20 @@ across restarts; it says nothing about resurrection.
   `capture_id`, and a count of rows replayed vs. dead-lettered again.
 - Either way: `capture_inbox` gains something that makes a dead set visible on its own (a metric, a
   log line, or an API field), so the next 480 do not wait for a docs sweep.
+
+## Decision (2026-11-03) — dropped
+
+The owner chose **drop**: the 480 captures are accepted as lost. Nothing is replayed, and no requeue
+mode is built.
+
+What that leaves on the table, stated so a later reader does not mistake silence for absence:
+
+- **The rows stay.** No purge path exists either, so `capture_inbox` keeps 480 `dead` rows until either
+  a mode is written or the owner runs a one-off `DELETE` themselves. The fleet's rules keep an agent
+  from writing to the live store, which is why this is recorded rather than executed.
+- **The evidence is kept.** The observation block above is the only record of what those 136 sessions
+  captured; the payloads are still on disk and still readable read-only, even though nothing will
+  consume them.
+- **The silence is not resolved.** A dead letter still produces no metric, no log line and no API
+  field; the next backlog of this size will again wait for someone to read the table. That residual is
+  deliberately left open rather than closed by this decision.
