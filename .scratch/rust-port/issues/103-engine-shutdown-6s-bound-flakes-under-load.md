@@ -1,6 +1,6 @@
 # 103 — the 6 s exit bound reds the workspace gate intermittently, and "0 failed" is a statement about machine load
 
-Status: ready-for-agent — 2026-11-01. MEASURED by the batched review of `95857b7` + `39dadf3`
+Status: done — 2026-11-05. MEASURED by the batched review of `95857b7` + `39dadf3`
 (`.tmp/progress/batch-review-1.md` §8 F1), not inherited. Pre-existing: neither commit touches the file.
 
 ## What is wrong
@@ -48,13 +48,13 @@ doc comment, so the next reader knows the number is derived rather than taste.
 
 ## Acceptance criteria
 
-- [ ] The test's wait is either event-based with a watchdog that only fires on a real hang, or a bound
+- [x] The test's wait is either event-based with a watchdog that only fires on a real hang, or a bound
       justified by the measured distribution recorded in its doc comment.
-- [ ] A measured margin is stated, not a round number.
-- [ ] Repeated runs under deliberate CPU load (e.g. concurrent `cargo build`) do not red it — evidence
+- [x] A measured margin is stated, not a round number.
+- [x] Repeated runs under deliberate CPU load (e.g. concurrent `cargo build`) do not red it — evidence
       recorded under `docs/evidence/`.
-- [ ] The canary assertion (`:559`) is unchanged: the transcript marker must still never reach stderr.
-- [ ] `tests/engine_shutdown.rs`'s other `wait_bounded(…6)` call site (`:187`) is checked for the same
+- [x] The canary assertion (`:559`) is unchanged: the transcript marker must still never reach stderr.
+- [x] `tests/engine_shutdown.rs`'s other `wait_bounded(…6)` call site (`:187`) is checked for the same
       margin; if it passes the same bound to the same work, it is fixed in the same change or the
       difference is stated.
 
@@ -64,6 +64,8 @@ Slice issue 93 (capture-schema slice) sequencing is unrelated; this is a gate-in
 by the batched review, and belongs to no slice.
 
 ## Comments
+
+**Resolved 2026-11-05.** Watchdog timeout `SHUTDOWN_WATCHDOG = Duration::from_secs(30)` applied at `:187` and `:553` in `tests/engine_shutdown.rs`, providing 4.78x margin over historical worst-case load (6.27 s), 4.26x over deliberate contention (7.04 s), and 6.55x over mean idle (4.58 s). Structured stderr assertion for `"engine.shutdown_complete"` added at `:558`. Canary checks at `:559` and `:563` untouched. State difference for `:187` documented (~0.19 s idle teardown with empty inbox). 5/5 consecutive loaded runs passed cleanly under heavy CPU contention. Evidence recorded in `docs/evidence/issue-103-shutdown-bound/README.md` and `MEASUREMENT.md`.
 
 **The evidential lesson, not the timing one.** The coder's `0 failed` was true when it ran and false when
 re-run — not because the code changed, but because the machine did. A consolidated single workspace run

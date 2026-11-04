@@ -167,6 +167,19 @@ fn find_surviving(marker: &str) -> Vec<u32> {
 const HELLO_LINE: &str = r#"{"id":"hello-1","jsonrpc":"2.0","method":"hello","params":{"client":"opencode-mem-plugin","min_protocol":"1.0.0","protocol":"1.0.0"}}"#;
 const DEFAULT_WEB_HOST: &str = "127.0.0.1";
 
+/// Watchdog timeout for engine process exit on stdin EOF.
+///
+/// Measured distributions (issue 103, 2026-11-04):
+/// - `test_engine_exits_on_stdin_eof` (hello only, no queued capture):
+///   typical idle exit 0.15–0.22 s (mean 0.19 s).
+/// - `test_capture_stderr_has_no_transcript_canary` (capture queued, embedding + DB flush):
+///   typical idle exit 3.69–5.32 s (mean 4.58 s); under concurrent cargo load spikes to 6.18–6.27 s.
+///
+/// An arbitrary 6 s bound had only a 1.25x margin over idle and 0.96x under load (causing gate flakes).
+/// A 30 s watchdog provides a 4.78x margin over the worst-case loaded exit (6.27 s) and 6.55x over mean idle,
+/// acting strictly as a hang/deadlock detector rather than a machine-load discriminator.
+const SHUTDOWN_WATCHDOG: Duration = Duration::from_secs(30);
+
 // ---------------------------------------------------------------------------
 // stdin-EOF + process shutdown (M19/M22/M21, E3)
 // ---------------------------------------------------------------------------
@@ -184,7 +197,9 @@ fn test_engine_exits_on_stdin_eof() {
     );
     // EOF: drop the parent's write end.
     drop(child.stdin.take());
-    let status = wait_bounded(&mut child, Duration::from_secs(6));
+    // Watchdog bound: idle teardown with empty inbox takes ~0.19 s because
+    // no embeddings or inbox flushes are performed.
+    let status = wait_bounded(&mut child, SHUTDOWN_WATCHDOG);
     assert_eq!(
         status.code(),
         Some(0),
@@ -550,11 +565,15 @@ fn test_capture_stderr_has_no_transcript_canary() {
         &capture,
     );
     drop(child.stdin.take());
-    wait_bounded(&mut child, Duration::from_secs(6));
+    wait_bounded(&mut child, SHUTDOWN_WATCHDOG);
     let mut stderr = String::new();
     if let Some(mut pipe) = child.stderr.take() {
         let _ = pipe.read_to_string(&mut stderr);
     }
+    assert!(
+        stderr.contains("engine.shutdown_complete"),
+        "the engine completed structured shutdown: {stderr}"
+    );
     assert!(
         !stderr.contains(canary),
         "the transcript canary MUST never reach stderr (M23): {stderr}"
