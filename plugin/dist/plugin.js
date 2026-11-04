@@ -1643,7 +1643,6 @@ export const server = async function server(input) {
         capture_id: reuseCaptureId(promptId),
         transcript: userPrompt,
         metadata,
-        agent_id: session?.agent ?? "unknown",
       };
       fireCapture(state, payload);
     } catch (err) {

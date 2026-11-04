@@ -260,6 +260,25 @@ test("test_idle_capture_payload_carries_the_resolved_agent_id", { timeout: 30000
   assert.equal(sent[0].params.project_id, "/work/proj");
 });
 
+// Issue 83 full AC: the resolved agent may come from the LATEST message's
+// `agent`/`mode` (the `session.get` object carries no agent). The producer
+// must forward THAT resolved value — never a sentinel fallback of its own.
+test("test_idle_capture_forwards_the_message_scanned_agent_id", { timeout: 30000 }, async (t) => {
+  const run = await runCapture(t, {
+    ...caseA(),
+    sessions: { "ses-A": {} },
+    messages: {
+      "ses-A": [
+        { info: { id: "u1", role: "user", agent: "review" }, parts: [{ type: "text", text: "fix the parser" }] },
+        { info: { id: "a1", role: "assistant", agent: "review" }, parts: [{ type: "text", text: "done" }] },
+      ],
+    },
+  });
+  const sent = captures(run);
+  assert.equal(sent.length, 1, "one capture reached the wire");
+  assert.equal(sent[0].params.agent_id, "review", "the message-scan fallback is forwarded");
+});
+
 test("test_session_agent_needs_no_second_messages_call", { timeout: 30000 }, async (t) => {
   const run = await runCapture(t, caseA());
   assert.equal(captures(run).length, 1, "the capture was sent");
