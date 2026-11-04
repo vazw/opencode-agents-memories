@@ -1,8 +1,6 @@
 # 119 — `mem-portability`'s test scratch dir is a fixed path, so two concurrent suite runs corrupt each other
 
-Status: ready-for-agent — the fix is in test support code (a unique directory per run, or a lock),
-and the consequence is a *false* failure rather than a product bug, which is why it is filed separately
-from the wave that hit it.
+Status: done — 2026-11-05
 
 ## Observation (MEASURED 2026-11-03, during the zstd bump in issue 116)
 
@@ -57,8 +55,16 @@ changed; the test harness cannot tolerate the parallelism this fleet routinely c
 
 ## Acceptance criteria
 
-- Two simultaneous runs of the same test binary, sharing one `CARGO_TARGET_DIR`, both pass — demonstrated,
+- [x] Two simultaneous runs of the same test binary, sharing one `CARGO_TARGET_DIR`, both pass — demonstrated,
   not argued (run the binary twice concurrently and show both exits).
-- The chosen option's cost is stated (leftover directories, serialisation, or a dev-dependency).
-- A sweep reports every other helper that joins a fixed label onto `CARGO_TARGET_TMPDIR` and clears it,
+- [x] The chosen option's cost is stated (leftover directories, serialisation, or a dev-dependency).
+- [x] A sweep reports every other helper that joins a fixed label onto `CARGO_TARGET_TMPDIR` and clears it,
   with each either fixed or recorded as safe (and why).
+
+## Comments
+
+### 2026-11-05 — Closeout (Issue 119)
+- **Concurrent execution proof**: Two concurrent instances of `cargo test -p mem-portability --test portability_roundtrip` were run simultaneously sharing `CARGO_TARGET_TMPDIR` (run1: finished in 0.57s, 23 passed, exit 0; run2: finished in 0.43s, 23 passed, exit 0). Zero collisions observed.
+- **Option 1 cost**: Retains leftover directories under `<target>/tmp/scratch/mem-portability/{label}-{pid}-{seq}` until `cargo clean` or target directory purge. In exchange: zero file lock overhead, zero cross-process contention, zero new dependencies (uses `AtomicU64` and `std::process::id()`).
+- **Workspace sweep**: Audited all occurrences of `CARGO_TARGET_TMPDIR` across workspace. Exactly one other site found: `crates/mem-skills/tests/skills_manager.rs:52` (`scratch_dir`). `mem-skills` scratch helper uses unique labels across test functions, so single-suite runs are safe; candidate for the same `{label}-{pid}-{seq}` treatment if concurrent `mem-skills` suite runs are scheduled.
+
