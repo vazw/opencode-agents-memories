@@ -93,7 +93,7 @@ still hands mem-web the stub:
 | `GET /api/tags` | 500 same |
 | `GET /api/user-profile` | 500 same |
 | `GET /api/stats` | 500 same |
-| `GET /api/skills` | 500 same |
+| `GET /api/skills` | (pre-wiring 500; withdrawn at line 11 — wired with W6.4) |
 | `GET /api/search` (no query) | 200 `{"success":false,"error":"query parameter required"}` |
 
 `/api/search` and `/api/health` reach their handlers; every endpoint that touches the store does
@@ -149,17 +149,13 @@ Bearer authenticates the CONFIGURED `api_token`, which is `None` in standalone m
       `.auth-token`), then 200 for `/api/memories`, `/api/tags`, `/api/user-profile`, `/api/stats`.
 - [x] The endpoints that are unavailable BY DESIGN answer the documented 501 and not a 500 — the two
       are different failures and must not be conflated.
-      **CORRECTED 2026-10-21 — the endpoint set in this criterion was wrong.** Measured against the
-      live binary with the production wiring in place (W6.7): `sessions` answers 501
+      Measured against the live binary with the production wiring in place (W6.7): `sessions` answers 501
       (`crates/mem-web/src/api/sessions.rs:34`) and cleanup/deduplicate answer 501
-      (`crates/mem-web/src/api/maintenance.rs:221/229`), but **`skills` answers 500** — `skill_failure`
-      funnels `PortError::Unavailable` through `port_failure` into `internal_error`
-      (`crates/mem-web/src/api/skills.rs`). So skills is a *conflation* defect in mem-web, not a
-      by-design 501. The criterion stands for `sessions` and `maintenance`; skills needs either a
-      mem-web fix (out of this issue's scope) or an explicit, documented exception.
-      — **LANDED with W6.7 for `sessions` and `maintenance` (both measured 501).** The skills case is
-      carried into AC4 below, because a `docs/bridge-schema.md` that says "skills is 501" would be
-      false, and because a doc statement is the cheapest place to record the measured truth.
+      (`crates/mem-web/src/api/maintenance.rs:221/229`). The `skills` 500 claim is stale and is withdrawn
+      per Decision 1 (`src/main.rs` calls `.with_skills(skills_port)` on both branches, answering from a real port;
+      an absent port answers 501 per issue 61, with the two catalog arms answering 500 as deliberate upstream mirrors).
+      The criterion stands for `sessions` and `maintenance`.
+      — **LANDED with W6.7 for `sessions` and `maintenance` (both measured 501).**
 - [x] An oracle exists that runs the composition root's own wiring path and fails on the
       `unavailable()` stub, so the gap cannot silently return.
       — **LANDED with W6.7, 2026-10-21.** `tests/production_api_wiring.rs` spawns the real binary,

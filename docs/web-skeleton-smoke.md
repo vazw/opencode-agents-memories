@@ -202,13 +202,16 @@ curl -i http://127.0.0.1:4747/api/user-profile
 
 ### D. Skills and the OpenCode catalog
 
-**W6.4 note:** the production wiring (`ApiServices::production`) leaves the
-`SkillPort` at `unavailable()` until W6.4 lands the skills manager. Until
-then the skills routes answer `500 {"success":false,"error":"Internal Server
-Error"}` in production — the contract below is what the handlers answer once
-the port is injected (`ApiServices::with_skills`), and it is exercised today
-by the fake-backed `skills_api_handlers.rs` suite. The guard rejections (400)
-happen **before** the port and therefore already work.
+**Skills wiring note (W6.4 / issue 61 / issue 65):** `src/main.rs:187, :211, :233`
+wires `SkillPort` (`.with_skills(skills_port)`) on **both** the production and the
+degraded branches, so the skills endpoints answer `200` in a live engine.
+If the skills port were absent/unavailable (`PortError::Unavailable`), the
+REST API routes (`/api/skills*`, rows 29–33) answer `501 Not Implemented` with the
+absent-service envelope (issue 61 `port_failure`), while the two OpenCode catalog
+routes (`/skills/index.json` and `/skills/{id}/{file}`, rows 34–35) deliberately
+answer `500` with the error envelope (`crates/mem-web/src/api/skills.rs:260, :291`),
+faithfully mirroring upstream `web-server.ts:755–786` catalog-error behavior.
+The guard rejections (`400`) happen **before** the port and remain active.
 
 ```bash
 curl -i -H "$AUTH" http://127.0.0.1:4747/api/skills
@@ -497,13 +500,13 @@ Binary under test: sha256 prefix `9dcded5b953f` (12 hex).
 | 26 | POST /api/user-profile/ai-cleanup | 200 | MEASURED | no profile - business error, body not asserted (status set 200) |
 | 27 | POST /api/user-profile/ai-cleanup/apply | 200 | ASSERTED | - |
 | 28 | PATCH /api/user-profile/item | 200 | ASSERTED | - |
-| 29 | GET /api/skills | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
-| 30 | POST /api/skills | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
-| 31 | GET /api/skills/{id} | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
-| 32 | PUT /api/skills/{id} | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
-| 33 | DELETE /api/skills/{id} | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
-| 34 | GET /skills/index.json | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
-| 35 | GET /skills/{id}/{file} | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
+| 29 | GET /api/skills | 200 | ASSERTED | wired via .with_skills(...) (src/main.rs:187, :211); absent port answers 501 (issue 61) |
+| 30 | POST /api/skills | 200 | ASSERTED | wired via .with_skills(...) (src/main.rs:187, :211); absent port answers 501 (issue 61) |
+| 31 | GET /api/skills/{id} | 200 | ASSERTED | wired via .with_skills(...) (src/main.rs:187, :211); absent port answers 501 (issue 61) |
+| 32 | PUT /api/skills/{id} | 200 | ASSERTED | wired via .with_skills(...) (src/main.rs:187, :211); absent port answers 501 (issue 61) |
+| 33 | DELETE /api/skills/{id} | 200 | ASSERTED | wired via .with_skills(...) (src/main.rs:187, :211); absent port answers 501 (issue 61) |
+| 34 | GET /skills/index.json | 200 | ASSERTED | wired via .with_skills(...) (src/main.rs:187, :211); absent port answers 500 (deliberate upstream mirror) |
+| 35 | GET /skills/{id}/{file} | 200 | ASSERTED | wired via .with_skills(...) (src/main.rs:187, :211); absent port answers 500 (deliberate upstream mirror) |
 | 36 | GET /api/projects/{project_id}/sessions | 501 | BLOCKED | issue 37 (AC6): .with_sessions(episodic_session_port(...)) not wired |
 | 37 | DELETE /api/projects/{project_id}/sessions/{session_id} | 501 | BLOCKED | issue 37 (AC6): .with_sessions(episodic_session_port(...)) not wired |
 
@@ -521,6 +524,12 @@ Binary under test: sha256 prefix `9dcded5b953f` (12 hex).
 > `nearDuplicateScan.unreadableShards` counter: a shard whose rows could not be
 > read is counted, forces `truncated: true`, and is never reported as an empty
 > shard, while the pass continues with the remaining shards.
+>
+> **Addendum (issue 65).** Corrects the historical skills rows (rows 29–35) and
+> Section D note: `SkillPort` is wired on both production and degraded branches
+> (`src/main.rs:187, :211, :233`) via `.with_skills(skills_port)` and answers 200.
+> An absent port answers 501 on `/api/skills*` (rows 29–33, issue 61), while catalog
+> rows 34–35 answer 500 as deliberate upstream mirrors (`crates/mem-web/src/api/skills.rs:260, :291`).
 
 ### Reproduction recipe
 

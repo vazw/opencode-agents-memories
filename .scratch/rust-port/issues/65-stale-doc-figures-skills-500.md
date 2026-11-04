@@ -1,6 +1,6 @@
 # 65 — three tracked docs describe a world that no longer exists: a stale test count and two stale `skills` 500 claims
 
-Status: ready-for-agent — 2026-10-27 (premise measured at HEAD `39bddc2`; filed from the issue-61 debugger audit,
+Status: done — 2026-11-05
 which found one of the three while auditing an unrelated ledger. Brief at the end of this file.)
 
 ## PREMISE — measured, not inherited
@@ -57,12 +57,12 @@ the claim instead of replacing it, so both survive.
 
 ## ACCEPTANCE — what would close it
 
-- [ ] `docs/agents/testing.md:181` carries the re-derived count, with the command that produced it.
-- [ ] `docs/web-skeleton-smoke.md`'s skills note and rows 29–35 state the wired behaviour and the 501/500
+- [x] `docs/agents/testing.md:181` carries the re-derived count, with the command that produced it.
+- [x] `docs/web-skeleton-smoke.md`'s skills note and rows 29–35 state the wired behaviour and the 501/500
       distinction correctly, naming which arms are deliberate mirrors.
-- [ ] Issue 37 has one statement about the skills claim, not two contradictory ones.
-- [ ] A sweep of both files for the same claim reports every hit, with each one corrected or explained.
-- [ ] No figure in the diff is a copy; each is a command's output, and the diff is docs-only.
+- [x] Issue 37 has one statement about the skills claim, not two contradictory ones.
+- [x] A sweep of both files for the same claim reports every hit, with each one corrected or explained.
+- [x] No figure in the diff is a copy; each is a command's output, and the diff is docs-only.
 
 ## Out of scope
 
@@ -96,8 +96,21 @@ the deliberate upstream-mirror 500s from the absent-service 501. Issue 37 carrie
 - `crates/mem-web/src/api/skills.rs:260`/`:291` — the two deliberate catalog 500 mirrors.
 
 **Acceptance criteria:**
-- [ ] The count is re-derived and the command recorded.
-- [ ] The smoke doc states the wired behaviour plus the 501/500 distinction, and names the mirror arms.
-- [ ] Issue 37 has one statement, not two.
-- [ ] A sweep reports every occurrence of the claim, corrected or explained.
-- [ ] Docs-only diff; no copied figures.
+- [x] The count is re-derived and the command recorded.
+- [x] The smoke doc states the wired behaviour plus the 501/500 distinction, and names the mirror arms.
+- [x] Issue 37 has one statement, not two.
+- [x] A sweep reports every occurrence of the claim, corrected or explained.
+- [x] Docs-only diff; no copied figures.
+
+## Comments
+
+### 2026-11-05 — closed by blueprint-issue-65-stale-doc-figures
+
+Closed per blueprint `blueprint-issue-65-stale-doc-figures.md`:
+1. `docs/agents/testing.md:255`: re-derived `crates/mem-web/tests/api_endpoint_contract.rs` test count (20) with live commands:
+   - `grep -cE '^\s*#\[(tokio::)?test\]' crates/mem-web/tests/api_endpoint_contract.rs` = 20
+   - `cargo test -p mem-web --test api_endpoint_contract -- --list | grep -c ': test$'` = 20
+2. `docs/web-skeleton-smoke.md`: Section D note updated with post-W6.4/post-issue-61 wiring (`SkillPort` wired on both production and degraded branches; 501 on absent port via `port_failure`, 500 deliberate upstream mirror on catalog endpoints `skills.rs:260, :291`); route table rows 29–35 flipped from `500 | BLOCKED` to `200 | ASSERTED` with 501/500 notes; issue 65 addendum recorded.
+3. `.scratch/rust-port/issues/37-composition-root-production-api-wiring.md`: line 96 table entry aligned with line 11 withdrawal; line 155 AC3 contradictory assertion removed.
+4. Two-file sweep verified zero residual false claims.
+5. Verification: `check-parity-matrix.sh` passes 110/110; `0 .rs` files modified; diff strictly docs/trackers.
