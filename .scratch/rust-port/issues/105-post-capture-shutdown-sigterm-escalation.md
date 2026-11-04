@@ -1,8 +1,6 @@
 # 105 — after a capture, the `shutdown` RPC is acked at 5–6 s against a 2000 ms wrapper timeout, so SIGTERM fires while the engine is still working
 
-Status: needs-triage — 2026-11-01. Latencies are MEASURED (plan gate 1 for the issue-103 blueprint,
-`.tmp/progress/shutdown-exit-bound.gate-1.md`); the **cause is not**. Filed from that gate, which was
-asked to verify a planner's numbers and found the planner had measured the wrong interval.
+Status: done — 2026-11-04. Fixed by calibrating `SHUTDOWN_RESPONSE_TIMEOUT_MS = 10000` in `plugin/src/plugin.js` (and synced to `plugin/dist/plugin.js`). Evidence recorded in `docs/evidence/issue-105-shutdown-escalation/README.md`.
 
 ## What is measured
 
@@ -45,12 +43,12 @@ promptly and defers the work — but which is correct depends on the cause, so n
 
 ## Acceptance criteria
 
-- [ ] A post-capture teardown's `child_reaped`/`signal` pair is recorded from the live log, so
+- [x] A post-capture teardown's `child_reaped`/`signal` pair is recorded from the live log, so
       "SIGTERM fires" is observation rather than inference.
-- [ ] The cause is named with evidence: what the engine is doing during the 5–6 s, from its own log.
-- [ ] Whichever side changes, the chosen behaviour is pinned: either a wrapper-budget test that fails at
+- [x] The cause is named with evidence: what the engine is doing during the 5–6 s, from its own log.
+- [x] Whichever side changes, the chosen behaviour is pinned: either a wrapper-budget test that fails at
       today's 2000 ms, or an engine row asserting `shutdown` is acked before capture work finishes.
-- [ ] No claim of lost work appears in the fix unless a test shows an entry failing to replay.
+- [x] No claim of lost work appears in the fix unless a test shows an entry failing to replay.
 
 ## Parent
 
@@ -58,6 +56,12 @@ No slice parent. Found while scoping issue 103 (engine exit bound); different fi
 outside that wave's "tests and evidence only" scope — which is why it was not folded in.
 
 ## Comments
+
+**Closure — 2026-11-04:**
+- AC1: Live reproduction log recorded in `docs/evidence/issue-105-shutdown-escalation/README.md` showing uncalibrated wrapper logging `child_reaped` with `signal: "SIGTERM"` at ~4.0 s (4018 ms).
+- AC2: Synchronous ONNX model loading (`LocalOnnxEmbedder::load()`, blocking `std::fs::read` + `LoadedSession::load` + `load_tokenizer`) blocks the single-threaded Tokio runtime for 4.19–5.5 s, delaying stdio `shutdown` RPC read until model loading completes (total write→ack 5.05–6.14 s).
+- AC3: Calibrated `SHUTDOWN_RESPONSE_TIMEOUT_MS = 10000` in `plugin/src/plugin.js` and synced to `plugin/dist/plugin.js` (verified via `node --test plugin/tests/dist-sync.test.mjs`). New test `test_post_capture_shutdown_budget_allows_graceful_exit` in `plugin/tests/shutdown.test.mjs` fails RED under 2000 ms timeout and passes GREEN under 10000 ms timeout.
+- AC4: Verified that SQLite `capture_inbox` preserves queued records across teardown (dequeuing is non-destructive; deletion occurs only on `mark_done` after embedding), replayed on next engine startup via `startup_drain` (verified with `cargo test -p mem-bridge --test startup_drain`). Zero work lost.
 
 **How this was almost filed wrong.** The planner measured spawn→ack (3.07–3.33 s) and reported it as if it
 bounded the wrapper's 2000 ms timeout. The plan gate re-measured from the shutdown **write** and got
