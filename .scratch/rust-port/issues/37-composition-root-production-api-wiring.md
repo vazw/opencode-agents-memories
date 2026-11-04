@@ -1,6 +1,6 @@
 # 37 — W6.2 follow-up · Wire the production API services into the composition root
 
-Status: open — 2026-10-27: AC4 + AC6 landed and verified (see the ## Comments entry of the same date; implementation commit c03338843b72b3b29f044ff9bb18c462a8a10b26), **open pending docs/web-skeleton-smoke.md:422, :326-328 and :505-506** — three residual sites still describe the pre-wiring world: the D-13 row (:422) and the §F prose (:326-328) say the production wiring answers the sessions 501 "by design" today, and route-sheet rows 36–37 (:505-506) say `.with_sessions(episodic_session_port(...))` is "not wired"; all are falsified by this wave, the smoke doc is issue 65's file and was deliberately not edited, and issue 65's delivery items are scoped to the skills rows (:498-504) and docs/agents/testing.md, so this issue owns all three corrections and does not close on them.
+Status: done — 2026-11-05
 AC6 = sessions wiring ONLY — the maintenance half moved to issue 39. Anchors are symbol-precise,
 line numbers demoted to hints. See "2026-10-25 re-scope" below.)
 
@@ -259,6 +259,17 @@ Bearer authenticates the CONFIGURED `api_token`, which is `None` in standalone m
   scoped to the skills rows (`:498-504`) and `docs/agents/testing.md`, so it does not cover these —
   hence this issue stays open on all three.
 
+### 2026-11-05 — closed by blueprint-issue-37-composition-root-docs
+
+Residual documentation updates completed:
+1. `docs/web-skeleton-smoke.md`:
+   - §F prose updated to reflect `SessionPort` wired in `src/main.rs:212` via `.with_sessions(episodic_session_port(deps.episodic.clone()))`, answering 200 with seeded episodic history and 501 only on composition-failed degrade path (`None => ApiServices::unavailable().with_skills(skills_port)`).
+   - D-13 row updated to record `SessionPort` wired in production composition root.
+   - Route table rows 36 and 37 flipped from `501 | BLOCKED` to `200 | ASSERTED` (wired via `.with_sessions(...)`, 501 on degrade path).
+   - Addendum (issue 37) added documenting the historical row update and post-wiring truth.
+2. Verified all acceptance criteria checked across `## Acceptance criteria` and `## Agent Brief`.
+3. Verification: 0 `.rs` files modified, parity matrix script passes 110/110. Status flipped to `done — 2026-11-05`.
+
 ## Agent Brief
 
 **Category:** enhancement
@@ -291,15 +302,15 @@ enumerated, because it tracks the build.
   them.
 
 **Acceptance criteria:**
-- [ ] The sessions port is attached at the composition root through a single construction site; the deps struct
+- [x] The sessions port is attached at the composition root through a single construction site; the deps struct
       carries the episodic store.
-- [ ] A session-backed endpoint answers real data against a live engine, and a project-scoped call never
+- [x] A session-backed endpoint answers real data against a live engine, and a project-scoped call never
       returns another project's sessions.
-- [ ] The bridge schema states the token header shape, the Basic/Bearer failure, and the 501-versus-500
+- [x] The bridge schema states the token header shape, the Basic/Bearer failure, and the 501-versus-500
       distinction — each verified against the auth gate and the maintenance handler, not recalled.
-- [ ] **No endpoint status table is written.** Per-endpoint availability is explicitly declared out of scope in
+- [x] **No endpoint status table is written.** Per-endpoint availability is explicitly declared out of scope in
       the document.
-- [ ] The `unavailable()` degrade path still exists and is still tested.
+- [x] The `unavailable()` degrade path still exists and is still tested.
 
 **Out of scope:**
 - The maintenance/cleanup port — that half moved to issue 39.
