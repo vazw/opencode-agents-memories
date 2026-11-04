@@ -31,6 +31,7 @@ pub mod analysis_prompt;
 pub mod cleanup_apply;
 pub mod cold_buffer;
 pub mod decay;
+pub mod decay_sweep;
 pub mod erasure;
 pub mod error;
 pub mod idle_scheduler;

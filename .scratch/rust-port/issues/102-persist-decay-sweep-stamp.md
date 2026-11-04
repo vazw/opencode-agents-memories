@@ -1,6 +1,6 @@
 # 102 — The decay-sweep stamp is in-memory, so every engine start re-arms the daily gate
 
-Status: landed — residual (owned by issue 102) — `39dadf3` landed the decay lifecycle on 2026-11-01 (startup tick + periodic), so this is not unstarted work. What remains is the **persisted sweep stamp** and the **duplicate `sync_confidence`**: they are due before the install passes the 30-day grace (≈ 6 days from 2026-11-03), after which every engine start would silently blend the oldest profile items twice.
+Status: done — 2026-11-05 — Sidecar file `decay-sweep.json` implemented beside `user-profiles.db` to persist the 24h daily decay sweep gate across restarts with fail-safe degradation to due on missing/corrupt stamp; duplicate `sync_confidence` in `decay_items` eliminated, restoring single-application EMA blend (0.55) and 90-day decay (0.405).
 decision, because every candidate changes either the storage root's file set or the `user_profiles`
 schema, and this repo's on-disk format carries an explicit refusal rule for newer roots (issue 43
 decisions 2–3). Filed with the issue-90 blueprint rather than left as a disclosed bullet, because issue
@@ -54,18 +54,18 @@ Persist the stamp so the 24 h gate survives a process restart. Triage decides be
 
 ## Acceptance criteria
 
-- [ ] A restart **inside** the interval does not sweep again: seed, `sweep_decay_daily(T)` on one store,
+- [x] A restart **inside** the interval does not sweep again: seed, `sweep_decay_daily(T)` on one store,
       drop it, construct a new store over the SAME root, `sweep_decay_daily(T + 1 h)` returns
       `profiles_scanned == 0`.
-- [ ] A restart **after** the interval does sweep: the same shape at `T + 25 h` returns
+- [x] A restart **after** the interval does sweep: the same shape at `T + 25 h` returns
       `profiles_scanned >= 1` and persists a lower confidence.
-- [ ] A lost optimistic-version CAS keeps its current contract: logged at `debug`, excluded from
+- [x] A lost optimistic-version CAS keeps its current contract: logged at `debug`, excluded from
       `profiles_updated`, no inline retry, deferred to the next *due* sweep.
-- [ ] A missing, unreadable or corrupt persisted stamp degrades to "due" (fail toward decaying, never
+- [x] A missing, unreadable or corrupt persisted stamp degrades to "due" (fail toward decaying, never
       toward skipping forever) and produces ONE named event, not one per tick.
-- [ ] Whichever storage shape is chosen, the refusal/downgrade rule for an older or newer build is
+- [x] Whichever storage shape is chosen, the refusal/downgrade rule for an older or newer build is
       recorded where the format is documented — no silent second on-disk surface.
-- [ ] The "daily decay sweep" row of `crates/mem-profile/CONTEXT.md` describes the gate as durable, and
+- [x] The "daily decay sweep" row of `crates/mem-profile/CONTEXT.md` describes the gate as durable, and
       the `sweep_decay_daily` doc comment (`profile_store.rs:1050-1061`) stops describing it as
       store-lifetime state.
 
@@ -103,3 +103,14 @@ MEASURED (read-only) and reasoned after a triage cross-check found this issue ra
 blend to the oldest items — silently, irreversibly, and twice per pass. The fix (persist the stamp, and
 remove the duplicate `sync_confidence`) must land **before** that, not when someone notices a number
 moving.
+
+## Comment — 2026-11-05: closed by blueprint-issue-102-persist-decay-sweep-stamp
+
+Implemented and verified:
+1. Sidecar file `decay-sweep.json` beside `user-profiles.db` via `crates/mem-profile/src/decay_sweep.rs`.
+2. Atomic persistence with mode 0600 on Unix, tempfile write + fsync + rename.
+3. Fail-safe degradation on missing or corrupt stamp files to `None` ("due") with a single `tracing::warn!`.
+4. Store integration in `ProfileStore::with_factory`, `reset()`, `rebind()`, and `sweep_decay_daily()`.
+5. Elimination of duplicate `sync_confidence` in `decay_items`, restoring single-application EMA blend (0.55) and 90-day decay (0.405).
+6. Tests added and updated: `user_profile_decay` (11 passed), `profile_decay_lifecycle` (5 passed, 1 ignored child), `decay_sweep` unit tests (6 passed).
+7. Clippy clean across `--lib` (unwrap/expect used denied) and `--all-targets` (-D warnings), fmt check clean.
