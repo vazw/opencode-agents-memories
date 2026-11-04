@@ -196,4 +196,14 @@ async fn test_episodic_write_failure_names_the_field() {
     ] {
         assert!(line.contains(needle), "{needle} missing from {line}");
     }
+    // Binds the `detail?` half of the validation contract (signatures.rs): a
+    // deleted or emptied `detail` field must fail here, not only at the unit seam.
+    let detail = line
+        .split("\"detail\":\"")
+        .nth(1)
+        .expect("the failure line carries a detail");
+    assert!(
+        !detail.is_empty() && !detail.starts_with('"'),
+        "detail is a non-empty string: {line}"
+    );
 }
