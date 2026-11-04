@@ -1783,4 +1783,18 @@ mod tests {
         assert_eq!(truncated.chars().count(), 120);
         assert!(truncated.ends_with('é'));
     }
+
+    /// Gate r2 fixture: 100 ASCII + 10 rockets = 110 chars / 140 bytes.
+    /// Pinned char clamp (120 CHARS): 110 <= 120, so the detail passes through
+    /// UNCHANGED. A byte-counting clamp keeps only 120 bytes (5 rockets) and dies.
+    #[test]
+    fn test_detail_truncation_counts_chars_not_bytes() {
+        let message = "X".repeat(100) + &"🚀".repeat(10);
+        assert_eq!(message.len(), 140);
+        assert_eq!(message.chars().count(), 110);
+        let truncated = truncate_detail(&message);
+        assert_eq!(truncated, message);
+        assert_eq!(truncated.len(), 140); // exact expected bytes, char semantics
+        assert_eq!(truncated.chars().count(), 110);
+    }
 }
