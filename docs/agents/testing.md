@@ -56,6 +56,8 @@ to remove.
 
 Every behavior lands RED→GREEN: the failing test is written first, its failure reason recorded, then the minimal green implementation. The RED reason is what proves the test can fail — a test that cannot fail is not a test.
 
+Any change that removes, disables, or relaxes an assertion or test must record the removed text verbatim in the wave ledger under `## Removed assertions / tests` along with the technical rationale. Coverage deletion is presumed regression until verified.
+
 ## Upstream-test dispositions
 
 Exactly three strings, one per upstream test file:
