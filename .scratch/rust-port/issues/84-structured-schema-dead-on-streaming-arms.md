@@ -1,6 +1,6 @@
 # 84 — structured-output schema is dead on 7 of 8 streaming provider arms; capture is the only caller that sets one
 
-Status: landed — 2026-11-01, commit `585956d` (`fix(bridge): capture asks for structured output, not the
+Status: done — 2026-11-04 (landed — 2026-11-01, commit `585956d` (`fix(bridge): capture asks for structured output, not the
 streaming arm`), residual owned here: the measured probe artifacts still sit in gitignored `.tmp/scratch/`
 and must be copied to `docs/evidence/` (AGENTS.md forbids `.tmp`-only evidence). Gate record:
 `.tmp/progress/20261101-0953-capture-schema-r5.ledger.md` steps 1–7 (final `cargo test --workspace`

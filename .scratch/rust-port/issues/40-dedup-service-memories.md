@@ -1,6 +1,6 @@
 # 40 — W8.2 · Make `POST /api/deduplicate` real (memory deduplication)
 
-Status: **landed — residual owned by issue 54** — 2026-10-25. `POST /api/deduplicate` merged as
+Status: done — 2026-11-04 (ALREADY-FIXED — src/main.rs:220 calls production_deduplication_port_with_cancel; issue 54 done)
 **`6bf7b28`** (`feat(mem-web): real POST /api/deduplicate behind MaintenancePort (issue 40)`, merge of
 `3950938` + `ad6ce7a`, 16 files): a real handler taking `State`, the `ProductionDeduplication`
 implementation of `MaintenancePort::deduplicate`, and the **`production_deduplication_port`** factory.

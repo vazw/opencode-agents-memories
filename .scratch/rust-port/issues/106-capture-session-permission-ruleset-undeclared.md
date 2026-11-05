@@ -1,6 +1,6 @@
 # 106 — the capture session's permission lockdown is sent under an undeclared key with an undeclared shape, so the deny-all ruleset may never apply
 
-Status: needs-triage — 2026-11-01. Evidence levels are separate and stated per claim: the **spec** is READ,
+Status: done — 2026-11-04 (STALE-PREMISE — session lifecycle deleted in 312ffcc; stateless route creates no session)
 the **tolerance** is MEASURED, the **consequence** is INFERRED and unmeasured. Security-relevant: the
 thing that may not be applied is the rule that denies an internal session every permission.
 

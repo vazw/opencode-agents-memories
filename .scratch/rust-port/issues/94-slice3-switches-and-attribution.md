@@ -2,7 +2,7 @@
 
 Sequencing parent — owns no work. Children: 63, 85, 86, 87.
 
-Status: ready-for-human — 2026-11-01. This file tracks **sequencing only**: it names the four children and
+Status: done — 2026-11-04 (SUPERSEDED — sequencing parent; child 87 fixed, children 63/85/86 tracked individually)
 holds no deliverable of its own. Agents should grab the children — issue 63 (the six resolved-but-unread
 injection keys), issue 85 (the chat path discards the session identity), issue 86 (attribution identity is
 never produced) and issue 87 (the `capturedSessionId` race). Do not open a wave against this file.

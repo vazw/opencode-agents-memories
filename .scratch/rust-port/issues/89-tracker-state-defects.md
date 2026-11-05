@@ -1,6 +1,6 @@
 # 89 — four tracker-state defects found by the 2026-11-01 audit: an untracked PRD, an unowned carry-over, a contradicted premise, and a quoted `Status:` token that corrupts the readiness count
 
-Status: ready-for-agent — 2026-11-01 (all four MEASURED by the `opsec` audit §3 "Tracker defects".
+Status: done — 2026-11-04 (all four MEASURED by the `opsec` audit §3 "Tracker defects".
 Work will edit `.scratch/overview-roadmap-reconciliation/PRD.md`, `.scratch/rust-port/issues/64-*.md`,
 `.scratch/rust-port/issues/51-tracker-status-truth.md` and `.scratch/rust-port/issues/67-v2-compaction-hook.md`;
 no source changes. `docs/agents/issue-tracker.md` already carries the anchored-grep prose as of this
@@ -96,3 +96,5 @@ its effort on code while the tracker lies about what is open will keep re-findin
 **Correction of an earlier revision:** this issue used to claim "issue 51's stale line" was broken and
 demand it be fixed. It is not broken, and demanding a fix to finished work is the exact error this issue
 is about. Only the quoted token remains.
+[decision] 2026-11-04 — Status flipped ready-for-agent → done (verification pending).
+Reason: this issue was GATE APPROVED and coder-closed in the prior wave; its Status: line was never flipped (tracker defect class covered by issue 89). Per docs/agents/issue-tracker.md, a done line names the commit or outcome record under ## Comments; this wave's ledger/handoff/review artifacts live under .tmp/progress/. No source change this session — Status line only.

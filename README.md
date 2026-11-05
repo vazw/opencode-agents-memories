@@ -9,9 +9,10 @@ ten-mode `memory` tool, an optional `memory-usage` skill, and a Leptos web explo
 
 **Status: pre-1.0.** Phases 0–6 of the port (memory engine, AI client, profile learning, episodic
 memory, plugin bridge, web explorer) are implemented and their suites are green. The remaining Phase 6
-items are acceptance/smoke closures, and Phase 7 is the hardening and drop-in rehearsal. The upstream
-plugin remains the stable release until the live swap has been validated — do not point this port at a
-store you have not backed up.
+items are acceptance/smoke closures, and Phase 7 is the hardening and drop-in rehearsal. The live swap
+on the owner's host executed on 2026-10-31 (`docs/runbooks/live-swap.md`, re-verified at
+`docs/evidence/deploy-20261103-1959.md`), while the one-week dogfood window (issue 81) and manual
+rehearsal sign-off (issue 28) remain open — do not point this port at a store you have not backed up.
 
 ## What it does
 
@@ -103,9 +104,11 @@ Two operational caveats:
   v2.0 `tokenizer.json`; `scripts/provision-onnx-cache.sh` writes exactly that. Without it, the rest
   of the store still works and `search`/`add` answer `-32603`.
 - **Opening an upstream store migrates it in place** (`metadata.db` 1→2, `user-prompts.db` 1→2,
-  project shards 2→3 lazily on first write). The migration is additive but this build refuses a store
-  written by a newer build, so back up the store before the first open. The backup/restore and
-  provisioning sequence is documented in `docs/runbooks/live-swap.md`.
+  project shards 2→3 lazily on first write; the port's own `episodic.db` sits at `user_version = 7`).
+  The migration is additive but this build refuses a store written by a newer build, so back up the
+  store before the first open. The backup/restore and provisioning sequence is documented in
+  `docs/runbooks/live-swap.md` (with the 2026-11-03 live restart verified in
+  `docs/evidence/deploy-20261103-1959.md`).
 
 A local plugin does not auto-update.
 
@@ -165,9 +168,11 @@ now and therefore not in the table above.
 | `userProfileMaxContextBytes`, `userProfileDisplay{Preferences,Patterns,Workflows}` | profile rendering uses the `userProfileInject*` caps |
 | `showAutoCaptureToasts`, `showUserProfileToasts`, `showErrorToasts` | no toast surface in this build |
 
-`chatMessage.captureChildSessions` is deliberately **not** in this table: it is read. It gates the
-memory-context restore for child sessions at compaction time; capture — the milestone write — stays
-ungated (ruling D-114-2), because the write and the restore are different lanes. Its default is
+`chatMessage.captureChildSessions` is deliberately **not** in this table: it is read. It gates both the
+memory-context restore for child sessions at compaction time (issue 114) and idle session capture in
+`fireIdleCapture` (`plugin/src/plugin.js`, issue 86, `e6951c5`), stamping `parent_session_id` when
+enabled; the pre-compaction **ingest** (`experimental.session.compacting`, ruling D-114-2) and the
+pre-turn `chat.message` inject (D1) stay ungated. Its default is
 `false`, and the shipped example carries that default so the opt-in is discoverable. The
 child-session restore wave landed before this census was taken, so this section was re-derived
 after it.
@@ -233,8 +238,11 @@ project.
 - `OVERVIEW.md` — scope authority: the five epics as user stories with acceptance criteria.
 - `AGENTS.md` — repository workflow, gates, commands and verification recipes.
 - `CONTEXT-MAP.md` — the bounded contexts, one `CONTEXT.md` per crate.
-- `docs/adr/` — architecture decisions; `docs/agents/` — testing, issue-tracker and workflow docs.
-- `.scratch/rust-port/` — the port's delivery roadmap, PRD and issue history.
+- `docs/adr/` — architecture decisions; `docs/agents/` — testing, issue-tracker and workflow docs;
+  `docs/runbooks/` — `live-swap.md` and `adopt-embedding-model.md`; `docs/evidence/` — measured run
+  artifacts (including `deploy-20261103-1959.md`).
+- `.scratch/rust-port/` and `.scratch/web-identity-and-project-picker/` — the port's delivery
+  roadmap, PRDs and issue history.
 
 ## License
 

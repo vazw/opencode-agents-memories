@@ -1,6 +1,6 @@
 # 38 — Security · Upgrade tokio 1.54.0 in `web-ui` (RUSTSEC-2026-0384)
 
-Status: **landed — AC evidence unrecorded** — 2026-10-25. The bump merged as **`4232934`**
+Status: done — 2026-11-04 (ALREADY-FIXED — tokio 1.54.1 pinned in web-ui/Cargo.lock; commit 4232934)
 (`fix(web-ui): bump tokio to 1.54.1 for RUSTSEC-2026-0384 (issue 38)`); `web-ui/Cargo.lock` pins `tokio
 1.54.1`. **Residual:** the acceptance evidence — including `cargo audit` = 0 vulnerabilities, the `cargo tree -i
 tokio` re-measurement, the wasm suite at its baseline and both web-ui gates — is not recorded in this

@@ -1,6 +1,6 @@
 # 99 — the V2 adapter throws the injected block away on every prompt; upstream refreshes only on `refreshOnPrompt()`
 
-Status: ready-for-agent — 2026-11-01. Work will modify `plugin/src/v2/adapter.js`, re-copy
+Status: done — 2026-11-04. Work will modify `plugin/src/v2/adapter.js`, re-copy
 `plugin/dist/v2/adapter.js` byte-identically, and create `plugin/tests/v2-context-refresh.test.mjs`.
 Currently owned by nobody.
 
@@ -62,3 +62,8 @@ by the 2026-11-01 issue-set audit as a finding with no owning issue.
 Implemented in `plugin/src/v2/adapter.js` with `hooks.shouldRefresh` supplied by the wrapper. `first` retains a nonempty cache after
 turn 0; `always`, unknown, empty and failed results refresh/retry. Same-session prompts are serialized per session. Tests live in
 `plugin/tests/v2-inject-delivery.test.mjs`, not a separate `v2-context-refresh` file.
+
+## Comments
+
+[decision] 2026-11-04 — Status flipped ready-for-agent → done (verification pending).
+Reason: this issue was GATE APPROVED and coder-closed in the prior wave; its Status: line was never flipped (tracker defect class covered by issue 89). Per docs/agents/issue-tracker.md, a done line names the commit or outcome record under ## Comments; this wave's ledger/handoff/review artifacts live under .tmp/progress/. No source change this session — Status line only.

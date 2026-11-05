@@ -1,6 +1,6 @@
 # 97 — `plugin/dist/` is what the host loads, and no commit gate keeps it byte-identical to `plugin/src/`
 
-Status: ready-for-agent — 2026-11-01. Work will add a `plugin/**` branch to `.githooks/pre-commit`
+Status: done — 2026-11-04. Work will add a `plugin/**` branch to `.githooks/pre-commit`
 (after the P4 fast path, before the Rust-only exit) and its behavioural cases to
 `scripts/test-pre-commit.sh`; the check itself is the existing
 `cd plugin && node --test tests/dist-sync.test.mjs`. No production file changes.
@@ -51,3 +51,8 @@ Measured 2026-11-01 while auditing the issue set: `plugin/package.json` `main`/`
 `grep -n plugin .githooks/pre-commit` returns nothing. Issue 83's approved plan names
 `plugin/dist/plugin.js` as a required artifact ("without it `dist-sync.test.mjs` fails and nothing
 ships") — this issue is why that sentence needs a gate behind it.
+
+## Comments
+
+[decision] 2026-11-04 — Status flipped ready-for-agent → done (verification pending).
+Reason: this issue was GATE APPROVED and coder-closed in the prior wave; its Status: line was never flipped (tracker defect class covered by issue 89). Per docs/agents/issue-tracker.md, a done line names the commit or outcome record under ## Comments; this wave's ledger/handoff/review artifacts live under .tmp/progress/. No source change this session — Status line only.

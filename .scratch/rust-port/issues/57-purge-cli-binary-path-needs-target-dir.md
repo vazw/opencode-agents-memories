@@ -1,6 +1,6 @@
 # 57 — Test harness · `purge_cli::binary_path()` falls back to `target/debug/deps`, so `cargo test --workspace` needs `CARGO_TARGET_DIR` to be green
 
-Status: landed 2026-10-27 in `672625fc2b5daf3a6e93c94ea0337b9537946241` — the root-binary resolution is now a
+Status: done — 2026-11-04 (landed 2026-10-27 in `672625fc2b5daf3a6e93c94ea0337b9537946241`)
 pure, total `resolve_binary_path(&Path, Option<&OsStr>)` that strips exactly one `deps/` segment; measured
 **21/21** in `purge_cli` with `CARGO_TARGET_DIR` unset and **21/21** with it set. `cargo test --workspace` with
 the variable unset still exits 101 on one **pre-existing, unrelated** `mem-skills` test

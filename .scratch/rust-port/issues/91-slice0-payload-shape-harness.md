@@ -1,6 +1,6 @@
 # 91 — Slice 0 (prefactor): extend the existing stub-engine harness so a wrapper→engine payload defect cannot ship green
 
-Status: ready-for-agent — 2026-11-01 (work will extend `plugin/tests/wrapper-glue.test.mjs`'s driver
+Status: done — 2026-11-04 (work will extend `plugin/tests/wrapper-glue.test.mjs`'s driver
 harness, commit `plugin/tests/fixtures/idle-capture-payload.json`, create
 `plugin/tests/capture-payload.test.mjs` and `crates/mem-bridge/tests/capture_wrapper_payload.rs`, and
 re-copy `plugin/dist/plugin.js`. No production behaviour changes.)
@@ -84,3 +84,8 @@ issue's remaining scope shrinks to the two pieces nothing else has built — the
 
 Issue 83 (the omitted `agent_id`), issue 84 (the dropped schema), issue 87 (the globals race): all three
 survived because no test crossed this seam. Audit: `.tmp/progress/opsec-audit-20261101T090956Z.md` §S1.
+
+## Comments
+
+[decision] 2026-11-04 — Status flipped ready-for-agent → done (verification pending).
+Reason: this issue was GATE APPROVED and coder-closed in the prior wave; its Status: line was never flipped (tracker defect class covered by issue 89). Per docs/agents/issue-tracker.md, a done line names the commit or outcome record under ## Comments; this wave's ledger/handoff/review artifacts live under .tmp/progress/. No source change this session — Status line only.

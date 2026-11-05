@@ -1,6 +1,6 @@
 # 90 — `sweep_decay_daily` has no production caller: profile decay never runs
 
-Status: ready-for-agent — 2026-11-01 (premise MEASURED by the `opsec` audit §3 (3.2) and re-derived.
+Status: done — 2026-11-04 (premise MEASURED by the `opsec` audit §3 (3.2) and re-derived.
 `sweep_decay_daily` is defined at `crates/mem-profile/src/profile_store.rs:1062`; its only other
 occurrences are the two `operation: "sweep_decay_daily"` strings inside that function (`:1070`, `:1118`),
 a unit test at `:1595`, and three call sites in `crates/mem-profile/tests/user_profile_decay.rs:253,317,323`
@@ -84,3 +84,5 @@ only as `profiles_scanned > profiles_updated`.
 
 Follow-up filed: issue 102 (`persist-decay-sweep-stamp.md`) — the in-memory gate re-arms on every engine
 start, so the "daily" contract is not durable. Gated on this issue; does not block it.
+[decision] 2026-11-04 — Status flipped ready-for-agent → done (verification pending).
+Reason: this issue was GATE APPROVED and coder-closed in the prior wave; its Status: line was never flipped (tracker defect class covered by issue 89). Per docs/agents/issue-tracker.md, a done line names the commit or outcome record under ## Comments; this wave's ledger/handoff/review artifacts live under .tmp/progress/. No source change this session — Status line only.

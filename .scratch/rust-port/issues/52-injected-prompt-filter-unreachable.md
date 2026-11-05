@@ -1,6 +1,6 @@
 # 52 — Privacy · The injected-prompt filter is implemented, tested and unreachable on all three paths
 
-Status: landed 2026-10-27 as merge `fc41bbd` (branch `issue-52/injected-prompt-filter`: implementation `705fa58`, self-closing arithmetic + guard run-on `0e07eb2`, strip-before-filter at four sites `fc41bbd`) — residual: 52.5's live-host measurement is `NOT OBSERVED` (a credit refusal, evidence at `docs/evidence/issue-52-idle-payload/MEASUREMENT.md`) and its adapter implementation is owned by issue 66, which is blocked by issue 33 (now landed)
+Status: done — 2026-11-04 (landed 2026-10-27 as merge `fc41bbd`; residual 66 done)
 user had typed it, and summarises it into memories: the filter that exists to prevent exactly that has zero
 production call sites, and the two config keys that would enable it have zero readers.**
 

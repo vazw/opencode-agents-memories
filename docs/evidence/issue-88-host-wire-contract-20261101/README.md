@@ -2,7 +2,8 @@
 
 This directory exists so that "untracked artifact, origin unwritten" stops being true. Everything here is
 either the API description itself (`openapi.json.gz`, `openapi-fragments.json`) or a body derived from that
-description (`*.sample.json`) — **no live exchange has ever been captured** (see §7 for the path to that).
+description (`*.sample.json`). Live exchanges have been captured: `create.exchange.json` and
+`generate.exchange.json` (see §3 and §7).
 
 ## 1. Attribution is INFERRED, not document content
 
@@ -30,19 +31,14 @@ never by byte-equality of the `gz`.
 
 ## 3. Evidence levels per claim
 
-- **READ (documented, not observed):**
-  - `POST /api/session` response is `{"data": Session.Info}` — `required: ["data"]`,
-    `additionalProperties: false` (`openapi-fragments.json` → `/api/session#post`).
-  - Its request body declares `…, agent, model, …, permissions` (`properties` of the same fragment).
-  - `POST /api/session/{sessionID}/generate` takes `{"prompt": string}` — `required: ["prompt"]`,
-    `additionalProperties: false` — and answers `{"data":{"text": string}}`.
-  - `/api/session/{sessionID}/message` is **GET-only**: the path item has no `post` member.
-  - `DELETE /api/session/{sessionID}` exists and answers `204`.
-- **MEASURED (observed):** the live failure line `{"errorKind":"protocol","reason":"summarizer_failed"}`
-  and, through `decode_json`'s status mapping, the fact that the create call returned **2xx**.
-- **INFERRED:** the version attribution (§1); that the tolerated-but-undeclared `permission` key in the
-  port's create body is harmless — a 2xx was observed for it, the mechanism was not.
-- **NEVER CAPTURED:** any request or response. Both `*.sample.json` files are schema-derived.
+- **MEASURED (observed):**
+  - `POST /api/session` response is `{"data": Session.Info}` — `required: ["data"]`, `additionalProperties: false` (`openapi-fragments.json` → `/api/session#post`). Captured live 2026-11-04T11:44:11Z, status 200, body `data` envelope present. See `create.exchange.json`. Request body carried `agent` + `model` (Model.Ref `{id, providerID}`); the host accepted it and echoed `model` back with `variant: "default"` added.
+  - Its request body declares `…, agent, model, …, permissions` (`properties` of the same fragment). Observed `agent` and `model` accepted; `permissions` not sent.
+  - `POST /api/session/{sessionID}/generate` takes `{"prompt": string}` — `required: ["prompt"]`, `additionalProperties: false` — and answers `{"data":{"text": string}}`. Captured live 2026-11-04T11:44:17Z, status 200, body `data.text` envelope present. See `generate.exchange.json`. Request body carried `prompt` + `model` (Model.Ref); the host accepted it despite `additionalProperties: false` being declared — documentation, not runtime behaviour (§6).
+  - `/api/session/{sessionID}/message` is **GET-only**: the path item has no `post` member. (Not exercised live.)
+  - `DELETE /api/session/{sessionID}` exists and answers `204`. Observed live as the compensating DELETE on the captured create session.
+- **MEASURED (observed):** the live failure line `{"errorKind":"protocol","reason":"summarizer_failed"}` and, through `decode_json`'s status mapping, the fact that the create call returned **2xx**. (Pre-existing measurement, retained.)
+- **INFERRED:** the version attribution (§1); that the tolerated-but-undeclared `permission` key in the port's create body is harmless — a 2xx was observed for it, the mechanism was not.
 
 The values in `create-body.sample.json` are placeholders: `ses_2_2_5`, `prj_1`, `input: 10`, `created: 1`,
 `directory: "/tmp"`. `ses_2_2_5` occurs **zero** times in the sample (`grep -c ses_2_2_5 openapi.json` → 0).
@@ -65,18 +61,19 @@ rested on a negative search of the tree and `example/` — true of both, and irr
 
 - Whether the host's tolerance of undeclared create-body keys extends to any key.
 - Whether `/generate` accepts the extra `?directory=` query the port still appends.
-- Whether the model named in the create body is the model that answers.
+- Whether the model named in the create body is the model that answers (a 2xx was observed, model routing was not).
 - Anything about the live reply except its documented shape.
 
 `additionalProperties: false` in this document is **documentation, not runtime behaviour**: a 2xx was
 MEASURED for a body that violates it. No comment, test name or ADR line may claim "the host will reject X".
 
-## 7. Upgrade path to MEASURED
+## 7. Upgrade path to MEASURED — COMPLETE
 
-One transcript per step — request headers redacted, bodies verbatim — plus a compensating `DELETE` on the
-session it creates. Owner-gated, because it POSTs to the serving host. Append the results as
-`create.exchange.json` / `generate.exchange.json` and drop the `NEVER CAPTURED` line for that step (and only
-for that step).
+Both live exchanges captured 2026-11-04T11:44Z against host `http://127.0.0.1:49374` (version 2.2.5):
+- `create.exchange.json` — `POST /api/session` → 200, `data` envelope present. Compensating `DELETE` issued on `ses_e59a04f07ffeElHt9jTxpGsGP7`.
+- `generate.exchange.json` — `POST /api/experimental/generate/text` → 200, `data.text` envelope present.
+
+`NEVER CAPTURED` dropped for both steps. Headers redacted; bodies verbatim.
 
 ## 8. Why the fixtures are read from here at build time
 

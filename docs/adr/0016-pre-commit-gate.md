@@ -9,6 +9,9 @@
 - **Amended:** 2026-10-25 (second amendment) — the `web-ui` panic-family gate is restored; the
   7-site carry-over is closed (D-3, Limitations). The 'one gate' line above records the interim
   state, not the current gate.
+- **Amended:** 2026-11-04 — plugin dist-sync gate (issue 97): a read-only plugin phase runs after
+  the web-ui phase (P4) and before the fast path (P5); `node` missing is a hard environment failure;
+  the hook never copies src→dist; the header no longer claims the hook runs no tests.
 - **Binding on:** `.githooks/pre-commit` (the gate) and `scripts/test-pre-commit.sh` (its
   behavioural self-test). No Rust source, manifest or dependency is touched.
 - **Supersedes / amends:** amends ADR-0013 D-5's *"no enforcement"* consequence by adding an
@@ -180,6 +183,18 @@ gates, generates and **commits** a `Cargo.lock` so clippy never re-resolves mid-
 it with `--no-verify` (scaffolding must not be gated, and the fixture must start with no
 `.tmp/scratch` so later cases prove the hook bootstraps it). Budget: ≈5 s per Rust-touching case;
 the measured whole-harness wall time is recorded per run.
+
+**D-11 — Plugin dist-sync gate (issue 97, amended 2026-11-04).** A read-only plugin
+phase runs after the web-ui phase (P4) and before the fast path (P5), so plugin-only
+staged sets are gated and the phase composes with the Rust gates when plugin/ and .rs
+paths are staged together. It requires `node` on PATH — a hard environment failure,
+never a silent skip — and `plugin/tests/dist-sync.test.mjs` present (fail loud, not
+fail open). The check is a byte-compare of `plugin/src/plugin.js` vs
+`plugin/dist/plugin.js` via `node --test tests/dist-sync.test.mjs`; the hook never
+copies src→dist (the fix hint names `cp` but never executes it). Cost: one node
+process, no cargo; plugin-only changes pay no cargo cost and reach the fast path only
+after this phase. The dist-sync log lives under gitignored `.tmp/scratch` and is
+removed on success; on failure its tail is printed to stderr.
 
 ## Consequences
 

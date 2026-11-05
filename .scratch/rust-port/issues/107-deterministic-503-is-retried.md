@@ -1,6 +1,6 @@
 # 107 — a deterministic 503 is retried five times, because the host encodes a validation failure as `ServiceUnavailableError`
 
-Status: needs-triage — 2026-11-01. MEASURED live (probe evidence `.tmp/progress/host-exchange-20261101T162001Z/`)
+Status: done — 2026-11-04 (STALE-PREMISE — session trigger gone; ServiceUnavailable has wire reason)
 and READ from the live host's own spec (`GET /openapi.json` → 138 paths, served by the running 2.2.5 build).
 
 ## What is wrong

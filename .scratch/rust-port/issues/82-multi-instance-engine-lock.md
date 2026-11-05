@@ -1,6 +1,6 @@
 # 82 — plugin · The host loads the plugin once per agent; only one engine can win the store lock, so every other agent's memory tool degrades
 
-Status: landed — 2026-10-31 — fix at `c37f05c` (ff-only from `issue-82-shared-engine-bridge`; base
+Status: done — 2026-11-04 (landed — 2026-10-31 — fix at `c37f05c` (ff-only from `issue-82-shared-engine-bridge`; base
 `a01cfe7`; 20 files, +1634/−276). Residual: the Step 10 live re-swap, owned by issue 81.
 
 ## What is happening

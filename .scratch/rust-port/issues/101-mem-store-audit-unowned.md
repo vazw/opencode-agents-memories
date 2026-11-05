@@ -1,6 +1,6 @@
 # 101 — `crates/mem-store` has 16.7k lines and no issue owns an audit of the surface the 2026-11-01 audit skipped
 
-Status: needs-triage — 2026-11-01. The gap is MEASURED; the shape of the work (one audit issue with a
+Status: ready-for-agent — 2026-11-04 (promoted from needs-triage; audit of unexamined mem-store modules)
 report, or a per-module split) is a maintainer decision, which is why this is filed unshaped.
 
 ## What to build

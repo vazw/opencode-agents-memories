@@ -1,6 +1,6 @@
 # 54 — Composition root · `POST /api/deduplicate` is implemented, tested and unreachable in the shipped binary
 
-Status: landed — residual (owned by issue 54b) — 2026-10-25. `POST /api/deduplicate` is reachable in the shipped binary: **`fa40b6ce2bd9d6b6b969b55a3bc81237c19c7458`**
+Status: done — 2026-11-04 (landed — residual owned by 54b done — reachable in shipped binary `fa40b6ce2bd9d6b6b969b55a3bc81237c19c7458`)
 (`feat: wire POST /api/deduplicate into the composition root (issue 54)`) adds the single
 `.with_maintenance(production_deduplication_port(..))` call to `src/main.rs`'s `Some(deps)` arm, fed
 by the resolved `deduplication_enabled` / `deduplication_similarity_threshold`; the oracles are

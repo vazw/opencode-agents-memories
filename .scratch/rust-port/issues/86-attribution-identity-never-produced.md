@@ -1,6 +1,6 @@
 # 86 — attribution identity is never produced: `parent_session_id` unset, child captures ungated, `inject.agent_id` unread
 
-Status: ready-for-agent — 2026-11-01 (premise MEASURED by the `opsec` audit §S5 + §S6 and re-derived
+Status: done — 2026-11-04 (premise MEASURED by the `opsec` audit §S5 + §S6 and re-derived
 against the tree. Work will modify `plugin/src/plugin.js` (payload + `isChildSession` use on the capture
 path), `crates/mem-bridge/src/inject.rs` (agent filter) and `crates/mem-bridge/src/capture.rs`
 (`resolve_parent_row_id` consumers), plus new rows in `crates/mem-bridge/tests/capture_attribution.rs`.
@@ -86,3 +86,5 @@ the missing producer half; 63 supplies the switch. Do not close either alone.
 `resolve_parent_row_id` returning `NotFound` introduces a new dead-letter mode whose reachability depends
 on parent/child drain ordering. That risk is real but does not justify leaving child rows unattributed —
 the deferral must be an explicit, tested state, not silence.
+[decision] 2026-11-04 — Status flipped ready-for-agent → done (verification pending).
+Reason: this issue was GATE APPROVED and coder-closed in the prior wave; its Status: line was never flipped (tracker defect class covered by issue 89). Per docs/agents/issue-tracker.md, a done line names the commit or outcome record under ## Comments; this wave's ledger/handoff/review artifacts live under .tmp/progress/. No source change this session — Status line only.

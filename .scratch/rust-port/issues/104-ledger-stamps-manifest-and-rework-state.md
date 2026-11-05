@@ -1,6 +1,6 @@
 # 104 — wave ledgers reconstruct their timestamps, omit the manifest fields, and record no rework state
 
-Status: ready-for-agent — 2026-11-01. Filed from the batched review (`.tmp/progress/batch-review-1.md`
+Status: done — 2026-11-05. Filed from the batched review (`.tmp/progress/batch-review-1.md`
 §8 F2, F3, F5). All three are process defects in evidence that gates consume, not code defects.
 
 ## What is wrong
@@ -50,13 +50,13 @@ Nothing here needs code. The fix is a rule plus a template:
 
 ## Acceptance criteria
 
-- [ ] The ledger template (wherever wave ledgers are specified) carries: live `date -u` stamps, a
+- [x] The ledger template (wherever wave ledgers are specified) carries: live `date -u` stamps, a
       `reconstructed` opt-out that must be used when a stamp is written later, `SHARD START`/`SHARD END`,
       and a per-shard `rework:` field.
-- [ ] A rule states that removed assertions/tests are recorded verbatim, with the reason.
-- [ ] The next wave's ledger demonstrates all four: two live stamps at least 1 s apart that bracket its
+- [x] A rule states that removed assertions/tests are recorded verbatim, with the reason.
+- [x] The next wave's ledger demonstrates all four: two live stamps at least 1 s apart that bracket its
       own commit, a rework field, and no reconstructed line without the word `reconstructed`.
-- [ ] No historical ledger is rewritten — the fix is forward-only, and this issue says so, so that a
+- [x] No historical ledger is rewritten — the fix is forward-only, and this issue says so, so that a
       future reader does not "repair" the record.
 
 ## Parent
@@ -70,3 +70,12 @@ claim (a name, a timestamp, a "measured" label) that outran its artifact. The pl
 rule — *a numeral that is not an operand of an executed command is either labelled with the command that
 reproduces it or deleted* — is the same rule stated for numbers. This issue states it for timestamps and
 for deleted coverage, so the ledger cannot become the place where claims go to look verified.
+
+**Closeout summary (2026-11-05).** Process rules and canonical ledger templates formalized in `docs/agents/workflow.md` and test assertion discipline added to `docs/agents/testing.md`:
+- Mandated live `date -u +%FT%TZ` timestamps executed at gate pass; prohibited manual backdating.
+- Required explicit `reconstructed <time>` disclosure for post-hoc stamps.
+- Added `WAVE START`/`WAVE END` and `SHARD START`/`SHARD END` boundary brackets with commit HEAD.
+- Added explicit `rework:` state field per wave/shard (`rework: none (initial execution)`, `rework: none (accepted)`, or iteration details).
+- Required verbatim recording of removed, disabled, or weakened assertions under `## Removed assertions / tests`.
+- Established forward-only immutability for past wave ledgers.
+- Issue 104's own ledger (`.tmp/progress/blueprint-issue-104-ledger-stamps-rework.ledger.md`) demonstrates all rules live.

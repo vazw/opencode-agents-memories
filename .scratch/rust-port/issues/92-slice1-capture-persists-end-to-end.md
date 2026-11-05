@@ -2,7 +2,7 @@
 
 Sequencing parent — owns no work. Children: 83, 88.
 
-Status: ready-for-human — 2026-11-01. This file tracks **sequencing only**: it schedules the children and
+Status: done — 2026-11-04 (SUPERSEDED — sequencing parent; children 83 fixed, 88 superseded/closed)
 holds no deliverable of its own. Agents should grab the children — issue 83 (the wrapper supplies the
 identity the store requires) and issue 88 (the host wire, measured before edited). Do not open a wave
 against this file.

@@ -1,6 +1,6 @@
 # 48 — Profile · The learner leg and the erasure leg land together
 
-Status: **landed — residual (owned by issue 39)** — implementation `86ff7d7`, merged as `fddffe3`
+Status: done — 2026-11-04 (SUPERSEDED — erasure landed 86ff7d7/fddffe3; learner skipped per 47.1 A2; residual owned by 39)
 (`--no-ff`), under 47.1's ruling (`Leg A = A2`, `Leg B = B2′`). Residual: `delete_old_prompts`, untouched here.
 
 ## What to build

@@ -1,6 +1,6 @@
 # 124 — the pre-turn `<memory_context>` inject silently misses some sessions
 
-Status: needs-triage — measured 2026-11-03 20:38–21:36 (Asia/Bangkok) on the live host, engine
+Status: done — 2026-11-05 — Option B built and tested (commits 33e9da9, 620cab9, fa928a4, 115f2f7). Context preserved across compaction in session cache; privacy-preserving telemetry inject.requested and inject.received with block_bytes, query_chars, handling_ms, status emitted by wrapper; tests pass in plugin/tests/v2-inject-delivery.test.mjs.
 `0ba4e0f1` (pid 12684), wrapper `12af073c`, UI `web-ui-321d4859fd9a772f`.
 
 Owner report: *"`◈memory context` not pop-up on the last planner after compaction."*

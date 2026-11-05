@@ -1,6 +1,6 @@
 # 27 — W7.1 · Deferred behavior sweep — auto-update, timeouts, i18n, runtime-require
 
-Status: ready-for-agent — 2026-10-27 (owner ruled all three remaining legs N/A — auto-update, i18n and
+Status: done — 2026-11-04 (ALREADY-FIXED — owner ruled auto-update, i18n, runtime-require N-A; timeouts pinned by request_lifecycle.rs)
 runtime-require; the work is to record the dispositions where this repo keeps them. Brief under
 `## Agent Brief`.)
 

@@ -5,9 +5,11 @@
 #   git config core.hooksPath .githooks
 #
 # It rustfmt-checks exactly the staged `.rs` files and then runs both clippy
-# gates this repository treats as law. It runs no tests. A commit whose staged
-# set touches no Rust file exits before cargo is invoked. This is a lint and
-# format gate, not a quality gate: see docs/adr/0016-pre-commit-gate.md.
+# gates this repository treats as law. It runs no cargo-based tests; for staged
+# plugin/ paths it runs a single read-only plugin dist-sync byte-compare of src
+# vs dist (the hook never copies src→dist). A commit whose staged set touches no
+# Rust file exits before cargo is invoked. This is a lint and format gate, not a
+# quality gate: see docs/adr/0016-pre-commit-gate.md.
 #
 # The hook never mutates the repository: it only reads the index (`git show`)
 # and runs `rustfmt --check` on copies plus read-only clippy.
@@ -71,6 +73,41 @@ if [ "$webui" -eq 1 ]; then
         exit 1
     fi
     rm -f "$coverage_log"
+fi
+
+# P4b — plugin dist-sync gate. plugin/dist/plugin.js is what the OpenCode host
+# imports; it must be a byte-identical copy of plugin/src/plugin.js. The check
+# is read-only (raw Buffer compare via dist-sync.test.mjs); the hook never
+# copies src→dist. Runs for plugin-only staged sets (before the P5 fast path)
+# and composes with the Rust gates when plugin/ and .rs paths are staged together.
+plugin_staged=0
+for p in "${staged[@]}"; do
+    case "$p" in
+        plugin/*) plugin_staged=1 ;;
+    esac
+done
+if [ "$plugin_staged" -eq 1 ]; then
+    if ! command -v node > /dev/null 2>&1; then
+        printf 'pre-commit: FAIL environment — node not found on PATH (the plugin dist-sync gate requires it)\n' >&2
+        bypass_note
+        exit 1
+    fi
+    if [ ! -f "$toplevel/plugin/tests/dist-sync.test.mjs" ]; then
+        printf 'pre-commit: FAIL environment — plugin/tests/dist-sync.test.mjs is missing\n' >&2
+        bypass_note
+        exit 1
+    fi
+    mkdir -p "$toplevel/.tmp/scratch"
+    dist_log="$toplevel/.tmp/scratch/dist-sync.log"
+    if ! (cd "$toplevel/plugin" && node --test tests/dist-sync.test.mjs) > "$dist_log" 2>&1; then
+        printf 'pre-commit: FAIL dist-sync — plugin/dist/ is not byte-identical to plugin/src/\n' >&2
+        tail -n 40 "$dist_log" >&2
+        printf 'pre-commit: reproduce: cd plugin && node --test tests/dist-sync.test.mjs\n' >&2
+        printf 'pre-commit: fix hint: cp plugin/src/plugin.js plugin/dist/plugin.js (the hook never executes this — it only compares)\n' >&2
+        bypass_note
+        exit 1
+    fi
+    rm -f "$dist_log"
 fi
 
 # P5 — fast path: no Rust-related path staged means no cargo work at all.

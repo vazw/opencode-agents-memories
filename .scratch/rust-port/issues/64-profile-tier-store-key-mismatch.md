@@ -1,6 +1,6 @@
 # 64 — the profile tier has no live key: the shipped binary uses `"unknown"`, the injector asks for the git email, and nothing writes a profile row
 
-Status: ready-for-agent — 2026-10-27 (premise measured at HEAD `9c46f8b`; filed from the issue-44 Plan Gate,
+Status: done — 2026-11-04 (ALREADY-FIXED — src/main.rs:252 calls web_identity::resolve_user_id; inject-side resolver 73a964f)
 which approved issue 44's identity wiring as **necessary but not sufficient**. Brief at the end of this file.)
 
 ## PREMISE — measured, not inherited

@@ -1,6 +1,6 @@
 # 87 — `capturedSessionId` is a module-global read after two awaits; concurrent idle events attribute a capture to the wrong session
 
-Status: ready-for-agent — 2026-11-01 (premise MEASURED by the `opsec` audit §S7; a plan gate independently
+Status: done — 2026-11-04 (premise MEASURED by the `opsec` audit §S7; a plan gate independently
 reproduced the mechanism and confirmed the existing test could not fail on it. Work will modify
 `plugin/src/plugin.js` (`fireIdleCapture` / `currentSessionId` use) and `plugin/tests/wrapper-glue.test.mjs`
 (the driver below) or a new test file, and re-copy `plugin/dist/plugin.js`.)
@@ -74,3 +74,5 @@ here if the change is one read, otherwise it must be filed rather than left sile
 **Scope note:** this is the same defect class as issue **85** — a value handed to a layer, then read
 from a shared slot instead of from the input. Issues 83 (a missing producer) and 84 (a hardcoded `None`
 schema slot) are *not* this shape; an earlier revision over-generalised them into it.
+[decision] 2026-11-04 — Status flipped ready-for-agent → done (verification pending).
+Reason: this issue was GATE APPROVED and coder-closed in the prior wave; its Status: line was never flipped (tracker defect class covered by issue 89). Per docs/agents/issue-tracker.md, a done line names the commit or outcome record under ## Comments; this wave's ledger/handoff/review artifacts live under .tmp/progress/. No source change this session — Status line only.

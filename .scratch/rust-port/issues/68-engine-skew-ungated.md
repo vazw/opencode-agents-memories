@@ -1,6 +1,6 @@
 # 68 — Engine-version skew is ungated: a pre-compaction engine silently double-counts
 
-Status: ready-for-agent — 2026-10-27 (re-verified at `f01ec63`: every premise holds; `plugin.js`/`engine.rs` citations shifted +1 after issue 22's merge. Brief under `## Agent Brief`.)
+Status: done — 2026-11-04 (ALREADY-FIXED — hello.result.capabilities.compaction in engine.rs:195, plugin.js:412; commit a70d92e)
 
 Issue 33 added `include.compaction` to the frozen `inject` request. ADR-0007 D-43 accepts an older
 same-major engine (`engine.protocol >= wrapper.min_protocol`; the wrapper sends `protocol` and

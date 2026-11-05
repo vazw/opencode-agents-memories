@@ -1,6 +1,6 @@
 # 61 — `mem-web` · a degraded build answers **500** where the contract says **501**, because `port_failure` ignores the error class
 
-Status: landed 2026-10-27 as merge `0fbc9b5` (branch `issue-61/mem-web-500-501`, implementation `7402ecc`) — reviewer APPROVED after re-running every gate independently: RED 4 failed / 2 passed with the four predicted names, GREEN 6/6, `--list` 237 = 231 + 6, passed sum 236 = 231 + 5 (one ignored), the mutation back to 500 reproduces 4/2 and reverts to 6/6 with the same file hash, workspace 232 result lines with none failed, and the eight excluded paths byte-identical.
+Status: done — 2026-11-04 (landed 2026-10-27 as merge `0fbc9b5` (branch `issue-61/mem-web-500-501`, implementation `7402ecc`) — reviewer APPROVED after re-running every gate independently: RED 4 failed / 2 passed with the four predicted names, GREEN 6/6, `--list` 237 = 231 + 6, passed sum 236 = 231 + 5 (one ignored), the mutation back to 500 reproduces 4/2 and reverts to 6/6 with the same file hash, workspace 232 result lines with none failed, and the eight excluded paths byte-identical.
 function, and a reachable production degrade path — brief at the end of this file).
 
 ## PREMISE — measured, not inherited

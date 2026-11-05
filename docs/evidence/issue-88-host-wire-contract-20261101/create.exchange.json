@@ -1,0 +1,48 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:49374/api/session",
+    "headers": "REDACTED",
+    "body": {
+      "agent": "opencode-mem",
+      "model": {
+        "id": "beam-free",
+        "providerID": "opencode-go"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": "REDACTED",
+    "body": {
+      "data": {
+        "id": "ses_e59a04f07ffeElHt9jTxpGsGP7",
+        "projectID": "fe46bd99533b72e7df942cb6e6769437f699e4a1",
+        "agent": "opencode-mem",
+        "model": {
+          "id": "beam-free",
+          "providerID": "opencode-go",
+          "variant": "default"
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "time": {
+          "created": 1793792651515,
+          "updated": 1793792651515
+        },
+        "location": {
+          "directory": "/home/vaz"
+        }
+      }
+    }
+  },
+  "captured_at": "2026-11-04T11:44:11Z"
+}

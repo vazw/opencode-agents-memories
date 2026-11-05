@@ -285,6 +285,16 @@ function idleEvent(sessionID, properties) {
   };
 }
 
+// Issue 91 pure normalizer: returns a shallow copy of `recorded` with `field`
+// deleted. Never mutates the input; never touches the committed fixture. Used
+// by test_wrapper_negative_case_strips_required_field and reusable by later
+// slices that need a payload missing one required field.
+function stripRequiredField(recorded, field) {
+  const copy = { ...recorded };
+  delete copy[field];
+  return copy;
+}
+
 // W6.9 / issue 36: stage the package + stub engine, run the driver with ONE
 // chat.message and DRIVER_WEB_DIST as the host's dist setting, then return the
 // stub's wire log plus the manifest the stub wrote for its own process
@@ -468,6 +478,7 @@ test("test_wrapper_captures_session_idle_with_project_id", { timeout: 60000 }, a
   });
   const capture = wire.find((message) => message.method === "capture");
   assert.ok(capture, "the idle event captured");
+  assert.equal(capture.params.agent_id, "build", "idle capture attributes the resolved agent (non-empty required field)");
   const context = capture.params.metadata.autoCaptureContext;
   assert.equal(context.userPrompt, "fix the login bug");
   assert.equal(
@@ -481,6 +492,38 @@ test("test_wrapper_captures_session_idle_with_project_id", { timeout: 60000 }, a
     typeof capture.params.capture_id === "string" && capture.params.capture_id.length <= 64,
     "idle capture carries a valid capture_id"
   );
+});
+
+// Issue 91 negative case: express a payload missing one required field
+// (agent_id) without editing the committed fixture. The recorded copy is
+// stripped by the pure stripRequiredField helper; a no-op mutant keeps
+// agent_id so notDeepEqual fails to fire here (RED), the landed helper makes
+// it GREEN. The input payload must survive untouched.
+test("test_wrapper_negative_case_strips_required_field", { timeout: 60000 }, async () => {
+  const wire = await runGlueTest("om-glue-neg-", {
+    ctx: {
+      client: {
+        sessionStub: {
+          session: { agent: "build" },
+          data: [
+            { info: { id: "u1", role: "user" }, parts: [{ type: "text", text: "fix the login bug" }] },
+            { info: { id: "a1", role: "assistant" }, parts: [{ type: "text", text: "done — updated the handler" }] },
+          ],
+        },
+      },
+    },
+    events: [idleEvent("sess-1")],
+    wait: "capture",
+  });
+  const capture = wire.find((message) => message.method === "capture");
+  assert.ok(capture, "the idle event captured");
+  assert.equal(capture.params.agent_id, "build", "live payload carries resolved agent_id");
+  const stripped = stripRequiredField(capture.params, "agent_id");
+  assert.notDeepEqual(stripped, capture.params, "stripped copy differs from the live payload");
+  assert.equal(stripped.agent_id, undefined, "agent_id absent from the stripped copy");
+  assert.equal(stripped.session_id, capture.params.session_id, "other fields survive the strip");
+  assert.notEqual(stripped, capture.params, "helper returns a copy, never the input itself");
+  assert.equal(capture.params.agent_id, "build", "input payload untouched after strip");
 });
 
 test("test_wrapper_reuses_capture_id_for_replayed_idle", { timeout: 60000 }, async () => {

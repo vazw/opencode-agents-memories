@@ -1,6 +1,6 @@
 # 105 — after a capture, the `shutdown` RPC is acked at 5–6 s against a 2000 ms wrapper timeout, so SIGTERM fires while the engine is still working
 
-Status: needs-triage — 2026-11-01. Latencies are MEASURED (plan gate 1 for the issue-103 blueprint,
+Status: ready-for-agent — 2026-11-04 (promoted from needs-triage; post-capture shutdown timing / SIGTERM measurement)
 `.tmp/progress/shutdown-exit-bound.gate-1.md`); the **cause is not**. Filed from that gate, which was
 asked to verify a planner's numbers and found the planner had measured the wrong interval.
 

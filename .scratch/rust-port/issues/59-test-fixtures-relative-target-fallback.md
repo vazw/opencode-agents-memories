@@ -1,6 +1,6 @@
 # 59 — Test harness · two scratch fixtures resolve `target/` relatively, so with `CARGO_TARGET_DIR` unset one suite fails and another writes into the checkout
 
-Status: landed 2026-10-27 in `72470ce38cc072cbf1d44831853a777e713937c6` — both fixtures derive their scratch base from `env!("CARGO_TARGET_TMPDIR")` (`<target>/tmp`), so with `CARGO_TARGET_DIR` unset `cargo test --workspace` exits 0 (231 result lines, 1848 passed, 0 FAILED), no `crates/*/target` appears, and one pinning test per crate (`scratch_base_is_absolute_under_the_target_dir`) fails on the pre-fix bodies.
+Status: done — 2026-11-04 (landed 2026-10-27 in `72470ce38cc072cbf1d44831853a777e713937c6`)
 
 ## PREMISE — measured, not inherited
 

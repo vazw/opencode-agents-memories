@@ -1,6 +1,6 @@
 # 42 — W8.4 · Maintenance section in Settings (run cleanup from the UI)
 
-Status: **landed — frontend half only** — 2026-10-25. The Maintenance section, its arming/confirm flow
+Status: done — 2026-11-04 (SUPERSEDED — frontend landed e996a63; backend residual owned by issue 39)
 and the report/refused/unavailable/error rendering merged as **`e996a63`** (`feat(web-ui): add a
 confirmed Maintenance section that runs cleanup (issue 42)`) in `web-ui/src/core_screens.rs`, with its
 wasm tests (`web-ui/tests/core_screens.rs`) and styles. **Residual:** the `200 success:true` five-count

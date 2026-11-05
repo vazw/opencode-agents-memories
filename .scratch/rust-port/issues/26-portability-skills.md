@@ -1,6 +1,6 @@
 # 26 — W6.4 · Portability & skills manager (US 4.3)
 
-Status: ready-for-agent — 2026-10-27 (narrowed: the round-trip and skills manager landed and are tested;
+Status: done — 2026-11-04 (ALREADY-FIXED — export/import in src/main.rs:640, testing.md:212, issue 69 8cf9060)
 the V2 skills bridge moved to issue 69, and the remaining work is a production transport for
 export/import. Brief under `## Agent Brief`.)
 

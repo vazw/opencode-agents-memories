@@ -1,6 +1,6 @@
 # 81 — ops · Execute the live drop-in swap: migrate in place, provision, swap the plugin, verify, dogfood, roll back
 
-Status: landed — 2026-10-31 — the live swap executed at 09:26:40Z (pre-swap stamp
+Status: done — 2026-11-04 (landed — 2026-10-31 — the live swap executed at 09:26:40Z (pre-swap stamp
 `20261031T092550Z`; outcome under `## Comments`). Residual: the manual two-workspace check and the
 one-week dogfood window (owner).
 

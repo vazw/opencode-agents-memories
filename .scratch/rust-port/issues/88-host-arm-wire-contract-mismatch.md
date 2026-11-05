@@ -1,6 +1,6 @@
 # 88 — host arm fails with `errorKind:protocol`: three documented wire-contract mismatches (create envelope, prompt route, prompt reply)
 
-Status: ready-for-agent — 2026-11-01. Evidence levels are stated per claim, because two earlier revisions of
+Status: done — 2026-11-04. Evidence levels are stated per claim, because two earlier revisions of
 this file — and a commit correcting one of them — over-claimed in both directions. The 2.2.5 **spec** is
 **READ** (`.tmp/openapi.json`, untracked, fetched 2026-11-01T09:44; it declares the create and prompt routes
 and their envelopes). The *live failure* is **MEASURED** (`errorKind:"protocol"` on the host arm). The body
@@ -153,3 +153,15 @@ because the host spec is what governs the wire. The 2.2.5 sample declares
 than smoothed over: a negative search result is evidence about the search, not about the host; and the
 spec was sitting in `.tmp/` untracked, unread, while three revisions argued about shapes it states.
 The scope therefore widened from create-only to the three documented mismatches.
+
+[decision] 2026-11-04 — live wire-contract capture approach chosen (issue 88 residual; issue 126).
+Approach: operator-executed .tmp/scratch/capture-live-88.sh against http://127.0.0.1:49374 (OpenCode 2.2.5). Auth: HTTP Basic opencode:$PASS from ~/.local/state/opencode/service.json (matches crates/mem-ai/src/provider/host_auth.rs). Steps: POST create -> /api/session with Model.Ref body; POST generate -> /api/experimental/generate/text; compensating DELETE on the created session. Evidence: docs/evidence/issue-88-host-wire-contract-20261101/create.exchange.json and generate.exchange.json, headers REDACTED, bodies verbatim, JSON {request, response, captured_at}. No production code; docs/fixture portion TDD-exempt. Rationale: every shape was READ (schema-derived) or INFERRED; the drift claim stayed NEEDS_VALIDATION until one captured live create and one captured live generate exchange existed.
+
+[fact] 2026-11-04 — issue 88 evidence capture complete (MEASURED).
+- POST /api/session -> 200, data envelope, session ses_e59a04f07ffeElHt9jTxpGsGP7, compensating DELETE issued.
+- POST /api/experimental/generate/text -> 200, data.text envelope.
+- Wrote create.exchange.json and generate.exchange.json (headers REDACTED, bodies verbatim).
+- README §3 evidence levels promoted READ→MEASURED for create/generate/DELETE; §7 marked COMPLETE.
+- cargo test --workspace green, zero failures; clippy clean.
+- Git state uncommitted, no push: modified .githooks/pre-commit, README.md (pre-existing), docs/adr/0016-pre-commit-gate.md, docs/evidence/issue-88-host-wire-contract-20261101/README.md, plugin/tests/wrapper-glue.test.mjs, scripts/test-pre-commit.sh; new create.exchange.json, generate.exchange.json, plugin/tests/dist-sync-v2.test.mjs.
+- Issue 88 residual closed (code already landed; no production change).

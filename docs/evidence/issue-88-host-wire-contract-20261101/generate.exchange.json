@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:49374/api/experimental/generate/text",
+    "headers": "REDACTED",
+    "body": {
+      "prompt": "user: fix the retry storm in the login handler",
+      "model": {
+        "id": "beam-free",
+        "providerID": "opencode-go"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": "REDACTED",
+    "body": {
+      "data": {
+        "text": "I'd be happy to help fix a retry storm in your login handler! But I need a bit more context to give you a precise fix. Could you share:\n\n1. **Language / framework** (e.g., Node/Express, Python/Django, Go, Java/Spring, etc.)\n2. **The login handler code** (or at least the relevant retry logic)\n3. **What's driving the retries** — is it:\n   - The client retrying on failure?\n   - A retry loop inside the handler itself?\n   - A queue/worker retrying failed auth jobs?\n   - A reverse proxy / load balancer retrying on 5xx?\n4. **Symptoms** — CPU spikes, DB connection exhaustion, lockouts, 429s, etc.?\n\nIn the meantime, here are the most common causes of login retry storms and their fixes:\n\n| Cause | Fix |\n|-------|-----|\n| No backoff between retries | Exponential backoff + jitter |\n| No max retry cap | Hard limit (e.g., 3–5 attempts) |\n| Retrying on non-transient errors (401/403) | Only retry on 5xx / network errors |\n| No rate limiting per IP/user | Token bucket / sliding window per key |\n| Synchronous blocking retries tying up threads | Async with bounded concurrency |\n| Missing circuit breaker | Open circuit after N consecutive failures |\n| Client-side auto-retry on any non-2xx | Differentiate 4xx (don't retry) vs 5xx (retry) |\n| DB connection pool exhaustion from parallel retries | Connection limits + queueing |\n\nIf you paste the code, I can pinpoint the exact issue and suggest a minimal patch."
+      }
+    }
+  },
+  "captured_at": "2026-11-04T11:44:17Z"
+}

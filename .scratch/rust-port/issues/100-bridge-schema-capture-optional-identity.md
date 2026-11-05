@@ -1,6 +1,6 @@
 # 100 — `docs/bridge-schema.md:98` advertises `agent_id?`/`project_id?` as optional on `capture`, but both dead-letter when empty
 
-Status: ready-for-agent — 2026-11-01. Work will edit the `capture` row of `docs/bridge-schema.md` and add
+Status: done — 2026-11-04 (ALREADY-FIXED — docs/bridge-schema.md:125 marks project_id/agent_id required-in-practice)
 a row to `crates/mem-bridge/tests/capture_wrapper_payload.rs` (created by issues 91/83) or a sibling if
 that file lands later. Documentation plus one test row; no wire change.
 

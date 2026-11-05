@@ -1,6 +1,6 @@
 # 83 — capture payload omits `agent_id`; every production capture dead-letters before either tier is written
 
-Status: ready-for-agent — 2026-11-01 (premise MEASURED twice: by the `opsec` audit
+Status: done — 2026-11-04 (ALREADY-FIXED — landed in 95857b7; payload.agent_id wired, r2 review-1.md APPROVED)
 `.tmp/progress/opsec-audit-20261101T090956Z.md` §S1, and independently re-derived by the orchestrator
 against the tree. Work will modify `plugin/src/plugin.js` (payload fields) and
 `crates/mem-bridge/src/capture.rs` (field-named log helper), add the `AUTO_CAPTURE_EPISODIC_FAILED`
@@ -113,3 +113,11 @@ point-in-time, not durable, and only the `reason` field is the claim.
 **Ownership vs issue 91:** 91 owns the harness by which the wrapper's payload is recorded and consumed
 and the fixture/variance mechanism; this issue owns the payload fields, the fail-closed events and the
 five artifacts above. An agent must not build both — see 91's "Blocked by / ownership" section.
+
+[fact] 2026-11-04 — issue 83 r2 reviewer verdict APPROVED, verified on disk (MEASURED).
+Artifact: .tmp/progress/issue-83-capture-identity-r2.review-1.md (blueprint 53121ead9062, commit 9c54880, test-only, +14/-0 in crates/mem-bridge/src/capture.rs).
+- STATUS: APPROVED; all 13 gates green (re-executed): cargo test -p mem-bridge rc 0 (62 binaries), capture_wrapper_payload 4/4, --lib 17/0, --lib truncation 2/0, capture-payload.test.mjs 21/0, cmp -s plugin/src/plugin.js plugin/dist/plugin.js rc 0, dist-sync-invariant 1/1, cargo fmt --all --check rc 0, both clippy gates rc 0.
+- Mutation spot-checks (2/3 cap, isolated scratch worktree): M-byte killed (rc 101), M-slice killed (panics on é at byte 120); baseline GREEN before/after; worktree == HEAD blob post-restore.
+- Security gate (10 mandates): 0 violations; PASS input validation / privacy-by-design / error handling / logging hygiene; N/A elsewhere.
+- Deviations verified genuine, none gate-affecting: truncate_detail gate-string substitution correct; TMPDIR must be absolute (/home/vaz/Code/Personal/Rust/opencode-agents-memory/...); /tmp tmpfs 54%.
+- Related cleanup (this session): removed debris crates/mem-bridge/.tmp/ and plugin/undefined.lifecycle (flagged safe-to-delete in this review's non-blocking notes).

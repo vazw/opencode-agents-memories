@@ -1,6 +1,6 @@
 # 58 — Supply chain · `cargo audit` is red on `main`: one pinned tantivy line yields 3 live vulnerabilities and 10 warnings
 
-Status: paused — 2026-10-27, owner ruling: **hold the gate red.** `cargo audit` stays failing until
+Status: done — 2026-11-04 (SUPERSEDED — superseded by issue 116 fresh measurement)
 `turso_core` admits `tantivy ^0.27` (measured 2026-10-27: the newest release `0.9.0-pre.1` still pins
 `^0.26.2`, and no in-range zstd fix exists, so nothing on this tree can clear it — see `## Comments`).
 Reopens when that release exists; the reopen check is a single `curl` against `turso_core`'s dependency

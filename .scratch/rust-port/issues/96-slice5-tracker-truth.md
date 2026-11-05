@@ -2,7 +2,7 @@
 
 Sequencing parent — owns no work. Children: 89.
 
-Status: ready-for-human — 2026-11-01. This file tracks **sequencing only**: it names the child and holds
+Status: done — 2026-11-04 (SUPERSEDED — parent of 89; 89 done)
 no deliverable of its own. Agents should grab the child — issue 89. Do not open a wave against this file.
 
 ## What to build

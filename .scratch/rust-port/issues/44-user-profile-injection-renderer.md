@@ -1,6 +1,6 @@
 # 44 — W5.4 · User-profile injection tier: the ranked renderer
 
-Status: landed 2026-10-27 as merge `4b078e6` (branch `issue-44/profile-injection-renderer`: implementation `2a56ae9`, oracle rework `dc00333`) — reviewer APPROVED after re-running every gate and driving **its own** 18-entry mutation matrix (18 killed, 0 survivors). The merged tree is byte-identical to the reviewed tree (`git diff 4b078e6 dc00333` empty). Residual: the **store-side** identity key, owned by issue 64; the learner stays read-only this release (47.1 Leg A = A2). Brief under `## Agent Brief`.
+Status: done — 2026-11-04 (landed 2026-10-27 as merge `4b078e6`; residual 64 done)
 
 ## What to build
 

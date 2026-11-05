@@ -1,6 +1,6 @@
 # 33 — W5.5 · Compaction hook: ingest before, restore after (US 1.2)
 
-Status: landed 2026-10-27 as merge `f1006f6` (branch `issue-33/compaction-hook`: implementation `6f8801b`, ADR pointer rebase + engine-skew record `f1006f6`) — residual: the V2 `compaction` hook is owned by issue 67, and the ungated engine-version skew by issue 68
+Status: done — 2026-11-04 (landed 2026-10-27 as merge `f1006f6`; residuals 67 and 68 both done)
 
 ## What to build
 

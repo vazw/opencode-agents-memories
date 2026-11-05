@@ -8,7 +8,7 @@
 # (`rev-parse`, `ls-files`).
 #
 # Usage: bash scripts/test-pre-commit.sh
-# Exit:  0 when all 17 cases pass, 1 otherwise.
+# Exit:  0 when all 20 cases pass, 1 otherwise.
 set -uo pipefail
 
 SECONDS=0
@@ -186,6 +186,18 @@ path_without_cargo() {
         stripped="${stripped:+$stripped:}$piece"
     done
     printf '%s\n' "$stripped"
+}
+
+# Writes plugin/src/plugin.js and plugin/dist/plugin.js into the fixture repo,
+# plus the real dist-sync test so the gate's environment check finds it. The
+# plugin gate is read-only: it compares these two files and never copies src→dist.
+mk_plugin_fixture() {
+    local repo_dir="$1" src="$2" dist="$3"
+    mkdir -p "$repo_dir/plugin/src" "$repo_dir/plugin/dist" "$repo_dir/plugin/tests"
+    printf '%s' "$src" > "$repo_dir/plugin/src/plugin.js"
+    printf '%s' "$dist" > "$repo_dir/plugin/dist/plugin.js"
+    cp -p "$repo_root/plugin/tests/dist-sync.test.mjs" "$repo_dir/plugin/tests/dist-sync.test.mjs"
+    return 0
 }
 
 # --- cases -----------------------------------------------------------------
@@ -675,6 +687,95 @@ case_17_webui_css_change_names_the_missing_hook() {
     return 0
 }
 
+case_18_plugin_consistent_passes_without_cargo() {
+    mk_repo || return 1
+    local shim_dir="$work/shim-plugin-18-$$" marker="$work/cargo-marker-18-$$"
+    rm -f "$marker"
+    mkdir -p "$shim_dir"
+    cat > "$shim_dir/cargo" <<SHIM
+#!/usr/bin/env bash
+printf 'cargo invoked\n' > "$marker"
+exit 1
+SHIM
+    chmod 755 "$shim_dir/cargo"
+    mk_plugin_fixture "$repo" \
+        '// OpenCode plugin wrapper (shim).
+export function ping() { return "pong"; }' \
+        '// OpenCode plugin wrapper (shim).
+export function ping() { return "pong"; }'
+    git -C "$repo" add plugin/
+    local saved_path="$PATH"
+    PATH="$shim_dir:$PATH"
+    run_commit "$repo" "case 18 plugin consistent"
+    PATH="$saved_path"
+    [ "$commit_rc" -eq 0 ] || {
+        fail "expected the plugin-consistent commit to pass, got rc $commit_rc"
+        return 1
+    }
+    [ ! -e "$marker" ] || {
+        fail "cargo was invoked for a plugin-only commit"
+        return 1
+    }
+    [ "$(git -C "$repo" log -1 --format=%s)" = "case 18 plugin consistent" ] || {
+        fail "the last commit message is not the case message"
+        return 1
+    }
+    return 0
+}
+
+case_19_plugin_divergent_blocks() {
+    mk_repo || return 1
+    mk_plugin_fixture "$repo" \
+        '// OpenCode plugin wrapper (shim).
+export function ping() { return "pong"; }' \
+        '// OpenCode plugin wrapper (shim).
+export function ping() { return "pong-stale"; }'
+    git -C "$repo" add plugin/
+    local head_before
+    head_before="$(git -C "$repo" rev-parse HEAD)"
+    run_commit "$repo" "case 19 plugin divergent"
+    [ "$commit_rc" -ne 0 ] || {
+        fail "the divergent-plugin commit was accepted (rc 0)"
+        return 1
+    }
+    assert_contains "FAIL dist-sync" || return 1
+    assert_contains "dist-sync.test.mjs" || return 1
+    assert_contains "cp plugin/src/plugin.js plugin/dist/plugin.js" || return 1
+    [ "$(git -C "$repo" rev-parse HEAD)" = "$head_before" ] || {
+        fail "HEAD advanced although the commit was refused"
+        return 1
+    }
+    return 0
+}
+
+case_20_plugin_with_rust_compose() {
+    mk_repo || return 1
+    mk_workspace "$repo" || return 1
+    mk_plugin_fixture "$repo" \
+        '// OpenCode plugin wrapper (shim).
+export function ping() { return "pong"; }' \
+        '// OpenCode plugin wrapper (shim).
+export function ping() { return "pong"; }'
+    cat >> "$repo/crates/probe/src/lib.rs" <<'RUST'
+
+/// Touches one lane value.
+pub fn touch_lane(a: u8) -> u8 {
+    a
+}
+RUST
+    git -C "$repo" add plugin/ crates/probe/src/lib.rs
+    run_commit "$repo" "case 20 plugin with rust"
+    [ "$commit_rc" -eq 0 ] || {
+        fail "expected the compose commit to pass, got rc $commit_rc"
+        return 1
+    }
+    [ "$(git -C "$repo" log -1 --format=%s)" = "case 20 plugin with rust" ] || {
+        fail "the last commit message is not the case message"
+        return 1
+    }
+    return 0
+}
+
 # --- runner ----------------------------------------------------------------
 
 ok=0
@@ -714,11 +815,14 @@ run case_14_hook_does_not_modify_the_tree
 run case_15_webui_change_runs_both_webui_gates
 run case_16_docs_name_the_installed_configuration
 run case_17_webui_css_change_names_the_missing_hook
+run case_18_plugin_consistent_passes_without_cargo
+run case_19_plugin_divergent_blocks
+run case_20_plugin_with_rust_compose
 
 printf 'wall time: %ss\n' "$SECONDS"
-if [ "$ok" -eq 17 ]; then
-    printf 'PASS %d/17\n' "$ok"
+if [ "$ok" -eq 20 ]; then
+    printf 'PASS %d/20\n' "$ok"
 else
-    printf 'FAIL %d/17\n' "$ok"
+    printf 'FAIL %d/20\n' "$ok"
     exit 1
 fi

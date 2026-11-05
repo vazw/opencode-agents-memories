@@ -1,8 +1,6 @@
 # 85 — `inject` discards the session identity it is handed; `excludeCurrentSession` is unimplementable, not merely unwired
 
-Status: ready-for-agent — 2026-11-01 (premise MEASURED by the `opsec` audit §S4 and re-derived against
-the tree. Work will modify `crates/mem-bridge/src/inject.rs` (`InjectService::assemble` and the session
-filter) and add rows to `crates/mem-bridge/tests/inject_budget.rs` or a sibling. Blocks issue 63.)
+Status: done — 2026-11-04 (landed in commit 4198a00; InjectParams exclude_session wired, inject_session_exclusion.rs and inject_chat_gates.rs pass, inject-query.test.mjs pass)
 
 ## What is missing
 
