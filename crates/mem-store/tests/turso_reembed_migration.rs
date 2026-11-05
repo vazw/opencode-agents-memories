@@ -988,3 +988,171 @@ async fn test_migrate_to_new_model_reembed_includes_identity_mismatches() {
     );
     cleanup_temp_dir(&rig.config.storage_path).expect("cleanup");
 }
+
+/// Issue 127: re-embedding must preserve direct `session_id` even when metadata
+/// JSON carries no `sessionID` fallback key.
+#[tokio::test]
+async fn test_reembed_preserves_session_id_without_metadata_fallback() {
+    let config = store_config("reembed-session-id");
+    let (config, connections, manager) = real_components(config).await;
+    let shards = Arc::new(manager);
+    let registry: Arc<dyn ShardRegistry> = shards.clone();
+    let ready = Arc::new(build_ready_gate(
+        &config.storage_path,
+        Arc::clone(&connections),
+        Arc::clone(&shards),
+        registry,
+    ));
+    ready.ensure_ready().await.expect("ready gate closes");
+
+    let _proof = common::exclusive_root(&config.storage_path);
+
+    let shard = shards
+        .create_shard(Scope::Project, SCOPE_HASH, 0)
+        .await
+        .expect("create shard");
+    let db = connections
+        .get_connection(&shard.db_path)
+        .await
+        .expect("source connection");
+
+    let rows_to_insert = [
+        MemoryInsert {
+            id: "mem_case_a".to_string(),
+            content: "content a".to_string(),
+            vector: vec![1.0, 0.0],
+            tags_vector: None,
+            container_tag: format!("opencode_project_{SCOPE_HASH}"),
+            tags: None,
+            memory_type: None,
+            created_at: 100,
+            updated_at: 200,
+            metadata: Some(r#"{"source":"case-a"}"#.to_string()),
+            session_id: Some("session-live-001".to_string()),
+            display_name: None,
+            user_name: None,
+            user_email: None,
+            project_path: None,
+            project_name: None,
+            git_repo_url: None,
+        },
+        MemoryInsert {
+            id: "mem_case_b".to_string(),
+            content: "content b".to_string(),
+            vector: vec![1.0, 1.0],
+            tags_vector: None,
+            container_tag: format!("opencode_project_{SCOPE_HASH}"),
+            tags: None,
+            memory_type: None,
+            created_at: 101,
+            updated_at: 201,
+            metadata: Some(r#"{"sessionID":"session-meta-002","source":"case-b"}"#.to_string()),
+            session_id: None,
+            display_name: None,
+            user_name: None,
+            user_email: None,
+            project_path: None,
+            project_name: None,
+            git_repo_url: None,
+        },
+        MemoryInsert {
+            id: "mem_case_c".to_string(),
+            content: "content c".to_string(),
+            vector: vec![1.0, 2.0],
+            tags_vector: None,
+            container_tag: format!("opencode_project_{SCOPE_HASH}"),
+            tags: None,
+            memory_type: None,
+            created_at: 102,
+            updated_at: 202,
+            metadata: Some(r#"{"source":"case-c"}"#.to_string()),
+            session_id: None,
+            display_name: None,
+            user_name: None,
+            user_email: None,
+            project_path: None,
+            project_name: None,
+            git_repo_url: None,
+        },
+    ];
+
+    for record in &rows_to_insert {
+        let statement = insert_vector_statement(record).expect("statement builds");
+        db.execute(&statement.sql, statement.params)
+            .await
+            .expect("insert memory");
+    }
+
+    let count = shard_facts::sync_count(db.as_ref())
+        .await
+        .expect("sync count");
+    shards
+        .set_vector_count(shard.id, count)
+        .await
+        .expect("set vector count");
+
+    drop(db);
+    connections
+        .close_connection(&shard.db_path)
+        .await
+        .expect("connection closes");
+
+    let mut service_config = config.clone();
+    service_config.embedding_dimensions = 4;
+    service_config.embedding_model = "text-embedding-mock".to_string();
+    let reembedder = Arc::new(FakeReEmbedder::new());
+    let service = MigrationService::new(
+        service_config,
+        ready,
+        Arc::clone(&shards),
+        Arc::clone(&connections),
+        Arc::clone(&reembedder) as Arc<dyn ReEmbedder>,
+    );
+
+    let result = service
+        .migrate_to_new_model(MigrationStrategy::ReEmbed)
+        .await
+        .expect("reembed");
+    assert!(result.success, "migration error: {:?}", result.error);
+    assert_eq!(result.re_embedded_memories, 3);
+
+    let db = connections
+        .get_connection(&shard.db_path)
+        .await
+        .expect("replacement connection");
+    let rows = db
+        .query(
+            "SELECT id, session_id, metadata FROM memories ORDER BY id",
+            Vec::new(),
+        )
+        .await
+        .expect("query rebuilt memories");
+    assert_eq!(rows.len(), 3);
+
+    assert_eq!(rows[0].text("id").as_deref(), Some("mem_case_a"));
+    assert_eq!(
+        rows[0].text("session_id").as_deref(),
+        Some("session-live-001"),
+        "Case A: direct session_id must survive re-embedding without metadata fallback"
+    );
+
+    assert_eq!(rows[1].text("id").as_deref(), Some("mem_case_b"));
+    assert_eq!(
+        rows[1].text("session_id").as_deref(),
+        Some("session-meta-002"),
+        "Case B: metadata fallback sessionID must survive re-embedding"
+    );
+
+    assert_eq!(rows[2].text("id").as_deref(), Some("mem_case_c"));
+    assert!(
+        rows[2].text("session_id").is_none(),
+        "Case C: absent session_id must remain None"
+    );
+
+    drop(db);
+    connections
+        .close_connection(&shard.db_path)
+        .await
+        .expect("connection closes");
+    cleanup_temp_dir(&config.storage_path).expect("cleanup");
+}

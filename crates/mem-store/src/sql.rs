@@ -358,7 +358,8 @@ pub const UNPIN_MEMORY: &str = r#"UPDATE memories SET is_pinned = 0 WHERE id = ?
 pub const SELECT_REEMBED_SOURCE: &str = r#"
       SELECT
         id, content, container_tag, tags, type, created_at, updated_at, metadata,
-        display_name, user_name, user_email, project_path, project_name, git_repo_url, is_pinned
+        display_name, user_name, user_email, project_path, project_name, git_repo_url, is_pinned,
+        session_id
       FROM memories
       ORDER BY created_at DESC
     "#;

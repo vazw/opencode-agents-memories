@@ -769,7 +769,7 @@ impl MigrationService {
                 created_at: memory.i64("created_at").unwrap_or(0),
                 updated_at: memory.i64("updated_at").unwrap_or(0),
                 metadata: memory.text("metadata").filter(|meta| !meta.is_empty()),
-                session_id: None, // not part of SELECT_REEMBED_SOURCE
+                session_id: memory.text("session_id").filter(|id| !id.is_empty()),
                 display_name: memory.text("display_name").filter(|name| !name.is_empty()),
                 user_name: memory.text("user_name").filter(|name| !name.is_empty()),
                 user_email: memory.text("user_email").filter(|email| !email.is_empty()),

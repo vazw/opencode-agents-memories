@@ -410,11 +410,16 @@ mod frozen {
     /// vector-search.ts L509 (unpinMemory)
     pub const FROZEN_UNPIN_MEMORY: &str = r#"UPDATE memories SET is_pinned = 0 WHERE id = ?"#;
 
-    /// migration-service.ts L269-275 (rebuildShardSafely re-embed source select)
+    /// migration-service.ts L269-275 — frozen with Issue 127 tracked divergence:
+    /// upstream TypeScript omitted `session_id` because it fell back to `metadata.sessionID`
+    /// parsing; Rust port requires `session_id` directly in `SELECT_REEMBED_SOURCE` to preserve
+    /// tier-1 session associations across re-embedding when rows have direct `session_id`
+    /// without redundant `metadata` JSON mirroring.
     pub const FROZEN_SELECT_REEMBED_SOURCE: &str = r#"
       SELECT
         id, content, container_tag, tags, type, created_at, updated_at, metadata,
-        display_name, user_name, user_email, project_path, project_name, git_repo_url, is_pinned
+        display_name, user_name, user_email, project_path, project_name, git_repo_url, is_pinned,
+        session_id
       FROM memories
       ORDER BY created_at DESC
     "#;
