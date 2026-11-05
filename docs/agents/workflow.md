@@ -110,6 +110,69 @@ Where a decision supersedes an earlier one, the earlier one stays visible marked
 overwrites destroy the only thing this record has that a search engine does not: the history of what was
 believed and why it changed.
 
+## Wave ledgers — authority, stamps and template
+
+### Authority and provenance
+
+A ledger row is a measurement or it is nothing. The wave ledger (`.tmp/progress/<blueprint_id>.ledger.md`)
+is the sole authority after an interruption or uncertainty; reconstructed or ungrounded timestamps
+destroy that authority.
+
+### Rules
+
+- **Rule 1 (Live Timestamps)**: Every `STARTED` and `DONE` stamp must be the literal output of
+  `date -u +%FT%TZ` executed at the moment the step begins or its gate passes. Handwritten or
+  batch-reconstructed stamps without disclosure are strictly prohibited.
+- **Rule 2 (Anti-Fabrication & Clock Skew Guard)**: A stamp must never exceed the host clock or the
+  ledger file's own mtime (no stamps from the future). Future-dated stamps invalidate the row.
+- **Rule 3 (Mandatory Reconstructed Disclosure)**: If an agent fails to record a stamp live and writes it
+  post-hoc, it MUST explicitly disclose `reconstructed <time>` (e.g. `- [x] DONE reconstructed 2026-11-04T12:00:00Z — <proof>`).
+  Honest disclosure is acceptable; disguised backdating is a falsification.
+- **Rule 4 (Manifest Bracketing)**:
+  - Single-shard waves must open with `WAVE START: <live UTC timestamp> (HEAD <commit>, clean/dirty)`
+    and close with `WAVE END: <live UTC timestamp> (HEAD <commit>)`.
+  - Multi-shard waves must bracket each shard with `SHARD START: <shard-name> <live UTC timestamp> (HEAD <commit>)`
+    and `SHARD END: <shard-name> <live UTC timestamp>`.
+- **Rule 5 (Explicit Rework State)**: Every ledger must contain an explicit `rework:` state field per
+  wave/shard (`rework: none (initial execution)`, `rework: none (accepted)`, or `rework: iteration N (<finding IDs, actions taken>)`).
+- **Rule 6 (Verbatim Removed Assertion Record)**: Any test, assertion, or test helper removed, disabled,
+  or weakened must be recorded verbatim in the ledger under `## Removed assertions / tests`, citing the exact code,
+  file, and justification. Coverage deletion is presumed regression until verified.
+- **Rule 7 (Forward-Only Immutability)**: Historical ledgers in `.tmp/progress/*.ledger.md` are immutable
+  audit records and must never be edited or retroactively rewritten. All ledger rules are forward-only.
+
+### Canonical Ledger Template (Single-Shard Wave)
+
+````markdown
+# Ledger: <blueprint_id>
+WAVE START: 2026-11-04T18:00:00Z (HEAD a1b2c3d, tree clean)
+rework: none (initial execution)
+
+- [ ] Step 1 — <name> — gate: <proof>
+- [ ] Step 2 — <name> — gate: <proof>
+
+## Removed assertions / tests
+None.
+
+WAVE END: 2026-11-04T18:30:00Z (HEAD e4f5g6h)
+````
+
+### Canonical Ledger Template (Multi-Shard / Fan-Out Wave)
+
+````markdown
+# Ledger: <blueprint_id> (shard <shard_name>)
+SHARD START: <shard_name> 2026-11-04T18:00:00Z (HEAD a1b2c3d)
+rework: none (initial execution)
+
+- [ ] Step 1 — <name> — gate: <proof>
+- [ ] Step 2 — <name> — gate: <proof>
+
+## Removed assertions / tests
+None.
+
+SHARD END: <shard_name> 2026-11-04T18:25:00Z
+````
+
 ## Standing rules
 
 - **Second-hand figures are re-derived, never inherited.** Every count that arrives from a report, an

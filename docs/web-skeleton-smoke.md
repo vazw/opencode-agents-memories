@@ -202,13 +202,16 @@ curl -i http://127.0.0.1:4747/api/user-profile
 
 ### D. Skills and the OpenCode catalog
 
-**W6.4 note:** the production wiring (`ApiServices::production`) leaves the
-`SkillPort` at `unavailable()` until W6.4 lands the skills manager. Until
-then the skills routes answer `500 {"success":false,"error":"Internal Server
-Error"}` in production — the contract below is what the handlers answer once
-the port is injected (`ApiServices::with_skills`), and it is exercised today
-by the fake-backed `skills_api_handlers.rs` suite. The guard rejections (400)
-happen **before** the port and therefore already work.
+**Skills wiring note (W6.4 / issue 61 / issue 65):** `src/main.rs:187, :211, :233`
+wires `SkillPort` (`.with_skills(skills_port)`) on **both** the production and the
+degraded branches, so the skills endpoints answer `200` in a live engine.
+If the skills port were absent/unavailable (`PortError::Unavailable`), the
+REST API routes (`/api/skills*`, rows 29–33) answer `501 Not Implemented` with the
+absent-service envelope (issue 61 `port_failure`), while the two OpenCode catalog
+routes (`/skills/index.json` and `/skills/{id}/{file}`, rows 34–35) deliberately
+answer `500` with the error envelope (`crates/mem-web/src/api/skills.rs:260, :291`),
+faithfully mirroring upstream `web-server.ts:755–786` catalog-error behavior.
+The guard rejections (`400`) happen **before** the port and remain active.
 
 ```bash
 curl -i -H "$AUTH" http://127.0.0.1:4747/api/skills
@@ -321,14 +324,14 @@ The residual is issue 37's AC6
 the handler contract, exercised by
 `api_endpoint_contract.rs` over the fake port.
 
-### F. Sessions (W6.3 — issue #25)
+### F. Sessions (W6.3 — issue #25 / issue 37)
 
-`ApiServices::production()` keeps the `SessionPort` on `UnavailablePort` until
-the issue-37 composition root calls `.with_sessions(episodic_session_port(store))`,
-so the production wiring answers the documented `501` **by design** today. The
-block below is the contract once that call exists — and it is exactly what the
-dev harness serves, over a real `EpisodicStore` and the real
-`EpisodicSessionPort`.
+`src/main.rs:212` wires `SessionPort` (`.with_sessions(episodic_session_port(deps.episodic.clone()))`)
+in the production composition root (`Some(deps)`), answering `200` with seeded episodic history
+(asserted by `tests/production_api_wiring.rs:test_production_wiring_serves_the_seeded_session_history`).
+It answers `501` only on the composition-failed degrade path (`None => ApiServices::unavailable().with_skills(skills_port)`,
+asserted by `tests/production_api_wiring.rs:test_sessions_stay_on_the_documented_stub_when_composition_fails`).
+The block below illustrates the contract over a real `EpisodicStore` and `EpisodicSessionPort`.
 
 ```bash
 # The dev harness: a real episodic store seeded with a parent + child row, the
@@ -419,7 +422,7 @@ curl -i http://127.0.0.1:<port>/api/projects/demo-project/sessions
 | **D-10** | The container-tag rejection echoes the offending tag in the message and answers `200` (`success:false`). | The fixed `"Invalid container tag"` with **400**; the log records the reason and the tag's length, never the tag text. | Untrusted input is never echoed into a response or a log (reflection / log injection), and a client error is a client error. |
 | **D-11** | The two OpenCode catalog paths are **always public** (upstream's token gate is `path.startsWith("/api/")`, so `/skills/*` was never token-gated). | **Conditional**: public when the server binds a loopback address (the upstream-parity default), token-gated when the bind host is not loopback (the house `is_loopback_host` set, read from `AppState.bind_host`). The rule sits inside the token step; the D-8 Host check remains check 0. | The user's ruling (2026-10-20): **public on loopback, token elsewhere**. Upstream's own comment recommends exactly this posture. |
 | **D-12** | `parseInt` on a bad `page` yields `NaN` → an empty page and `totalPages: null`. | `page ≥ 1` and `1 ≤ pageSize ≤ 200`; a violation is `400` `{"success":false,"error":"Invalid pagination parameters"}`. | `NaN` pagination and an unbounded `pageSize` are a DoS and a contract hazard; the UI only sends valid numbers. |
-| **D-13** | (no upstream counterpart) | The session-history endpoints are registered from W6.2 on and answer the documented `501` (`"Session history endpoints land with W6.3"`) until the composition root injects the port. W6.3 supplies `EpisodicSessionPort`; `ApiServices::production()` still keeps `UnavailablePort` until the issue-37 composition root calls `.with_sessions(episodic_session_port(store))`, so the production wiring answers the `501` **by design** until then. | The seam and the route shapes landed in W6.2; the W6.3 adapter makes the fill a one-builder change, and the 501 stays truthful until the composition root wires it. |
+| **D-13** | (no upstream counterpart) | The session-history endpoints are registered from W6.2 on. W6.3 supplied `EpisodicSessionPort`, and issue 37 wired the production composition root (`src/main.rs:212`) via `.with_sessions(episodic_session_port(deps.episodic.clone()))`, answering `200` when composed with `EpisodicStore`. The endpoints answer the documented `501` (`"Session history endpoints land with W6.3"`) only on the composition-failed degrade path where `ApiServices::unavailable()` is returned. | The seam and the route shapes landed in W6.2; the W6.3 adapter made the fill a one-builder change, and issue 37 wired it into the composition root while keeping the 501 truthful on the uncomposed degrade path. |
 | **D-14** | The stored `metadata` object keeps its insertion order. | A `serde_json::Value` object is key-sorted. | Free-form metadata; the UI reads by key. |
 | **D-15** | `POST /api/cleanup` and `POST /api/deduplicate` exist and answer real data (upstream ships `cleanup-service.ts` and `deduplication-service.ts`). | `POST /api/cleanup` answers **501** with a fixed message (`"… is not available in this build"`). `POST /api/deduplicate` answers **200** with the real report — `data` carries `exactDuplicatesDeleted` and `nearDuplicateGroups` exactly as before, plus the additive `nearDuplicateScan { pairsScanned, pairBudget, truncated, unreadableShards }` accounting for a near-duplicate scan that runs on a blocking thread under one global candidate-comparison budget — or the 200 business envelope `{"success":false,"error":"Deduplication is disabled in config"}` when `deduplicationEnabled` is `false` — and answers **501** only on the tier-1-composition-failed launch, where the web server comes up on `ApiServices::unavailable()` and the maintenance slot is the `UnavailablePort`. | The port had neither service when this row was written; **the deduplication one landed in `6bf7b28`** behind `production_deduplication_port`, which the composition root did not call until issue 54 (`src/main.rs`'s `Some(deps)` arm now chains `.with_maintenance(..)`). `/api/cleanup` still answers from its own stub, which returns `CLEANUP_UNAVAILABLE` without consulting the port, so its 501 is unchanged. Cleanup's service is issue 39 (PAUSED). (`mem_core::dedup` is the profile-conflict kernel, not upstream's memory-dedup service.) **Divergence (recorded):** upstream aborts the pass on a shard read failure (`deduplication-service.ts:54`) and answers an error over deletions already committed; this build counts the shard, forces `truncated`, and continues. |
 | **D-16** | `GET /api/skills?tag=<malformed>` applies no validation — the malformed tag simply matches nothing and the answer is an empty list. | The `tag` filter goes through the container-tag guard; a malformed tag is rejected with `400` `"Invalid container tag"`. | A traversal attempt must be rejected at **every** scoped endpoint; an empty list would silently answer a hostile tag. |
@@ -497,15 +500,15 @@ Binary under test: sha256 prefix `9dcded5b953f` (12 hex).
 | 26 | POST /api/user-profile/ai-cleanup | 200 | MEASURED | no profile - business error, body not asserted (status set 200) |
 | 27 | POST /api/user-profile/ai-cleanup/apply | 200 | ASSERTED | - |
 | 28 | PATCH /api/user-profile/item | 200 | ASSERTED | - |
-| 29 | GET /api/skills | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
-| 30 | POST /api/skills | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
-| 31 | GET /api/skills/{id} | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
-| 32 | PUT /api/skills/{id} | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
-| 33 | DELETE /api/skills/{id} | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
-| 34 | GET /skills/index.json | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
-| 35 | GET /skills/{id}/{file} | 500 | BLOCKED | issue 26 (W6.4): skills manager + .with_skills(...) not wired |
-| 36 | GET /api/projects/{project_id}/sessions | 501 | BLOCKED | issue 37 (AC6): .with_sessions(episodic_session_port(...)) not wired |
-| 37 | DELETE /api/projects/{project_id}/sessions/{session_id} | 501 | BLOCKED | issue 37 (AC6): .with_sessions(episodic_session_port(...)) not wired |
+| 29 | GET /api/skills | 200 | ASSERTED | wired via .with_skills(...) (src/main.rs:187, :211); absent port answers 501 (issue 61) |
+| 30 | POST /api/skills | 200 | ASSERTED | wired via .with_skills(...) (src/main.rs:187, :211); absent port answers 501 (issue 61) |
+| 31 | GET /api/skills/{id} | 200 | ASSERTED | wired via .with_skills(...) (src/main.rs:187, :211); absent port answers 501 (issue 61) |
+| 32 | PUT /api/skills/{id} | 200 | ASSERTED | wired via .with_skills(...) (src/main.rs:187, :211); absent port answers 501 (issue 61) |
+| 33 | DELETE /api/skills/{id} | 200 | ASSERTED | wired via .with_skills(...) (src/main.rs:187, :211); absent port answers 501 (issue 61) |
+| 34 | GET /skills/index.json | 200 | ASSERTED | wired via .with_skills(...) (src/main.rs:187, :211); absent port answers 500 (deliberate upstream mirror) |
+| 35 | GET /skills/{id}/{file} | 200 | ASSERTED | wired via .with_skills(...) (src/main.rs:187, :211); absent port answers 500 (deliberate upstream mirror) |
+| 36 | GET /api/projects/{project_id}/sessions | 200 | ASSERTED | wired via .with_sessions(episodic_session_port(...)) (src/main.rs:212); answers 501 on degrade path |
+| 37 | DELETE /api/projects/{project_id}/sessions/{session_id} | 200 | ASSERTED | wired via .with_sessions(episodic_session_port(...)) (src/main.rs:212); answers 501 on degrade path |
 
 > **Addendum (issue 54).** This sheet is a historical measurement record: it
 > was measured on the binary above against the then-37-row table (38 rows since
@@ -521,6 +524,18 @@ Binary under test: sha256 prefix `9dcded5b953f` (12 hex).
 > `nearDuplicateScan.unreadableShards` counter: a shard whose rows could not be
 > read is counted, forces `truncated: true`, and is never reported as an empty
 > shard, while the pass continues with the remaining shards.
+>
+> **Addendum (issue 65).** Corrects the historical skills rows (rows 29–35) and
+> Section D note: `SkillPort` is wired on both production and degraded branches
+> (`src/main.rs:187, :211, :233`) via `.with_skills(skills_port)` and answers 200.
+> An absent port answers 501 on `/api/skills*` (rows 29–33, issue 61), while catalog
+> rows 34–35 answer 500 as deliberate upstream mirrors (`crates/mem-web/src/api/skills.rs:260, :291`).
+>
+> **Addendum (issue 37).** Corrects historical session rows (rows 36–37), Section F prose,
+> and the D-13 divergence row: `SessionPort` is wired in the production composition root
+> (`src/main.rs:212`) via `.with_sessions(episodic_session_port(deps.episodic.clone()))` and answers
+> 200 against seeded episodic history. The documented 501 stub answers only on the
+> composition-failed degrade path (`None => ApiServices::unavailable().with_skills(skills_port)`).
 
 ### Reproduction recipe
 

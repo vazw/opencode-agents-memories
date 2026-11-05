@@ -44,6 +44,10 @@ test("test_shutdown_source_rules", () => {
     }
     assert.match(text, /shutdownTimers: \[\],/, `${rel}: shutdownTimers must be an array`);
     assert.ok(text.includes("state.pendingCaptures"), `${rel}: pendingCaptures counter must exist`);
+    const matchResp = text.match(/const SHUTDOWN_RESPONSE_TIMEOUT_MS = (\d+);/);
+    assert.ok(matchResp && Number(matchResp[1]) === 10000, `${rel}: SHUTDOWN_RESPONSE_TIMEOUT_MS must be 10000`);
+    const matchTerm = text.match(/const SHUTDOWN_TERM_AFTER_MS = (\d+);/);
+    assert.ok(matchTerm && Number(matchTerm[1]) === 2000, `${rel}: SHUTDOWN_TERM_AFTER_MS must be 2000`);
     assert.ok(
       !text.includes("process.exit("),
       `${rel}: wrapper must never call process.exit`
@@ -69,31 +73,33 @@ function stagePackage(tmpRoot) {
   return pkgDir;
 }
 
-function stageEngine(pkgDir, { linger, requestLogPath, manifestPath }) {
+function stageEngine(pkgDir, { linger, shutdownDelayMs = 0, gracefulSigterm = true, requestLogPath, manifestPath }) {
   const dir = path.join(pkgDir, "engine", `${process.platform}-${process.arch}`);
   fs.mkdirSync(dir, { recursive: true });
-  const script = stubEngineSource({ linger, requestLogPath, manifestPath });
+  const script = stubEngineSource({ linger, shutdownDelayMs, gracefulSigterm, requestLogPath, manifestPath });
   const binPath = path.join(dir, "opencode-agents-memory");
   fs.writeFileSync(binPath, script, { mode: 0o755 });
   fs.chmodSync(binPath, 0o755);
   return binPath;
 }
 
-function stubEngineSource({ linger, requestLogPath, manifestPath }) {
-  const config = JSON.stringify({ linger, requestLogPath, manifestPath });
+function stubEngineSource({ linger, shutdownDelayMs = 0, gracefulSigterm = true, requestLogPath, manifestPath }) {
+  const config = JSON.stringify({ linger, shutdownDelayMs, gracefulSigterm, requestLogPath, manifestPath });
   return `#!/usr/bin/env node
 const CONFIG = ${config};
 import fs from "node:fs";
-const { linger, requestLogPath, manifestPath } = CONFIG;
+const { linger, shutdownDelayMs = 0, gracefulSigterm = true, requestLogPath, manifestPath } = CONFIG;
 function logLine(obj) {
   try { fs.appendFileSync(requestLogPath, JSON.stringify(obj) + "\\n"); } catch {}
 }
 try {
   fs.writeFileSync(manifestPath, JSON.stringify({ pid: process.pid, argv: process.argv, env: process.env }, null, 2) + "\\n");
 } catch {}
-// Graceful SIGTERM: exit code 0, no signal — so the wrapper's reap observes
-// exitCode !== null and signalCode === null on the escalation path.
-process.on("SIGTERM", () => process.exit(0));
+if (gracefulSigterm) {
+  // Graceful SIGTERM: exit code 0, no signal — so the wrapper's reap observes
+  // exitCode !== null and signalCode === null on the escalation path.
+  process.on("SIGTERM", () => process.exit(0));
+}
 let buffer = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
@@ -107,11 +113,26 @@ process.stdin.on("data", (chunk) => {
     let parsed;
     try { parsed = JSON.parse(line); } catch { continue; }
     logLine({ got: parsed });
-    const reply = respond(parsed);
-    if (reply) process.stdout.write(JSON.stringify(reply) + "\\n");
+    handleMessage(parsed);
   }
 });
 process.stdin.on("end", () => process.exit(0));
+
+function handleMessage(parsed) {
+  const method = parsed && parsed.method;
+  if (method === "shutdown" && shutdownDelayMs > 0) {
+    setTimeout(() => {
+      const reply = { id: parsed.id, jsonrpc: "2.0", result: { ok: true } };
+      process.stdout.write(JSON.stringify(reply) + "\\n", () => {
+        if (!linger) process.exit(0);
+      });
+    }, shutdownDelayMs);
+    return;
+  }
+  const reply = respond(parsed);
+  if (reply) process.stdout.write(JSON.stringify(reply) + "\\n");
+}
+
 function respond(parsed) {
   const method = parsed && parsed.method;
   let result = null;
@@ -253,4 +274,68 @@ test("test_shutdown_reaps_child", { timeout: 60000 }, async () => {
   assert.ok(reapedLines.length >= 1, `wrapper must log the reap, stderr=${stderrText}`);
   assert.equal(reapedLines[0].exit_code, 0, "stub exited cleanly on SIGTERM escalation");
   assert.equal(reapedLines[0].signal, null, "reap must observe a signalCode of null");
+});
+
+test("test_post_capture_shutdown_budget_allows_graceful_exit", { timeout: 60000 }, async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-shutdown-cal-"));
+  const pkgDir = stagePackage(tmp);
+  const requestLogPath = path.join(tmp, "stub-requests.ndjson");
+  const manifestPath = path.join(tmp, "stub-manifest.json");
+  stageEngine(pkgDir, { linger: false, shutdownDelayMs: 5000, gracefulSigterm: false, requestLogPath, manifestPath });
+  const driverPath = path.join(tmp, "driver.mjs");
+  fs.writeFileSync(driverPath, DRIVER_SOURCE);
+  const readyPath = path.join(tmp, "wrapper-ready");
+
+  const driver = spawn(process.execPath, [driverPath, pkgDir], {
+    env: {
+      STUB_LOG: requestLogPath,
+      STUB_READY: readyPath,
+      DRIVER_CTX_PATH: path.join(tmp, "driver-ctx.json"),
+      DRIVER_STORAGE_ROOT: path.join(tmp, "storage"),
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  fs.writeFileSync(path.join(tmp, "driver-ctx.json"), JSON.stringify({}));
+  let stderrText = "";
+  driver.stderr.setEncoding("utf8");
+  driver.stderr.on("data", (data) => (stderrText += data));
+
+  const readyDeadline = Date.now() + 20000;
+  let ready = false;
+  while (Date.now() < readyDeadline) {
+    if (fs.existsSync(readyPath)) {
+      ready = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.ok(ready, "wrapper must have spawned the engine before SIGTERM");
+
+  const startedAt = Date.now();
+  driver.kill("SIGTERM");
+  const closed = await new Promise((resolve) => {
+    driver.once("close", (code, signal) => resolve({ code, signal }));
+  });
+  const elapsed = Date.now() - startedAt;
+  assert.ok(elapsed < 15000, `host must not be held indefinitely (took ${elapsed}ms)`);
+  assert.equal(closed.signal, "SIGTERM", "re-delivered SIGTERM must terminate the driver");
+
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  assert.ok(Number.isInteger(manifest.pid), "stub manifest must carry the child pid");
+  assert.throws(
+    () => process.kill(manifest.pid, 0),
+    /ESRCH/,
+    "stub engine must be reaped (pid gone)"
+  );
+
+  const reapedLines = [];
+  for (const line of stderrText.split("\n")) {
+    if (!line.includes("child_reaped")) continue;
+    try {
+      reapedLines.push(JSON.parse(line));
+    } catch {}
+  }
+  assert.ok(reapedLines.length >= 1, `wrapper must log the reap, stderr=${stderrText}`);
+  assert.equal(reapedLines[0].exit_code, 0, "engine should have exited cleanly (exit_code: 0)");
+  assert.equal(reapedLines[0].signal, null, "engine should not have been killed by signal (signal: null)");
 });

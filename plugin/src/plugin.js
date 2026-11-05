@@ -51,7 +51,7 @@ const PACKAGE_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..
 // shutdownTimers array so teardown can clear everything it scheduled.
 const SHUTDOWN_TERM_AFTER_MS = 2000;
 const SHUTDOWN_KILL_AFTER_MS = 5000;
-const SHUTDOWN_RESPONSE_TIMEOUT_MS = 2000;
+const SHUTDOWN_RESPONSE_TIMEOUT_MS = 10000;
 const CAPTURE_DRAIN_MAX_MS = 2000;
 const CAPTURE_DRAIN_POLL_MS = 50;
 const REQUEST_TIMEOUT_MS = 15000;
