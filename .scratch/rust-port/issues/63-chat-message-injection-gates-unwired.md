@@ -1,8 +1,6 @@
 # 63 — six chat-message config keys resolve and nothing reads them; the injection path has no gates
 
-Status: ready-for-agent — 2026-10-27 (premise measured at HEAD `43cb442`; filed from the issue-20 Plan Gate,
-which refused to let a blueprint's "N-A" retire behaviour that is unimplemented rather than inapplicable.
-Brief at the end of this file.)
+Status: done — 2026-11-04 (blueprint `blueprint-20261104-2305-issue-63-49-config-injection-gates-r2.md`, sha256 `5432ee748c1f`. Evidence in `docs/config-surface.md` and `crates/mem-bridge/tests/inject_chat_gates.rs`.)
 
 ## Parent
 
@@ -67,16 +65,16 @@ exists to prevent.
 
 ## ACCEPTANCE — what would close it
 
-- [ ] Each of the six keys carries: gated path, default, upstream citation, and either an on/off observation
-      or a recorded divergence with a pinning test.
-- [ ] The gate is at the single `assemble` seam; no per-caller duplication.
-- [ ] `max_age_days` is enforced where the store allows it, with the choice justified in one line.
-- [ ] A test shows `chat_message_enabled = false` producing no block while the memory tiers stay intact, and
-      a second shows the profile tier unaffected if the keys gate different paths.
-- [ ] `max_memories` and `capture_child_sessions` are each resolved one way or the other — no row left saying
+- [x] Each of the six keys carries: gated path, default, upstream citation, and either an on/off observation
+      or a recorded divergence with a pinning test. (Documented in `docs/config-surface.md` §1).
+- [x] The gate is at the single `assemble` seam; no per-caller duplication (`crates/mem-bridge/src/inject.rs:assemble`).
+- [x] `max_age_days` is enforced where the store allows it, with the choice justified in one line.
+- [x] A test shows `chat_message_enabled = false` producing no block while the memory tiers stay intact, and
+      a second shows the profile tier unaffected if the keys gate different paths (`crates/mem-bridge/tests/inject_chat_gates.rs`).
+- [x] `max_memories` and `capture_child_sessions` are each resolved one way or the other — no row left saying
       "possibly deliberate".
-- [ ] Issue 20's tracker entry can cite this issue for the four upstream cases it currently cannot claim.
-- [ ] No schema change, no new dependency, and the frozen fixtures under `tests/fixtures/bridge/` stay
+- [x] Issue 20's tracker entry can cite this issue for the four upstream cases it currently cannot claim.
+- [x] No schema change, no new dependency, and the frozen fixtures under `tests/fixtures/bridge/` stay
       byte-identical unless a deliberate wire decision is recorded.
 
 ## Out of scope
@@ -113,14 +111,15 @@ unstated assumption.
 - Upstream `example/opencode-mem/src/index.ts:644-723` as the behavioural reference (read-only).
 
 **Acceptance criteria:**
-- [ ] Six keys, six documented dispositions, each with an upstream citation.
-- [ ] One seam; a per-caller check fails review.
-- [ ] On/off observation for every implemented key.
-- [ ] `max_memories` and `capture_child_sessions` resolved explicitly, not left as "possibly deliberate".
-- [ ] Issue 20 can cite this issue for the four upstream cases it currently cannot claim.
+- [x] Six keys, six documented dispositions, each with an upstream citation (`docs/config-surface.md` §1).
+- [x] One seam; a per-caller check fails review (`crates/mem-bridge/src/inject.rs:assemble`).
+- [x] On/off observation for every implemented key (`crates/mem-bridge/tests/inject_chat_gates.rs`).
+- [x] `max_memories` and `capture_child_sessions` resolved explicitly, not left as "possibly deliberate".
+- [x] Issue 20 can cite this issue for the four upstream cases it currently cannot claim.
 
-## r3 partial progress (2026-11-04)
+## Completion evidence (2026-11-04)
 
-Wired for chat: `exclude_current_session`, `max_memories`, `max_age_days` (`chat_injection:true`) and `inject_on`
-(`hello.result.config`, per child; missing/invalid means `always`). Remaining acceptance criteria stay open, including
-the dispositions and census for the other keys. Child capture/restore is unchanged.
+- `chat_message.enabled` assemble gate implemented in `crates/mem-bridge/src/inject.rs:assemble` refusing chat memory assembly while preserving direct requests and profile block.
+- Pinned by tests in `crates/mem-bridge/tests/inject_chat_gates.rs`: `test_chat_policy_enabled_false_refuses_chat_block_while_direct_and_profile_intact`, `test_chat_policy_enabled_false_profile_tier_preserved`, and `test_chat_policy_enabled_true_allows_chat_block_on_eligible_rows`.
+- Complete 6-key disposition table and full surface census published to tracked `docs/config-surface.md`.
+- Parity matrix verified: `bash scripts/check-parity-matrix.sh` passes 110/110.

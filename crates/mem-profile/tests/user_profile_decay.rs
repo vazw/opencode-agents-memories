@@ -204,11 +204,9 @@ fn test_sync_confidence_blends_the_stored_prior_with_the_beta_observation_at_alp
     let now = mem_profile::ids::now_millis();
 
     // Stored prior 0.4, Beta posterior 9:1 ⇒ observation 0.9.
-    // The α = 0.3 EMA applied to that pair is 0.3·0.9 + 0.7·0.4 = 0.55. The
-    // read path derives twice (upstream `lazyMigrateAlpha` syncs, then
-    // `decayItems` re-derives — see the `decay_in_memory` doc comment), so the
-    // observation lands on 0.55 as the second prior: 0.3·0.9 + 0.7·0.55 =
-    // 0.655. The old Beta-mean-only body returns 0.9 either way and fails.
+    // The α = 0.3 EMA applied to that pair is 0.3·0.9 + 0.7·0.4 = 0.55.
+    // Issue 102 eliminated the duplicate sync_confidence in decay_items,
+    // so the single blend 0.55 is returned.
     let mut probe = item("blended prior", 0.4, 3, now);
     probe.alpha = Some(9.0);
     probe.beta = Some(1.0);
@@ -219,8 +217,8 @@ fn test_sync_confidence_blends_the_stored_prior_with_the_beta_observation_at_alp
         .confidence
         .expect("confidence is always re-derived");
     assert!(
-        (confidence - 0.655).abs() < 1e-9,
-        "expected the α = 0.3 blend 0.655, got {confidence}"
+        (confidence - 0.55).abs() < 1e-9,
+        "expected the α = 0.3 blend 0.55, got {confidence}"
     );
     assert!(
         (confidence - 0.9).abs() > 0.1,
@@ -271,11 +269,10 @@ async fn test_daily_sweep_persists_decayed_confidence_and_bumps_the_profile_vers
         .expect("confidence persisted");
     // 0.8 with a 5:1 Beta posterior: sync gives 0.3·0.8333 + 0.7·0.8 = 0.81,
     // then the 90-day age (60-day frequency-1 half-life, one half-life past
-    // the 30-day grace threshold) halves it to 0.405; the read path derives
-    // twice (see the `decay_in_memory` doc comment), so the sweep persists
-    // 0.3·0.8333 + 0.7·0.405 = 0.5335 halved again = 0.26675.
+    // the 30-day grace threshold) halves it to 0.405. With the duplicate
+    // sync_confidence eliminated (Issue 102), the sweep persists 0.405.
     assert!(
-        (confidence - 0.26675).abs() < 1e-6,
+        (confidence - 0.405).abs() < 1e-6,
         "the decayed confidence is persisted, got {confidence}"
     );
     assert!(
@@ -332,4 +329,165 @@ async fn test_daily_sweep_is_a_noop_within_its_interval() {
         .expect("read profile")
         .expect("profile exists");
     assert_eq!(stored.version, 2, "the no-op sweep wrote nothing");
+}
+
+#[tokio::test]
+async fn test_daily_sweep_survives_restart_within_interval() {
+    let dir = TempDir::new("decay-restart-within");
+    let store1 = store(dir.path());
+    let now = mem_profile::ids::now_millis();
+
+    let profile_data = data(vec![item("decay me", 0.8, 3, now - 90 * DAY_MS)]);
+    let profile_id = store1
+        .create_profile(
+            "decay@example.com",
+            "Unknown",
+            "unknown",
+            "decay@example.com",
+            &profile_data,
+            7,
+        )
+        .await
+        .expect("create profile");
+
+    let report1 = store1.sweep_decay_daily(now).await.expect("sweep");
+    assert_eq!(report1.profiles_scanned, 1);
+    assert_eq!(report1.profiles_updated, 1);
+
+    drop(store1);
+
+    let store2 = store(dir.path());
+    let report2 = store2
+        .sweep_decay_daily(now + 3_600_000)
+        .await
+        .expect("sweep within interval");
+    assert_eq!(report2.profiles_scanned, 0);
+    assert_eq!(report2.profiles_updated, 0);
+
+    let stored = store2
+        .get_profile_by_id(&profile_id)
+        .await
+        .expect("read profile")
+        .expect("profile exists");
+    assert_eq!(
+        stored.version, 2,
+        "profile version is unchanged when sweep is noop"
+    );
+}
+
+#[tokio::test]
+async fn test_daily_sweep_sweeps_after_restart_past_interval() {
+    let dir = TempDir::new("decay-restart-past");
+    let store1 = store(dir.path());
+    let now = mem_profile::ids::now_millis();
+
+    let profile_data = data(vec![item("decay me", 0.8, 3, now - 90 * DAY_MS)]);
+    let profile_id = store1
+        .create_profile(
+            "decay@example.com",
+            "Unknown",
+            "unknown",
+            "decay@example.com",
+            &profile_data,
+            7,
+        )
+        .await
+        .expect("create profile");
+
+    let report1 = store1.sweep_decay_daily(now).await.expect("sweep");
+    assert_eq!(report1.profiles_scanned, 1);
+    assert_eq!(report1.profiles_updated, 1);
+
+    drop(store1);
+
+    let store2 = store(dir.path());
+    let report2 = store2
+        .sweep_decay_daily(now + 25 * 3_600_000)
+        .await
+        .expect("sweep past interval");
+    assert!(report2.profiles_scanned >= 1);
+    assert!(report2.profiles_updated >= 1);
+
+    let stored = store2
+        .get_profile_by_id(&profile_id)
+        .await
+        .expect("read profile")
+        .expect("profile exists");
+    assert_eq!(
+        stored.version, 3,
+        "profile version bumped on second sweep after 25h"
+    );
+
+    let persisted: ProfileData = serde_json::from_str(&stored.profile_data).expect("parse");
+    let confidence = persisted.preferences[0]
+        .confidence
+        .expect("confidence persisted");
+    assert!(
+        confidence < 0.405,
+        "confidence decayed further after 25h, got {confidence}"
+    );
+}
+
+#[tokio::test]
+async fn test_daily_sweep_stamp_degrades_fail_safe_on_corrupt_file() {
+    let dir = TempDir::new("decay-corrupt-stamp");
+    let store1 = store(dir.path());
+    let now = mem_profile::ids::now_millis();
+
+    let profile_data = data(vec![item("decay me", 0.8, 3, now - 90 * DAY_MS)]);
+    let profile_id = store1
+        .create_profile(
+            "decay@example.com",
+            "Unknown",
+            "unknown",
+            "decay@example.com",
+            &profile_data,
+            7,
+        )
+        .await
+        .expect("create profile");
+
+    // Manually write corrupt content to the decay-sweep.json sidecar file
+    std::fs::write(store1.decay_sweep_path(), b"invalid-json-payload")
+        .expect("write corrupt stamp");
+
+    let new_store = store(dir.path());
+    assert_eq!(
+        *new_store.last_decay_sweep.lock().unwrap(),
+        None,
+        "corrupt stamp must degrade fail-safe to None (due)"
+    );
+
+    let report = new_store
+        .sweep_decay_daily(now)
+        .await
+        .expect("sweep succeeds despite corrupt stamp");
+    assert!(
+        report.profiles_scanned >= 1,
+        "sweep must run (fail toward decaying, never skipping forever)"
+    );
+
+    // Assert new_store.decay_sweep_path() now contains valid JSON with timestamp now
+    let raw = std::fs::read_to_string(new_store.decay_sweep_path()).expect("read stamp file");
+    let loaded: mem_profile::decay_sweep::DecaySweepStamp =
+        serde_json::from_str(&raw).expect("stamp file must now be valid json");
+    assert_eq!(loaded.version, 1);
+    assert_eq!(loaded.last_decay_sweep, now);
+
+    // Second sweep at now + 1: assert profiles_scanned == 0
+    let second_report = new_store
+        .sweep_decay_daily(now + 1)
+        .await
+        .expect("second sweep");
+    assert_eq!(
+        second_report.profiles_scanned, 0,
+        "second sweep within interval must be noop"
+    );
+
+    let stored = new_store
+        .get_profile_by_id(&profile_id)
+        .await
+        .expect("read profile")
+        .expect("profile exists");
+    assert_eq!(stored.version, 2);
 }

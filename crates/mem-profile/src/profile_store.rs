@@ -276,6 +276,7 @@ fn decay_items(
 
     for item in items {
         let mut item = item.clone();
+        let previous = item.confidence;
         lazy_migrate_alpha(&mut item, now);
         if item.last_seen.is_none() {
             item.last_seen = Some(now);
@@ -284,8 +285,6 @@ fn decay_items(
             item.evidence = Some(Vec::new());
         }
 
-        let previous = item.confidence;
-        sync_confidence(&mut item, now);
         if item.confidence != previous {
             has_changes = true;
         }
@@ -359,16 +358,18 @@ pub struct ProfileStore {
     storage_path: PathBuf,
     db_path: PathBuf,
     cold_buffer_path: PathBuf,
+    decay_sweep_path: PathBuf,
     connections: ConnectionManager,
     handle: tokio::sync::OnceCell<DbHandle>,
     config: ProfileConfig,
     /// Cold-start buffers keyed by profile id, so items observed for one user
     /// never drain into another user's merge (cross-user contamination wall).
     cold_state: Mutex<ColdState>,
-    /// The instant of the last persisted decay sweep (R5); `None` until the
-    /// first sweep. A raw `Option<i64>` (not a `SystemTime`) keeps the clock
-    /// injected — the sweep never reads a wall clock itself.
-    last_decay_sweep: Mutex<Option<i64>>,
+    /// The instant of the last persisted decay sweep (R5); loaded fail-safe from
+    /// `decay-sweep.json` on store creation, `None` if missing/corrupt.
+    /// A raw `Option<i64>` (not a `SystemTime`) keeps the clock injected —
+    /// the sweep never reads a wall clock itself.
+    pub last_decay_sweep: Mutex<Option<i64>>,
 }
 
 impl ProfileStore {
@@ -391,6 +392,7 @@ impl ProfileStore {
     ) -> Self {
         let db_path = storage_path.join(USER_PROFILES_DB_NAME);
         let cold_buffer_path = crate::cold_buffer::cold_buffer_path(&storage_path);
+        let decay_sweep_path = crate::decay_sweep::decay_sweep_path(&storage_path);
         let platform = Platform::current();
         let connections = ConnectionManager::new(
             storage_path.clone(),
@@ -402,15 +404,18 @@ impl ProfileStore {
         // non-critical cache read error must never crash the plugin import
         // path, so it is only recorded and the next merge round fails closed.
         let cold_state = Mutex::new(load_cold_state_fail_safe(&cold_buffer_path));
+        let last_decay_sweep =
+            Mutex::new(crate::decay_sweep::load_stamp_fail_safe(&decay_sweep_path));
         Self {
             storage_path,
             db_path,
             cold_buffer_path,
+            decay_sweep_path,
             connections,
             handle: tokio::sync::OnceCell::new(),
             config,
             cold_state,
-            last_decay_sweep: Mutex::new(None),
+            last_decay_sweep,
         }
     }
 
@@ -427,15 +432,15 @@ impl ProfileStore {
     }
 
     /// Upstream `reset()` — forget the initialized handle AND reload the
-    /// cold-buffer snapshot: keeping the old in-memory map would resurrect the
-    /// previous storage's buckets on the next save.
+    /// cold-buffer snapshot and decay sweep stamp: keeping the old in-memory
+    /// state would resurrect the previous storage's state on the next save.
     pub fn reset(&mut self) {
         self.handle = tokio::sync::OnceCell::new();
         if let Ok(mut state) = self.cold_state.lock() {
             *state = load_cold_state_fail_safe(&self.cold_buffer_path);
         }
         if let Ok(mut last) = self.last_decay_sweep.lock() {
-            *last = None;
+            *last = crate::decay_sweep::load_stamp_fail_safe(&self.decay_sweep_path);
         }
     }
 
@@ -444,6 +449,7 @@ impl ProfileStore {
         self.storage_path = storage_path.clone();
         self.db_path = storage_path.join(USER_PROFILES_DB_NAME);
         self.cold_buffer_path = crate::cold_buffer::cold_buffer_path(&storage_path);
+        self.decay_sweep_path = crate::decay_sweep::decay_sweep_path(&storage_path);
         self.connections = ConnectionManager::new(
             storage_path,
             store_config,
@@ -455,8 +461,13 @@ impl ProfileStore {
             *state = load_cold_state_fail_safe(&self.cold_buffer_path);
         }
         if let Ok(mut last) = self.last_decay_sweep.lock() {
-            *last = None;
+            *last = crate::decay_sweep::load_stamp_fail_safe(&self.decay_sweep_path);
         }
+    }
+
+    /// The on-disk decay sweep stamp location (`decay-sweep.json`).
+    pub fn decay_sweep_path(&self) -> &Path {
+        &self.decay_sweep_path
     }
 
     /// The on-disk cold-buffer location.
@@ -1019,14 +1030,8 @@ impl ProfileStore {
     /// The clock is the `now` argument — this method never reads a wall clock,
     /// so a sweep is fully reproducible from its inputs.
     ///
-    /// DIVERGENCE (disclosed, accepted): upstream re-derives each item's
-    /// confidence twice per pass — `lazyMigrateAlpha` ends with
-    /// `syncConfidence`, and `decayItems` then calls it again to detect
-    /// `hasChanges`. Upstream's `syncConfidence` was idempotent, so the second
-    /// call was a no-op; the PRD's EMA lock (R1/R3) makes it a real second
-    /// blend, and the decay factor is applied again. The structure is kept
-    /// byte-faithful to upstream because R4 pins the decay semantics, and the
-    /// doubled derivation is what the pinned fixtures assert.
+    /// Each item's confidence is derived once per pass via `lazy_migrate_alpha`
+    /// (restoring single-application EMA blend + decay factor; Issue 102).
     pub fn decay_in_memory(&self, data: &ProfileData, now: i64) -> DecayOutcome {
         let stale_days = f64::from(self.config.stale_days);
         let min_evidence = self.config.min_evidence_for_retention as usize;
@@ -1061,8 +1066,8 @@ impl ProfileStore {
     ///
     /// `mem_bridge::engine::spawn_profile_decay_lifecycle` calls this once per
     /// process start and then on its wake-up loop; the 24 h cadence is this
-    /// store's own gate, and the stamp is in-memory, so every engine start
-    /// re-arms it (issue 102).
+    /// store's own gate, persisted in the durable `decay-sweep.json` sidecar
+    /// file beside `user-profiles.db` to survive engine restarts (Issue 102).
     pub async fn sweep_decay_daily(&self, now: i64) -> Result<DecaySweepReport, ProfileError> {
         let due = {
             // last_decay_sweep gates the persisted decay side effect: a poisoned gate must refuse (ADR-0013 D-2 D2-c)
@@ -1121,6 +1126,14 @@ impl ProfileStore {
                 lock: "last_decay_sweep",
                 operation: "sweep_decay_daily",
             })? = Some(now);
+
+        if let Err(error) = crate::decay_sweep::save_stamp(&self.decay_sweep_path, now) {
+            tracing::warn!(
+                path = %self.decay_sweep_path.display(),
+                error = %error,
+                "decay sweep: failed to persist sweep stamp to sidecar file"
+            );
+        }
 
         Ok(DecaySweepReport {
             profiles_scanned,

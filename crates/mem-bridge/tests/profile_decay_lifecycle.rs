@@ -167,9 +167,9 @@ async fn test_startup_tick_persists_the_decayed_confidence() {
     loop {
         let (version, confidence) = stored(&store, &id).await;
         if version == 2 {
-            // 0.8 -> 0.26675 (the sweep derives twice; 90 d age, 0.5 factor).
+            // 0.8 -> 0.405 (single derivation; 90 d age, 0.5 factor, Issue 102).
             assert!(
-                (confidence - 0.26675).abs() < 1e-6,
+                (confidence - 0.405).abs() < 1e-6,
                 "decayed with the injected now, got {confidence}"
             );
             break;

@@ -262,12 +262,21 @@ fn scratch_base() -> PathBuf {
     PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
 }
 
+static SCRATCH_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// A scratch directory under the target dir (never `/tmp`).
+///
+/// Qualified by process ID and an atomic sequence counter (`{label}-{pid}-{seq}`)
+/// so concurrent test processes and threads sharing `CARGO_TARGET_TMPDIR` do not
+/// collide or delete each other's state (issue 119).
 fn scratch_root(label: &str) -> PathBuf {
+    let pid = std::process::id();
+    let seq = SCRATCH_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let unique_label = format!("{label}-{pid}-{seq}");
     let dir = scratch_base()
         .join("scratch")
         .join("mem-portability")
-        .join(label);
+        .join(unique_label);
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("scratch dir");
     dir
@@ -298,6 +307,26 @@ fn scratch_base_is_absolute_under_the_target_dir() {
         !base.starts_with(env!("CARGO_MANIFEST_DIR")),
         "the scratch base must not live inside the checkout, got {}",
         base.display()
+    );
+}
+
+#[test]
+fn scratch_root_produces_unique_paths_for_same_label() {
+    let p1 = scratch_root("concurrency_probe");
+    let p2 = scratch_root("concurrency_probe");
+    assert_ne!(
+        p1, p2,
+        "successive scratch_root calls must yield distinct paths"
+    );
+    assert!(
+        p1.is_dir() && p2.is_dir(),
+        "both scratch paths must exist as directories"
+    );
+    let pid_str = std::process::id().to_string();
+    assert!(
+        p1.to_string_lossy().contains(&pid_str),
+        "scratch path must contain process ID: {}",
+        p1.display()
     );
 }
 

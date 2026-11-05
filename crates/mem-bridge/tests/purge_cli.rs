@@ -1042,18 +1042,53 @@ fn resolve_binary_path(current_exe: &Path, target_dir: Option<&OsStr>) -> PathBu
     }
 }
 
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("workspace root is 2 levels above crate manifest")
+        .to_path_buf()
+}
+
+fn resolve_target_dir(target_dir: Option<&OsStr>, workspace_root: &Path) -> Option<PathBuf> {
+    target_dir.map(|td| {
+        let path = Path::new(td);
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            workspace_root.join(path)
+        }
+    })
+}
+
+fn build_root_binary_cmd(_manifest_dir: &Path, target_dir_env: Option<&OsStr>) -> Command {
+    let ws_root = workspace_root();
+    let mut cmd = Command::new(env!("CARGO"));
+    cmd.current_dir(&ws_root);
+    cmd.args(["build", "-q", "-p", "opencode-agents-memory"]);
+    if let Some(target_dir) = resolve_target_dir(target_dir_env, &ws_root) {
+        cmd.env("CARGO_TARGET_DIR", target_dir);
+    } else {
+        cmd.env_remove("CARGO_TARGET_DIR");
+    }
+    cmd
+}
+
 fn binary_path() -> PathBuf {
     use std::sync::OnceLock;
     static BUILT: OnceLock<()> = OnceLock::new();
     let exe = std::env::current_exe().expect("current exe");
-    let binary = resolve_binary_path(&exe, std::env::var_os("CARGO_TARGET_DIR").as_deref());
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let ws_root = workspace_root();
+    let target_dir_var = std::env::var_os("CARGO_TARGET_DIR");
+    let target_dir = resolve_target_dir(target_dir_var.as_deref(), &ws_root);
+    let binary = resolve_binary_path(&exe, target_dir.as_deref().map(Path::as_os_str));
     // Always (re)build once per test process: `cargo test -p mem-bridge` does
     // not build the ROOT binary, and a stale one would silently test the old
     // argv surface. The build is incremental and serialized by cargo's own
     // target-dir lock.
     BUILT.get_or_init(|| {
-        let status = Command::new(env!("CARGO"))
-            .args(["build", "-q", "-p", "opencode-agents-memory"])
+        let status = build_root_binary_cmd(manifest_dir, target_dir_var.as_deref())
             .status()
             .expect("build the root binary");
         assert!(status.success(), "cargo build failed");
@@ -1126,6 +1161,111 @@ fn test_resolve_binary_path_ignores_dwo_sidecars_in_deps() {
 fn test_resolve_binary_path_falls_back_to_a_bare_name_when_the_exe_has_no_parent() {
     let resolved = resolve_binary_path(Path::new("/"), None);
     assert_eq!(resolved, PathBuf::from(root_binary_name()));
+}
+
+#[test]
+fn test_resolve_target_dir_normalizes_relative_to_workspace_root() {
+    let ws = Path::new("/workspace");
+    let relative = OsStr::new(".tmp/scratch/target-w1");
+    let resolved = resolve_target_dir(Some(relative), ws);
+    assert_eq!(resolved, Some(ws.join(".tmp/scratch/target-w1")));
+}
+
+#[test]
+fn test_resolve_target_dir_preserves_absolute_path() {
+    let ws = Path::new("/workspace");
+    let absolute = OsStr::new("/opt/target");
+    let resolved = resolve_target_dir(Some(absolute), ws);
+    assert_eq!(resolved, Some(PathBuf::from("/opt/target")));
+}
+
+#[test]
+fn test_resolve_target_dir_returns_none_when_unset() {
+    let ws = Path::new("/workspace");
+    let resolved = resolve_target_dir(None, ws);
+    assert_eq!(resolved, None);
+}
+
+#[test]
+fn test_build_root_binary_cmd_sets_absolute_target_dir_when_relative() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let ws_root = workspace_root();
+    let relative = OsStr::new(".tmp/scratch/target-w1");
+    let cmd = build_root_binary_cmd(manifest_dir, Some(relative));
+    assert_eq!(cmd.get_current_dir(), Some(ws_root.as_path()));
+    let env_target = cmd
+        .get_envs()
+        .find(|(k, _)| *k == OsStr::new("CARGO_TARGET_DIR"))
+        .and_then(|(_, v)| v);
+    assert_eq!(
+        env_target,
+        Some(ws_root.join(".tmp/scratch/target-w1").as_os_str())
+    );
+}
+
+#[test]
+fn test_build_root_binary_cmd_unsets_target_dir_when_none() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let ws_root = workspace_root();
+    let cmd = build_root_binary_cmd(manifest_dir, None);
+    assert_eq!(cmd.get_current_dir(), Some(ws_root.as_path()));
+    let env_entry = cmd
+        .get_envs()
+        .find(|(k, _)| *k == OsStr::new("CARGO_TARGET_DIR"));
+    assert_eq!(env_entry, Some((OsStr::new("CARGO_TARGET_DIR"), None)));
+}
+
+#[test]
+fn test_relative_cargo_target_dir_does_not_leak_into_crate_tree() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let leaked_tmp = manifest_dir.join(".tmp");
+    if leaked_tmp.exists() {
+        let _ = std::fs::remove_dir_all(&leaked_tmp);
+    }
+
+    let ws_root = workspace_root();
+    let exe = std::env::current_exe().expect("current exe");
+    let active_target = exe
+        .parent()
+        .and_then(|p| {
+            if p.file_name() == Some(OsStr::new("deps")) {
+                p.parent()
+            } else {
+                Some(p)
+            }
+        })
+        .and_then(|p| p.parent())
+        .expect("active target directory");
+
+    let scratch_dir = ws_root.join(".tmp").join("scratch");
+    std::fs::create_dir_all(&scratch_dir).expect("create scratch dir");
+    let probe_symlink = scratch_dir.join("issue-125-probe");
+    if std::fs::symlink_metadata(&probe_symlink).is_ok() {
+        let _ = std::fs::remove_file(&probe_symlink);
+    }
+    std::os::unix::fs::symlink(active_target, &probe_symlink).expect("create probe symlink");
+
+    struct SymlinkGuard(PathBuf);
+    impl Drop for SymlinkGuard {
+        fn drop(&mut self) {
+            if std::fs::symlink_metadata(&self.0).is_ok() {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+    }
+    let _guard = SymlinkGuard(probe_symlink);
+
+    let mut cmd = build_root_binary_cmd(
+        manifest_dir,
+        Some(OsStr::new(".tmp/scratch/issue-125-probe")),
+    );
+    let status = cmd.status().expect("cargo build");
+    assert!(status.success(), "cargo build failed");
+
+    assert!(
+        !leaked_tmp.exists(),
+        "cargo build leaked directory into crates/mem-bridge/.tmp"
+    );
 }
 
 fn scratch_home(label: &str) -> PathBuf {
