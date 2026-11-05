@@ -26,10 +26,9 @@ pub mod provider_trait;
 pub use error::{ProviderError, ProviderErrorKind};
 pub use host_auth::{HostAuthorization, Zeroizing};
 pub use opencode_host::{
-    ConnectedRefresher, GENERATE_TEXT_PATH, HostMethod, HostRequest, HostResponse, HostTransport,
-    OpenCodeHostConfig, OpenCodeHostProvider, PROVIDER_NAME, ReqwestHostTransport,
-    STRUCTURED_OUTPUT_TIMEOUT_MS, SYSTEM_USER_SEPARATOR, decode_generate_failure,
-    estimate_token_count,
+    GENERATE_TEXT_PATH, HostMethod, HostRequest, HostResponse, HostTransport, OpenCodeHostConfig,
+    OpenCodeHostProvider, PROVIDER_NAME, ReqwestHostTransport, STRUCTURED_OUTPUT_TIMEOUT_MS,
+    SYSTEM_USER_SEPARATOR, decode_generate_failure, estimate_token_count, provider_ids,
 };
 pub use provider_trait::{AiProvider, AiProviderStructured, BoxFuture, CompletionStream};
 pub use registry::{ProviderConfig, ProviderKind, ProviderRegistry};

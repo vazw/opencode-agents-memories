@@ -4,7 +4,6 @@
 //! refresh delegation, and the registry fallback chain.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use mem_ai::provider::{
@@ -64,49 +63,6 @@ fn test_provider_config_timeout() {
         OpenCodeHostConfig::default().timeout,
         Duration::from_millis(90_000)
     );
-}
-
-#[tokio::test]
-async fn test_connected_provider_refresh() {
-    let transport = Arc::new(ReqwestHostTransport::new());
-    let provider = Arc::new(OpenCodeHostProvider::new(
-        OpenCodeHostConfig {
-            base_url: "http://127.0.0.1:4096".to_owned(),
-            ..OpenCodeHostConfig::default()
-        },
-        transport,
-    ));
-
-    provider.set_connected_providers(vec!["anthropic".to_owned(), "github-copilot".to_owned()]);
-    assert!(provider.is_provider_connected("anthropic"));
-    assert!(provider.is_provider_connected("github-copilot"));
-    assert!(!provider.is_provider_connected("openai"));
-
-    // A refresher registers late-arriving providers; refresh happens on miss
-    // only, never on hit.
-    let refresh_calls = Arc::new(AtomicUsize::new(0));
-    let calls = Arc::clone(&refresh_calls);
-    let weak = Arc::downgrade(&provider);
-    provider.set_connected_providers_refresher(Arc::new(move || {
-        let calls = Arc::clone(&calls);
-        let weak = weak.clone();
-        Box::pin(async move {
-            calls.fetch_add(1, Ordering::SeqCst);
-            if let Some(provider) = weak.upgrade() {
-                provider.set_connected_providers(vec![
-                    "anthropic".to_owned(),
-                    "github-copilot".to_owned(),
-                    "newapi".to_owned(),
-                ]);
-            }
-        })
-    }));
-
-    assert!(provider.ensure_provider_connected("anthropic").await);
-    assert_eq!(refresh_calls.load(Ordering::SeqCst), 0);
-
-    assert!(provider.ensure_provider_connected("newapi").await);
-    assert_eq!(refresh_calls.load(Ordering::SeqCst), 1);
 }
 
 #[test]

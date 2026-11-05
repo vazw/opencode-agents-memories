@@ -1,8 +1,7 @@
 # 62 — `mem-ai`'s provider-connectivity gate is dead code, and `provider_ids` has no activation filter
 
-Status: ready-for-agent — 2026-10-27 (re-verified at `8023dd8`: every premise holds, and issue 20's
-pointer is already in place. The deliverable is the discriminating measurement, not an implementation;
-brief under `## Agent Brief`.)
+Status: done — 2026-11-05 (resolved per blueprint r2: discriminating measurement recorded in
+`docs/evidence/issue-62-measurement/README.md`, Option B won, dead gate removed, `provider_ids` parity implemented)
 
 ## PREMISE — measured, not inherited
 
@@ -64,15 +63,15 @@ function that exists either way.
 
 ## ACCEPTANCE — what would close it
 
-- [ ] The discriminating measurement is recorded with its artifact (engine fixture, capture invocation,
-      timing, error text).
-- [ ] A or B is chosen from that measurement, and the loser is recorded with why it lost.
-- [ ] `provider_ids` either matches upstream's activation filter + dedup, or carries a recorded divergence
-      with a reason and a test pinning the current behaviour.
-- [ ] Issue 20's tracker entry stops calling these two behaviours "N-A — engine-side" and points here
-      instead.
-- [ ] If B wins: the gate, the refresher slot and their public mirrors are removed, and the tests that
-      exercised them go with them — no test left covering deleted code.
+- [x] The discriminating measurement is recorded with its artifact (engine fixture, capture invocation,
+      timing, error text). Recorded in `docs/evidence/issue-62-measurement/README.md` via `crates/mem-bridge/tests/provider_connectivity_measurement.rs`.
+- [x] A or B is chosen from that measurement, and the loser is recorded with why it lost. Option B (delete dead gate) won; Option A rejected due to empty-snapshot trap and latency overhead.
+- [x] `provider_ids` either matches upstream's activation filter + dedup, or carries a recorded divergence
+      with a reason and a test pinning the current behaviour. Implemented `activation ∈ {"auto", "enabled"}` and encounter-order deduplication in `crates/mem-ai/src/provider/opencode_host.rs`, tested with non-collinear sequence `["p2", "p1", "p2"]`.
+- [x] Issue 20's tracker entry stops calling these two behaviours "N-A — engine-side" and points here
+      instead. Updated in `.scratch/rust-port/issues/20-v2-adapter-tui.md`.
+- [x] If B wins: the gate, the refresher slot and their public mirrors are removed, and the tests that
+      exercised them go with them — no test left covering deleted code. Removed from `crates/mem-ai/src/provider/opencode_host.rs`, `mod.rs`, and tests in `opencode_provider.rs` and `ai_provider_config.rs`.
 
 ## Out of scope
 

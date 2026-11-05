@@ -70,10 +70,11 @@ derivation is not upstream's either: `provider_ids` (`:721-733`) keeps every `GE
 filter and no dedup, where upstream keeps `activation ∈ {auto, enabled}` deduped
 (`example/opencode-mem/src/v2/legacy-client.ts:246-256`).
 
-`v2-provider-connectivity` and `v2-provider-refresh` are therefore N-A **for this lane** and owned by **#62**
-(`.scratch/rust-port/issues/62-provider-connectivity-gate-unowned.md`), whose discriminating measurement, A-or-B
-ruling and `provider_ids` parity fix are the resolution — including this issue's obligation to stop calling these
-two behaviours "N-A — engine-side". This section adds no second owner and no second measurement.
+`v2-provider-connectivity` and `v2-provider-refresh` are therefore N-A **for this lane** and closed by **#62**
+(`.scratch/rust-port/issues/62-provider-connectivity-gate-unowned.md`). Issue 62 resolved both behaviours via empirical
+measurement in `docs/evidence/issue-62-measurement/README.md` (fast <5ms typed failures): Option B won, removing the dead
+connectivity gate (`ensure_provider_connected`, `is_provider_connected`, `refresh_connected_providers`), while `provider_ids`
+achieved upstream parity with activation filtering and encounter-order deduplication.
 
 ## Landing — 2026-10-27
 
