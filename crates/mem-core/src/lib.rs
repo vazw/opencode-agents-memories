@@ -18,3 +18,4 @@ pub mod tier;
 pub mod utils;
 
 pub use error::{Error, Result};
+pub use tracing;

@@ -38,12 +38,12 @@ function chatMessage(sessionID = "sess-1", text = "hello world") {
 
 // Stages the package + stub engine + driver, runs one case, and returns the
 // driver's record, the stub's wire log and the driver's stderr.
-async function runToastCase(t, { injectMode, showToast, events, killBoundMs }) {
+async function runToastCase(t, { injectMode, showToast, events, killBoundMs, helloConfig, diesAfterRequests }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-toast-"));
   const pkgDir = stagePackageTree(tmp);
   const requestLogPath = path.join(tmp, "stub-requests.ndjson");
   const manifestPath = path.join(tmp, "stub-manifest.json");
-  stageStubEngine(pkgDir, { requestLogPath, manifestPath, injectMode });
+  stageStubEngine(pkgDir, { requestLogPath, manifestPath, injectMode, helloConfig, diesAfterRequests });
   t.after(() => assertReaped(manifestPath));
 
   const donePath = path.join(tmp, "driver-done.json");
@@ -180,3 +180,105 @@ test("test_wrapper_does_not_toast_when_inject_succeeds", { timeout: 60000 }, asy
   );
   assert.ok(!stderr.includes('"event":"toast'), `no toast is logged on the success path (stderr=${stderr})`);
 });
+
+test(
+  "test_wrapper_toasts_when_engine_advertises_inert_keys_named_summary",
+  { timeout: 60000 },
+  async (t) => {
+    const { record } = await runToastCase(t, {
+      injectMode: "success",
+      showToast: "counting",
+      events: [chatMessage()],
+      killBoundMs: 60000,
+      helloConfig: {
+        inert_keys: ["similarityThreshold", "maxProfileItems", "autoUpdate"],
+      },
+    });
+
+    assert.equal(record.settled, true);
+    assert.equal(record.toastCalls, 1, "exactly one toast for inert keys");
+    assert.deepEqual(record.toastBodies, [
+      {
+        title: "opencode-mem",
+        message:
+          "Inert config keys set: similarityThreshold, maxProfileItems, autoUpdate. These have no effect.",
+        variant: "warning",
+      },
+    ]);
+  }
+);
+
+test(
+  "test_wrapper_toasts_when_engine_advertises_many_inert_keys_count_summary",
+  { timeout: 60000 },
+  async (t) => {
+    const { record } = await runToastCase(t, {
+      injectMode: "success",
+      showToast: "counting",
+      events: [chatMessage()],
+      killBoundMs: 60000,
+      helloConfig: {
+        inert_keys: [
+          "similarityThreshold",
+          "maxProfileItems",
+          "autoCaptureMaxIterations",
+          "autoUpdate",
+        ],
+      },
+    });
+
+    assert.equal(record.settled, true);
+    assert.equal(record.toastCalls, 1, "exactly one toast for inert keys");
+    assert.deepEqual(record.toastBodies, [
+      {
+        title: "opencode-mem",
+        message: "4 inert config keys set. These have no effect.",
+        variant: "warning",
+      },
+    ]);
+  }
+);
+
+test(
+  "test_wrapper_skips_toast_when_inert_keys_empty",
+  { timeout: 60000 },
+  async (t) => {
+    const { record } = await runToastCase(t, {
+      injectMode: "success",
+      showToast: "counting",
+      events: [chatMessage()],
+      killBoundMs: 60000,
+      helloConfig: { inert_keys: [] },
+    });
+
+    assert.equal(record.settled, true);
+    assert.equal(record.toastCalls, 0, "no toast when inert_keys is empty");
+  }
+);
+
+test(
+  "test_wrapper_dedupes_inert_keys_toast_across_multiple_handshakes",
+  { timeout: 60000 },
+  async (t) => {
+    const { record, wire } = await runToastCase(t, {
+      injectMode: "success",
+      showToast: "counting",
+      events: [
+        chatMessage("sess-1", "first"),
+        { ...chatMessage("sess-1", "second"), waitDeadChild: true },
+      ],
+      killBoundMs: 60000,
+      helloConfig: { inert_keys: ["similarityThreshold"] },
+      diesAfterRequests: 1,
+    });
+
+    assert.equal(record.settled, true);
+    const hellos = wire.filter((message) => message.method === "hello");
+    assert.equal(hellos.length, 2, "two handshakes occurred across child restart");
+    assert.equal(
+      record.toastCalls,
+      1,
+      "inert keys toast is deduplicated across handshakes"
+    );
+  }
+);

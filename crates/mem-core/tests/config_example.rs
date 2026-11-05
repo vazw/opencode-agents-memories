@@ -249,7 +249,18 @@ fn test_example_values_match_the_built_in_defaults() {
         .expect("the no-file load must succeed");
     let after = load_in(&home, &example_text()).expect("the shipped example must load");
     assert_eq!(
-        after, before,
+        after.inert_keys_present,
+        vec![
+            "autoUpdate".to_string(),
+            "defaultScope".to_string(),
+            "maxProfileItems".to_string(),
+        ],
+        "the shipped example carries exactly these inert keys"
+    );
+    let mut normalized_after = after;
+    normalized_after.inert_keys_present.clear();
+    assert_eq!(
+        normalized_after, before,
         "copying the example must change no resolved value"
     );
 }

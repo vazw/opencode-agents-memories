@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use mem_core::config::FileConfig;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CensusRow {
     pub struct_name: String,
@@ -167,7 +169,7 @@ pub fn extract_schema_fields(schema_source: &str) -> Vec<(String, String)> {
                             .and_then(|rest| rest.split_once(':'))
                         {
                             let field = field.trim();
-                            if !field.is_empty() {
+                            if !field.is_empty() && field != "inert_keys_present" {
                                 result.push((struct_name.to_string(), field.to_string()));
                             }
                         }
@@ -340,4 +342,31 @@ fn test_census_covers_all_schema_fields() {
 
     validate_census_against_schema(&rows, &schema_fields)
         .expect("all schema fields present in census");
+}
+
+#[test]
+fn test_inert_field_names_match_dead_census_rows() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let doc_path = manifest_dir.join("../../docs/config-surface.md");
+    let doc_content = std::fs::read_to_string(&doc_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", doc_path.display()));
+
+    let rows = parse_census_table(&doc_content).expect("valid census table");
+    let dead_census_fields: BTreeSet<&str> = rows
+        .iter()
+        .filter(|r| r.status == "dead")
+        .map(|r| r.field_name.as_str())
+        .collect();
+
+    let inert_fields: BTreeSet<&str> = FileConfig::inert_field_names().iter().copied().collect();
+
+    assert_eq!(
+        dead_census_fields.len(),
+        20,
+        "expected exactly 20 dead census fields in docs/config-surface.md"
+    );
+    assert_eq!(
+        inert_fields, dead_census_fields,
+        "FileConfig::inert_field_names() must match dead census rows 1:1"
+    );
 }

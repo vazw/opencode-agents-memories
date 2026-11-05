@@ -102,7 +102,7 @@ export function stageStubEngine(pkgDir, {
   const dir = path.join(pkgDir, "engine", `${process.platform}-${process.arch}`);
   fs.mkdirSync(dir, { recursive: true });
   const binPath = path.join(dir, "opencode-agents-memory");
-  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath: lifecycleLogPath ?? requestLogPath + ".lifecycle" }), {
+  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath: lifecycleLogPath ?? (requestLogPath ? requestLogPath + ".lifecycle" : null) }), {
     mode: 0o755,
   });
   fs.chmodSync(binPath, 0o755);
@@ -134,7 +134,9 @@ function logLine(object) {
   try { fs.appendFileSync(requestLogPath, JSON.stringify(object) + "\\n"); } catch {}
 }
 function lifecycleLine(object) {
-  try { fs.appendFileSync(lifecycleLogPath, JSON.stringify(object) + "\\n"); } catch {}
+  if (lifecycleLogPath) {
+    try { fs.appendFileSync(lifecycleLogPath, JSON.stringify(object) + "\\n"); } catch {}
+  }
 }
 // Issue 82: every exit path appends its pid first, so a test can wait for the
 // child to be gone before racing the next call.
@@ -457,6 +459,34 @@ if (mode === "v1") {
   let settled = false;
   let elapsedMs = 0;
   for (const event of fixture.events ?? []) {
+    if (event.waitDeadChild) {
+      const lifecycleLog = process.env.STUB_LOG + ".lifecycle";
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        let entries = [];
+        try {
+          entries = fs
+            .readFileSync(lifecycleLog, "utf8")
+            .split("\\n")
+            .filter(Boolean)
+            .map((l) => JSON.parse(l));
+        } catch {}
+        const spawned = entries.filter((e) => e.spawned !== undefined);
+        const lastSpawn = spawned[spawned.length - 1];
+        if (lastSpawn !== undefined) {
+          const logged = entries.some((e) => e.exited === lastSpawn.spawned);
+          let gone = false;
+          try {
+            process.kill(lastSpawn.spawned, 0);
+          } catch (err) {
+            gone = err.code === "ESRCH";
+          }
+          if (logged && gone) break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     const startedAt = Date.now();
     const guard = new Promise((resolve) => setTimeout(() => resolve("guard"), 2000));
     const outcome = await Promise.race([

@@ -207,13 +207,15 @@ impl Config {
             merged.insert(key, value);
         }
 
+        let inert_keys_present = detect_inert_keys(&merged);
+
         let file_config: FileConfig = serde_path_to_error::deserialize(Value::Object(merged))
             .map_err(|error| ConfigError::InvalidShape {
                 path: error.path().to_string(),
                 source: error.into_inner(),
             })?;
 
-        Self::build(file_config, env, &paths.home)
+        Self::build(file_config, env, &paths.home, inert_keys_present)
     }
 
     /// Loads from the standard global paths derived from the env home.
@@ -233,7 +235,12 @@ impl Config {
 
     /// Mirrors upstream `buildConfig` field for field; copy every default
     /// from the [DEFAULTS] table rather than inventing one.
-    fn build(file: FileConfig, env: &dyn EnvSource, home: &Path) -> Result<Self, ConfigError> {
+    fn build(
+        file: FileConfig,
+        env: &dyn EnvSource,
+        home: &Path,
+        inert_keys_present: Vec<String>,
+    ) -> Result<Self, ConfigError> {
         use normalize::*;
 
         let memory_provider = file
@@ -588,8 +595,62 @@ impl Config {
             promotion: schema::Promotion {
                 ttl_fallback_days: promotion_ttl_fallback_days,
             },
+            inert_keys_present,
         })
     }
+}
+
+// -------------------------------------------------------------------------
+// Inert key detection
+// -------------------------------------------------------------------------
+
+/// Converts a snake_case identifier to camelCase.
+pub fn snake_to_camel(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut uppercase_next = false;
+    for ch in s.chars() {
+        if ch == '_' {
+            uppercase_next = true;
+        } else if uppercase_next {
+            out.extend(ch.to_uppercase());
+            uppercase_next = false;
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Detects any inert configuration keys present in the merged JSON map.
+///
+/// Checks both snake_case and camelCase forms of each inert field declared
+/// by [`FileConfig::inert_field_names`], as well as nested `memory.defaultScope`
+/// / `memory.default_scope`. Returns a sorted, deduplicated list of key names.
+pub fn detect_inert_keys(merged: &serde_json::Map<String, serde_json::Value>) -> Vec<String> {
+    let mut present = Vec::new();
+
+    for &field in FileConfig::inert_field_names() {
+        let camel = snake_to_camel(field);
+        if merged.contains_key(&camel) {
+            present.push(camel.clone());
+        }
+        if field != camel && merged.contains_key(field) {
+            present.push(field.to_string());
+        }
+    }
+
+    if let Some(Value::Object(mem)) = merged.get("memory") {
+        if mem.contains_key("defaultScope") {
+            present.push("defaultScope".to_string());
+        }
+        if mem.contains_key("default_scope") {
+            present.push("default_scope".to_string());
+        }
+    }
+
+    present.sort();
+    present.dedup();
+    present
 }
 
 // -------------------------------------------------------------------------

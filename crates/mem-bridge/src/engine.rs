@@ -165,6 +165,9 @@ pub struct EngineConfig {
     /// `hello.result.config.inject_on` (`"first"` / `"always"`). The wrapper
     /// reads it per bridge child; missing/invalid means `always` there.
     pub inject_on: &'static str,
+    /// Inert configuration keys set by the operator in JSONC (issue 128).
+    /// Advertised as `hello.result.config.inert_keys`.
+    pub inert_keys: Vec<String>,
 }
 
 impl Default for EngineConfig {
@@ -179,6 +182,7 @@ impl Default for EngineConfig {
             open_guard_override: false,
             capture_child_sessions: false,
             inject_on: "always",
+            inert_keys: Vec::new(),
         }
     }
 }
@@ -226,6 +230,7 @@ fn handshake_result(config: &EngineConfig, chat_message_enabled: bool) -> serde_
             "chat_message_enabled": chat_message_enabled,
             "capture_child_sessions": config.capture_child_sessions,
             "inject_on": config.inject_on,
+            "inert_keys": config.inert_keys,
         },
         "engine_version": config.engine_version,
         "methods": RUNTIME_METHODS,
@@ -319,6 +324,7 @@ impl Engine {
         let config = EngineConfig {
             capture_child_sessions: core.chat_message.capture_child_sessions,
             inject_on: core.chat_message.inject_on.as_str(),
+            inert_keys: core.inert_keys_present.clone(),
             ..config
         };
         let backend = portability.and_then(|factory| {

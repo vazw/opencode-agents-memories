@@ -996,6 +996,13 @@ async function startBridge(state) {
       (advertisedConfig.inject_on === "first" || advertisedConfig.inject_on === "always")
         ? advertisedConfig.inject_on
         : null;
+    if (
+      advertisedConfig !== null &&
+      Array.isArray(advertisedConfig.inert_keys) &&
+      advertisedConfig.inert_keys.length > 0
+    ) {
+      notifyInertKeys(state.hostClient, advertisedConfig.inert_keys);
+    }
     state.engineCompatible = true;
     state.bridgeState = "installed";
     return true;
@@ -1173,6 +1180,43 @@ function notifyRestore(client, count) {
   }
 }
 
+// Advertised inert config keys toast (Issue 128). Warns user that inert keys
+// were specified in configuration and have no runtime effect. Idempotent per
+// process via NOTIFIED.
+function notifyInertKeys(client, inertKeys) {
+  if (NOTIFIED.has("config.inert_keys")) return;
+  NOTIFIED.add("config.inert_keys");
+  let showToast;
+  try {
+    showToast = client?.tui?.showToast;
+  } catch {
+    showToast = undefined;
+  }
+  if (typeof showToast !== "function") {
+    logInfo("toast.not_delivered", { reason: "config.inert_keys" });
+    return;
+  }
+  const message =
+    inertKeys.length <= 3
+      ? `Inert config keys set: ${inertKeys.join(", ")}. These have no effect.`
+      : `${inertKeys.length} inert config keys set. These have no effect.`;
+  try {
+    Promise.resolve(
+      showToast.call(client.tui, {
+        body: {
+          title: "opencode-mem",
+          message,
+          variant: "warning",
+        },
+      })
+    ).catch((err) =>
+      logWarn("toast.failed", { reason: "config.inert_keys", message: shortError(err) })
+    );
+  } catch (err) {
+    logWarn("toast.failed", { reason: "config.inert_keys", message: shortError(err) });
+  }
+}
+
 // ── capture/best-effort transcript extraction (never throws) ────────────
 
 function extractText(node) {
@@ -1301,6 +1345,8 @@ async function runShutdown(state) {
 // ── plugin surface (D-34: session ids are hook data) ────────────────────
 
 export const server = async function server(input) {
+  const state = bridge();
+  state.hostClient = input?.client;
   // No engine is spawned and no host-visible state is touched here: hooks
   // exist even with no engine, so the plugin always loads (fail-open minimum).
   // Issue 34 (D-W5.3-7): the host `input.directory` is captured ONCE as the

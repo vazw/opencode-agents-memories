@@ -625,6 +625,23 @@ fn main() {
         );
     }
 
+    if !core_config.inert_keys_present.is_empty() {
+        mem_core::tracing::warn!(
+            inert_keys = ?core_config.inert_keys_present,
+            count = core_config.inert_keys_present.len(),
+            "inert config keys set in JSONC; these have no runtime effect"
+        );
+        structured_stderr(
+            "config.inert_keys",
+            "warn",
+            "engine",
+            mem_store::serde_json::json!({
+                "inert_keys": core_config.inert_keys_present,
+                "count": core_config.inert_keys_present.len(),
+            }),
+        );
+    }
+
     let exit = engine_run(
         config.mode,
         config,

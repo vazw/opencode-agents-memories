@@ -329,9 +329,100 @@ pub struct AutoCaptureProviderSettings {
 // Raw file schema (transcription of upstream OpenCodeMemConfig)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FileConfig {
+macro_rules! define_file_config {
+    // Munch: field with inert (inert attribute first)
+    (
+        @munch
+        [ $($fields:tt)* ]
+        [ $($inerts:expr,)* ]
+        #[inert]
+        $(#[$meta:meta])*
+        pub $field:ident : Option<$ty:ty>,
+        $($rest:tt)*
+    ) => {
+        define_file_config! {
+            @munch
+            [
+                $($fields)*
+                $(#[$meta])*
+                pub $field: Option<$ty>,
+            ]
+            [
+                $($inerts,)*
+                stringify!($field),
+            ]
+            $($rest)*
+        }
+    };
+
+    // Munch: field without inert
+    (
+        @munch
+        [ $($fields:tt)* ]
+        [ $($inerts:expr,)* ]
+        $(#[$meta:meta])*
+        pub $field:ident : Option<$ty:ty>,
+        $($rest:tt)*
+    ) => {
+        define_file_config! {
+            @munch
+            [
+                $($fields)*
+                $(#[$meta])*
+                pub $field: Option<$ty>,
+            ]
+            [
+                $($inerts,)*
+            ]
+            $($rest)*
+        }
+    };
+
+    // Munch done: emit struct and inert_field_names
+    (
+        @munch
+        [ $($fields:tt)* ]
+        [ $($inerts:expr,)* ]
+    ) => {
+        #[derive(Debug, Default, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        pub struct FileConfig {
+            $($fields)*
+        }
+
+        impl FileConfig {
+            pub fn inert_field_names() -> &'static [&'static str] {
+                &[
+                    $($inerts,)*
+                ]
+            }
+        }
+    };
+
+    // Entry point: MUST NOT match @munch
+    (
+        pub $($rest:tt)*
+    ) => {
+        define_file_config! {
+            @munch
+            [ ]
+            [ ]
+            pub $($rest)*
+        }
+    };
+    (
+        # $($rest:tt)*
+    ) => {
+        define_file_config! {
+            @munch
+            [ ]
+            [ ]
+            # $($rest)*
+        }
+    };
+}
+
+define_file_config! {
     pub storage_path: Option<String>,
     pub user_email_override: Option<String>,
     pub user_name_override: Option<String>,
@@ -346,8 +437,10 @@ pub struct FileConfig {
     pub embedding_document_prefix: Option<String>,
     pub embedding_dtype: Option<Value>,
     pub embedding_max_tokens: Option<f64>,
+    #[inert]
     pub similarity_threshold: Option<f64>,
     pub max_memories: Option<u32>,
+    #[inert]
     /// Upstream's `maxProfileItems`, parsed for compatibility and
     /// **deliberately unread**: no consumer exists, and the injection caps come
     /// from the three `userProfileInject*` knobs (issue 44.9). Do not wire it
@@ -356,17 +449,22 @@ pub struct FileConfig {
     pub inject_profile: Option<bool>,
     pub container_tag_prefix: Option<String>,
     pub auto_capture_enabled: Option<bool>,
+    #[inert]
     pub auto_capture_max_iterations: Option<u32>,
+    #[inert]
     pub auto_capture_iteration_timeout: Option<u64>,
     pub auto_capture_max_retries: Option<u32>,
     pub auto_capture_max_context_bytes: Option<f64>,
+    #[inert]
     pub auto_capture_language: Option<String>,
     pub memory_provider: Option<MemoryProvider>,
     pub memory_model: Option<String>,
     pub memory_api_url: Option<String>,
     pub memory_api_key: Option<String>,
+    #[inert]
     pub memory_temperature: Option<Value>,
     pub force_tool_choice: Option<bool>,
+    #[inert]
     pub memory_extra_params: Option<Value>,
     pub opencode_provider: Option<String>,
     pub opencode_model: Option<String>,
@@ -375,7 +473,11 @@ pub struct FileConfig {
     /// over `~/.local/state/opencode/service.json`'s origin, and the service
     /// file is then consulted for credentials ONLY.
     pub opencode_base_url: Option<String>,
+    #[inert]
     pub opencode_timeout_ms: Option<Value>,
+    #[inert]
+    pub auto_capture_provider_status: Option<Value>,
+    #[inert]
     pub ai_session_retention_days: Option<u32>,
     pub web_server_enabled: Option<bool>,
     pub web_server_port: Option<u16>,
@@ -385,13 +487,18 @@ pub struct FileConfig {
     pub web_server_api_token: Option<String>,
     pub max_vectors_per_shard: Option<u32>,
     pub auto_cleanup_enabled: Option<bool>,
+    #[inert]
     pub auto_cleanup_retention_days: Option<f64>,
     pub deduplication_enabled: Option<bool>,
     pub deduplication_similarity_threshold: Option<f64>,
     pub user_profile_analysis_interval: Option<u32>,
+    #[inert]
     pub user_profile_max_context_bytes: Option<u32>,
+    #[inert]
     pub user_profile_display_preferences: Option<u32>,
+    #[inert]
     pub user_profile_display_patterns: Option<u32>,
+    #[inert]
     pub user_profile_display_workflows: Option<u32>,
     pub user_profile_stale_days: Option<u32>,
     pub user_profile_inject_preferences: Option<u32>,
@@ -409,15 +516,21 @@ pub struct FileConfig {
     pub user_profile_auto_cleanup_enabled: Option<bool>,
     pub user_profile_auto_cleanup_interval: Option<f64>,
     pub user_profile_validation_enabled: Option<bool>,
+    #[inert]
     pub show_auto_capture_toasts: Option<bool>,
+    #[inert]
     pub show_user_profile_toasts: Option<bool>,
+    #[inert]
     pub show_error_toasts: Option<bool>,
     pub database_encryption_key: Option<String>,
     pub database_encryption_enabled: Option<bool>,
     pub database_encryption_cipher: Option<DatabaseEncryptionCipher>,
     /// Top-level switch that disables the mixed-version open guard (issue 45 O4/O5).
     pub allow_unguarded_open: Option<bool>,
+    #[inert]
     pub auto_update: Option<bool>,
+    #[inert]
+    pub default_scope: Option<Value>,
     pub compaction: Option<FileCompactionConfig>,
     pub chat_message: Option<FileChatMessageConfig>,
     pub episodic: Option<FileEpisodicConfig>,
@@ -759,6 +872,7 @@ pub struct Config {
     pub feature_flags: FeatureFlags,
     pub sound_memory: SoundMemory,
     pub promotion: Promotion,
+    pub inert_keys_present: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
