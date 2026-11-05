@@ -33,6 +33,8 @@ use crate::nav::ScreenState;
 use crate::paths::{EndpointId, encode_component, project_path};
 use crate::routes::{Owner, RouteId};
 use crate::skill_library::SkillLibraryPanel;
+use crate::state_block::{BlockKind, StateBlock};
+use thaw::{Button, Tag};
 
 /// The pure placeholder description for a screen state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -414,21 +416,25 @@ pub fn SessionHistoryPanel() -> impl IntoView {
                             .collect_view()
                     }}
                 </select>
-                <button
-                    type="button"
+                <Button
                     class="load-sessions"
-                    data-testid="load-sessions"
-                    on:click=move |_| reload.run(())
+                    attr:data-testid="load-sessions"
+                    on_click=move |_| reload.run(())
                 >
                     "Load timeline"
-                </button>
+                </Button>
             </div>
             {move || {
                 error
                     .get()
                     .map(|message| {
                         view! {
-                            <p class="session-error" data-testid="session-error">{message}</p>
+                            <StateBlock
+                                kind=BlockKind::Error
+                                message=message
+                                class="state-error"
+                                testid="session-error"
+                            />
                         }
                     })
             }}
@@ -451,9 +457,9 @@ pub fn SessionHistoryPanel() -> impl IntoView {
                                     {orphaned
                                         .then(|| {
                                             view! {
-                                                <span class="orphaned-badge" data-testid="orphaned-badge">
+                                                <Tag class="orphaned-badge" attr:data-testid="orphaned-badge">
                                                     "orphaned"
-                                                </span>
+                                                </Tag>
                                             }
                                         })}
                                     {move || {
@@ -485,11 +491,10 @@ pub fn SessionHistoryPanel() -> impl IntoView {
                                         } else {
                                             let ask_id = row_id.clone();
                                             view! {
-                                                <button
-                                                    type="button"
+                                                <Button
                                                     class="session-delete"
-                                                    data-testid="delete-session"
-                                                    on:click=move |_| {
+                                                    attr:data-testid="delete-session"
+                                                    on_click=move |_| {
                                                         confirm
                                                             .set(
                                                                 confirm_next(
@@ -501,7 +506,7 @@ pub fn SessionHistoryPanel() -> impl IntoView {
                                                     }
                                                 >
                                                     "Delete"
-                                                </button>
+                                                </Button>
                                             }
                                                 .into_any()
                                         }

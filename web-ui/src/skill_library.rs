@@ -25,6 +25,8 @@ use crate::api::envelope::ApiError;
 use crate::api_request::{self, RequestSpec};
 use crate::confirm::{ConfirmEvent, ConfirmGate, ConfirmState, confirm_next, dispatch};
 use crate::paths::{EndpointId, endpoint, fill};
+use crate::state_block::{BlockKind, StateBlock};
+use thaw::{Button, ButtonType, Card, Input, Tag};
 
 fn default_true() -> bool {
     true
@@ -529,22 +531,63 @@ pub fn SkillLibraryPanel() -> impl IntoView {
     view! {
         <section class="skill-library-panel" data-testid="skill-library-panel">
             <h2>"Skill Library"</h2>
-            <input type="text" id="skill-search" name="q" class="skill-search" data-testid="skill-search" aria-label="Search skills"
+            <Input
+                id="skill-search"
+                name="q"
+                class="skill-search"
+                attr:data-testid="skill-search"
+                attr:aria-label="Search skills"
                 placeholder="Search skills"
-                prop:value=move || search.get()
-                on:input=move |e| search.set(event_target_value(&e)) />
-            <button type="button" class="skill-create" data-testid="skill-create" on:click=move |_| open_create.run(())>
+                value=search
+            />
+            <Button
+                class="skill-create"
+                attr:data-testid="skill-create"
+                on_click=move |_| open_create.run(())
+            >
                 "New skill"
-            </button>
+            </Button>
 
             {move || match state.get() {
-                SkillsView::Loading => view! { <p class="panel-loading" data-testid="skills-loading">"Loading…"</p> }.into_any(),
-                SkillsView::Empty => view! { <p class="skills-empty" data-testid="skills-empty">"No skills"</p> }.into_any(),
-                SkillsView::Error(msg) => view! { <p class="skills-error" data-testid="skills-error">{msg}</p> }.into_any(),
+                SkillsView::Loading => view! {
+                    <StateBlock
+                        kind=BlockKind::Loading
+                        message="Loading…"
+                        class="state-loading"
+                        testid="skills-loading"
+                    />
+                }
+                .into_any(),
+                SkillsView::Empty => view! {
+                    <StateBlock
+                        kind=BlockKind::Empty
+                        message="No skills"
+                        class="state-empty"
+                        testid="skills-empty"
+                    />
+                }
+                .into_any(),
+                SkillsView::Error(msg) => view! {
+                    <StateBlock
+                        kind=BlockKind::Error
+                        message=msg
+                        class="state-error"
+                        testid="skills-error"
+                    />
+                }
+                .into_any(),
                 SkillsView::Loaded { .. } => {
                     let filtered = visible_rows();
                     if filtered.is_empty() && rows.get().is_empty() {
-                        view! { <p class="skills-empty" data-testid="skills-empty">"No skills"</p> }.into_any()
+                        view! {
+                            <StateBlock
+                                kind=BlockKind::Empty
+                                message="No skills"
+                                class="state-empty"
+                                testid="skills-empty"
+                            />
+                        }
+                        .into_any()
                     } else {
                         view! {
                             <ul class="skill-list">
@@ -558,13 +601,16 @@ pub fn SkillLibraryPanel() -> impl IntoView {
                                             <span class="skill-name" data-testid="skill-name">{row.name.clone()}</span>
                                             <span class="skill-description" data-testid="skill-description">{row.description.clone()}</span>
                                             <span class="skill-updated" data-testid="skill-updated">{row.updated_at.clone()}</span>
-                                            {if row.enabled { view! { <span class="skill-enabled-badge" data-testid="skill-enabled-badge">"enabled"</span> }.into_any() } else { view! { <span></span> }.into_any() }}
-                                            {if row.autoinvoke { view! { <span class="skill-autoinvoke-badge" data-testid="skill-autoinvoke-badge">"auto"</span> }.into_any() } else { view! { <span></span> }.into_any() }}
-                                            <button type="button" class="skill-edit" data-testid="skill-edit"
-                                                aria-label=format!("Edit {}", id)
-                                                on:click=move |_| open_edit.run(id2.clone())>
+                                            {if row.enabled { view! { <Tag class="skill-enabled-badge" attr:data-testid="skill-enabled-badge">"enabled"</Tag> }.into_any() } else { view! { <span></span> }.into_any() }}
+                                            {if row.autoinvoke { view! { <Tag class="skill-autoinvoke-badge" attr:data-testid="skill-autoinvoke-badge">"auto"</Tag> }.into_any() } else { view! { <span></span> }.into_any() }}
+                                            <Button
+                                                class="skill-edit"
+                                                attr:data-testid="skill-edit"
+                                                attr:aria-label=format!("Edit {}", id)
+                                                on_click=move |_| open_edit.run(id2.clone())
+                                            >
                                                 "Edit"
-                                            </button>
+                                            </Button>
                                             {move || {
                                                 let armed = confirm.get().pending.as_deref()
                                                     == Some(row_id.as_str());
@@ -595,12 +641,11 @@ pub fn SkillLibraryPanel() -> impl IntoView {
                                                     let ask_id = row_id.clone();
                                                     let label = format!("Delete {}", ask_id);
                                                     view! {
-                                                        <button
-                                                            type="button"
+                                                        <Button
                                                             class="skill-delete"
-                                                            data-testid="skill-delete"
-                                                            aria-label=label
-                                                            on:click=move |_| {
+                                                            attr:data-testid="skill-delete"
+                                                            attr:aria-label=label
+                                                            on_click=move |_| {
                                                                 confirm
                                                                     .set(
                                                                         confirm_next(
@@ -612,7 +657,7 @@ pub fn SkillLibraryPanel() -> impl IntoView {
                                                             }
                                                         >
                                                             "Delete"
-                                                        </button>
+                                                        </Button>
                                                     }
                                                         .into_any()
                                                 }
@@ -627,47 +672,76 @@ pub fn SkillLibraryPanel() -> impl IntoView {
             }}
 
             {move || error.get().map(|m| view! {
-                <p class="skills-error" data-testid="skills-error">{m}</p>
+                <StateBlock
+                    kind=BlockKind::Error
+                    message=m
+                    class="state-error"
+                    testid="skills-error"
+                />
             })}
 
             {move || if form_open.get() {
                 view! {
-                    <form class="skill-form" data-testid="skill-form">
-                        <code class="skill-form-id" data-testid="skill-form-id">{form_id_display()}</code>
-                        <label for="skill-name">"Name"</label>
-                        <input type="text" id="skill-name" class="skill-form-name" data-testid="skill-form-name"
-                            prop:value=move || draft_name.get()
-                            on:input=move |e| draft_name.set(event_target_value(&e)) />
-                        <label for="skill-description">"Description"</label>
-                        <input type="text" id="skill-description" class="skill-form-description" data-testid="skill-form-description"
-                            prop:value=move || draft_description.get()
-                            on:input=move |e| draft_description.set(event_target_value(&e)) />
-                        <label for="skill-content">"Content"</label>
-                        <textarea id="skill-content" class="skill-form-content" data-testid="skill-form-content"
-                            prop:value=move || draft_content.get()
-                            on:input=move |e| draft_content.set(event_target_value(&e)) />
-                        <label>
-                            <input type="checkbox" id="skill-autoinvoke" name="autoinvoke"
-                                class="skill-form-autoinvoke" data-testid="skill-form-autoinvoke"
-                                prop:checked=move || draft_autoinvoke.get()
-                                on:change=move |e| draft_autoinvoke.set(event_target_checked(&e)) />
-                            "Auto-invoke"
-                        </label>
-                        <label>
-                            <input type="checkbox" id="skill-enabled" name="enabled"
-                                class="skill-form-enabled" data-testid="skill-form-enabled"
-                                prop:checked=move || draft_enabled.get()
-                                on:change=move |e| draft_enabled.set(event_target_checked(&e)) />
-                            "Enabled"
-                        </label>
-                        {move || form_error.get().map(|m| view! { <p class="skill-form-error">{m}</p> })}
-                        <button type="button" class="skill-save" data-testid="skill-save" on:click=move |_| save.run(())>
-                            "Save skill"
-                        </button>
-                        <button type="button" class="skill-cancel" data-testid="skill-cancel" on:click=move |_| cancel.run(())>
-                            "Cancel"
-                        </button>
-                    </form>
+                    <Card>
+                        <form class="skill-form" data-testid="skill-form"
+                            on:submit=move |ev| {
+                                // A form with no submit control still fires an
+                                // implicit submit on Enter; keep it on the page
+                                // (the Save button carries the write).
+                                ev.prevent_default();
+                            }>
+                            <code class="skill-form-id" data-testid="skill-form-id">{form_id_display()}</code>
+                            <label for="skill-name">"Name"</label>
+                            <Input
+                                id="skill-name"
+                                class="skill-form-name"
+                                attr:data-testid="skill-form-name"
+                                value=draft_name
+                            />
+                            <label for="skill-description">"Description"</label>
+                            <Input
+                                id="skill-description"
+                                class="skill-form-description"
+                                attr:data-testid="skill-form-description"
+                                value=draft_description
+                            />
+                            <label for="skill-content">"Content"</label>
+                            <textarea id="skill-content" class="skill-form-content" data-testid="skill-form-content"
+                                prop:value=move || draft_content.get()
+                                on:input=move |e| draft_content.set(event_target_value(&e)) />
+                            <label>
+                                <input type="checkbox" id="skill-autoinvoke" name="autoinvoke"
+                                    class="skill-form-autoinvoke" data-testid="skill-form-autoinvoke"
+                                    prop:checked=move || draft_autoinvoke.get()
+                                    on:change=move |e| draft_autoinvoke.set(event_target_checked(&e)) />
+                                "Auto-invoke"
+                            </label>
+                            <label>
+                                <input type="checkbox" id="skill-enabled" name="enabled"
+                                    class="skill-form-enabled" data-testid="skill-form-enabled"
+                                    prop:checked=move || draft_enabled.get()
+                                    on:change=move |e| draft_enabled.set(event_target_checked(&e)) />
+                                "Enabled"
+                            </label>
+                            {move || form_error.get().map(|m| view! { <p class="skill-form-error">{m}</p> })}
+                            <Button
+                                class="skill-save"
+                                attr:data-testid="skill-save"
+                                button_type=ButtonType::Button
+                                on_click=move |_| save.run(())
+                            >
+                                "Save skill"
+                            </Button>
+                            <Button
+                                class="skill-cancel"
+                                attr:data-testid="skill-cancel"
+                                button_type=ButtonType::Button
+                                on_click=move |_| cancel.run(())
+                            >
+                                "Cancel"
+                            </Button>
+                        </form>
+                    </Card>
                 }.into_any()
             } else {
                 view! { <span></span> }.into_any()

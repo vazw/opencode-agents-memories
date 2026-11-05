@@ -31,8 +31,8 @@ use leptos::callback::Callable;
 use leptos::prelude::*;
 use serde::Deserialize;
 use thaw::{
-    Badge, BadgeAppearance, Card, Pagination, Table, TableBody, TableCell, TableHeader,
-    TableHeaderCell, TableRow,
+    Badge, BadgeAppearance, Button, ButtonAppearance, Card, Input, Pagination, Table, TableBody,
+    TableCell, TableHeader, TableHeaderCell, TableRow, Tag,
 };
 
 use crate::api::auth::{AuthContext, read_marker_token};
@@ -41,7 +41,7 @@ use crate::api_request::{self, RequestSpec};
 use crate::confirm::{ConfirmEvent, ConfirmGate, ConfirmState, confirm_next, dispatch};
 use crate::paths::{EndpointId, endpoint, fill};
 use crate::screens::format_created_at;
-use crate::state_block::{BlockKind, block_kind};
+use crate::state_block::{BlockKind, StateBlock, block_kind};
 
 /// Render a timestamp the endpoint supplied.
 ///
@@ -396,10 +396,10 @@ fn memory_row(
             } else {
                 let ask_id = id.clone();
                 view! {
-                    <button
-                        type="button"
-                        data-testid="memory-delete"
-                        on:click=move |_| {
+                    <Button
+                        appearance=ButtonAppearance::Subtle
+                        attr:data-testid="memory-delete"
+                        on_click=move |_| {
                             confirm
                                 .set(
                                     confirm_next(
@@ -411,7 +411,7 @@ fn memory_row(
                         }
                     >
                         "Delete"
-                    </button>
+                    </Button>
                 }
                 .into_any()
             }
@@ -462,7 +462,7 @@ fn memory_row(
                                     aria-label=label
                                     on:click=move |_| on_tag.run(value.clone())
                                 >
-                                    {tag}
+                                    <Tag>{tag}</Tag>
                                 </button>
                             }
                         })
@@ -480,9 +480,13 @@ fn memory_row(
                     .then(move || {
                         view! {
                             <div class="memory-card-foot">
-                                <button type="button" data-testid="memory-pin" on:click=pin>
+                                <Button
+                                    appearance=ButtonAppearance::Subtle
+                                    attr:data-testid="memory-pin"
+                                    on_click=pin
+                                >
                                     {if pinned { "Unpin" } else { "Pin" }}
-                                </button>
+                                </Button>
                                 {delete_area}
                             </div>
                         }
@@ -610,16 +614,14 @@ pub fn MemoriesPanel() -> impl IntoView {
         <section class="memories-panel" data-testid="memories-panel">
             <h2>"Memories"</h2>
             <div class="memories-filters" data-testid="memories-filters">
-                <input
+                <Input
                     id="memories-search"
                     name="q"
-                    type="text"
                     class="memories-search"
-                    data-testid="memories-search"
+                    attr:data-testid="memories-search"
                     placeholder="Search memories"
-                    prop:value=move || query.get()
-                    on:input=move |event| query.set(event_target_value(&event))
-                    on:keydown=move |event| {
+                    value=query
+                    on:keydown=move |event: leptos::ev::KeyboardEvent| {
                         if event.key() == "Enter" {
                             refresh.run(());
                         }
@@ -638,7 +640,7 @@ pub fn MemoriesPanel() -> impl IntoView {
                                     aria-label=label
                                     on:click=move |_| remove_tag(value.clone())
                                 >
-                                    {tag}
+                                    <Tag>{tag}</Tag>
                                 </button>
                             }
                         })
@@ -648,20 +650,23 @@ pub fn MemoriesPanel() -> impl IntoView {
                     (!tags.get().is_empty())
                         .then(|| {
                             view! {
-                                <button type="button" data-testid="memories-clear" on:click=clear_tags>
+                                <Button
+                                    appearance=ButtonAppearance::Subtle
+                                    attr:data-testid="memories-clear"
+                                    on_click=clear_tags
+                                >
                                     "Clear"
-                                </button>
+                                </Button>
                             }
                         })
                 }}
-                <button
-                    type="button"
+                <Button
                     class="memories-reload"
-                    data-testid="memories-reload"
-                    on:click=move |_| refresh.run(())
+                    attr:data-testid="memories-reload"
+                    on_click=move |_| refresh.run(())
                 >
                     "Reload"
-                </button>
+                </Button>
                 <span class="memories-range" data-testid="memories-range">{range}</span>
             </div>
             {move || {
@@ -690,28 +695,33 @@ pub fn MemoriesPanel() -> impl IntoView {
             {move || {
                 let current = state.get();
                 match (block_kind(&current), current) {
-                    (BlockKind::Loading, _) => {
-                        view! {
-                            <p class="panel-loading" data-testid="memories-loading">
-                                "Loading memories…"
-                            </p>
-                        }
-                            .into_any()
+                    (BlockKind::Loading, _) => view! {
+                        <StateBlock
+                            kind=BlockKind::Loading
+                            message="Loading memories…"
+                            class="state-loading"
+                            testid="memories-loading"
+                        />
                     }
-                    (BlockKind::Empty, MemoriesView::Empty { total }) => {
-                        view! {
-                            <p class="memories-empty" data-testid="memories-empty">
-                                {format!("No memories match (total {total}).")}
-                            </p>
-                        }
-                            .into_any()
+                    .into_any(),
+                    (BlockKind::Empty, MemoriesView::Empty { total }) => view! {
+                        <StateBlock
+                            kind=BlockKind::Empty
+                            message=format!("No memories match (total {total}).")
+                            class="state-empty"
+                            testid="memories-empty"
+                        />
                     }
-                    (BlockKind::Error, MemoriesView::Error(message)) => {
-                        view! {
-                            <p class="memories-error" data-testid="memories-error">{message}</p>
-                        }
-                            .into_any()
+                    .into_any(),
+                    (BlockKind::Error, MemoriesView::Error(message)) => view! {
+                        <StateBlock
+                            kind=BlockKind::Error
+                            message=message
+                            class="state-error"
+                            testid="memories-error"
+                        />
                     }
+                    .into_any(),
                     (_, MemoriesView::Loaded { rows, .. }) => {
                         view! {
                             <ul class="memory-list" data-testid="memories-list">
@@ -911,30 +921,33 @@ pub fn TagsPanel() -> impl IntoView {
     view! {
         <section class="tags-panel" data-testid="tags-panel">
             <h2>"Tags"</h2>
-            <button
-                type="button"
+            <Button
                 class="tags-reload"
-                data-testid="tags-reload"
-                on:click=move |_| reload.run(())
+                attr:data-testid="tags-reload"
+                on_click=move |_| reload.run(())
             >
                 "Reload"
-            </button>
+            </Button>
             {move || {
                 match state.get() {
-                    TagsView::Loading => {
-                        view! {
-                            <p class="panel-loading" data-testid="tags-loading">"Loading tags…"</p>
-                        }
-                            .into_any()
+                    TagsView::Loading => view! {
+                        <StateBlock
+                            kind=BlockKind::Loading
+                            message="Loading tags…"
+                            class="state-loading"
+                            testid="tags-loading"
+                        />
                     }
-                    TagsView::Empty => {
-                        view! {
-                            <p class="tags-empty" data-testid="tags-empty">
-                                "No tags yet. Add a memory to a project or your profile."
-                            </p>
-                        }
-                            .into_any()
+                    .into_any(),
+                    TagsView::Empty => view! {
+                        <StateBlock
+                            kind=BlockKind::Empty
+                            message="No tags yet. Add a memory to a project or your profile."
+                            class="state-empty"
+                            testid="tags-empty"
+                        />
                     }
+                    .into_any(),
                     TagsView::Loaded { project, user, memory_tags, memory_tag_total } => {
                         let shown = memory_tags.len();
                         view! {
@@ -984,10 +997,15 @@ pub fn TagsPanel() -> impl IntoView {
                         }
                             .into_any()
                     }
-                    TagsView::Error(message) => {
-                        view! { <p class="tags-error" data-testid="tags-error">{message}</p> }
-                            .into_any()
+                    TagsView::Error(message) => view! {
+                        <StateBlock
+                            kind=BlockKind::Error
+                            message=message
+                            class="state-error"
+                            testid="tags-error"
+                        />
                     }
+                    .into_any(),
                 }
             }}
         </section>
@@ -1369,24 +1387,24 @@ pub fn ProfilePanel() -> impl IntoView {
                         .into_any()
                 }
             }}
-            <button
-                type="button"
+            <Button
                 class="profile-reload"
-                data-testid="profile-reload"
-                on:click=move |_| reload.run(())
+                attr:data-testid="profile-reload"
+                on_click=move |_| reload.run(())
             >
                 "Reload"
-            </button>
+            </Button>
             {move || {
                 match state.get() {
-                    ProfileScreen::Loading => {
-                        view! {
-                            <p class="panel-loading" data-testid="profile-loading">
-                                "Loading profile…"
-                            </p>
-                        }
-                            .into_any()
+                    ProfileScreen::Loading => view! {
+                        <StateBlock
+                            kind=BlockKind::Loading
+                            message="Loading profile…"
+                            class="state-loading"
+                            testid="profile-loading"
+                        />
                     }
+                    .into_any(),
                     ProfileScreen::Missing { user_id, message } => {
                         view! {
                             <div class="profile-missing" data-testid="profile-missing">
@@ -1426,12 +1444,15 @@ pub fn ProfilePanel() -> impl IntoView {
                         }
                             .into_any()
                     }
-                    ProfileScreen::Error(message) => {
-                        view! {
-                            <p class="profile-error" data-testid="profile-error">{message}</p>
-                        }
-                            .into_any()
+                    ProfileScreen::Error(message) => view! {
+                        <StateBlock
+                            kind=BlockKind::Error
+                            message=message
+                            class="state-error"
+                            testid="profile-error"
+                        />
                     }
+                    .into_any(),
                 }
             }}
         </section>
@@ -1766,29 +1787,34 @@ fn stats_overview(stats: &StatsView, active_shards: usize) -> AnyView {
         stats.generated_at.clone()
     };
 
+    let total = stats.total;
+    let scope_meta = format!(
+        "user {} · project {}",
+        stats.by_scope.user, stats.by_scope.project
+    );
+    let shards_len = stats.shards.len();
+
     view! {
         <section class="stats-overview" aria-label="Stats overview">
-            <div class="stats-card" data-testid="stats-card-total">
+            <Card class="stats-card" attr:data-testid="stats-card-total">
                 <h3>"Total memories"</h3>
-                <p class="stats-card-value">{stats.total}</p>
-                <p class="stats-card-meta">
-                    {format!("user {} · project {}", stats.by_scope.user, stats.by_scope.project)}
-                </p>
-            </div>
-            <div class="stats-card" data-testid="stats-card-shards">
+                <p class="stats-card-value">{total}</p>
+                <p class="stats-card-meta">{scope_meta}</p>
+            </Card>
+            <Card class="stats-card" attr:data-testid="stats-card-shards">
                 <h3>"Active shards"</h3>
                 <p class="stats-card-value">{active_shards}</p>
-                <p class="stats-card-meta">{format!("{} shards total", stats.shards.len())}</p>
-            </div>
-            <div class="stats-card" data-testid="stats-card-profile">
+                <p class="stats-card-meta">{format!("{} shards total", shards_len)}</p>
+            </Card>
+            <Card class="stats-card" attr:data-testid="stats-card-profile">
                 <h3>"Profile"</h3>
                 {profile_cell}
-            </div>
-            <div class="stats-card" data-testid="stats-card-generated">
+            </Card>
+            <Card class="stats-card" attr:data-testid="stats-card-generated">
                 <h3>"Generated"</h3>
                 <p class="stats-card-value stats-generated">{generated}</p>
                 <p class="stats-card-meta">"Snapshot of this answer"</p>
-            </div>
+            </Card>
         </section>
     }
     .into_any()
@@ -1996,21 +2022,23 @@ pub fn StatsPanel() -> impl IntoView {
     view! {
         <section class="stats-panel" data-testid="stats-panel">
             <h2>"Stats"</h2>
-            <button
-                type="button"
+            <Button
                 class="stats-reload"
-                data-testid="stats-reload"
-                on:click=move |_| reload.run(())
+                attr:data-testid="stats-reload"
+                on_click=move |_| reload.run(())
             >
                 "Reload"
-            </button>
+            </Button>
             {move || match state.get() {
-                StatsScreen::Loading => {
-                    view! {
-                        <p class="panel-loading" data-testid="stats-loading">"Loading stats…"</p>
-                    }
-                        .into_any()
+                StatsScreen::Loading => view! {
+                    <StateBlock
+                        kind=BlockKind::Loading
+                        message="Loading stats…"
+                        class="state-loading"
+                        testid="stats-loading"
+                    />
                 }
+                .into_any(),
                 StatsScreen::Loaded(stats) => stats_loaded_view(&stats),
                 StatsScreen::Failed { message, last } => {
                     let stale = last.is_some().then(|| {
@@ -2022,11 +2050,16 @@ pub fn StatsPanel() -> impl IntoView {
                     });
                     let body = last.map(|stats| stats_loaded_view(&stats));
                     view! {
-                        <p class="stats-error" data-testid="stats-error">{message}</p>
+                        <StateBlock
+                            kind=BlockKind::Error
+                            message=message
+                            class="state-error"
+                            testid="stats-error"
+                        />
                         {stale}
                         {body}
                     }
-                        .into_any()
+                    .into_any()
                 }
             }}
         </section>
@@ -2388,24 +2421,24 @@ pub fn SettingsPanel() -> impl IntoView {
     view! {
         <section class="settings-panel" data-testid="settings-panel">
             <h2>"Settings"</h2>
-            <button
-                type="button"
+            <Button
                 class="settings-reload"
-                data-testid="settings-reload"
-                on:click=move |_| reload.run(())
+                attr:data-testid="settings-reload"
+                on_click=move |_| reload.run(())
             >
                 "Reload"
-            </button>
+            </Button>
             {move || {
                 match state.get() {
-                    SettingsScreen::Loading => {
-                        view! {
-                            <p class="panel-loading" data-testid="settings-loading">
-                                "Loading status…"
-                            </p>
-                        }
-                            .into_any()
+                    SettingsScreen::Loading => view! {
+                        <StateBlock
+                            kind=BlockKind::Loading
+                            message="Loading status…"
+                            class="state-loading"
+                            testid="settings-loading"
+                        />
                     }
+                    .into_any(),
                     SettingsScreen::Loaded {
                         status,
                         auth_enabled,
@@ -2441,12 +2474,15 @@ pub fn SettingsPanel() -> impl IntoView {
                         }
                             .into_any()
                     }
-                    SettingsScreen::Error(message) => {
-                        view! {
-                            <p class="settings-error" data-testid="settings-error">{message}</p>
-                        }
-                            .into_any()
+                    SettingsScreen::Error(message) => view! {
+                        <StateBlock
+                            kind=BlockKind::Error
+                            message=message
+                            class="state-error"
+                            testid="settings-error"
+                        />
                     }
+                    .into_any(),
                 }
             }}
             {move || {
@@ -2464,14 +2500,14 @@ pub fn SettingsPanel() -> impl IntoView {
                 });
                 let cancel = (status == CleanupStatus::Armed).then(|| {
                     view! {
-                        <button
-                            type="button"
+                        <Button
+                            appearance=ButtonAppearance::Secondary
                             class="maintenance-cancel"
-                            data-testid="maintenance-cancel"
-                            on:click=move |_| dispatch.run(CleanupAction::Cancel)
+                            attr:data-testid="maintenance-cancel"
+                            on_click=move |_| dispatch.run(CleanupAction::Cancel)
                         >
                             "Cancel"
-                        </button>
+                        </Button>
                     }
                 });
                 let outcome_view = match outcome {
@@ -2535,12 +2571,12 @@ pub fn SettingsPanel() -> impl IntoView {
                             "Cleanup deletes memories older than the retention window. It is never run automatically."
                         </p>
                         {armed_notice}
-                        <button
-                            type="button"
+                        <Button
+                            appearance=ButtonAppearance::Primary
                             class="maintenance-action"
-                            data-testid="maintenance-action"
-                            prop:disabled=move || cleanup_disabled(&cleanup.get())
-                            on:click=move |_| {
+                            attr:data-testid="maintenance-action"
+                            disabled=Signal::derive(move || cleanup_disabled(&cleanup.get()))
+                            on_click=move |_| {
                                 let action = if cleanup.get_untracked().armed {
                                     CleanupAction::Confirm
                                 } else {
@@ -2550,7 +2586,7 @@ pub fn SettingsPanel() -> impl IntoView {
                             }
                         >
                             {cleanup_action_label(status)}
-                        </button>
+                        </Button>
                         {cancel}
                         {outcome_view}
                     </section>

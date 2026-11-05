@@ -10,7 +10,10 @@ use leptos_router::NavigateOptions;
 use leptos_router::components::{Route, Router, Routes};
 use leptos_router::hooks::use_navigate;
 use leptos_router::path;
-use thaw::{ConfigProvider, Icon, LayoutHeader, LayoutSider, NavDrawer, NavDrawerHeader, NavItem};
+use thaw::{
+    Button, ButtonAppearance, ConfigProvider, Icon, LayoutHeader, LayoutSider, NavDrawer,
+    NavDrawerHeader, NavItem,
+};
 
 use crate::nav::{
     ScreenState, is_plain_left_click, nav_entries, nav_icon, selected_path, state_for,
@@ -152,21 +155,21 @@ fn ShellView() -> impl IntoView {
                     <h1 class="app-title">
                         {move || current_route.get().map(|id| route_spec(id).label)}
                     </h1>
-                    <button
-                        type="button"
+                    <Button
+                        appearance=ButtonAppearance::Subtle
                         class="theme-toggle"
-                        on:click=toggle
-                        aria-label=move || match theme.get() {
+                        on_click=toggle
+                        attr:aria-label=move || match theme.get() {
                             Theme::Light => "Switch to dark theme",
                             Theme::Dark => "Switch to light theme",
                         }
-                        title=move || match theme.get() {
+                        attr:title=move || match theme.get() {
                             Theme::Light => "Switch to dark theme",
                             Theme::Dark => "Switch to light theme",
                         }
                     >
                         <Icon icon=Signal::derive(move || toggle_icon(theme.get())) />
-                    </button>
+                    </Button>
                 </LayoutHeader>
                 <main class="app-main">
                     {move || match current_route.get() {

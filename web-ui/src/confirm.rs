@@ -13,8 +13,8 @@
 //! so every wiring site must dispatch it on **every** exit path of the request
 //! — success, HTTP error and transport error — not only where the list reloads.
 
-use leptos::html;
 use leptos::prelude::*;
+use thaw::{Button, ButtonAppearance, ButtonRef, ComponentRef};
 
 /// The confirmation copy, one string for all three rows.
 pub const CONFIRM_DELETE_PROMPT: &str = "Delete permanently? This cannot be undone.";
@@ -93,33 +93,33 @@ pub fn dispatch(signal: RwSignal<ConfirmState>, event: ConfirmEvent) -> Option<S
 /// must not be stranded on `<body>`.
 #[component]
 pub fn ConfirmGate(on_confirm: Callback<()>, on_cancel: Callback<()>) -> impl IntoView {
-    let confirm_ref = NodeRef::<html::Button>::new();
+    let confirm_ref = ComponentRef::<ButtonRef>::default();
     Effect::new(move |_| {
         if let Some(button) = confirm_ref.get() {
-            let _ = button.focus();
+            button.focus();
         }
     });
 
     view! {
         <span class="confirm-gate" data-testid="confirm-gate" role="group" aria-label="Confirm delete">
             <span class="confirm-gate-text" data-testid="confirm-gate-text">{CONFIRM_DELETE_PROMPT}</span>
-            <button
-                type="button"
+            <Button
+                appearance=ButtonAppearance::Primary
                 class="confirm-gate-confirm"
-                data-testid="confirm-gate-confirm"
-                node_ref=confirm_ref
-                on:click=move |_| on_confirm.run(())
+                attr:data-testid="confirm-gate-confirm"
+                comp_ref=confirm_ref
+                on_click=move |_| on_confirm.run(())
             >
                 "Confirm delete"
-            </button>
-            <button
-                type="button"
+            </Button>
+            <Button
+                appearance=ButtonAppearance::Secondary
                 class="confirm-gate-cancel"
-                data-testid="confirm-gate-cancel"
-                on:click=move |_| on_cancel.run(())
+                attr:data-testid="confirm-gate-cancel"
+                on_click=move |_| on_cancel.run(())
             >
                 "Cancel"
-            </button>
+            </Button>
         </span>
     }
 }
