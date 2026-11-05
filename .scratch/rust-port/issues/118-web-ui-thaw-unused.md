@@ -1,14 +1,25 @@
 # 118 — the web UI draws 1 of 58 Thaw components: a hand-rolled design system sits beside the framework
 
-Status: ready-for-human — **wave 1 (theme + shell) is built, staged and live-verified; wave 2 is the next
-scoped unit** (blueprint `.tmp/blueprints/blueprint-20261103-1147-webui-thaw-wave1-shell-r6.md`,
-`blueprint_sha256: 6d54b8762eae`). Live on `:3742` 2026-11-03: `[class*=thaw-]` 1 → **39** on every route,
-`nav[aria-label="Primary"]` 0 → **1** (the app's nav had never carried its label — `shell.rs:59` wrote
-`attr:aria-label`, a literal attribute name), colon-named attributes **0**, canvas painted from the palette
-(`rgb(20, 23, 28)` dark), 196 wasm tests and class census 187/187. The ±2 % height pair held on 9 of 10
-routes; `/tags` read **+4.3 %** (1273 → 1328 px at 1280×800) on a page whose rows are data-derived —
-labelled INFERRED content drift, not a layout change, and the one number here that is not proven.
-Waves 2 and 3 are scoped below but not yet planned.
+Status: ready-for-human — **waves 1 (theme + shell) and 2 (controls + states) are built and live-verified;
+wave 3 is the next scoped unit.** Wave 2 (blueprint `.tmp/blueprints/blueprint-20261105-1525-issue-118-webui-thaw-wave2-controls-r2.md`,
+`blueprint_sha256: def66e3174bf`) replaced the raw controls with Thaw `Button`/`Input`/`Card`/`Tag`
+and one `StateBlock`, and pruned the matching bespoke CSS in the same steps. Live on a disposable
+engine 2026-11-06 (port 49384, fresh store): `raw <button>` **0** on all ten routes, class census
+`emitted=179 hooks=179 missing=0 dead=0 unresolved=0`, token census `missing=0 dead=0`, wasm suite
+green, both web-ui and both root clippy gates green. The two always-rendered native selects
+(`profile-identity-select`, `sessions-project-select`) measure 1; `agents-project-select` renders only
+with a populated project roster (empty roster shows `agents-no-projects`) and is unchanged at source.
+Wave 2 also fixed a regression its own control swap introduced: Thaw buttons default to
+`type=submit`, so `skill-save`/`skill-cancel` now carry `button_type=ButtonType::Button` and the form
+prevents its implicit Enter submission — browser RED (`Save must not submit form — 1 !== 0`) → GREEN
+(`PASS Save, Cancel, Enter`). Review-1 also caught that every `StateBlock` container rendered only the
+caller's class (`class={let _ = STATE_BLOCK_CLASS; cls}` discarded the common class, so the `.state-block`
+spacing never applied while the dead-class census still counted the token); fixed with
+`class={[STATE_BLOCK_CLASS, cls.as_str()].join(" ")}` and pinned by
+`web-ui/scripts/test-state-block-cdp.cjs` (RED `FAIL StateBlock container must carry .state-block` →
+GREEN, classList `["state-block","state-empty"]`, 12 px margins, `/agents` loading arm included). The
+route census is now readiness-gated (`web-ui/scripts/capture-evidence.cjs`), which is why the `/stats`
+row reads 4 cards rather than a mid-load 0. Evidence: `docs/evidence/webui-wave2-thaw-controls/README.md`.
 
 ## Observation (MEASURED 2026-11-03, chrome-devtools MCP against the live engine at 127.0.0.1:3742)
 

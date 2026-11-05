@@ -8,6 +8,8 @@ use crate::core_screens::{
     MemoryItem, MemoryPage, ProfileData, ProfileItem, ProfileView, TagInfo, TagsPage,
 };
 use crate::paths::{EndpointId, endpoint};
+use crate::state_block::{BlockKind, StateBlock};
+use thaw::Button;
 
 pub const EXPLORER_EXPORT_KIND: &str = "opencode-mem-explorer-export";
 pub const MAX_IMPORT_BYTES: usize = 100 * 1024 * 1024;
@@ -499,11 +501,14 @@ pub fn ExportImportPanel() -> impl IntoView {
                     exportable_memories(&memories.get()).len(),
                 )}
             </div>
-            <button type="button" class="export-download" data-testid="export-download"
-                prop:disabled=move || export_download_disabled(loaded.get())
-                on:click=move |_| download.run(())>
+            <Button
+                class="export-download"
+                attr:data-testid="export-download"
+                disabled=Signal::derive(move || export_download_disabled(loaded.get()))
+                on_click=move |_| download.run(())
+            >
                 "Download export"
-            </button>
+            </Button>
             <label for="import-json">"Import JSON"</label>
             <textarea id="import-json" class="import-input" data-testid="import-input"
                 prop:value=move || import_text.get()
@@ -517,7 +522,12 @@ pub fn ExportImportPanel() -> impl IntoView {
                 "Import apply is not supported in the browser; use the server-side portability import."
             </div>
             {move || import_error.get().map(|m| view! {
-                <p class="export-import-error" data-testid="export-import-error">{m}</p>
+                <StateBlock
+                    kind=BlockKind::Error
+                    message=m
+                    class="state-error"
+                    testid="export-import-error"
+                />
             })}
         </section>
     }

@@ -229,8 +229,7 @@ body {
  * counter labels are the only visible symptom when it is missing, but every
  * label it wraps is read by assistive tech instead of painted.
  *
- * `.panel-loading` is the one loading note five panels render (Memories, Tags,
- * Profile, Settings, Skills) — one rule, five screens.
+ * `.state-block` provides common spacing for loading/empty/error states.
  * ------------------------------------------------------------------------- */
 
 .visually-hidden {
@@ -246,10 +245,14 @@ body {
   border: 0;
 }
 
-.panel-loading {
+.state-block {
   margin: 0.75rem 0;
-  color: var(--muted);
-  font-size: 0.9rem;
+}
+
+.state-loading,
+.state-empty,
+.state-error {
+  display: block;
 }
 
 /* ---------------------------------------------------------------------------
@@ -273,9 +276,7 @@ body {
   font-size: 1.15rem;
 }
 
-.skill-search,
 .import-input,
-.skill-form input[type="text"],
 .skill-form textarea {
   width: 100%;
   padding: 0.45rem 0.6rem;
@@ -287,6 +288,7 @@ body {
 }
 
 .skill-search {
+  width: 100%;
   margin-bottom: 0.75rem;
 }
 
@@ -322,12 +324,7 @@ body {
 
 .skill-enabled-badge,
 .skill-autoinvoke-badge {
-  padding: 0.05rem 0.4rem;
-  font-size: 0.75rem;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  border: 1px solid var(--border);
-  border-radius: 999px;
 }
 
 .skill-form {
@@ -354,11 +351,6 @@ body {
 
 .skill-form-error {
   margin: 0;
-  color: var(--warn-text);
-}
-
-.skills-error,
-.export-import-error {
   color: var(--warn-text);
 }
 
@@ -433,27 +425,10 @@ body {
 
 .maintenance-action {
   margin-top: 0.5rem;
-  padding: 0.4rem 0.9rem;
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 0.25rem;
-  cursor: pointer;
-}
-
-.maintenance-action:disabled {
-  opacity: 0.6;
-  cursor: progress;
 }
 
 .maintenance-cancel {
   margin-left: 0.5rem;
-  padding: 0.4rem 0.9rem;
-  color: var(--muted);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 0.25rem;
-  cursor: pointer;
 }
 
 /* The armed step is loud: the next click deletes memories. */
@@ -651,22 +626,6 @@ body {
 
 .tags-reload {
   margin-bottom: 0.75rem;
-}
-
-.tags-empty {
-  margin-top: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  color: var(--muted);
-  background: var(--bg);
-  border: 1px dashed var(--border);
-  border-radius: 0.25rem;
-}
-
-.tags-error {
-  margin-top: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  color: var(--warn-text);
-  border-left: 3px solid var(--warn-border);
 }
 
 .tag-group {
@@ -868,23 +827,6 @@ body {
   border-left: 3px solid var(--warn-border);
 }
 
-.memories-empty {
-  margin-top: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  color: var(--muted);
-  background: var(--bg);
-  border: 1px dashed var(--border);
-  border-radius: 0.25rem;
-}
-
-.memories-error {
-  margin-top: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  color: var(--warn-text);
-  border-left: 3px solid var(--warn-border);
-}
-
-
 .memories-pager {
   display: flex;
   flex-wrap: wrap;
@@ -1008,13 +950,6 @@ body {
   border-radius: 0.25rem;
 }
 
-.profile-error {
-  margin-top: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  color: var(--warn-text);
-  border-left: 3px solid var(--warn-border);
-}
-
 /* ---------------------------------------------------------------------------
  * Settings (W6.7)
  *
@@ -1053,13 +988,6 @@ body {
 
 .settings-status dd {
   margin: 0;
-}
-
-.settings-error {
-  margin-top: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  color: var(--warn-text);
-  border-left: 3px solid var(--warn-border);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1207,13 +1135,6 @@ body {
   color: var(--muted);
 }
 
-.stats-error {
-  margin-top: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  color: var(--warn-text);
-  border-left: 3px solid var(--warn-border);
-}
-
 .stats-daily-error {
   margin-top: 0.75rem;
   padding: 0.5rem 0.75rem;
@@ -1338,13 +1259,6 @@ body {
   flex: 0 0 auto;
 }
 
-.session-error {
-  margin-top: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  color: var(--warn-text);
-  border-left: 3px solid var(--warn-border);
-}
-
 .session-list {
   margin: 0;
   padding: 0;
@@ -1399,14 +1313,7 @@ body {
   grid-row: 1;
   grid-column: 4;
   justify-self: end;
-  padding: 0.05rem 0.4rem;
-  font-size: 0.75rem;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--warn-text);
-  background: var(--warn-bg);
-  border: 1px solid var(--warn-border);
-  border-radius: 999px;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1451,15 +1358,6 @@ body {
  * `.skill-form-*` hooks must add to them, never replace their
  * padding/background/border values.
  * ------------------------------------------------------------------------- */
-
-.skills-empty {
-  margin-top: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  color: var(--muted);
-  background: var(--bg);
-  border: 1px dashed var(--border);
-  border-radius: 0.25rem;
-}
 
 .skill-create {
   margin-bottom: 0.5rem;
@@ -1534,14 +1432,7 @@ body {
   font-size: 0.85rem;
 }
 
-.confirm-gate-confirm {
-  color: var(--accent-text);
-  background: var(--accent);
-  border-color: var(--accent);
-  font-weight: 600;
-}
-
+.confirm-gate-confirm,
 .confirm-gate-cancel {
-  color: var(--muted);
-  background: transparent;
+  font-size: 0.85rem;
 }

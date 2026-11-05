@@ -27,6 +27,8 @@ use crate::api::envelope::ApiError;
 use crate::api_request::{self, RequestSpec};
 use crate::paths::{self, EndpointId};
 use crate::screens::{format_created_at, initial_project};
+use crate::state_block::{BlockKind, StateBlock};
+use thaw::{Button, Card};
 
 /// One milestone exactly as the `mem-web` projection sends it.
 ///
@@ -805,15 +807,21 @@ pub fn AgentsPanel() -> impl IntoView {
             <p class="agents-hint">"Who contributed to this project's durable memory."</p>
             {move || match projects_view(projects.get().as_ref()) {
                 ProjectsView::Loading => view! {
-                    <p class=AGENTS_LOADING_CLASS data-testid=AGENTS_LOADING_TESTID>
-                        "Loading projects…"
-                    </p>
+                    <StateBlock
+                        kind=BlockKind::Loading
+                        message="Loading projects…"
+                        class=AGENTS_LOADING_CLASS
+                        testid=AGENTS_LOADING_TESTID
+                    />
                 }
                     .into_any(),
                 ProjectsView::Unavailable(message) => view! {
-                    <p class=AGENTS_UNAVAILABLE_CLASS data-testid=AGENTS_UNAVAILABLE_TESTID>
-                        {message}
-                    </p>
+                    <StateBlock
+                        kind=BlockKind::Error
+                        message=message
+                        class=AGENTS_UNAVAILABLE_CLASS
+                        testid=AGENTS_UNAVAILABLE_TESTID
+                    />
                 }
                     .into_any(),
                 ProjectsView::NoProjects => view! {
@@ -823,7 +831,12 @@ pub fn AgentsPanel() -> impl IntoView {
                 }
                     .into_any(),
                 ProjectsView::Failed(message) => view! {
-                    <p class=AGENTS_ERROR_CLASS data-testid=AGENTS_ERROR_TESTID>{message}</p>
+                    <StateBlock
+                        kind=BlockKind::Error
+                        message=message
+                        class=AGENTS_ERROR_CLASS
+                        testid=AGENTS_ERROR_TESTID
+                    />
                 }
                     .into_any(),
                 ProjectsView::Ready(rows) => view! {
@@ -846,27 +859,32 @@ pub fn AgentsPanel() -> impl IntoView {
                                 })
                                 .collect_view()}
                         </select>
-                        <button
-                            type="button"
+                        <Button
                             class="load-agents"
-                            data-testid="load-agents"
-                            on:click=move |_| load_roster.run(())
+                            attr:data-testid="load-agents"
+                            on_click=move |_| load_roster.run(())
                         >
                             "Refresh"
-                        </button>
+                        </Button>
                     </div>
                     {move || match agents_view(outcome.get().as_ref()) {
                         AgentsView::Loading => view! {
-                            <p class=AGENTS_LOADING_CLASS data-testid=AGENTS_LOADING_TESTID>
-                                "Loading agents…"
-                            </p>
+                            <StateBlock
+                                kind=BlockKind::Loading
+                                message="Loading agents…"
+                                class=AGENTS_LOADING_CLASS
+                                testid=AGENTS_LOADING_TESTID
+                            />
                         }
                             .into_any(),
                         AgentsView::Empty => view! {
                             <div>
-                                <p class=AGENTS_EMPTY_CLASS data-testid=AGENTS_EMPTY_TESTID>
-                                    {AGENTS_EMPTY_MESSAGE}
-                                </p>
+                                <StateBlock
+                                    kind=BlockKind::Empty
+                                    message=AGENTS_EMPTY_MESSAGE
+                                    class=AGENTS_EMPTY_CLASS
+                                    testid=AGENTS_EMPTY_TESTID
+                                />
                                 <p
                                     class=AGENTS_EMPTY_DETAIL_CLASS
                                     data-testid=AGENTS_EMPTY_DETAIL_TESTID
@@ -877,9 +895,12 @@ pub fn AgentsPanel() -> impl IntoView {
                         }
                             .into_any(),
                         AgentsView::Unavailable(message) => view! {
-                            <p class=AGENTS_UNAVAILABLE_CLASS data-testid=AGENTS_UNAVAILABLE_TESTID>
-                                {message}
-                            </p>
+                            <StateBlock
+                                kind=BlockKind::Error
+                                message=message
+                                class=AGENTS_UNAVAILABLE_CLASS
+                                testid=AGENTS_UNAVAILABLE_TESTID
+                            />
                         }
                             .into_any(),
                         AgentsView::Roster(rows) => view! {
@@ -890,11 +911,10 @@ pub fn AgentsPanel() -> impl IntoView {
                                         let agent_id = row.agent_id.clone();
                                         view! {
                                             <li>
-                                                <button
-                                                    type="button"
+                                                <Button
                                                     class=AGENTS_ROW_CLASS
-                                                    data-testid=AGENTS_ROW_TESTID
-                                                    on:click=move |_| {
+                                                    attr:data-testid=AGENTS_ROW_TESTID
+                                                    on_click=move |_| {
                                                         detail_agent.set(Some(agent_id.clone()))
                                                     }
                                                 >
@@ -910,7 +930,7 @@ pub fn AgentsPanel() -> impl IntoView {
                                                     <span class="agents-last-contribution">
                                                         {format_created_at(row.last_contribution)}
                                                     </span>
-                                                </button>
+                                                </Button>
                                             </li>
                                         }
                                     })
@@ -919,9 +939,14 @@ pub fn AgentsPanel() -> impl IntoView {
                         }
                             .into_any(),
                         AgentsView::Failed(message) => view! {
-                            <p class=AGENTS_ERROR_CLASS data-testid=AGENTS_ERROR_TESTID>{message}</p>
+                            <StateBlock
+                                kind=BlockKind::Error
+                                message=message
+                                class=AGENTS_ERROR_CLASS
+                                testid=AGENTS_ERROR_TESTID
+                            />
                         }
-                            .into_any(),
+                        .into_any(),
                     }}
                 }
                     .into_any(),
@@ -943,7 +968,7 @@ pub fn AgentsPanel() -> impl IntoView {
 /// Render one agent's drill-down.
 fn detail_view(detail: AgentDetailView) -> AnyView {
     view! {
-        <section class=AGENTS_DETAIL_CLASS data-testid=AGENTS_DETAIL_TESTID>
+        <Card class=AGENTS_DETAIL_CLASS attr:data-testid=AGENTS_DETAIL_TESTID>
             <h3>{format!("Milestones contributed by {}", detail.display_name)}</h3>
             <ul class="agents-milestone-list">
                 {detail
@@ -974,7 +999,7 @@ fn detail_view(detail: AgentDetailView) -> AnyView {
                     })
                     .collect_view()}
             </ul>
-        </section>
+        </Card>
     }
         .into_any()
 }
