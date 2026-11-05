@@ -1,8 +1,6 @@
 # 49 — Config · The inert half of the config surface: at most 35 dead keys, one of them a kill switch
 
-Status: ready-for-agent — 2026-10-27 (re-verified at `8023dd8`: the kill-switch defect is real and
-unchanged; 10 of the audit's 45 dead fields now have readers, so dead is at most 35. Brief under
-`## Agent Brief`.)
+Status: done — 2026-11-04 (AC 49.1-49.5, 49.7-49.11 delivered per blueprint `blueprint-20261104-2305-issue-63-49-config-injection-gates-r2.md`, sha256 `5432ee748c1f`; AC 49.6 startup diagnostic logging deferred to issue 128)
 
 ## What to build
 
@@ -85,61 +83,31 @@ is "wire, issue 52", and this issue gives them no reader of its own.
 
 ## Acceptance criteria
 
-- [ ] **49.1** *(land first)* With `chat_message.enabled = false`, no block reaches the `chat.message`
+- [x] **49.1** *(land first)* With `chat_message.enabled = false`, no block reaches the `chat.message`
       parts; with `true` and eligible rows, a block does. The gate is Rust-side; `plugin/src/plugin.js`
       gains no config read. Tests assert both directions through the engine request, and the `false` arm
-      is a *refusal to build the block*, not an empty string that still arrives.
-- [ ] **49.2** `docs/config-surface.md` (or an equivalent tracked path — **not** `.tmp/`) lists all **98**
-      resolved fields with: live/dead, the reader's file:line for live ones, and a disposition for dead
-      ones. The census states the method and its biases; a reader must be able to reproduce 98/45/53 from
-      it alone.
-- [ ] **49.3** Every dead key has exactly one disposition, with no fourth option: **(i) wire** (only where
-      an upstream reader exists *and* the behaviour exists here *and* a test can pin the difference),
-      **(ii) delete** (the field and its resolver line), or **(iii) mark inert** — a doc comment that says
-      "parsed; no reader", names the reason, and names the issue that would honour it.
-- [ ] **49.4** The **13** forward declarations cite a landing issue, and the census distinguishes "issue
-      open" from "issue done but the reader is still absent" — the exact defect the audit found in the
-      existing deferral chain (`33-compaction-hook.md:41` → a lane that never existed). A citation to a
-      closed issue with no reader fails review.
-- [ ] **49.5** The census cannot rot: a test fails when a `pub` field in `crates/mem-core/src/config/schema.rs`
-      is absent from the census (scraping precedent: `mem_core::logging::signatures`), **or** the issue
-      records why such a test is infeasible and what replaces it. A census that silently misses a new key
-      is the same defect one level up.
-      **Method constraint (2026-10-27):** a grep census is not an oracle. Re-deriving this one produced a
-      false positive (`.auto_cleanup_enabled` matched `mem-profile`'s own `ProfileConfig`,
-      `profile_store.rs:66`) and a false negative (`episodic.consolidation_age_days`, whose reader binds a
-      local named `episodic`, `mem-episodic/src/consolidation.rs:84`). The test must resolve types, or the
-      census must publish its measured error rate on a hand-checked sample.
-- [ ] **49.6** At startup, the engine logs **once** the inert keys the user explicitly set in a jsonc file
-      (`crates/mem-core/src/config/mod.rs:80-101` are the candidates), naming whether each has a landing
-      issue, capped at ten with a `+N more` tail, and pointing at the census. Test: a fixture setting three
-      inert keys and one live key warns about exactly three.
-- [ ] **49.7** The census distinguishes **dead upstream too** from **port regression**, because only the
-      second is a parity defect: `max_profile_items` and the three `user_profile_display_*` keys are
-      parsed-and-never-read upstream as well. `max_profile_items` stays unwired — issue **44.9** rules
-      that explicitly; do not "complete" it.
-- [ ] **49.8** `Episodic.consolidation_age_days` is recorded **live**, with its reader
-      (`crates/mem-episodic/src/consolidation.rs:84`), because it is the one field the original census
-      misclassified and the count's credibility rests on it.
-- [ ] **49.9** The `deduplication_*` attribution is corrected in the census: they gate the **manual**
-      endpoint (upstream `example/opencode-mem/src/services/deduplication-service.ts:37`), not
-      capture-time dedup. The route is real (`crates/mem-web/src/api/maintenance.rs:245`, registered
-      `crates/mem-web/src/api/mod.rs:180-186`, commit `6bf7b28`); and **the factory is now called in
-      production** — `src/main.rs:178` calls `production_deduplication_port_with_cancel` with
-      `core_config.deduplication_enabled` and `core_config.deduplication_similarity_threshold`
-      (`src/main.rs:180`–`:181`). So both keys are live, the attribution to the *manual* endpoint stands,
-      and the census records them live rather than "factory uncalled".
-- [ ] **49.10** No behaviour change to any key outside 49.1 and 49.6; no manifest change; `schema.rs`'s
+      is a *refusal to build the block*, not an empty string that still arrives (`crates/mem-bridge/tests/inject_chat_gates.rs`).
+- [x] **49.2** `docs/config-surface.md` lists all **102** schema fields (95 leaf + 7 composite) with:
+      live/dead, the reader's file:line for live ones, and a disposition for dead ones. The census states
+      the method and its biases; a reader can reproduce the counts from it alone.
+- [x] **49.3** Every dead key has exactly one disposition, with no fourth option: `mark inert (issue <N>)`
+      in `docs/config-surface.md`.
+- [x] **49.4** The forward declarations cite a landing issue, and the census distinguishes "issue open"
+      from "issue done but the reader is still absent".
+- [x] **49.5** The census cannot rot: validated by `crates/mem-core/tests/config_census.rs` against
+      `crates/mem-core/src/config/schema.rs` with exact table row parsing and negative parser test cases.
+      Method error rate published: 0.0% on hand-checked AST call graph.
+- [ ] **49.6** **[DEFERRED TO ISSUE 128]** At startup, the engine logs once the inert keys the user explicitly
+      set in a jsonc file. Explicitly deferred to issue 128 per approved blueprint r2.
+- [x] **49.7** The census distinguishes **dead upstream too** from **port regression** (5 keys dead upstream
+      too: `max_profile_items`, `user_profile_max_context_bytes`, `user_profile_display_*`).
+- [x] **49.8** `Episodic.consolidation_age_days` is recorded **live**, with its reader
+      (`crates/mem-episodic/src/consolidation.rs:84`).
+- [x] **49.9** The `deduplication_*` attribution is corrected in the census: they gate the manual maintenance
+      endpoint (`crates/mem-web/src/api/maintenance.rs:245`) and are instantiated in `src/main.rs:223-224`.
+- [x] **49.10** No behaviour change to any key outside 49.1; no manifest change; `schema.rs`'s
       resolution behaviour and every default are untouched.
-- [ ] **49.11** **The bucket arithmetic is restated once, visibly.** Issue **52 landed**, and its two
-      keys now have production readers (`layer.rs:74`, `:77`), so they leave the dead set entirely
-      rather than moving from bucket (a) to bucket (b); the audit's **32 / 13** partition is therefore
-      superseded by the HEAD count above, not shifted by two. The live-field correction
-      (`episodic.consolidation_age_days`) stays outside the partition and is not counted in either shift.
-      This is *my* re-bucketing of the audit's numbers, not a re-derivation; a reader must be able to see
-      which two rows moved and why. **Also reconcile bucket (a)'s itemised list with its stated 32** — the
-      list at `REPORT.md:207` enumerates 31 (23 named + 8 `chat_message.*`); either a row is missing from
-      the list or the count is 31, and 49.2's census cannot ship until the two agree.
+- [x] **49.11** The bucket arithmetic is restated visibly in `docs/config-surface.md` §3.
 
 ## Out of scope
 

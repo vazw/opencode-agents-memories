@@ -682,3 +682,191 @@ async fn test_max_memories_slot_not_lost_to_duplicate_suppression() {
     );
     assert_eq!(result.memory_count, 2, "block: {block}");
 }
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_chat_policy_enabled_false_refuses_chat_block_while_direct_and_profile_intact() {
+    let root = TestDir::new("ac1-root");
+    let home = TestDir::new("ac1-home");
+    let (engine, store, project_id) = production_engine(&root, &home, |cfg| {
+        cfg.chat_message.enabled = false;
+    })
+    .await;
+    let embedder = FakeEmbedder::with_vector(common::unit_vector(0));
+
+    store
+        .insert_session(
+            NewAgentSession {
+                project_id: project_id.clone(),
+                session_id: "ses-1".into(),
+                agent_id: "agent-1".into(),
+                summary: "SESSION_1_SUMMARY".into(),
+                ..Default::default()
+            },
+            &embedder,
+        )
+        .await
+        .expect("insert");
+
+    // Chat inject: chat_injection: true -> must refuse block (block is null, memory_count == 0)
+    let chat_resp = dispatch_req(
+        &engine,
+        "inject",
+        json!({
+            "session_id": "ses-req",
+            "project_id": project_id,
+            "chat_injection": true,
+            "token_budget": 5000,
+            "include": { "recent_count": 10 }
+        }),
+    )
+    .await;
+    let chat_res = chat_resp.result.expect("result");
+    assert!(
+        chat_res["block"].is_null(),
+        "chat block must be null when chat_message.enabled=false: {chat_res}"
+    );
+    assert_eq!(chat_res["memory_count"], 0);
+
+    // Direct inject: chat_injection omitted -> block intact
+    let direct_resp = dispatch_req(
+        &engine,
+        "inject",
+        json!({
+            "session_id": "ses-req",
+            "project_id": project_id,
+            "token_budget": 5000,
+            "include": { "recent_count": 10 }
+        }),
+    )
+    .await;
+    let direct_res = direct_resp.result.expect("result");
+    let direct_block = direct_res["block"]
+        .as_str()
+        .expect("direct block must exist");
+    assert!(
+        direct_block.contains("SESSION_1_SUMMARY"),
+        "direct block must contain summary: {direct_block}"
+    );
+    assert!(direct_res["memory_count"].as_u64().unwrap_or(0) > 0);
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_chat_policy_enabled_false_profile_tier_preserved() {
+    let fx = tier1_fixture("profile-tier-preserved", 1_000_000).await;
+    seed_episode_row(&fx, "sess-1", "EPISODIC_ROW_SUMMARY").await;
+
+    let profile = Arc::new(mem_profile::profile_store::ProfileStore::new(
+        fx._dir.path().to_path_buf(),
+        fx._dir.store_config(),
+        mem_profile::profile_store::ProfileConfig::default(),
+    ));
+    profile
+        .create_profile(
+            "testuser@example.com",
+            "Test User",
+            "testuser",
+            "testuser@example.com",
+            &mem_profile::profile_store::ProfileData {
+                preferences: vec![mem_profile::profile_store::ProfileItem {
+                    description: "Prefers cargo test".to_string(),
+                    category: Some("tooling".to_string()),
+                    confidence: Some(0.9),
+                    frequency: Some(3),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            1,
+        )
+        .await
+        .expect("create profile");
+
+    let mut config = test_config(fx._dir.path().to_path_buf(), fx._dir.path());
+    config.chat_message.enabled = false;
+    config.inject_profile = true;
+
+    let service = fx
+        .service
+        .with_profile(
+            profile,
+            mem_profile::profile_context::ProfileInjectPolicy {
+                enabled: true,
+                caps: mem_profile::profile_context::ProfileRenderCaps {
+                    preferences: 5,
+                    patterns: 5,
+                    workflows: 3,
+                },
+            },
+        )
+        .with_chat_policy(mem_bridge::inject::ChatInjectionPolicy::from_core(&config));
+
+    let params: InjectParams = serde_json::from_value(json!({
+        "project_id": "/srv/proj",
+        "user_id": "testuser@example.com",
+        "chat_injection": true,
+        "token_budget": 5000,
+        "include": { "recent_count": 10 }
+    }))
+    .expect("params");
+
+    let result = service.assemble(&params).await.expect("assemble");
+    assert_eq!(
+        result.profile,
+        mem_bridge::inject::ProfileInjection::Rendered
+    );
+    assert_eq!(result.memory_count, 0);
+    let block = result.block.expect("block exists");
+    assert!(
+        block.contains("<user_profile>"),
+        "profile must be present: {block}"
+    );
+    assert!(
+        !block.contains("EPISODIC_ROW_SUMMARY"),
+        "episodic summary must be absent: {block}"
+    );
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_chat_policy_enabled_true_allows_chat_block_on_eligible_rows() {
+    let root = TestDir::new("ac1-true-root");
+    let home = TestDir::new("ac1-true-home");
+    let (engine, store, project_id) = production_engine(&root, &home, |cfg| {
+        cfg.chat_message.enabled = true;
+    })
+    .await;
+    let embedder = FakeEmbedder::with_vector(common::unit_vector(0));
+
+    store
+        .insert_session(
+            NewAgentSession {
+                project_id: project_id.clone(),
+                session_id: "ses-1".into(),
+                agent_id: "agent-1".into(),
+                summary: "SESSION_1_SUMMARY".into(),
+                ..Default::default()
+            },
+            &embedder,
+        )
+        .await
+        .expect("insert");
+
+    let chat_resp = dispatch_req(
+        &engine,
+        "inject",
+        json!({
+            "session_id": "ses-req",
+            "project_id": project_id,
+            "chat_injection": true,
+            "token_budget": 5000,
+            "include": { "recent_count": 10 }
+        }),
+    )
+    .await;
+    let chat_res = chat_resp.result.expect("result");
+    let block = chat_res["block"].as_str().expect("chat block must exist");
+    assert!(
+        block.contains("SESSION_1_SUMMARY"),
+        "chat block must contain summary: {block}"
+    );
+    assert!(chat_res["memory_count"].as_u64().unwrap_or(0) > 0);
+}

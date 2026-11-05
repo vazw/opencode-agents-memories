@@ -308,8 +308,8 @@ fn test_spawned_engine_decays_a_seeded_profile_confidence() {
         "the sweep persisted through update_profile"
     );
     assert!(
-        after.confidence > 0.25 && after.confidence < 0.29,
-        "the persisted confidence is in the decayed band, got {}",
+        (after.confidence - 0.405).abs() < 1e-6,
+        "the persisted confidence is in the decayed band (Issue 102 single derivation 0.405), got {}",
         after.confidence
     );
     assert!(

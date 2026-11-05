@@ -281,11 +281,23 @@ pub type InjectClock = Arc<dyn Fn() -> i64 + Send + Sync>;
 ///
 /// Every field is inert by default (`None` = no restriction), so an engine that
 /// never calls [`InjectService::with_chat_policy`] keeps the legacy semantics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChatInjectionPolicy {
+    pub enabled: bool,
     pub max_memories: Option<u32>,
     pub exclude_current_session: bool,
     pub max_age_days: Option<u32>,
+}
+
+impl Default for ChatInjectionPolicy {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_memories: None,
+            exclude_current_session: false,
+            max_age_days: None,
+        }
+    }
 }
 
 impl ChatInjectionPolicy {
@@ -293,6 +305,7 @@ impl ChatInjectionPolicy {
     /// resolved by the config layer, so it is always a cap here.
     pub fn from_core(config: &mem_core::config::Config) -> Self {
         Self {
+            enabled: config.chat_message.enabled,
             max_memories: Some(config.chat_message.max_memories),
             exclude_current_session: config.chat_message.exclude_current_session,
             max_age_days: config.chat_message.max_age_days,
@@ -416,6 +429,23 @@ impl InjectService {
         // never double-emit and no path can see a divergent profile outcome.
         let (profile_block, profile_injection) = self.profile_tier(params, &scope).await;
 
+        let is_chat = params.chat_injection.unwrap_or(false);
+        let chat_policy = if is_chat { self.chat_policy } else { None };
+        let chat_enabled = chat_policy.map(|p| p.enabled).unwrap_or(true);
+
+        if !chat_enabled {
+            let block = wrap_context(profile_block.as_deref(), None);
+            let tokens = emitted_tokens(block.as_deref());
+            return Ok(InjectResult {
+                block,
+                memory_count: 0,
+                tokens,
+                truncated: false,
+                handling_ms: ms(started),
+                profile: profile_injection,
+            });
+        }
+
         // 2. Recent sessions: 2 × N rows, blockers first with stable
         // recency inside the groups.
         let recent_raw = self.read_recent(project_id, recent_count).await?;
@@ -430,9 +460,6 @@ impl InjectService {
         // Resolution order (issue 63): explicit top-level parameter wins, then
         // wrapper-chat request policy, then the direct-request default (no
         // restriction / no exclusion).
-        let is_chat = params.chat_injection.unwrap_or(false);
-        let chat_policy = if is_chat { self.chat_policy } else { None };
-
         let should_exclude = params
             .exclude_session
             .or_else(|| chat_policy.map(|p| p.exclude_current_session))
