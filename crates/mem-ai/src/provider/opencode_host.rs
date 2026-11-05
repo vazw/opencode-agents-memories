@@ -20,9 +20,7 @@
 //! Transport is an injected [`HostTransport`] seam — the production
 //! implementation is [`ReqwestHostTransport`]; tests inject an in-memory mock.
 
-use mem_core::sync::{read_or_recover, write_or_recover};
-use std::collections::HashSet;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -214,17 +212,12 @@ impl HostTransport for ReqwestHostTransport {
     }
 }
 
-/// Callback used to force one connected-provider refresh before failing.
-pub type ConnectedRefresher = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
-
 /// Shared, cheaply-cloneable provider state (so `complete` can own a `'static`
 /// stream).
 #[derive(Clone)]
 struct HostState {
     config: Arc<OpenCodeHostConfig>,
     transport: Arc<dyn HostTransport>,
-    connected: Arc<RwLock<HashSet<String>>>,
-    refresher: Arc<RwLock<Option<ConnectedRefresher>>>,
 }
 
 impl HostState {
@@ -341,43 +334,6 @@ impl HostState {
             )
             .await?;
         decode_json(&response, "GET /config")
-    }
-
-    fn is_provider_connected(&self, name: &str) -> bool {
-        // connected: read-only contains; re-derived from GET /config (ADR-0013 D-2 D2-R)
-        read_or_recover(&self.connected).contains(name)
-    }
-
-    fn set_connected_providers(&self, providers: Vec<String>) {
-        // connected: clear + extend in one write guard, so readers never see a partial set (ADR-0013 D-2 D2-R)
-        let mut connected = write_or_recover(&self.connected);
-        connected.clear();
-        connected.extend(providers);
-    }
-
-    fn set_connected_providers_refresher(&self, refresher: ConnectedRefresher) {
-        // refresher: one Option store; a stale value only changes who refreshes (ADR-0013 D-2 D2-R)
-        *write_or_recover(&self.refresher) = Some(refresher);
-    }
-
-    async fn ensure_provider_connected(&self, name: &str) -> bool {
-        if self.is_provider_connected(name) {
-            return true;
-        }
-        // refresher: clone out, invoked after the guard is dropped (ADR-0013 D-2 D2-R)
-        let refresher = read_or_recover(&self.refresher).clone();
-        if let Some(refresher) = refresher {
-            // The refresher logs; a failed refresh keeps the previous set.
-            let _ = refresher().await;
-        }
-        self.is_provider_connected(name)
-    }
-
-    /// Refresh the connected-provider snapshot from `GET /config`.
-    async fn refresh_connected_providers(&self) -> Result<(), ProviderError> {
-        let value = self.fetch_config().await?;
-        self.set_connected_providers(provider_ids(&value));
-        Ok(())
     }
 }
 
@@ -748,18 +704,41 @@ fn config_providers(entry: &Value) -> &serde_json::Map<String, Value> {
         .unwrap_or_else(|| EMPTY.get_or_init(serde_json::Map::new))
 }
 
-fn provider_ids(value: &Value) -> Vec<String> {
+pub fn provider_ids(value: &Value) -> Vec<String> {
     let mut ids = Vec::new();
-    for entry in config_documents(value)
+    let is_active = |activation: Option<&str>| matches!(activation, Some("auto" | "enabled"));
+
+    let doc_entries: Vec<&Value> = config_documents(value)
         .iter()
         .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("document"))
-    {
-        for provider_id in config_providers(entry).keys() {
-            if !ids.contains(provider_id) {
-                ids.push(provider_id.clone());
+        .collect();
+
+    if !doc_entries.is_empty() {
+        for entry in doc_entries {
+            for (provider_id, provider) in config_providers(entry) {
+                let active = provider.get("activation").and_then(Value::as_str);
+                if is_active(active) && !ids.contains(provider_id) {
+                    ids.push(provider_id.clone());
+                }
+            }
+        }
+    } else {
+        let direct_entries = value
+            .get("data")
+            .and_then(Value::as_array)
+            .or_else(|| value.as_array());
+        if let Some(entries) = direct_entries {
+            for entry in entries {
+                if let Some(id) = entry.get("id").and_then(Value::as_str) {
+                    let active = entry.get("activation").and_then(Value::as_str);
+                    if is_active(active) && !ids.iter().any(|x| x == id) {
+                        ids.push(id.to_owned());
+                    }
+                }
             }
         }
     }
+
     ids
 }
 
@@ -808,8 +787,6 @@ impl OpenCodeHostProvider {
             state: HostState {
                 config: Arc::new(config),
                 transport,
-                connected: Arc::new(RwLock::new(HashSet::new())),
-                refresher: Arc::new(RwLock::new(None)),
             },
         }
     }
@@ -822,32 +799,6 @@ impl OpenCodeHostProvider {
     /// The request budget the provider enforces.
     pub fn timeout(&self) -> Duration {
         self.state.config.timeout
-    }
-
-    /// Replace the connected-provider snapshot.
-    pub fn set_connected_providers(&self, providers: Vec<String>) {
-        self.state.set_connected_providers(providers);
-    }
-
-    /// Whether `name` is in the connected-provider snapshot.
-    pub fn is_provider_connected(&self, name: &str) -> bool {
-        self.state.is_provider_connected(name)
-    }
-
-    /// Register (or replace) the refresh callback used on a connectivity miss.
-    pub fn set_connected_providers_refresher(&self, refresher: ConnectedRefresher) {
-        self.state.set_connected_providers_refresher(refresher);
-    }
-
-    /// Refresh-on-miss: await one refresh then re-check (never refreshes
-    /// twice for the same call, never throws).
-    pub async fn ensure_provider_connected(&self, name: &str) -> bool {
-        self.state.ensure_provider_connected(name).await
-    }
-
-    /// Refresh the connected-provider snapshot from `GET /config`.
-    pub async fn refresh_connected_providers(&self) -> Result<(), ProviderError> {
-        self.state.refresh_connected_providers().await
     }
 }
 

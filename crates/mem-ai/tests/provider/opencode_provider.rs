@@ -19,7 +19,7 @@ use mem_ai::provider::{
     AiProvider, AiProviderStructured, BoxFuture, ChatMessage, CompletionRequest, HostAuthorization,
     HostMethod, HostRequest, HostResponse, OpenCodeHostConfig, OpenCodeHostProvider, ProviderError,
     ProviderErrorKind, ProviderKind, ProviderRegistry, SYSTEM_USER_SEPARATOR, StaticSecretResolver,
-    Zeroizing,
+    Zeroizing, provider_ids,
 };
 
 /// The generate URL the provider must call, built from `host_config()`.
@@ -174,30 +174,6 @@ async fn test_opencode_host_timeout_config() {
     assert_eq!(error.kind, ProviderErrorKind::Timeout);
 }
 
-#[tokio::test]
-async fn test_opencode_host_connected_refresh() {
-    let transport = Arc::new(MockTransport::new());
-    let provider = Arc::new(OpenCodeHostProvider::new(host_config(), transport));
-
-    provider.set_connected_providers(vec!["opencode".to_owned()]);
-    provider.set_connected_providers_refresher(Arc::new({
-        let weak = Arc::downgrade(&provider);
-        move || {
-            let weak = weak.clone();
-            Box::pin(async move {
-                if let Some(provider) = weak.upgrade() {
-                    provider
-                        .set_connected_providers(vec!["opencode".to_owned(), "newapi".to_owned()]);
-                }
-            })
-        }
-    }));
-
-    assert!(provider.ensure_provider_connected("opencode").await);
-    assert!(provider.ensure_provider_connected("newapi").await);
-    assert!(!provider.ensure_provider_connected("ghost").await);
-}
-
 #[test]
 fn test_no_provider_leakage() {
     // Consumers can only talk to providers through the object-safe trait:
@@ -290,21 +266,14 @@ impl mem_ai::provider::HostTransport for ConfigTransport {
 /// `GET /api/config` returns `Config.Entry[]` (measured live shape): a
 /// top-level ARRAY of documents whose `info.providers` is an object keyed by
 /// provider id.
-#[tokio::test]
-async fn test_provider_ids_read_the_config_document_array() {
-    let transport = Arc::new(ConfigTransport::new(
-        r#"[{"type":"document","info":{"providers":{"opencode-go":{"models":{"beam-free":{}}}}}},{"type":"document","info":{"providers":{"github-copilot":{"models":{}}}}}]"#,
-    ));
-    let provider = OpenCodeHostProvider::new(host_config(), transport);
-
-    provider
-        .refresh_connected_providers()
-        .await
-        .expect("the measured array parses");
-    assert!(provider.is_provider_connected("opencode-go"));
-    assert!(provider.is_provider_connected("github-copilot"));
+#[test]
+fn test_provider_ids_read_the_config_document_array() {
+    let raw = r#"[{"type":"document","info":{"providers":{"opencode-go":{"activation":"enabled","models":{"beam-free":{}}}}}},{"type":"document","info":{"providers":{"github-copilot":{"activation":"auto","models":{}}}}}]"#;
+    let value: serde_json::Value = serde_json::from_str(raw).expect("the measured array parses");
+    let ids = provider_ids(&value);
+    assert_eq!(ids, vec!["opencode-go", "github-copilot"]);
     assert!(
-        !provider.is_provider_connected("providers"),
+        !ids.contains(&"providers".to_string()),
         "the legacy `value.get(\"providers\")` read yields nothing against an array"
     );
 }
@@ -542,4 +511,103 @@ async fn test_issue_111_the_host_route_folds_the_system_side_with_the_separator_
         serde_json::json!(format!("SYS{SYSTEM_USER_SEPARATOR}USR")),
         "the spend is the constant the builder charges"
     );
+}
+
+#[test]
+fn test_provider_ids_filters_activation() {
+    let json = serde_json::json!([
+        {
+            "type": "document",
+            "info": {
+                "providers": {
+                    "p1": { "activation": "enabled" },
+                    "p2": { "activation": "disabled" },
+                    "p3": { "activation": "auto" }
+                }
+            }
+        }
+    ]);
+    let ids = provider_ids(&json);
+    assert_eq!(ids, vec!["p1", "p3"]);
+}
+
+#[test]
+fn test_provider_ids_omits_missing_activation() {
+    let json = serde_json::json!([
+        {
+            "type": "document",
+            "info": {
+                "providers": {
+                    "p1": {}
+                }
+            }
+        }
+    ]);
+    let ids = provider_ids(&json);
+    assert!(ids.is_empty(), "omits missing activation: {ids:?}");
+}
+
+#[test]
+fn test_provider_ids_deduplicates_order_preserving() {
+    // Non-collinear sequence ["p2", "p1", "p2"] must yield ["p2", "p1"], NOT sorted ["p1", "p2"]
+    let json = serde_json::json!([
+        {
+            "type": "document",
+            "info": {
+                "providers": {
+                    "p2": { "activation": "enabled" }
+                }
+            }
+        },
+        {
+            "type": "document",
+            "info": {
+                "providers": {
+                    "p1": { "activation": "auto" }
+                }
+            }
+        },
+        {
+            "type": "document",
+            "info": {
+                "providers": {
+                    "p2": { "activation": "enabled" }
+                }
+            }
+        }
+    ]);
+    let ids = provider_ids(&json);
+    assert_eq!(ids, vec!["p2", "p1"]);
+}
+
+#[test]
+fn test_provider_ids_empty_documents() {
+    let json = serde_json::json!([]);
+    assert_eq!(provider_ids(&json), Vec::<String>::new());
+
+    let json_no_docs = serde_json::json!([
+        { "type": "other", "info": { "providers": { "p1": { "activation": "enabled" } } } }
+    ]);
+    assert_eq!(provider_ids(&json_no_docs), Vec::<String>::new());
+}
+
+#[test]
+fn test_provider_ids_fallback_direct_provider_array() {
+    let json_array = serde_json::json!([
+        { "id": "p1", "activation": "enabled" },
+        { "id": "p2", "activation": "disabled" },
+        { "id": "p3", "activation": "auto" },
+        { "id": "p1", "activation": "enabled" },
+        { "id": "p4" }
+    ]);
+    assert_eq!(provider_ids(&json_array), vec!["p1", "p3"]);
+
+    let json_data = serde_json::json!({
+        "data": [
+            { "id": "p2", "activation": "enabled" },
+            { "id": "p1", "activation": "auto" },
+            { "id": "p2", "activation": "enabled" }
+        ]
+    });
+    assert_eq!(provider_ids(&json_data), vec!["p2", "p1"]);
 }
