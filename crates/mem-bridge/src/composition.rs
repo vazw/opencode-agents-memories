@@ -119,10 +119,19 @@ pub async fn build_composed_runtime(
         storage_root.to_path_buf(),
         store_config.clone(),
     ));
-    store
-        .ready()
-        .await
-        .map_err(|error| format!("episodic store init failed: {error}"))?;
+    // Issue 129: the ONE startup audit. The observations are read-only, the
+    // eager `ready()` result is HELD (not re-opened) so the audit can classify
+    // what the real actor did, and the event is emitted right after that
+    // result on BOTH arms — before any later construction can fail.
+    let episodic_before = crate::startup_audit::presence(store.db_path());
+    let ready = store.ready().await;
+    crate::startup_audit::emit(
+        storage_root,
+        episodic_before,
+        &ready,
+        config.feature_flags.promotion_pipeline,
+    );
+    ready.map_err(|error| format!("episodic store init failed: {error}"))?;
 
     // W6.7: the two profile-tier stores the mem-web surface needs. Both take
     // their own database files (`user-prompts.db` / `user-profiles.db`) under
