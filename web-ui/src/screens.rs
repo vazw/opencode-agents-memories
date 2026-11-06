@@ -17,6 +17,7 @@
 //! all.
 
 use leptos::callback::Callable;
+use leptos::html;
 use leptos::prelude::*;
 use serde::Deserialize;
 
@@ -27,7 +28,7 @@ use crate::agents::{
 use crate::api::auth::{AuthContext, read_marker_token};
 use crate::api::envelope::{ApiEnvelope, ApiError};
 use crate::api_request::{self, RequestSpec};
-use crate::confirm::{ConfirmEvent, ConfirmGate, ConfirmState, confirm_next, dispatch};
+use crate::confirm::{ConfirmDeleteButton, ConfirmEvent, ConfirmState, confirm_next};
 use crate::core_screens::{MemoriesPanel, ProfilePanel, SettingsPanel, StatsPanel, TagsPanel};
 use crate::export_import::ExportImportPanel;
 use crate::nav::ScreenState;
@@ -244,14 +245,16 @@ fn load_rows(
     });
 }
 
-/// One timeline row with its delete arm (the confirm gate swaps in place).
+/// One timeline row with its Delete button and the dialog it arms.
 fn session_row_view(
     row: SessionRow,
     confirm: RwSignal<ConfirmState>,
     run_delete: Callback<String>,
+    fallback: NodeRef<html::Span>,
 ) -> impl IntoView {
     let row_id = row.id.clone();
     let orphaned = row.orphaned;
+    let delete_ref = NodeRef::<html::Span>::new();
     view! {
         <li class="session-row" data-testid="session-row">
             <span class="session-id">{row.id.clone()}</span>
@@ -273,55 +276,16 @@ fn session_row_view(
                         </span>
                     }
                 })}
-            {move || {
-                let armed = confirm.get().pending.as_deref()
-                    == Some(row_id.as_str());
-                if armed {
-                    let on_confirm = Callback::new(move |_: ()| {
-                        if let Some(run_id) = dispatch(
-                            confirm,
-                            ConfirmEvent::Confirm,
-                        ) {
-                            run_delete.run(run_id);
-                        }
-                    });
-                    let on_cancel = Callback::new(move |_: ()| {
-                        confirm
-                            .set(
-                                confirm_next(
-                                    &confirm.get_untracked(),
-                                    ConfirmEvent::Cancel,
-                                )
-                                    .state,
-                            );
-                    });
-                    view! {
-                        <ConfirmGate on_confirm=on_confirm on_cancel=on_cancel/>
-                    }
-                        .into_any()
-                } else {
-                    let ask_id = row_id.clone();
-                    view! {
-                        <Button
-                            class="session-delete"
-                            attr:data-testid="delete-session"
-                            on_click=move |_| {
-                                confirm
-                                    .set(
-                                        confirm_next(
-                                            &confirm.get_untracked(),
-                                            ConfirmEvent::Ask(ask_id.clone()),
-                                        )
-                                            .state,
-                                    );
-                            }
-                        >
-                            "Delete"
-                        </Button>
-                    }
-                        .into_any()
-                }
-            }}
+            <span class="session-delete" node_ref=delete_ref>
+                <ConfirmDeleteButton
+                    confirm=confirm
+                    id=row_id.clone()
+                    invoker=delete_ref
+                    fallback=fallback
+                    testid="delete-session"
+                    on_run=run_delete
+                />
+            </span>
         </li>
     }
 }
@@ -427,6 +391,8 @@ pub fn SessionHistoryPanel() -> impl IntoView {
     let error = RwSignal::new(None::<String>);
     let sessions_loading = RwSignal::new(false);
     let confirm = RwSignal::new(ConfirmState::default());
+    // Focus returns here when a deleted row took its own Delete button with it.
+    let row_fallback = NodeRef::<html::Span>::new();
     let auth = AuthContext {
         local_token: read_marker_token(),
         basic: None,
@@ -601,7 +567,9 @@ pub fn SessionHistoryPanel() -> impl IntoView {
                                 <ul class="session-list" data-testid="session-list">
                                     {ready
                                         .into_iter()
-                                        .map(|row| session_row_view(row, confirm, run_delete))
+                                        .map(|row| {
+                                            session_row_view(row, confirm, run_delete, row_fallback)
+                                        })
                                         .collect_view()}
                                 </ul>
                             }
@@ -633,13 +601,15 @@ pub fn SessionHistoryPanel() -> impl IntoView {
                                     })
                                     .collect_view()}
                             </select>
-                            <Button
-                                class="load-sessions"
-                                attr:data-testid="load-sessions"
-                                on_click=move |_| reload.run(())
-                            >
-                                "Load timeline"
-                            </Button>
+                            <span node_ref=row_fallback>
+                                <Button
+                                    class="load-sessions"
+                                    attr:data-testid="load-sessions"
+                                    on_click=move |_| reload.run(())
+                                >
+                                    "Load timeline"
+                                </Button>
+                            </span>
                         </div>
                         {timeline}
                     }

@@ -17,13 +17,14 @@
 //! documented limitation, not a change to the algorithm's shape.
 
 use leptos::callback::Callable;
+use leptos::html;
 use leptos::prelude::*;
 use serde::Deserialize;
 
 use crate::api::auth::{AuthContext, read_marker_token};
 use crate::api::envelope::ApiError;
 use crate::api_request::{self, RequestSpec};
-use crate::confirm::{ConfirmEvent, ConfirmGate, ConfirmState, confirm_next, dispatch};
+use crate::confirm::{ConfirmDeleteButton, ConfirmEvent, ConfirmState, confirm_next};
 use crate::paths::{EndpointId, endpoint, fill};
 use crate::state_block::{BlockKind, StateBlock};
 use thaw::{Button, ButtonType, Card, Input, Tag};
@@ -369,6 +370,8 @@ pub fn SkillLibraryPanel() -> impl IntoView {
     let draft_enabled = RwSignal::new(true);
     let form_error = RwSignal::new(None::<String>);
     let confirm = RwSignal::new(ConfirmState::default());
+    // Focus returns here when a deleted row took its own Delete button with it.
+    let row_fallback = NodeRef::<html::Span>::new();
 
     let reload = Callback::new({
         let auth = auth.clone();
@@ -540,13 +543,15 @@ pub fn SkillLibraryPanel() -> impl IntoView {
                 placeholder="Search skills"
                 value=search
             />
-            <Button
-                class="skill-create"
-                attr:data-testid="skill-create"
-                on_click=move |_| open_create.run(())
-            >
-                "New skill"
-            </Button>
+            <span node_ref=row_fallback>
+                <Button
+                    class="skill-create"
+                    attr:data-testid="skill-create"
+                    on_click=move |_| open_create.run(())
+                >
+                    "New skill"
+                </Button>
+            </span>
 
             {move || match state.get() {
                 SkillsView::Loading => view! {
@@ -595,6 +600,7 @@ pub fn SkillLibraryPanel() -> impl IntoView {
                                     let id = row.id.clone();
                                     let id2 = row.id.clone();
                                     let row_id = row.id.clone();
+                                    let delete_ref = NodeRef::<html::Span>::new();
                                     view! {
                                         <li class="skill-row" data-testid="skill-row">
                                             <code class="skill-id" data-testid="skill-id">{row.id.clone()}</code>
@@ -611,57 +617,17 @@ pub fn SkillLibraryPanel() -> impl IntoView {
                                             >
                                                 "Edit"
                                             </Button>
-                                            {move || {
-                                                let armed = confirm.get().pending.as_deref()
-                                                    == Some(row_id.as_str());
-                                                if armed {
-                                                    let on_confirm = Callback::new(move |_: ()| {
-                                                        if let Some(run_id) = dispatch(
-                                                            confirm,
-                                                            ConfirmEvent::Confirm,
-                                                        ) {
-                                                            request_delete.run(run_id);
-                                                        }
-                                                    });
-                                                    let on_cancel = Callback::new(move |_: ()| {
-                                                        confirm
-                                                            .set(
-                                                                confirm_next(
-                                                                    &confirm.get_untracked(),
-                                                                    ConfirmEvent::Cancel,
-                                                                )
-                                                                    .state,
-                                                            );
-                                                    });
-                                                    view! {
-                                                        <ConfirmGate on_confirm=on_confirm on_cancel=on_cancel/>
-                                                    }
-                                                        .into_any()
-                                                } else {
-                                                    let ask_id = row_id.clone();
-                                                    let label = format!("Delete {}", ask_id);
-                                                    view! {
-                                                        <Button
-                                                            class="skill-delete"
-                                                            attr:data-testid="skill-delete"
-                                                            attr:aria-label=label
-                                                            on_click=move |_| {
-                                                                confirm
-                                                                    .set(
-                                                                        confirm_next(
-                                                                            &confirm.get_untracked(),
-                                                                            ConfirmEvent::Ask(ask_id.clone()),
-                                                                        )
-                                                                            .state,
-                                                                    );
-                                                            }
-                                                        >
-                                                            "Delete"
-                                                        </Button>
-                                                    }
-                                                        .into_any()
-                                                }
-                                            }}
+                                            <span class="skill-delete" node_ref=delete_ref>
+                                                <ConfirmDeleteButton
+                                                    confirm=confirm
+                                                    id=row_id.clone()
+                                                    invoker=delete_ref
+                                                    fallback=row_fallback
+                                                    testid="skill-delete"
+                                                    aria_label=format!("Delete {row_id}")
+                                                    on_run=request_delete
+                                                />
+                                            </span>
                                         </li>
                                     }
                                 }).collect_view()}
