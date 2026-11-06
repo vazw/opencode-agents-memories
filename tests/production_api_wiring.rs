@@ -1461,3 +1461,860 @@ fn test_no_mem_bridge_to_mem_web_edge() {
         "crates/mem-bridge/src/composition.rs must never import mem_web"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Step 3 — the startup storage-root audit (issue 129)
+// ---------------------------------------------------------------------------
+
+/// The hostile parent-directory marker the sanitization test hunts for.
+const HOSTILE_MARKER: &str = "HOSTILE_MARK_7f3a";
+
+/// The fixed prefix `build_composed_runtime` puts in front of the episodic
+/// error (`composition.rs`). Excluded from the 12-byte leak oracle: it is OUR
+/// text, not the store's.
+const COMPOSITION_ERROR_PREFIX: &str = "episodic store init failed: ";
+
+/// The expected escaped basename of the hostile root (`root-\n\t-x`), written
+/// as a LITERAL so the oracle does not call the production escaper.
+const HOSTILE_ROOT_NAME: &str = "root-\\n\\t-x";
+
+/// A no-I/O embedder for the in-process composition call.
+struct NoopEmbedder;
+
+impl Embedder for NoopEmbedder {
+    fn warmup(&self) -> BoxFuture<'_, Result<(), EmbedError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn embed(&self, _text: &str) -> BoxFuture<'_, Result<Vec<f32>, EmbedError>> {
+        Box::pin(async { Ok(vec![0.0; 8]) })
+    }
+}
+
+/// The one directory the sanitization test poisons: the basename carries a real
+/// newline and a real tab.
+fn hostile_root(scratch: &Path) -> PathBuf {
+    scratch.join(HOSTILE_MARKER).join("root-\n\t-x")
+}
+
+/// Loads the same resolved config the child loads from `home`.
+fn audit_config(home: &Path) -> Config {
+    resolve_sandbox_config(home)
+}
+
+/// The `Err(String)` text `build_composed_runtime` returns for `root`, captured
+/// IN PROCESS (the child process cannot see it: `engine.rs` sends it to
+/// `tracing`, whose only subscriber drops non-`mem_core::logging` targets).
+///
+/// The fixture root is shared with the child launch, so the text is the SAME
+/// error the child hits — not an injected string.
+fn captured_composition_error(root: &Path, home: &Path) -> String {
+    let config = audit_config(home);
+    let runtime = mem_store::tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("the capture's own current_thread runtime builds");
+    runtime
+        .block_on(mem_bridge::composition::build_composed_runtime(
+            root,
+            &config,
+            Arc::new(NoopEmbedder),
+            None,
+        ))
+        .err()
+        .expect("the poisoned root must fail composition")
+}
+
+/// Polls `path` until at least one `event` line matching `event` appears, and
+/// returns the parsed events (bounded by `STARTUP_BOUND`).
+fn wait_for_events(path: &Path, event: &str) -> Vec<serde_json::Value> {
+    let started = Instant::now();
+    loop {
+        let stderr = std::fs::read_to_string(path).unwrap_or_default();
+        let events: Vec<serde_json::Value> = stderr
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line.trim()).ok())
+            .filter(|value| value["event"] == event)
+            .collect();
+        if !events.is_empty() {
+            return events;
+        }
+        assert!(
+            started.elapsed() < STARTUP_BOUND,
+            "no `{event}` event in {path:?} within {STARTUP_BOUND:?}; stderr so far:\n{stderr}"
+        );
+        std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
+/// The single audit event, asserting there is EXACTLY one.
+fn single_audit(stderr_path: &Path) -> serde_json::Value {
+    let events = wait_for_events(stderr_path, "storage.root_audit");
+    assert_eq!(
+        events.len(),
+        1,
+        "exactly one storage.root_audit per process (composition runs once): {events:?}"
+    );
+    events.into_iter().next().expect("one event")
+}
+
+/// The single `entries` element for `store`.
+fn audit_entry<'a>(event: &'a serde_json::Value, store: &str) -> &'a serde_json::Value {
+    let entries = event["entries"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the audit carries an entries array: {event}"));
+    let matches: Vec<&serde_json::Value> = entries
+        .iter()
+        .filter(|entry| entry["store"] == store)
+        .collect();
+    assert_eq!(matches.len(), 1, "exactly one `{store}` entry: {event}");
+    matches.into_iter().next().expect("one entry")
+}
+
+/// The entry count the matrix fixes (Step 2b, `N`).
+const AUDIT_ENTRY_COUNT: usize = 8;
+
+/// Asserts the fixed shape: `entries.len() == N`, each expected store exactly
+/// once, and no top-level `store`/`outcome`/`reason`.
+fn assert_audit_shape(event: &serde_json::Value) {
+    for key in ["store", "outcome", "reason"] {
+        assert!(
+            event.get(key).is_none(),
+            "the event has no top-level `{key}`: {event}"
+        );
+    }
+    assert!(
+        event["root_name"].is_string(),
+        "root_name is a string: {event}"
+    );
+    let entries = event["entries"]
+        .as_array()
+        .unwrap_or_else(|| panic!("entries is an array: {event}"));
+    assert_eq!(
+        entries.len(),
+        AUDIT_ENTRY_COUNT,
+        "the audit is TOTAL over the Step 2b matrix: {event}"
+    );
+    for store in [
+        "episodic.db",
+        "user-profiles.db",
+        "user-prompts.db",
+        "facts.db",
+        "skills.db",
+        "metadata.db",
+        "vault.db",
+        "shard.db",
+    ] {
+        audit_entry(event, store);
+    }
+}
+
+/// Every string value of the event, recursively (entries included).
+fn audit_strings(value: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    match value {
+        serde_json::Value::String(text) => out.push(text.clone()),
+        serde_json::Value::Array(items) => {
+            for item in items {
+                out.extend(audit_strings(item));
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for item in map.values() {
+                out.extend(audit_strings(item));
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
+/// The 12-byte leak oracle windows of the captured error text (fixed prefix
+/// excluded).
+fn leak_windows(captured: &str) -> Vec<&str> {
+    let text = captured
+        .strip_prefix(COMPOSITION_ERROR_PREFIX)
+        .unwrap_or(captured);
+    let bytes = text.as_bytes();
+    if bytes.len() < 12 {
+        return Vec::new();
+    }
+    (0..=bytes.len() - 12)
+        .map(|start| &text[start..start + 12])
+        .collect()
+}
+
+/// Collects every sanitization violation across the WHOLE event.
+fn audit_violations(event: &serde_json::Value, captured: Option<&str>) -> Vec<(String, String)> {
+    let mut violations = Vec::new();
+    let windows = captured.map(leak_windows).unwrap_or_default();
+    for text in audit_strings(event) {
+        if text.contains(HOSTILE_MARKER) || text.contains('/') {
+            violations.push(("[G1]".to_string(), text.clone()));
+        }
+        if windows.iter().any(|window| text.contains(window)) {
+            violations.push(("[G2]".to_string(), text.clone()));
+        }
+        if text.chars().any(char::is_control) {
+            violations.push(("[G3]".to_string(), text.clone()));
+        }
+        if let Some(id) = text.strip_prefix("shard-")
+            && (id.is_empty() || !id.chars().all(|ch| ch.is_ascii_digit()))
+        {
+            violations.push(("[G4]".to_string(), text.clone()));
+        }
+    }
+    let root_name = event["root_name"].as_str().unwrap_or_default();
+    if root_name != HOSTILE_ROOT_NAME {
+        violations.push((
+            "[EQ]".to_string(),
+            format!("root_name {root_name:?} != {HOSTILE_ROOT_NAME:?}"),
+        ));
+    }
+    violations
+}
+
+fn assert_no_violations(event: &serde_json::Value, captured: Option<&str>) {
+    let violations = audit_violations(event, captured);
+    let joined: Vec<String> = violations
+        .iter()
+        .map(|(label, text)| format!("{label} {text:?}"))
+        .collect();
+    assert!(
+        violations.is_empty(),
+        "sanitization violations:
+{}",
+        joined.join(
+            "
+"
+        )
+    );
+}
+
+/// Recursive listing (relative paths, sorted) of `root`.
+fn listing(root: &Path) -> Vec<String> {
+    fn walk(base: &Path, current: &Path, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(current) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let relative = path
+                .strip_prefix(base)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            out.push(relative);
+            if path.is_dir() {
+                walk(base, &path, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out.sort();
+    out
+}
+
+/// The MEASURED fresh-root file set of a default-flag run on the pre-change tree
+/// (`docs/evidence/issue129-residuals/sanitation-actor-error.md` records the
+/// run and the class of every entry). `opencode-mem.log` is the harness's own
+/// log sink: `spawn_engine_inner` points `OPENCODE_MEM_LOG_FILE` inside the
+/// root, so it appears here and not in the bare-binary measurement.
+const FRESH_ROOT_LISTING: [&str; 10] = [
+    ".engine.lock",
+    ".wal-mode",
+    "decay-sweep.json",
+    "episodic.db",
+    "episodic.db-tshm",
+    "episodic.db-wal",
+    "opencode-mem.log",
+    "user-profiles.db",
+    "user-profiles.db-tshm",
+    "user-profiles.db-wal",
+];
+
+/// Polls until the root's listing STABILIZES (two identical readings 200 ms
+/// apart), then returns it. The decay sweep runs asynchronously after
+/// composition, so the set settles a moment after the audit event.
+fn settled_listing(root: &Path) -> Vec<String> {
+    let started = Instant::now();
+    let mut previous = listing(root);
+    let mut stable = 0;
+    while stable < 2 {
+        assert!(
+            started.elapsed() < STARTUP_BOUND,
+            "the root listing never settled within {STARTUP_BOUND:?}: {previous:?}"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+        let current = listing(root);
+        stable = if current == previous { stable + 1 } else { 0 };
+        previous = current;
+    }
+    previous
+}
+
+// ---------------------------------------------------------------------------
+// Step 3a — Found: a valid database from a previous boot
+// ---------------------------------------------------------------------------
+
+/// Old behaviour: composition succeeded and nobody said what the store did. New:
+/// exactly one audit event, and the `episodic.db` entry says `found` — NOT
+/// `created` (the file predates this boot) and NOT `refused`.
+#[test]
+fn test_audit_classifies_found_missing_and_refused() {
+    let _lock = serial();
+    let scratch = scratch_dir("audit-found");
+    let storage = scratch.join("storage");
+    let home = scratch.join("home");
+    let dist = scratch.join("dist");
+    std::fs::create_dir_all(&home).expect("create home");
+    std::fs::create_dir_all(&storage).expect("create storage");
+    write_shell(&dist);
+
+    // First boot creates a REAL database (no handcrafted empty file).
+    let first_stderr = scratch.join("first.err");
+    let port = free_port();
+    {
+        let _child = spawn_engine_with_home(&storage, port, &dist, &first_stderr, &home);
+        wait_for_port(port);
+        let event = single_audit(&first_stderr);
+        assert_eq!(
+            audit_entry(&event, "episodic.db")["outcome"],
+            "created",
+            "the first boot creates the store: {event}"
+        );
+    }
+    let db = storage.join("episodic.db");
+    assert!(
+        db.is_file(),
+        "the first boot left a regular episodic.db: {:?}",
+        listing(&storage)
+    );
+
+    // Restart on the same root: composition succeeds again.
+    let second_stderr = scratch.join("second.err");
+    let port = free_port();
+    let _child = spawn_engine_with_home(&storage, port, &dist, &second_stderr, &home);
+    wait_for_port(port);
+    let event = single_audit(&second_stderr);
+    assert_audit_shape(&event);
+    let entry = audit_entry(&event, "episodic.db");
+    assert_eq!(
+        entry["outcome"], "found",
+        "a pre-existing database is `found`, never `created`/`refused`: {event}"
+    );
+    assert!(
+        entry["reason"].is_string(),
+        "the entry carries a fixed reason token: {event}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Step 3b — Created: absent before, present after, actor reached
+// ---------------------------------------------------------------------------
+
+/// Wrong implementations it kills: omitting the event; reporting `found` for a
+/// store that did not exist before the boot; claiming `created` without the
+/// before/after observation (the fixture asserts the file is absent first).
+#[test]
+fn test_audit_is_total_over_expected_list() {
+    let _lock = serial();
+    let scratch = scratch_dir("audit-created");
+    let storage = scratch.join("storage");
+    let home = scratch.join("home");
+    let dist = scratch.join("dist");
+    std::fs::create_dir_all(&home).expect("create home");
+    std::fs::create_dir_all(&storage).expect("create storage");
+    write_shell(&dist);
+
+    let db = storage.join("episodic.db");
+    assert!(
+        std::fs::symlink_metadata(&db).is_err(),
+        "fixture precondition: episodic.db is absent before the boot"
+    );
+
+    let stderr_path = scratch.join("engine.err");
+    let port = free_port();
+    let _child = spawn_engine_with_home(&storage, port, &dist, &stderr_path, &home);
+    wait_for_port(port);
+    let event = single_audit(&stderr_path);
+    assert_audit_shape(&event);
+    assert!(
+        db.is_file(),
+        "the production composition created a regular episodic.db: {:?}",
+        listing(&storage)
+    );
+    assert_eq!(
+        audit_entry(&event, "episodic.db")["outcome"],
+        "created",
+        "absent before + present after = created: {event}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Step 3c — Refused: the poisoned `episodic.db` directory
+// ---------------------------------------------------------------------------
+
+/// The legacy name denotes a refused TARGET, not an unreadable root: the root
+/// is writable and the failing actor is the episodic open.
+#[test]
+fn test_audit_refuses_when_root_unreadable() {
+    let _lock = serial();
+    let scratch = scratch_dir("audit-refused");
+    let storage = scratch.join("storage");
+    let home = scratch.join("home");
+    let dist = scratch.join("dist");
+    std::fs::create_dir_all(&home).expect("create home");
+    std::fs::create_dir_all(&storage).expect("create storage");
+    write_shell(&dist);
+
+    let poisoned = storage.join("episodic.db");
+    std::fs::create_dir_all(&poisoned).expect("create the poisoned episodic entry");
+    assert!(
+        poisoned.is_dir(),
+        "fixture: a directory sits at episodic.db"
+    );
+
+    let stderr_path = scratch.join("engine.err");
+    let port = free_port();
+    let _child = spawn_engine_with_home(&storage, port, &dist, &stderr_path, &home);
+    wait_for_port(port);
+    // The premise: a REAL composition failure, not a wired server.
+    wait_for_events(&stderr_path, "engine.composition_failed");
+
+    let event = single_audit(&stderr_path);
+    assert_audit_shape(&event);
+    let entry = audit_entry(&event, "episodic.db");
+    assert_eq!(
+        entry["outcome"], "refused",
+        "the failed eager actor is `refused`: {event}"
+    );
+    assert!(
+        entry["reason"].is_string(),
+        "the refusal is a fixed token, never the store text: {event}"
+    );
+    assert!(
+        poisoned.is_dir(),
+        "the audit neither repairs nor replaces the target: {:?}",
+        listing(&storage)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Step 3d — sanitation, sequenced on one shared hostile root
+// ---------------------------------------------------------------------------
+
+/// Guards G1 (root redaction), G2 (raw-error redaction) and G3 (control
+/// escaping), measured — G4 is ABSENT BY CONSTRUCTION (Step 2b measured that
+/// startup never reaches the shard registry, so no shard entry exists).
+///
+/// Sequence (binding): S0 poison -> S1 in-process capture T -> S2 failure arm
+/// with T as the leak oracle -> S3 cleanup -> S4 success arm without G2.
+#[test]
+fn test_startup_audit_sanitizes_names() {
+    let _lock = serial();
+    let scratch = scratch_dir("audit-sanitize");
+    let root = hostile_root(&scratch);
+    let home = scratch.join("home");
+    let dist = scratch.join("dist");
+    // The marker lives in the PARENT only; the basename holds the controls.
+    std::fs::create_dir_all(&home).expect("create home");
+    std::fs::create_dir_all(root.parent().expect("hostile root has a parent"))
+        .expect("create the hostile parent");
+    write_shell(&dist);
+
+    // S0: poison the target without touching the (absent) root itself.
+    let poisoned = root.join("episodic.db");
+    std::fs::create_dir_all(&poisoned).expect("create the poisoned episodic entry");
+    assert!(poisoned.is_dir(), "S0: a directory sits at episodic.db");
+    assert_eq!(
+        listing(&poisoned),
+        Vec::<String>::new(),
+        "S0: the poisoned directory is empty"
+    );
+
+    // S1: capture the REAL error text in process, before any child spawn.
+    let captured = captured_composition_error(&root, &home);
+    assert!(
+        captured.starts_with(COMPOSITION_ERROR_PREFIX),
+        "S1: the captured text is the composition error: {captured:?}"
+    );
+    assert_eq!(
+        listing(&poisoned),
+        Vec::<String>::new(),
+        "S1: the capture is read-only; the poisoned directory is still empty"
+    );
+    eprintln!("S1 captured composition error: {captured:?}");
+
+    // S2: failure arm, G2 active.
+    let fail_stderr = scratch.join("fail.err");
+    let port = free_port();
+    {
+        let _child = spawn_engine_with_home(&root, port, &dist, &fail_stderr, &home);
+        wait_for_port(port);
+        wait_for_events(&fail_stderr, "engine.composition_failed");
+        let stderr = std::fs::read_to_string(&fail_stderr).expect("read the child's stderr");
+        let event = single_audit(&fail_stderr);
+        assert_audit_shape(&event);
+        assert_eq!(
+            audit_entry(&event, "episodic.db")["outcome"],
+            "refused",
+            "S2: the failure arm reports the refusal: {event}"
+        );
+        assert_no_violations(&event, Some(&captured));
+        assert!(
+            stderr.contains("storage.root_audit"),
+            "S2: the audit is on the same stderr stream as the failure"
+        );
+    }
+    assert!(
+        poisoned.is_dir(),
+        "S2: post-state is still the poisoned directory"
+    );
+
+    // S3: cleanup the poison (fails loudly if something wrote into it).
+    std::fs::remove_dir(&poisoned).expect("S3: the poisoned directory is empty and removable");
+    assert!(
+        std::fs::symlink_metadata(&poisoned).is_err(),
+        "S3: the target is gone"
+    );
+
+    // S4: success arm, G2 NOT asserted (no captured text on this arm).
+    let ok_stderr = scratch.join("ok.err");
+    let port = free_port();
+    let _child = spawn_engine_with_home(&root, port, &dist, &ok_stderr, &home);
+    wait_for_port(port);
+    let event = single_audit(&ok_stderr);
+    assert_audit_shape(&event);
+    assert_eq!(
+        audit_entry(&event, "episodic.db")["outcome"],
+        "created",
+        "S4: absent before + successful ready = created: {event}"
+    );
+    assert_eq!(
+        event["root_name"], HOSTILE_ROOT_NAME,
+        "S4: the root name is the escaped basename: {event}"
+    );
+    assert_no_violations(&event, None);
+    assert!(
+        poisoned.is_file(),
+        "S4: post-state is a regular file: {:?}",
+        listing(&root)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Step 3e — the inventory over the measured file set
+// ---------------------------------------------------------------------------
+
+/// Asserts one fixture's audit: shape, per-store outcome/reason, and that the
+/// audit created no file beyond the real actors.
+fn assert_inventory(event: &serde_json::Value, expected: &[(&str, &str, &str)]) {
+    assert_audit_shape(event);
+    for (store, outcome, reason) in expected {
+        let entry = audit_entry(event, store);
+        assert_eq!(entry["outcome"], *outcome, "{store} outcome: {event}");
+        assert_eq!(entry["reason"], *reason, "{store} reason: {event}");
+    }
+}
+
+#[test]
+fn test_startup_audit_inventory() {
+    let _lock = serial();
+    let scratch = scratch_dir("audit-inventory");
+
+    // F1 — fresh root, default flags.
+    let f1 = scratch.join("f1");
+    let f1_storage = f1.join("storage");
+    let f1_home = f1.join("home");
+    let f1_dist = f1.join("dist");
+    std::fs::create_dir_all(&f1_home).expect("create f1 home");
+    std::fs::create_dir_all(&f1_storage).expect("create f1 storage");
+    write_shell(&f1_dist);
+    assert_eq!(
+        listing(&f1_storage),
+        Vec::<String>::new(),
+        "F1 pre-state: the fresh root is empty"
+    );
+    let f1_storage_err = f1.join("engine.err");
+    let port = free_port();
+    {
+        let _child = spawn_engine_with_home(&f1_storage, port, &f1_dist, &f1_storage_err, &f1_home);
+        wait_for_port(port);
+        let event = single_audit(&f1_storage_err);
+        assert_inventory(
+            &event,
+            &[
+                ("episodic.db", "created", "observed_created"),
+                ("user-profiles.db", "unknown", "not_opened"),
+                ("user-prompts.db", "unknown", "not_opened"),
+                ("facts.db", "unknown", "disabled"),
+                ("skills.db", "unknown", "not_opened"),
+                ("metadata.db", "unknown", "not_observed"),
+                ("vault.db", "unknown", "not_opened"),
+                ("shard.db", "unknown", "not_observed"),
+            ],
+        );
+        let measured: Vec<String> = FRESH_ROOT_LISTING
+            .iter()
+            .map(|name| name.to_string())
+            .collect();
+        assert_eq!(
+            settled_listing(&f1_storage),
+            measured,
+            "F1: the run's file set equals the Step 2b measured set"
+        );
+    }
+
+    // F2 — restart of F1: episodic found, lazy rows still unknown, set unchanged.
+    let f2_stderr = f1.join("restart.err");
+    let port = free_port();
+    {
+        let _child = spawn_engine_with_home(&f1_storage, port, &f1_dist, &f2_stderr, &f1_home);
+        wait_for_port(port);
+        let event = single_audit(&f2_stderr);
+        assert_inventory(
+            &event,
+            &[
+                ("episodic.db", "found", "observed"),
+                ("user-profiles.db", "unknown", "not_opened"),
+                ("metadata.db", "unknown", "not_observed"),
+            ],
+        );
+        let measured: Vec<String> = FRESH_ROOT_LISTING
+            .iter()
+            .map(|name| name.to_string())
+            .collect();
+        assert_eq!(
+            settled_listing(&f1_storage),
+            measured,
+            "F2: a restart adds no file"
+        );
+    }
+
+    // F3 — poisoned episodic.db: refused, later-composed rows not_attempted.
+    let f3 = scratch.join("f3");
+    let f3_storage = f3.join("storage");
+    let f3_home = f3.join("home");
+    let f3_dist = f3.join("dist");
+    std::fs::create_dir_all(&f3_home).expect("create f3 home");
+    std::fs::create_dir_all(f3_storage.join("episodic.db")).expect("poison f3");
+    write_shell(&f3_dist);
+    let f3_stderr = f3.join("engine.err");
+    let port = free_port();
+    {
+        let _child = spawn_engine_with_home(&f3_storage, port, &f3_dist, &f3_stderr, &f3_home);
+        wait_for_port(port);
+        wait_for_events(&f3_stderr, "engine.composition_failed");
+        let event = single_audit(&f3_stderr);
+        assert_inventory(
+            &event,
+            &[
+                ("episodic.db", "refused", "open_failed"),
+                ("user-profiles.db", "unknown", "not_attempted"),
+                ("user-prompts.db", "unknown", "not_attempted"),
+                ("facts.db", "unknown", "not_attempted"),
+                ("skills.db", "unknown", "not_attempted"),
+                ("metadata.db", "unknown", "not_attempted"),
+                ("vault.db", "unknown", "not_attempted"),
+                ("shard.db", "unknown", "not_attempted"),
+            ],
+        );
+        assert!(
+            f3_storage.join("episodic.db").is_dir(),
+            "F3: the degraded launch repairs nothing: {:?}",
+            listing(&f3_storage)
+        );
+        assert!(
+            !f3_storage.join("user-profiles.db").exists(),
+            "F3: no lazy store is created on the failure path: {:?}",
+            listing(&f3_storage)
+        );
+    }
+
+    // F4 is dropped: Step 2b measured that a flag-ON startup creates no
+    // `facts.db` (the store stays lazy), so the row cannot be told apart.
+    // F5 — a pre-seeded lazy file stays unknown and changes no store status.
+    let f5 = scratch.join("f5");
+    let f5_storage = f5.join("storage");
+    let f5_home = f5.join("home");
+    let f5_dist = f5.join("dist");
+    std::fs::create_dir_all(&f5_home).expect("create f5 home");
+    std::fs::create_dir_all(&f5_storage).expect("create f5 storage");
+    write_shell(&f5_dist);
+    std::fs::write(f5_storage.join("skills.db"), b"").expect("pre-seed skills.db");
+    let f5_stderr = f5.join("engine.err");
+    let port = free_port();
+    {
+        let _child = spawn_engine_with_home(&f5_storage, port, &f5_dist, &f5_stderr, &f5_home);
+        wait_for_port(port);
+        let event = single_audit(&f5_stderr);
+        assert_inventory(
+            &event,
+            &[
+                ("episodic.db", "created", "observed_created"),
+                ("skills.db", "unknown", "not_opened"),
+            ],
+        );
+        let mut measured: Vec<String> = FRESH_ROOT_LISTING
+            .iter()
+            .map(|name| name.to_string())
+            .collect();
+        measured.push("skills.db".to_string());
+        measured.sort();
+        assert_eq!(
+            settled_listing(&f5_storage),
+            measured,
+            "F5: the audit opens nothing; the seeded file is untouched"
+        );
+    }
+    assert_eq!(
+        std::fs::read(f5_storage.join("skills.db")).expect("the seeded file is readable"),
+        Vec::<u8>::new(),
+        "F5: the seeded lazy file was never opened (still empty)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Step 2b flag-ON facts.db row — the token the matrix fixes (debug-1 F5)
+// ---------------------------------------------------------------------------
+
+/// The Step 2b matrix row for `facts.db`: "Flag off = Unknown `disabled`; flag
+/// on construction lazy … otherwise Unknown `not_observed`". F4 was dropped
+/// because the flag-ON row cannot be told apart by FILE CREATION (no
+/// `facts.db` appears) — but the emitted TOKEN is observable, so this fixture
+/// pins it. Wrong implementation it kills: emitting `not_opened` on the
+/// flag-ON arm (the genuinely-lazy token), which mislabels a
+/// feature-constructed store as merely unopened.
+#[test]
+fn test_audit_facts_flag_on_reports_not_observed() {
+    let _lock = serial();
+    let scratch = scratch_dir("audit-facts-on");
+    let storage = scratch.join("storage");
+    let home = scratch.join("home");
+    let dist = scratch.join("dist");
+    std::fs::create_dir_all(&home).expect("create home");
+    std::fs::create_dir_all(&storage).expect("create storage");
+    write_shell(&dist);
+    write_config(&home, "{\"featureFlags\":{\"promotionPipeline\":true}}");
+    let config = resolve_sandbox_config(&home);
+    assert!(
+        config.feature_flags.promotion_pipeline,
+        "the sandbox config's promotionPipeline flag resolved (a key typo fails here)"
+    );
+
+    let stderr_path = scratch.join("engine.err");
+    let port = free_port();
+    let _child = spawn_engine_with_home(&storage, port, &dist, &stderr_path, &home);
+    wait_for_port(port);
+    let event = single_audit(&stderr_path);
+    assert_inventory(
+        &event,
+        &[
+            ("episodic.db", "created", "observed_created"),
+            ("facts.db", "unknown", "not_observed"),
+        ],
+    );
+    assert!(
+        !storage.join("facts.db").exists(),
+        "the flag-ON startup still creates no facts.db: {:?}",
+        listing(&storage)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The symlink boundary — a DANGLING link is the M2 oracle (debug-1 F1)
+// ---------------------------------------------------------------------------
+
+/// The symlink boundary (Step 2b: "Metadata errors and symlinks are Unknown
+/// unless attributed"). A DANGLING symlink at episodic.db is the
+/// distinguishing input: `symlink_metadata` reads the link itself (Other →
+/// unknown), while a link-following read hits NotFound → Absent and lets the
+/// eager actor create through the link and label the boot `created`.
+#[test]
+fn test_audit_dangling_symlink_at_episodic_is_unknown() {
+    let _lock = serial();
+    let scratch = scratch_dir("audit-symlink-dangling");
+    let storage = scratch.join("storage");
+    let home = scratch.join("home");
+    let dist = scratch.join("dist");
+    std::fs::create_dir_all(&home).expect("create home");
+    std::fs::create_dir_all(&storage).expect("create storage");
+    write_shell(&dist);
+
+    let db = storage.join("episodic.db");
+    std::os::unix::fs::symlink(scratch.join("gone.db"), &db).expect("seed the dangling symlink");
+    // Precondition, discriminating BOTH calls: the link exists (symlink_metadata
+    // is Ok) AND its target does not (metadata is Err(NotFound)).
+    assert!(
+        std::fs::metadata(&db).is_err() && std::fs::symlink_metadata(&db).is_ok(),
+        "fixture precondition: the link dangles (metadata NotFound, symlink_metadata Ok)"
+    );
+
+    let stderr_path = scratch.join("engine.err");
+    let port = free_port();
+    let _child = spawn_engine_with_home(&storage, port, &dist, &stderr_path, &home);
+    wait_for_port(port);
+    let event = single_audit(&stderr_path);
+    assert_audit_shape(&event);
+    let entry = audit_entry(&event, "episodic.db");
+    assert_eq!(
+        entry["outcome"], "unknown",
+        "a dangling symlink is never `created` (and its `after` reading is Other, \
+         not Regular): {event}"
+    );
+    assert_eq!(entry["reason"], "not_observed", "{event}");
+    assert!(
+        std::fs::symlink_metadata(&db)
+            .map(|meta| meta.file_type().is_symlink())
+            .unwrap_or(false),
+        "post-state: the audit repaired nothing (the link is still a link)"
+    );
+}
+
+/// Companion fixture: a symlink at `episodic.db` pointing at an EXISTING
+/// regular file outside the root. The store's own open refuses through the
+/// link, so the entry is `refused/open_failed` on both the correct tree and
+/// under the M2 mutant (`presence` following the link) — this test is
+/// explicitly NOT the M2 oracle (collinear); it pins that the real actor
+/// refuses symlinks and that the audit records the refusal honestly.
+#[test]
+fn test_audit_escaping_symlink_at_episodic_is_refused() {
+    let _lock = serial();
+    let scratch = scratch_dir("audit-symlink-escaping");
+    let storage = scratch.join("storage");
+    let home = scratch.join("home");
+    let dist = scratch.join("dist");
+    std::fs::create_dir_all(&home).expect("create home");
+    std::fs::create_dir_all(&storage).expect("create storage");
+    write_shell(&dist);
+
+    let outside = scratch.join("outside.db");
+    std::fs::write(&outside, b"not a database").expect("seed the outside file");
+    let db = storage.join("episodic.db");
+    std::os::unix::fs::symlink(&outside, &db).expect("seed the escaping symlink");
+    assert!(
+        std::fs::metadata(&db).is_ok() && std::fs::symlink_metadata(&db).is_ok(),
+        "fixture precondition: the link resolves (both stat calls Ok)"
+    );
+
+    let stderr_path = scratch.join("engine.err");
+    let port = free_port();
+    let _child = spawn_engine_with_home(&storage, port, &dist, &stderr_path, &home);
+    wait_for_port(port);
+    let event = single_audit(&stderr_path);
+    assert_audit_shape(&event);
+    let entry = audit_entry(&event, "episodic.db");
+    assert_eq!(
+        entry["outcome"], "refused",
+        "the store refuses to open through a symlink: {event}"
+    );
+    assert_eq!(entry["reason"], "open_failed", "{event}");
+    assert!(
+        std::fs::symlink_metadata(&db)
+            .map(|meta| meta.file_type().is_symlink())
+            .unwrap_or(false),
+        "post-state: the audit repaired nothing (the link is still a link)"
+    );
+}

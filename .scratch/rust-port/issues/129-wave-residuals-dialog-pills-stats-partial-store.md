@@ -1,6 +1,6 @@
 # 129 — Close out the wave-1/2/3 residuals: ConfirmGate→Dialog, tag-pill retirement, stats latency, partial-store robustness
 
-Status: ready-for-agent — 2026-11-06 (synthesized from the issue 118 wave 1–3 pipeline; all premises measured or statically verified during those waves; brief under `## Agent Brief`)
+Status: DONE — 2026-11-07 (r9 wave complete: dialog 14-row lane pre+post, pills 11-row lane pre+post, startup storage.root_audit with sanitized hostile-root event, stats measured-not-delivered per PRD, partial-store Step 4 closed as diagnosis per syseng Q2=ACCEPT-STOP; issue 130 filed needs-triage. Review-2 APPROVED, all Step 7 gates green at integration; evidence in `docs/evidence/issue129-residuals/`)
 
 Triage: ready-for-agent
 

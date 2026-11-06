@@ -9,6 +9,7 @@ pub mod api;
 pub mod api_request;
 pub mod confirm;
 pub mod core_screens;
+pub mod dialog_focus;
 pub mod export_import;
 pub mod layout;
 pub mod nav;

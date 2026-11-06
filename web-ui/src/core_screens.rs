@@ -28,18 +28,24 @@
 use std::collections::BTreeMap;
 
 use leptos::callback::Callable;
+use leptos::html;
 use leptos::prelude::*;
+use leptos::reactive::wrappers::write::SignalSetter;
 use serde::Deserialize;
 use thaw::{
-    Badge, BadgeAppearance, Button, ButtonAppearance, Card, CardFooter, CardHeader,
-    CardHeaderDescription, Field, Input, MessageBar, MessageBarBody, MessageBarIntent, Pagination,
-    Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Tag,
+    Badge, BadgeAppearance, Button, ButtonAppearance, ButtonSize, ButtonType, Card, CardFooter,
+    CardHeader, CardHeaderDescription, Dialog, DialogActions, DialogBody, DialogSurface,
+    DialogTitle, Field, Input, MessageBar, MessageBarBody, MessageBarIntent, Pagination, Table,
+    TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Tag,
 };
 
 use crate::api::auth::{AuthContext, read_marker_token};
 use crate::api::envelope::{ApiError, parse_envelope};
 use crate::api_request::{self, RequestSpec};
-use crate::confirm::{ConfirmEvent, ConfirmGate, ConfirmState, confirm_next, dispatch};
+use crate::confirm::{
+    ConfirmDeleteButton, ConfirmEvent, ConfirmState, confirm_next, track_section_focus_return,
+};
+use crate::dialog_focus::trap_tab;
 use crate::paths::{EndpointId, endpoint, fill};
 use crate::screens::format_created_at;
 use crate::state_block::{BlockKind, StateBlock, block_kind};
@@ -392,6 +398,11 @@ pub fn range_text(page: usize, page_size: usize, total: usize) -> String {
 }
 
 /// One rendered memory row with its pin/unpin/delete controls.
+///
+/// Eight arguments is the shape of the row: the data, the reload, the two
+/// signals that drive its gestures, the two callbacks it can raise, the focus
+/// fallback, and the auth context. A struct would only move the list.
+#[allow(clippy::too_many_arguments)]
 fn memory_row(
     row: MemoryRowView,
     reload: Callback<()>,
@@ -399,6 +410,7 @@ fn memory_row(
     confirm: RwSignal<ConfirmState>,
     request_delete: Callback<String>,
     on_tag: Callback<String>,
+    fallback: NodeRef<html::Span>,
     auth: AuthContext,
 ) -> impl IntoView {
     let pinned = row.is_pinned;
@@ -427,41 +439,22 @@ fn memory_row(
     // The row's Delete button only arms the gate; the gate's Confirm button is
     // the one path to `request_delete`, and the request spec there is built
     // from `step.run` alone (never from render state).
+    let delete_ref = NodeRef::<html::Span>::new();
     let delete_area = {
         let id = row.id.clone();
         move || {
-            let armed = confirm.get().pending.as_deref() == Some(id.as_str());
-            if armed {
-                let on_confirm = Callback::new(move |_: ()| {
-                    if let Some(run_id) = dispatch(confirm, ConfirmEvent::Confirm) {
-                        request_delete.run(run_id);
-                    }
-                });
-                let on_cancel = Callback::new(move |_: ()| {
-                    confirm.set(confirm_next(&confirm.get_untracked(), ConfirmEvent::Cancel).state);
-                });
-                view! { <ConfirmGate on_confirm=on_confirm on_cancel=on_cancel/> }.into_any()
-            } else {
-                let ask_id = id.clone();
-                view! {
-                    <Button
+            view! {
+                <span node_ref=delete_ref>
+                    <ConfirmDeleteButton
+                        confirm=confirm
+                        id=id.clone()
+                        invoker=delete_ref
+                        fallback=fallback
+                        testid="memory-delete"
                         appearance=ButtonAppearance::Subtle
-                        attr:data-testid="memory-delete"
-                        on_click=move |_| {
-                            confirm
-                                .set(
-                                    confirm_next(
-                                        &confirm.get_untracked(),
-                                        ConfirmEvent::Ask(ask_id.clone()),
-                                    )
-                                        .state,
-                                );
-                        }
-                    >
-                        "Delete"
-                    </Button>
-                }
-                .into_any()
+                        on_run=request_delete
+                    />
+                </span>
             }
         }
     };
@@ -509,14 +502,16 @@ fn memory_row(
                             let label = format!("Filter by tag: {tag}");
                             let value = tag.clone();
                             view! {
-                                <button
-                                    type="button"
-                                    class="chip"
-                                    aria-label=label
-                                    on:click=move |_| on_tag.run(value.clone())
+                                <Button
+                                    appearance=ButtonAppearance::Subtle
+                                    size=Signal::derive(|| ButtonSize::Small)
+                                    button_type=ButtonType::Button
+                                    attr:aria-label=label
+                                    attr:data-testid="memory-tag-pill"
+                                    on_click=move |_| on_tag.run(value.clone())
                                 >
                                     <Tag>{tag}</Tag>
-                                </button>
+                                </Button>
                             }
                         })
                         .collect_view()}
@@ -665,6 +660,9 @@ pub fn MemoriesPanel() -> impl IntoView {
         refresh.run(());
     };
 
+    // Focus returns here when a deleted row took its own Delete button with it.
+    let row_fallback = NodeRef::<html::Span>::new();
+
     let page_count = Signal::derive(move || match state.get() {
         MemoriesView::Loaded { total_pages, .. } => total_pages.max(1),
         _ => 1,
@@ -712,14 +710,16 @@ pub fn MemoriesPanel() -> impl IntoView {
                             let label = format!("Remove tag: {tag}");
                             let value = tag.clone();
                             view! {
-                                <button
-                                    type="button"
-                                    class="chip"
-                                    aria-label=label
-                                    on:click=move |_| remove_tag(value.clone())
+                                <Button
+                                    appearance=ButtonAppearance::Subtle
+                                    size=Signal::derive(|| ButtonSize::Small)
+                                    button_type=ButtonType::Button
+                                    attr:aria-label=label
+                                    attr:data-testid="memory-filter-pill"
+                                    on_click=move |_| remove_tag(value.clone())
                                 >
                                     <Tag>{tag}</Tag>
-                                </button>
+                                </Button>
                             }
                         })
                         .collect_view()
@@ -738,13 +738,15 @@ pub fn MemoriesPanel() -> impl IntoView {
                             }
                         })
                 }}
-                <Button
-                    class="memories-reload"
-                    attr:data-testid="memories-reload"
-                    on_click=move |_| refresh.run(())
-                >
-                    "Reload"
-                </Button>
+                <span node_ref=row_fallback>
+                    <Button
+                        class="memories-reload"
+                        attr:data-testid="memories-reload"
+                        on_click=move |_| refresh.run(())
+                    >
+                        "Reload"
+                    </Button>
+                </span>
                 <span class="memories-range" data-testid="memories-range">{range}</span>
             </div>
             {move || {
@@ -817,6 +819,7 @@ pub fn MemoriesPanel() -> impl IntoView {
                                             confirm,
                                             request_delete,
                                             add_tag,
+                                            row_fallback,
                                             auth.clone(),
                                         )
                                     })
@@ -2345,6 +2348,12 @@ pub const CLEANUP_ERROR_TESTID: &str = "maintenance-error";
 /// The `data-testid` of the armed notice.
 pub const CLEANUP_ARMED_TESTID: &str = "maintenance-armed";
 
+/// The maintenance dialog's heading.
+pub const MAINTENANCE_TITLE: &str = "Run cleanup?";
+
+/// The id the dialog surface's `aria-labelledby` points at.
+pub const MAINTENANCE_TITLE_ID: &str = "maintenance-dialog-title";
+
 /// The class of the rendered report.
 pub const CLEANUP_REPORT_CLASS: &str = "maintenance-report";
 
@@ -2483,9 +2492,10 @@ pub fn SettingsPanel() -> impl IntoView {
     Effect::new(move |_| reload.run(()));
 
     // The Maintenance section's only path to the network: this callback is
-    // reachable from the two `on:click` handlers below and from nowhere else
+    // reachable from the dialog's Confirm handler below and from nowhere else
     // (no reactive effect, no mount hook, no interval, no call from `reload`).
     let cleanup = RwSignal::new(CleanupState::default());
+    let action_ref = NodeRef::<html::Span>::new();
     let dispatch = Callback::new({
         let auth = auth.clone();
         move |action: CleanupAction| {
@@ -2503,6 +2513,17 @@ pub fn SettingsPanel() -> impl IntoView {
             });
         }
     });
+
+    // Created once, outside the render closure: a tracker rebuilt on every
+    // cleanup render would never see the armed -> idle transition it watches
+    // for.
+    track_section_focus_return(
+        Signal::derive(move || {
+            let current = cleanup.get();
+            current.armed || current.running
+        }),
+        action_ref,
+    );
 
     view! {
         <section class="settings-panel" data-testid="settings-panel">
@@ -2599,18 +2620,61 @@ pub fn SettingsPanel() -> impl IntoView {
                         </div>
                     }
                 });
-                let cancel = (status == CleanupStatus::Armed).then(|| {
-                    view! {
-                        <Button
-                            appearance=ButtonAppearance::Secondary
-                            class="maintenance-cancel"
-                            attr:data-testid="maintenance-cancel"
-                            on_click=move |_| dispatch.run(CleanupAction::Cancel)
-                        >
-                            "Cancel"
-                        </Button>
+                // The final decision is the dialog's, never an inline second
+                // click: `open` is derived from the reducer and the setter maps
+                // a close request (Esc, mask) onto `CleanupAction::Cancel`.
+                let open = Signal::derive(move || cleanup.get().armed);
+                let set_open = SignalSetter::map(move |value: bool| {
+                    if !value {
+                        dispatch.run(CleanupAction::Cancel);
                     }
                 });
+                let surface = NodeRef::<html::Div>::new();
+                let confirm_dialog = (status == CleanupStatus::Armed)
+                    .then(|| {
+                        view! {
+                            <Dialog open=(open, set_open) mask_closeable=false>
+                                <DialogSurface attr:aria-labelledby=MAINTENANCE_TITLE_ID>
+                                    <DialogBody>
+                                        <div
+                                            class="confirm-dialog"
+                                            data-testid="maintenance-dialog"
+                                            node_ref=surface
+                                            on:keydown=move |event: leptos::ev::KeyboardEvent| {
+                                                if let Some(element) = surface.get_untracked() {
+                                                    trap_tab(&event, &element);
+                                                }
+                                            }
+                                        >
+                                            <DialogTitle
+                                                attr:id=MAINTENANCE_TITLE_ID
+                                                attr:data-testid="maintenance-dialog-title"
+                                            >
+                                                {MAINTENANCE_TITLE}
+                                            </DialogTitle>
+                                            <p class="maintenance-dialog-copy">{CLEANUP_ARMED_NOTICE}</p>
+                                            <DialogActions attr:data-testid="maintenance-dialog-actions">
+                                                <Button
+                                                    appearance=ButtonAppearance::Primary
+                                                    attr:data-testid="maintenance-dialog-confirm"
+                                                    on_click=move |_| dispatch.run(CleanupAction::Confirm)
+                                                >
+                                                    "Confirm cleanup"
+                                                </Button>
+                                                <Button
+                                                    appearance=ButtonAppearance::Secondary
+                                                    attr:data-testid="maintenance-dialog-cancel"
+                                                    on_click=move |_| dispatch.run(CleanupAction::Cancel)
+                                                >
+                                                    "Cancel"
+                                                </Button>
+                                            </DialogActions>
+                                        </div>
+                                    </DialogBody>
+                                </DialogSurface>
+                            </Dialog>
+                        }
+                    });
                 let outcome_view = match outcome {
                     CleanupOutcomeView::Nothing => ().into_any(),
                     CleanupOutcomeView::Report(rows) => {
@@ -2672,24 +2736,21 @@ pub fn SettingsPanel() -> impl IntoView {
                             "Cleanup deletes memories older than the retention window. It is never run automatically."
                         </p>
                         {armed_notice}
-                        <Button
-                            appearance=ButtonAppearance::Primary
-                            class="maintenance-action"
-                            attr:data-testid="maintenance-action"
-                            disabled=Signal::derive(move || cleanup_disabled(&cleanup.get()))
-                            loading=Signal::derive(move || cleanup.get().running)
-                            on_click=move |_| {
-                                let action = if cleanup.get_untracked().armed {
-                                    CleanupAction::Confirm
-                                } else {
-                                    CleanupAction::Arm
-                                };
-                                dispatch.run(action);
-                            }
-                        >
-                            {cleanup_action_label(status)}
-                        </Button>
-                        {cancel}
+                        <span node_ref=action_ref>
+                            <Button
+                                appearance=ButtonAppearance::Primary
+                                class="maintenance-action"
+                                attr:data-testid="maintenance-action"
+                                disabled=Signal::derive(move || {
+                                    cleanup_disabled(&cleanup.get()) || cleanup.get().armed
+                                })
+                                loading=Signal::derive(move || cleanup.get().running)
+                                on_click=move |_| dispatch.run(CleanupAction::Arm)
+                            >
+                                {cleanup_action_label(status)}
+                            </Button>
+                        </span>
+                        {confirm_dialog}
                         {outcome_view}
                     </section>
                 }

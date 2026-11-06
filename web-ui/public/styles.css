@@ -427,10 +427,6 @@ body {
   margin-top: 0.5rem;
 }
 
-.maintenance-cancel {
-  margin-left: 0.5rem;
-}
-
 /* Informational, not an error: the build has no cleanup endpoint. */
 .maintenance-unavailable {
   margin-top: 0.75rem;
@@ -793,13 +789,6 @@ body {
   max-width: var(--app-measure, 72ch);
   margin: 0.75rem 0;
   overflow-wrap: anywhere;
-}
-
-.chip {
-  padding: 0.15rem 0.5rem;
-  border-radius: 0.75rem;
-  background: var(--surface-hover);
-  font-size: 0.8125rem;
 }
 
 .memory-tag-more {
@@ -1401,33 +1390,26 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
- * Delete confirmation (U11)
+ * Delete confirmation (U11, dialog form in issue 129)
  *
- * The armed row renders this inline gate in place of its Delete button, in all
- * three destructive surfaces (memory, session, skill). The `grid-column` lets
- * it span a `.memory-row` / `.session-row` grid; it has no effect inside the
- * skill rows' flex layout. The confirm button is emphasised, the cancel is a
- * ghost — the two choices are never the same shape.
- * ------------------------------------------------------------------------- */
-
-.confirm-gate {
-  grid-column: 1 / -1;
+ * Every destructive surface (memory, session, skill) keeps its Delete button
+ * mounted and opens this dialog instead of swapping the button for an inline
+ * gate. The confirm button is emphasised, the cancel is a ghost — the two
+ * choices are never the same shape. The dialog's own surface carries the
+ * layout; only the warning frame lives here. */
+.confirm-dialog {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 26rem;
   padding: 0.35rem 0.6rem;
   background: var(--warn-bg);
   border: 1px solid var(--warn-border);
   border-radius: 0.25rem;
 }
 
-.confirm-gate-text {
+.maintenance-dialog-copy {
+  margin: 0;
   color: var(--warn-text);
-  font-size: 0.85rem;
-}
-
-.confirm-gate-confirm,
-.confirm-gate-cancel {
   font-size: 0.85rem;
 }
