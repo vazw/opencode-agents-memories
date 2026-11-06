@@ -27,10 +27,10 @@ use web_ui::core_screens::{
     ProfileScreen, ProfileView, SettingsScreen, ShardStatsView, StatsView, TagsPage, TagsView,
     active_shard_count, daily_peak, delete_memory_spec, error_buckets, get_user_profile_spec,
     get_user_profile_spec_for, health_outcome, health_spec, initial_tags, list_memories_spec,
-    list_tags_spec, list_user_profiles_spec, memories_request, memories_view, memory_preview,
-    pin_memory_spec, profile_identity_control, profile_view, range_text, search_spec,
-    settings_view, sorted_shards, stats_spec, tags_json, tags_view, unpin_memory_spec,
-    visible_tags,
+    list_tags_spec, list_user_profiles_spec, memories_empty_copy, memories_request, memories_view,
+    memory_preview, page_after_shrink, pin_memory_spec, profile_identity_control, profile_view,
+    range_text, search_spec, settings_view, sorted_shards, stats_spec, tags_json, tags_view,
+    unpin_memory_spec, visible_tags,
 };
 use web_ui::paths::{ENDPOINTS, EndpointId, encode_component};
 
@@ -1381,27 +1381,112 @@ fn test_range_text_is_one_based() {
 }
 
 #[wasm_bindgen_test]
-fn test_memory_preview_is_a_lossless_split() {
+fn test_memory_preview_boundary_320() {
+    // Wave 3: PREVIEW_CHARS is 320 (was 700). The multi-byte body is the same
+    // lossless-split fixture re-anchored to the new boundary, so the mutant
+    // "the constant stayed at 700" dies on the ≤320 row and on the 320/480
+    // hard-cut row (two of four rows; enough to kill it).
     let body: String = "héllo wörld ✓ ".repeat(473); // 6622 chars, multi-byte
     assert!(body.chars().count() > 6600);
     let (preview, rest) = memory_preview(&body);
     let rest = rest.expect("a long body splits");
-    assert_eq!(format!("{preview}{rest}"), body);
+    assert_eq!(format!("{preview}{rest}"), body, "lossless split");
     assert!(
-        preview.chars().count() <= 700,
-        "{}",
+        preview.chars().count() <= 320,
+        "preview is capped at {} chars, got {}",
+        320,
         preview.chars().count()
     );
     assert!(
-        preview.chars().count() > 600,
-        "word-boundary cut stays near the limit"
+        preview.chars().count() > 220,
+        "word-boundary cut stays near the limit, got {}",
+        preview.chars().count()
     );
     let (short, none) = memory_preview("short");
     assert_eq!((short.as_str(), none), ("short", None));
-    // No whitespace at all: a hard cut on a char boundary.
+    // No whitespace at all: a hard cut on a char boundary, exactly at the cap.
     let (hard, rest) = memory_preview(&"é".repeat(800));
-    assert_eq!(hard.chars().count(), 700);
-    assert_eq!(rest.map(|r| r.chars().count()), Some(100));
+    assert_eq!(
+        hard.chars().count(),
+        320,
+        "hard cut is exactly PREVIEW_CHARS"
+    );
+    assert_eq!(
+        rest.map(|r| r.chars().count()),
+        Some(480),
+        "800 - 320 = 480"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_page_after_shrink_clamps_to_last_page() {
+    // Mutant: returns None (no re-fetch) — the panel then shows an empty page
+    // forever, because the server's answer for page 6 at total 50 IS empty.
+    // (50, 6, 10): offset 50 ≥ total 50 → page 6 is the empty answer;
+    // total_pages = div_ceil(50, 10) = 5, and 6 > 5, so the contract clamps to
+    // page 5, which holds rows 41-50 (non-empty).
+    assert_eq!(page_after_shrink(50, 6, 10), Some(5));
+}
+
+#[wasm_bindgen_test]
+fn test_page_after_shrink_clamps_by_ceil_not_floor() {
+    // Mutant: clamps with floor `total / page_size` instead of div_ceil — the
+    // clamp lands one page short and the last rows (51-55) are unreachable
+    // without a manual reload.
+    // (55, 7, 10): offset 60 ≥ 55 → page 7 is empty; div_ceil(55, 10) = 6, so
+    // the clamp is 6, not the floor mutant's 5.
+    assert_eq!(page_after_shrink(55, 7, 10), Some(6));
+}
+
+#[wasm_bindgen_test]
+fn test_page_after_shrink_guards() {
+    // Mutant: page_size=0 divides → panic in a reachable branch (an empty
+    // store reports pageSize 0 through the projection's defaults).
+    assert_eq!(
+        page_after_shrink(0, 1, 0),
+        None,
+        "zero page size never clamps"
+    );
+    assert_eq!(
+        page_after_shrink(5, 1, 10),
+        None,
+        "the first page never clamps"
+    );
+    assert_eq!(
+        page_after_shrink(0, 3, 10),
+        None,
+        "an empty store never clamps"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_page_after_shrink_in_bounds_is_none() {
+    // Mutant: the clamp fires on a non-empty answer — page silently rewinds
+    // while the user is reading it.
+    // (55, 5, 10): div_ceil(55, 10) = 6, page 5 ≤ 6, offset 40 < 55 → page 5
+    // holds rows 41-55 and is NOT empty, so the answer is None.
+    assert_eq!(page_after_shrink(55, 5, 10), None);
+}
+
+#[wasm_bindgen_test]
+fn test_memories_empty_copy_unfiltered() {
+    // Mutant: the copy split dropped — a BARE store (nothing recorded) shows
+    // the filtered copy "(total 0)", claiming a filter is active.
+    assert_eq!(memories_empty_copy(0, false), "No memories recorded yet.");
+}
+
+#[wasm_bindgen_test]
+fn test_memories_empty_copy_filtered() {
+    // Mutant: the total omitted from the filtered copy — the user cannot tell
+    // whether the filter matched nothing or the store is empty.
+    assert_eq!(
+        memories_empty_copy(3827, true),
+        "No memories match the current filter (total 3827)."
+    );
+    assert_eq!(
+        memories_empty_copy(0, true),
+        "No memories match the current filter (total 0)."
+    );
 }
 
 #[wasm_bindgen_test]

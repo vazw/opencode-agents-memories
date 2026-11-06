@@ -31,8 +31,9 @@ use leptos::callback::Callable;
 use leptos::prelude::*;
 use serde::Deserialize;
 use thaw::{
-    Badge, BadgeAppearance, Button, ButtonAppearance, Card, Input, Pagination, Table, TableBody,
-    TableCell, TableHeader, TableHeaderCell, TableRow, Tag,
+    Badge, BadgeAppearance, Button, ButtonAppearance, Card, CardFooter, CardHeader,
+    CardHeaderDescription, Field, Input, MessageBar, MessageBarBody, MessageBarIntent, Pagination,
+    Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Tag,
 };
 
 use crate::api::auth::{AuthContext, read_marker_token};
@@ -292,7 +293,7 @@ async fn perform_action(spec: &RequestSpec, auth: &AuthContext) -> Result<(), Ap
 }
 
 /// How many characters of a memory body a card shows before "Show more".
-pub const PREVIEW_CHARS: usize = 700;
+pub const PREVIEW_CHARS: usize = 320;
 
 /// Split a body into a preview of at most [`PREVIEW_CHARS`] characters (cut at a
 /// word boundary when one exists) and the rest. Lossless: `preview + rest`
@@ -310,6 +311,53 @@ pub fn memory_preview(content: &str) -> (String, Option<String>) {
         .filter(|at| *at > 0)
         .unwrap_or(limit);
     (content[..cut].to_string(), Some(content[cut..].to_string()))
+}
+
+/// The Memories screen's fixed page size.
+///
+/// Decided by the step-6 CDP `docHeight` measurement (MEASURED, 2026-11-06,
+/// lane port 3777, fresh store, 13 project memories, release build, headed
+/// Chrome at a 1279×800 CSS viewport — the headed window cannot hit exactly
+/// 1280; the 1-px rounding cannot move the ruling across its ~1250-px gap):
+/// 10 rows → 3835 px, 8 rows → 3128 px. Both exceed the ~2500 px bar, so the
+/// blueprint's "else 8 and re-measure" branch applies and **8 stands**; the
+/// residual height (the 320-char previews keep cards ~340 px tall) is
+/// documented in the wave evidence, not chased by a third value the
+/// blueprint never authorized.
+pub const MEMORY_PAGE_SIZE: usize = 8;
+
+/// The page to load after a shrink left the current page empty.
+///
+/// Returns `Some(clamped)` **iff** the fresh answer was empty — `page > 1`,
+/// the store is non-empty (`total > 0`), the size is usable (`page_size > 0`)
+/// and the current page is past the last page (`page > total_pages`, with
+/// `total_pages = total.div_ceil(page_size)`, the server's own comparator in
+/// `crates/mem-web/src/api/memories.rs`). Otherwise `None`: re-fetch the same
+/// page (empty store, first page, in-bounds page) — never clamp a page the
+/// user is reading, never divide by zero.
+pub fn page_after_shrink(total: usize, page: usize, page_size: usize) -> Option<usize> {
+    if page_size == 0 || total == 0 || page <= 1 {
+        return None;
+    }
+    let total_pages = total.div_ceil(page_size);
+    if page > total_pages {
+        Some(total_pages)
+    } else {
+        None
+    }
+}
+
+/// The empty-state copy of the Memories screen.
+///
+/// A **bare** store (`total == 0`) has nothing recorded; a **filtered** empty
+/// answer has a store behind it — the copy names the total so the user can
+/// tell "nothing there" from "nothing matched".
+pub fn memories_empty_copy(total: usize, filtered: bool) -> String {
+    if filtered {
+        format!("No memories match the current filter (total {total}).")
+    } else {
+        "No memories recorded yet.".to_string()
+    }
 }
 
 /// The most tag chips a card renders.
@@ -429,14 +477,19 @@ fn memory_row(
     view! {
         <li data-testid="memory-row" data-tags=data_tags>
             <Card class="memory-card">
-                <div class="memory-card-head">
+                <CardHeader>
                     <Badge>{kind}</Badge>
-                    <span data-testid="memory-created">{row.created_at}</span>
                     {pinned
                         .then(|| {
                             view! { <Badge appearance=BadgeAppearance::Outline>"pinned"</Badge> }
                         })}
-                </div>
+                    // The `card_header_description` slot: the timestamp renders
+                    // in the header's description line (grid row 2), under the
+                    // kind/pinned badges.
+                    <CardHeaderDescription slot>
+                        <span data-testid="memory-created">{row.created_at}</span>
+                    </CardHeaderDescription>
+                </CardHeader>
                 <div class="memory-content" data-testid="memory-content">
                     {preview}
                 </div>
@@ -479,7 +532,7 @@ fn memory_row(
                 {(!is_prompt)
                     .then(move || {
                         view! {
-                            <div class="memory-card-foot">
+                            <CardFooter class="memory-card-foot">
                                 <Button
                                     appearance=ButtonAppearance::Subtle
                                     attr:data-testid="memory-pin"
@@ -488,7 +541,7 @@ fn memory_row(
                                     {if pinned { "Unpin" } else { "Pin" }}
                                 </Button>
                                 {delete_area}
-                            </div>
+                            </CardFooter>
                         }
                     })}
             </Card>
@@ -504,7 +557,7 @@ pub fn MemoriesPanel() -> impl IntoView {
         basic: None,
     };
     let page = RwSignal::new(1_usize);
-    let page_size = RwSignal::new(20_usize);
+    let page_size = RwSignal::new(MEMORY_PAGE_SIZE);
     let query = RwSignal::new(String::new());
     let tags = RwSignal::new(
         web_sys::window()
@@ -530,9 +583,26 @@ pub fn MemoriesPanel() -> impl IntoView {
                 page_size.get_untracked(),
             );
             state.set(MemoriesView::Loading);
+            // The shrink re-fetch: a page change re-fires the effect above.
+            // When the fresh answer is EMPTY and the shrink put us past the
+            // last page, clamp to the last page (`page_after_shrink`) and let
+            // the effect re-run — the failed-fetch-leaves-page-untouched and
+            // reload-reads-page-untracked contracts below still hold, because
+            // the clamp is a plain `page.set` that only fires on the empty
+            // answer.
             leptos::task::spawn_local(async move {
                 match api_request::request::<MemoryPage>(&spec, &auth).await {
-                    Ok(found) => state.set(memories_view(&found)),
+                    Ok(found) => {
+                        state.set(memories_view(&found));
+                        if let MemoriesView::Empty { total } = state.get_untracked() {
+                            let current = page.get_untracked();
+                            if let Some(clamped) =
+                                page_after_shrink(total, current, page_size.get_untracked())
+                            {
+                                page.set(clamped);
+                            }
+                        }
+                    }
                     Err(failure) => state.set(MemoriesView::Error(failure.to_string())),
                 }
             });
@@ -599,6 +669,7 @@ pub fn MemoriesPanel() -> impl IntoView {
         MemoriesView::Loaded { total_pages, .. } => total_pages.max(1),
         _ => 1,
     });
+    let filter_active = move || !tags.get().is_empty();
     let range = move || match state.get() {
         MemoriesView::Loaded {
             total,
@@ -614,19 +685,26 @@ pub fn MemoriesPanel() -> impl IntoView {
         <section class="memories-panel" data-testid="memories-panel">
             <h2>"Memories"</h2>
             <div class="memories-filters" data-testid="memories-filters">
-                <Input
-                    id="memories-search"
-                    name="q"
-                    class="memories-search"
-                    attr:data-testid="memories-search"
-                    placeholder="Search memories"
-                    value=query
-                    on:keydown=move |event: leptos::ev::KeyboardEvent| {
-                        if event.key() == "Enter" {
-                            refresh.run(());
+                <Field label="Search" class="memories-search-field">
+                    // The explicit id is dropped ON PURPOSE (blueprint r2,
+                    // gate-modified): thaw 0.4.8 pins the Label's `for` to the
+                    // Field's internal uuid (field.rs:26,54) while an explicit
+                    // child id wins only for the control's id attribute
+                    // (field.rs:175-206) — keeping it would strand the label.
+                    // Name/class/testid/value/keydown are untouched.
+                    <Input
+                        name="q"
+                        class="memories-search"
+                        attr:data-testid="memories-search"
+                        placeholder="Search memories"
+                        value=query
+                        on:keydown=move |event: leptos::ev::KeyboardEvent| {
+                            if event.key() == "Enter" {
+                                refresh.run(());
+                            }
                         }
-                    }
-                />
+                    />
+                </Field>
                 {move || {
                     tags.get()
                         .into_iter()
@@ -685,10 +763,14 @@ pub fn MemoriesPanel() -> impl IntoView {
                 action_error
                     .get()
                     .map(|message| {
+                        // MessageBar spreads no attrs in thaw 0.4.8 (F4, step
+                        // 4): the wrapper div carries the testid, no class.
                         view! {
-                            <p class="memories-action-error" data-testid="memories-action-error">
-                                {message}
-                            </p>
+                            <div data-testid="memories-action-error">
+                                <MessageBar intent=MessageBarIntent::Error>
+                                    <MessageBarBody>{message}</MessageBarBody>
+                                </MessageBar>
+                            </div>
                         }
                     })
             }}
@@ -707,7 +789,7 @@ pub fn MemoriesPanel() -> impl IntoView {
                     (BlockKind::Empty, MemoriesView::Empty { total }) => view! {
                         <StateBlock
                             kind=BlockKind::Empty
-                            message=format!("No memories match (total {total}).")
+                            message=memories_empty_copy(total, filter_active())
                             class="state-empty"
                             testid="memories-empty"
                         />
@@ -740,15 +822,19 @@ pub fn MemoriesPanel() -> impl IntoView {
                                     })
                                     .collect_view()}
                             </ul>
+                            // The pager lives INSIDE the Ready arm (wave 3):
+                            // an empty store or a loading/error state must not
+                            // render pagination controls for data that is not
+                            // on the screen.
+                            <div class="memories-pager" data-testid="memories-pager">
+                                <Pagination page=page page_count=page_count/>
+                            </div>
                         }
                             .into_any()
                     }
                     _ => ().into_any(),
                 }
             }}
-            <div class="memories-pager" data-testid="memories-pager">
-                <Pagination page=page page_count=page_count/>
-            </div>
         </section>
     }
 }
@@ -2447,15 +2533,13 @@ pub fn SettingsPanel() -> impl IntoView {
                         by_project,
                         by_type,
                     } => {
-                        let types = if by_type.is_empty() {
-                            "(none)".to_string()
-                        } else {
-                            by_type
-                                .iter()
-                                .map(|(kind, count)| format!("{kind}: {count}"))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        };
+                        let cloud: Vec<AnyView> = by_type
+                            .iter()
+                            .map(|(kind, count)| {
+                                let label = format!("{kind} · {count}");
+                                view! { <Tag>{label}</Tag> }.into_any()
+                            })
+                            .collect();
                         view! {
                             <dl class="settings-status" data-testid="settings-status">
                                 <dt>"Health"</dt>
@@ -2469,7 +2553,18 @@ pub fn SettingsPanel() -> impl IntoView {
                                     {format!("user {by_user} · project {by_project}")}
                                 </dd>
                                 <dt>"By type"</dt>
-                                <dd data-testid="settings-by-type">{types}</dd>
+                                <dd data-testid="settings-by-type">
+                                    <div class="settings-by-type-cloud">
+                                        {if by_type.is_empty() {
+                                            view! {
+                                                <span class="settings-by-type-none">"(none)"</span>
+                                            }
+                                                .into_any()
+                                        } else {
+                                            cloud.into_iter().collect_view().into_any()
+                                        }}
+                                    </div>
+                                </dd>
                             </dl>
                         }
                             .into_any()
@@ -2492,13 +2587,18 @@ pub fn SettingsPanel() -> impl IntoView {
                 let status = cleanup_status(&snapshot);
                 let outcome = cleanup_outcome_view(snapshot.last.as_ref());
                 let armed_notice = (status == CleanupStatus::Armed).then(|| {
+                    // thaw 0.4.8's MessageBar spreads no attrs (its root takes
+                    // only `class` and `role`), so `attr:data-testid` has
+                    // nowhere to land — the F4 wrapper-div fallback carries
+                    // the testid, with no class (no census impact).
                     view! {
-                        <p class="maintenance-armed" data-testid=CLEANUP_ARMED_TESTID>
-                            {CLEANUP_ARMED_NOTICE}
-                        </p>
+                        <div data-testid=CLEANUP_ARMED_TESTID>
+                            <MessageBar intent=MessageBarIntent::Warning>
+                                <MessageBarBody>{CLEANUP_ARMED_NOTICE}</MessageBarBody>
+                            </MessageBar>
+                        </div>
                     }
-                });
-                let cancel = (status == CleanupStatus::Armed).then(|| {
+                });                let cancel = (status == CleanupStatus::Armed).then(|| {
                     view! {
                         <Button
                             appearance=ButtonAppearance::Secondary
@@ -2576,6 +2676,7 @@ pub fn SettingsPanel() -> impl IntoView {
                             class="maintenance-action"
                             attr:data-testid="maintenance-action"
                             disabled=Signal::derive(move || cleanup_disabled(&cleanup.get()))
+                            loading=Signal::derive(move || cleanup.get().running)
                             on_click=move |_| {
                                 let action = if cleanup.get_untracked().armed {
                                     CleanupAction::Confirm

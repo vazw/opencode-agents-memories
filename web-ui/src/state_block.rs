@@ -5,6 +5,62 @@ use thaw::{MessageBar, MessageBarBody, MessageBarIntent, Spinner};
 
 use crate::core_screens::MemoriesView;
 
+/// The timeline layer of the Sessions screen: exactly one of the four arms
+/// renders.
+///
+/// Wave 3 (issue 118). The classifier is pure so the arm boundaries are
+/// table-testable without a DOM; the panel renders one [`StateBlock`] per arm
+/// (or the row list for [`SessionState::Ready`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionState {
+    /// A timeline fetch is in flight.
+    Loading,
+    /// The fetch answered with an empty timeline.
+    Empty,
+    /// The fetch failed (or no project could be resolved); the string is the
+    /// bounded error copy.
+    Error(String),
+    /// Rows arrived.
+    Ready(Vec<crate::screens::SessionRow>),
+}
+
+/// Classify the timeline layer: error > loading > empty > ready.
+///
+/// An error always wins — a failure must never be masked by a spinner or by
+/// stale rows. A load in flight beats whatever the row buffer still holds (the
+/// previous project's timeline must not flash as current). With neither, an
+/// empty buffer is the empty arm and only populated rows are Ready.
+pub fn session_state(
+    rows: &[crate::screens::SessionRow],
+    error: Option<&str>,
+    loading: bool,
+) -> SessionState {
+    if let Some(message) = error {
+        return SessionState::Error(message.to_string());
+    }
+    if loading {
+        return SessionState::Loading;
+    }
+    if rows.is_empty() {
+        return SessionState::Empty;
+    }
+    SessionState::Ready(rows.to_vec())
+}
+
+/// Map the roster outcome onto the Sessions screen's picker arms, one-to-one
+/// over [`crate::agents::ProjectsView`].
+///
+/// The Sessions screen renders the SAME five arms the Agents panel renders —
+/// the classification already exists, so this is a pure forward, never a
+/// re-derivation: `None` is the pre-outcome loading arm, an empty loaded
+/// roster is `NoProjects` (never an error), and only the 501 degrade answers
+/// `Unavailable`.
+pub fn roster_session_view(
+    outcome: Option<&crate::agents::ProjectsOutcome>,
+) -> crate::agents::ProjectsView {
+    crate::agents::projects_view(outcome)
+}
+
 /// The four mutually exclusive blocks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockKind {

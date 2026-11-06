@@ -1,6 +1,10 @@
-// Readiness-gated route census + screenshots for the Issue 118 wave 2 evidence.
+// Readiness-gated route census + screenshots for the Issue 118 waves 2/3 evidence.
 // Every count and screenshot is taken only after the route has been idle (no Thaw spinner and no
 // `*-loading` testid) for 3 consecutive 100 ms samples; a busy capture fails the run.
+// Wave 3 additions: the Memories search Field label association is a HARD check —
+// the search input must have a non-empty id and a `label[for]` pointing at it
+// (thaw Field pins `for` to its internal uuid; the Input's explicit id is
+// dropped so the uuid becomes both). A failure stops the run.
 // Run against a disposable engine serving this build and Chrome CDP on port 9222:
 //   TEST_BASE_URL=http://127.0.0.1:49392 node web-ui/scripts/capture-evidence.cjs
 const assert = require('node:assert/strict');
@@ -8,7 +12,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:49392';
-const outDir = process.env.EVIDENCE_DIR || path.join(__dirname, '..', '..', 'docs', 'evidence', 'webui-wave2-thaw-controls');
+const outDir = process.env.EVIDENCE_DIR || path.join(__dirname, '..', '..', 'docs', 'evidence', 'webui-wave3-worst-screens');
 const routes = [
   ['/', 'home'], ['/project-memories', 'project-memories'], ['/tags', 'tags'], ['/user-profile', 'user-profile'],
   ['/settings', 'settings'], ['/export-import', 'export-import'], ['/skill-library', 'skill-library'],
@@ -41,9 +45,15 @@ const get = url => new Promise((resolve, reject) => http.get(url, r => { let bod
       agentsSelect: q('select[data-testid="agents-project-select"]'),
       sessionsSelect: q('select[data-testid="sessions-project-select"]'),
       agentsNoProjects: q('[data-testid="agents-no-projects"]'),
+      memoriesPager: q('[data-testid="memories-pager"]'),
+      memoriesList: q('[data-testid="memory-row"]'),
       busyAtCapture: q('[class*=thaw-spinner]') + q('[data-testid$="-loading"]')
     };
   })()`;
+  // Wave 3, step 6: the discriminating page-size measurement. docHeight is
+  // recorded per route; the /project-memories reading decides MEMORY_PAGE_SIZE:
+  // ≤ 2500 px at 1280×800 keeps 10, a taller page drops it to 8 and re-measures.
+  const docHeight = `(() => ({url: location.pathname, viewport: innerWidth + 'x' + innerHeight, docHeight: document.documentElement.scrollHeight}))()`;
   const rows = [];
   try {
     for (const [route, name] of routes) {
@@ -57,7 +67,7 @@ const get = url => new Promise((resolve, reject) => http.get(url, r => { let bod
           if (quiet >= 3) break;
           await wait(100);
         }
-        return ${census};
+        return {...${census}, ...${docHeight}};
       })()`);
       assert.equal(row.busyAtCapture, 0, `${route} must be captured at steady state`);
       assert.equal(row.stateBlocksMissingClass, 0, `${route} StateBlock containers must carry .state-block`);
@@ -80,6 +90,41 @@ const get = url => new Promise((resolve, reject) => http.get(url, r => { let bod
     assert.equal(form.busyAtCapture, 0, '/skill-library form must be captured at steady state');
     await shot('skill-form-r2');
     console.log(JSON.stringify({...form, fixture:'skill-form-open'}));
+
+    // Wave 3, step 5: the Memories search Field label association. HARD check,
+    // no wrapper fallback — a failure stops the step. The mutant this kills is
+    // the r1 shape (explicit id kept inside the Field): the control keeps its
+    // id but label[for] stays pinned to the Field uuid, so the second clause
+    // fails while everything else looks green. The Field uuid becomes BOTH the
+    // control's id and the label's for, so we assert through the uuid pair.
+    await call('Page.navigate', {url: base + '/project-memories'});
+    const fieldCheck = await evaluate(`(async () => {
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      for (let i = 0; i < 300; i++) {
+        const busy = document.querySelectorAll('[class*=thaw-spinner]').length + document.querySelectorAll('[data-testid$="-loading"]').length;
+        if (busy === 0 && document.querySelector('.thaw-field input[name="q"]')) break;
+        await wait(100);
+      }
+      // The testid lives on the thaw Input's outer <span> (its root element);
+      // the control is the inner input named q. The Field's label carries for=
+      // <uuid>; the association holds iff the control's id equals it.
+      const root = document.querySelector('[data-testid="memories-search"]');
+      const i = root ? root.querySelector('input') : document.querySelector('.thaw-field input[name="q"]');
+      const label = document.querySelector('label[for]');
+      return {
+        searchRootPresent: root !== null,
+        searchControlName: i ? i.name : null,
+        searchControlId: i ? i.id : null,
+        labelFor: label ? label.getAttribute('for') : null,
+        labelForResolves: i && i.id !== '' && document.querySelector('label[for="' + i.id + '"]') !== null
+      };
+    })()`);
+    assert.equal(fieldCheck.searchRootPresent, true, 'the Memories search input must render');
+    assert.notEqual(fieldCheck.searchControlId, null, 'the search control must have an id (the Field uuid)');
+    assert.notEqual(fieldCheck.searchControlId, '', 'the search control id must be non-empty');
+    assert.equal(fieldCheck.searchControlName, 'q', 'the search control keeps name=q');
+    assert.equal(fieldCheck.labelForResolves, true, 'label[for] must resolve to the search input id');
+    console.log(JSON.stringify({...fieldCheck, fixture:'memories-field-label-association'}));
     console.log('STEADY-STATE CENSUS OK');
   } finally { ws.close(); }
 })().catch(e => { console.error('FAIL', e.message); process.exitCode = 1; });
