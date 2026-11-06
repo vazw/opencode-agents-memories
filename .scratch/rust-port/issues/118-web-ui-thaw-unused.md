@@ -1,7 +1,9 @@
 # 118 — the web UI draws 1 of 58 Thaw components: a hand-rolled design system sits beside the framework
 
 Status: ready-for-human — **waves 1 (theme + shell), 2 (controls + states) and 3 (the three worst
-screens) are built; waves 1–2 are live-verified, wave 3 awaits review.** Wave 3 (blueprint
+screens) are built and live-verified; wave 3 merged to main at a21eb2d on 2026-11-06 (review 2 APPROVED
+after review 1 caught a frozen Sessions timeline layer — untracked reads + a once-invoked closure — and
+stale wave-2 evidence, both fixed with a permanent Sessions arms lane guard in `capture-evidence.cjs`).
 `.tmp/blueprints/blueprint-20261106-issue-118-webui-wave3-worst-screens-r2.md`, stamp
 `sha256=36ff0e12949c`, worktree `issue-118-w3` @ branch `issue-118/webui-wave3-worst-screens`) rebuilt
 Memories, Settings and Sessions: the Memories card list moved to thaw `CardHeader`/`CardFooter` with
