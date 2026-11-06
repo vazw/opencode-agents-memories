@@ -6,6 +6,12 @@
 //! [`encode_component`], and the delete's data-less success envelope is pinned
 //! by [`delete_outcome`]. The live `fetch` itself is the adapter exercised by
 //! the manual demo.
+//!
+//! Wave 3 (issue 118): the roster and the timeline are classified by the pure
+//! [`SessionState`] state machine (`state_block::session_state`) before they
+//! render, so every arm the panel shows — loading, empty, error, ready — has a
+//! table-tested classifier behind it with the error > loading > empty > ready
+//! precedence pinned by mutants.
 #![cfg(target_arch = "wasm32")]
 
 use wasm_bindgen_test::wasm_bindgen_test;
@@ -15,6 +21,18 @@ use web_ui::screens::{
     SessionRow, delete_outcome, delete_session_spec, format_created_at, initial_project,
     list_sessions_spec, session_path, session_request,
 };
+use web_ui::state_block::{SessionState, session_state};
+
+/// One timeline row for the classifier tables.
+fn row(id: &str) -> SessionRow {
+    SessionRow {
+        id: id.to_string(),
+        agent_name: "Coder".to_string(),
+        summary: "did the thing".to_string(),
+        created_at: 1_788_220_800_000,
+        orphaned: false,
+    }
+}
 
 /// The pinned template for `id`.
 fn template(id: EndpointId) -> &'static str {
@@ -180,4 +198,113 @@ fn test_session_request_uses_only_roster_ids() {
     assert_eq!(spec.path, list_sessions_spec("/a/one").path);
     assert!(!spec.path.contains("nope"));
     assert!(session_request(&[], Some("/a/one")).is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Wave 3 — the timeline classifier (`session_state`)
+//
+// Precedence: error > loading > empty > ready. Each test names the mutant it
+// kills; the distinguishing input is the one on which the rule and the mutant
+// disagree.
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen_test]
+fn test_session_state_error_dominates() {
+    // Mutant: precedence swapped so Loading beats Error — the spinner would
+    // hide a real failure forever while a load is in flight.
+    let state = session_state(&[], Some("boom"), true);
+    assert_eq!(
+        state,
+        SessionState::Error("boom".to_string()),
+        "an error beats an in-flight load"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_session_state_ready_beats_empty() {
+    // Mutant: the Ready arm dropped — populated rows classified as Empty and
+    // the timeline renders "no sessions" over real data.
+    let rows = vec![row("a"), row("b"), row("c")];
+    let state = session_state(&rows, None, false);
+    assert_eq!(state, SessionState::Ready(rows), "populated rows are Ready");
+}
+
+#[wasm_bindgen_test]
+fn test_session_state_empty() {
+    // Mutant: Empty conflated with Ready — an empty timeline renders an empty
+    // list with no explanation.
+    let state = session_state(&[], None, false);
+    assert_eq!(state, SessionState::Empty, "no rows and no error is Empty");
+}
+
+#[wasm_bindgen_test]
+fn test_session_state_loading() {
+    // Mutant: Loading returns Ready when rows carry stale data — the previous
+    // project's timeline would flash as current while the new one loads.
+    let stale = vec![row("stale")];
+    let state = session_state(&stale, None, true);
+    assert_eq!(state, SessionState::Loading, "an in-flight load wins");
+}
+
+// ---------------------------------------------------------------------------
+// Wave 3 — the roster-to-SessionState map (one-to-one over ProjectsView)
+// ---------------------------------------------------------------------------
+
+use web_ui::agents::{ProjectRow, ProjectsOutcome, ProjectsView};
+use web_ui::state_block::roster_session_view;
+
+fn roster_rows() -> Vec<ProjectRow> {
+    vec![roster_row("/a/one"), roster_row("/b/two")]
+}
+
+#[wasm_bindgen_test]
+fn test_roster_map_loading() {
+    // Mutant: None mapped to Error or NoProjects — the picker would show an
+    // error (or a falsely empty roster) during the mount fetch.
+    assert_eq!(roster_session_view(None), ProjectsView::Loading);
+}
+
+#[wasm_bindgen_test]
+fn test_roster_map_ready() {
+    // Mutant: Ready conflated with NoProjects — the picker disappears with a
+    // populated roster.
+    let loaded = ProjectsOutcome::Loaded(roster_rows());
+    assert_eq!(
+        roster_session_view(Some(&loaded)),
+        ProjectsView::Ready(roster_rows()),
+        "a populated roster renders the picker"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_roster_map_no_projects() {
+    // Mutant: an empty Loaded roster classified Failed — a fresh install
+    // would show an error instead of the documented empty state.
+    let loaded = ProjectsOutcome::Loaded(Vec::new());
+    assert_eq!(
+        roster_session_view(Some(&loaded)),
+        ProjectsView::NoProjects,
+        "a successful empty roster is NoProjects, never Failed"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_roster_map_unavailable_is_not_failed() {
+    // Mutant: the 501 degrade mapped to Failed(msg) — the documented
+    // informational state would render as a hard error.
+    let outcome = ProjectsOutcome::Unavailable;
+    assert_eq!(
+        roster_session_view(Some(&outcome)),
+        ProjectsView::Unavailable(web_ui::agents::PROJECTS_UNAVAILABLE_MESSAGE),
+        "the 501 degrade keeps its own arm"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_roster_map_failed() {
+    let outcome = ProjectsOutcome::Failed("boom".to_string());
+    assert_eq!(
+        roster_session_view(Some(&outcome)),
+        ProjectsView::Failed("boom".to_string())
+    );
 }

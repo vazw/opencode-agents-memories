@@ -1,7 +1,26 @@
 # 118 — the web UI draws 1 of 58 Thaw components: a hand-rolled design system sits beside the framework
 
-Status: ready-for-human — **waves 1 (theme + shell) and 2 (controls + states) are built and live-verified;
-wave 3 is the next scoped unit.** Wave 2 (blueprint `.tmp/blueprints/blueprint-20261105-1525-issue-118-webui-thaw-wave2-controls-r2.md`,
+Status: ready-for-human — **waves 1 (theme + shell), 2 (controls + states) and 3 (the three worst
+screens) are built; waves 1–2 are live-verified, wave 3 awaits review.** Wave 3 (blueprint
+`.tmp/blueprints/blueprint-20261106-issue-118-webui-wave3-worst-screens-r2.md`, stamp
+`sha256=36ff0e12949c`, worktree `issue-118-w3` @ branch `issue-118/webui-wave3-worst-screens`) rebuilt
+Memories, Settings and Sessions: the Memories card list moved to thaw `CardHeader`/`CardFooter` with
+the pager inside the Ready arm, two new pure oracles (`page_after_shrink` with a div_ceil ceil-vs-floor
+discriminator, `memories_empty_copy`), `PREVIEW_CHARS` 700→320, the search input wrapped in a thaw
+`Field` with the explicit id DROPPED so the Field uuid is both the control's id and the label's `for`
+(CDP-verified — an explicit id strands the label silently), and the action-error as an Error
+`MessageBar`. Settings' ~900-char "By type" comma paragraph became a wrapped tag cloud (oracle
+untouched) and the maintenance armed notice became a Warning `MessageBar` with a loading action
+button. Sessions split into distinct roster arms (`sessions-roster-loading`/`-no-projects`/
+`-unavailable`/`-error`) + timeline arms (`sessions-loading`/`-empty`/`session-error`) with a visible
+`<label for>` picker label and the orphaned `Tag` swapped for `Badge appearance=Outline color=Warning`.
+The page size is MEASURED, not preferred: the CDP `docHeight` at a 1279×800 CSS viewport read
+3835 px at page size 10 and 3128 px at 8 (both > the ~2500 px bar), so `MEMORY_PAGE_SIZE = 8` stands
+per the blueprint's else-branch. Class census `emitted=179 hooks=179 missing=0 dead=0` (pre-commit
+floor stays 179); wasm suites green (60 core_screens + 20 screens); both web-ui and both root clippy
+gates green; F4 finding recorded: thaw 0.4.8 `MessageBar`/`Badge` spread NO attrs, so both use the
+blueprint's wrapper-div testid fallback. Evidence + the lane's absolute-storage-root requirement:
+`docs/evidence/webui-wave3-worst-screens/README.md`. Wave 2 (blueprint `.tmp/blueprints/blueprint-20261105-1525-issue-118-webui-thaw-wave2-controls-r2.md`,
 `blueprint_sha256: def66e3174bf`) replaced the raw controls with Thaw `Button`/`Input`/`Card`/`Tag`
 and one `StateBlock`, and pruned the matching bespoke CSS in the same steps. Live on a disposable
 engine 2026-11-06 (port 49384, fresh store): `raw <button>` **0** on all ten routes, class census

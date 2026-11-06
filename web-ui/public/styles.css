@@ -431,16 +431,6 @@ body {
   margin-left: 0.5rem;
 }
 
-/* The armed step is loud: the next click deletes memories. */
-.maintenance-armed {
-  margin-top: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  color: var(--warn-text);
-  background: var(--warn-bg);
-  border: 1px solid var(--warn-border);
-  border-radius: 0.25rem;
-}
-
 /* Informational, not an error: the build has no cleanup endpoint. */
 .maintenance-unavailable {
   margin-top: 0.75rem;
@@ -724,6 +714,12 @@ body {
   flex: 1 1 18rem;
 }
 
+/* The Field wrapper around the search Input: the label is programmatic
+ * (Field uuid), the input keeps its flex sizing. */
+.memories-search-field {
+  flex: 1 1 18rem;
+}
+
 
 .memories-reload {
   flex: 0 0 auto;
@@ -777,19 +773,11 @@ body {
   outline-offset: -1px;
 }
 
-.memory-card-head,
-.memory-card-tags,
-.memory-card-foot {
+.memory-card-tags {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
-}
-
-.memory-card-head {
-  color: var(--muted);
-  font-size: 0.85rem;
-  font-variant-numeric: tabular-nums;
 }
 
 .memory-card-foot {
@@ -818,13 +806,6 @@ body {
   padding: 0.15rem 0.5rem;
   font-size: 0.8125rem;
   opacity: 0.75;
-}
-
-.memories-action-error {
-  margin: 0.5rem 0;
-  padding: 0.5rem 0.75rem;
-  color: var(--warn-text);
-  border-left: 3px solid var(--warn-border);
 }
 
 .memories-pager {
@@ -988,6 +969,19 @@ body {
 
 .settings-status dd {
   margin: 0;
+}
+
+/* Issue 118 wave 3: the "By type" value is a wrapped cloud of one Tag per
+ * type — `"{type} · {count}"` — instead of one long comma paragraph. */
+.settings-by-type-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+  align-items: baseline;
+}
+
+.settings-by-type-none {
+  color: var(--muted);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1255,6 +1249,14 @@ body {
   max-width: 32rem;
 }
 
+/* Wave 3: the picker's visible label. Explicit `for` — a raw native select
+ * never consumes the thaw Field label injection, so the association is
+ * hand-wired to the select's id. */
+.session-select-label {
+  color: var(--muted);
+  align-self: center;
+}
+
 .load-sessions {
   flex: 0 0 auto;
 }
@@ -1307,13 +1309,6 @@ body {
   grid-row: 3;
   grid-column: 4;
   justify-self: end;
-}
-
-.orphaned-badge {
-  grid-row: 1;
-  grid-column: 4;
-  justify-self: end;
-  text-transform: uppercase;
 }
 
 /* ---------------------------------------------------------------------------
