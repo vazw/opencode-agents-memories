@@ -1,13 +1,13 @@
 # opencode-agents-memory
 
-Persistent memory for [OpenCode](https://opencode.ai) coding agents — a Rust port of
-[`opencode-mem`](https://github.com/tickernelz/opencode-mem).
+Persistent memory for [OpenCode](https://opencode.ai) coding agents — a local agent-memory engine
+written in Rust, inspired by [`opencode-mem`](https://github.com/tickernelz/opencode-mem).
 
 The engine stores project-scoped memories in sharded Turso/libSQL databases, embeds locally with
 `Xenova/nomic-embed-text-v1` (768-dim ONNX), and exposes them through a thin OpenCode plugin, a
 ten-mode `memory` tool, an optional `memory-usage` skill, and a Leptos web explorer over a REST API.
 
-**Status: pre-1.0.** Phases 0–6 of the port (memory engine, AI client, profile learning, episodic
+**Status: pre-1.0.** Phases 0–6 (memory engine, AI client, profile learning, episodic
 memory, plugin bridge, web explorer) are implemented and their suites are green. The web explorer's
 design-system rebuild is complete: waves 1–3 of issue 118 (Thaw theme + shell, controls + states, the
 three worst screens) merged on 2026-11-06, with browser evidence and regression lanes committed. The
@@ -17,7 +17,7 @@ retirement, stats latency measurement, partial-store diagnostics). Phase 7 is th
 drop-in rehearsal. The live swap on the owner's host executed on 2026-10-31
 (`docs/runbooks/live-swap.md`, re-verified at `docs/evidence/deploy-20261103-1959.md`), while the
 one-week dogfood window (issue 81) and manual rehearsal sign-off (issue 28) remain open — do not
-point this port at a store you have not backed up.
+point this engine at a store you have not backed up.
 
 ## What it does
 
@@ -112,7 +112,7 @@ Two operational caveats:
   v2.0 `tokenizer.json`; `scripts/provision-onnx-cache.sh` writes exactly that. Without it, the rest
   of the store still works and `search`/`add` answer `-32603`.
 - **Opening an upstream store migrates it in place** (`metadata.db` 1→2, `user-prompts.db` 1→2,
-  project shards 2→3 lazily on first write; the port's own `episodic.db` sits at `user_version = 7`).
+  project shards 2→3 lazily on first write; this project's own `episodic.db` sits at `user_version = 7`).
   The migration is additive but this build refuses a store written by a newer build, so back up the
   store before the first open. The backup/restore and provisioning sequence is documented in
   `docs/runbooks/live-swap.md` (with the 2026-11-03 live restart verified in
@@ -231,9 +231,9 @@ The upstream-visible compatibility surfaces are exactly two:
 
 - the OpenCode **plugin-loader contract** — `plugin/` exports a `PluginModule` with a `server` plugin;
 - the **REST API** — the hand-written, upstream-shaped routes (the upstream Svelte UI remains usable
-  against this server; this port ships its own Leptos explorer).
+  against this server; this project ships its own Leptos explorer).
 
-Everything else is port-owned: the wrapper↔engine stdio protocol, the on-disk store format, and the
+Everything else is this project's own: the wrapper↔engine stdio protocol, the on-disk store format, and the
 episodic/facts/profile tiers. See `docs/adr/` for the decisions (ADR-0003 web stack, ADR-0007 bridge
 strategy, ADR-0016 commit gate, and the schema/format ADRs).
 
@@ -249,7 +249,7 @@ project.
 - `docs/adr/` — architecture decisions; `docs/agents/` — testing, issue-tracker and workflow docs;
   `docs/runbooks/` — `live-swap.md` and `adopt-embedding-model.md`; `docs/evidence/` — measured run
   artifacts (including `deploy-20261103-1959.md`).
-- `.scratch/rust-port/` and `.scratch/web-identity-and-project-picker/` — the port's delivery
+- `.scratch/rust-port/` and `.scratch/web-identity-and-project-picker/` — this project's delivery
   roadmap, PRDs and issue history.
 
 ## License

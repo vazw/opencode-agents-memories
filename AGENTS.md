@@ -1,7 +1,8 @@
 # AGENTS.md
 
-This repository is a from-scratch **Rust port of `opencode-mem`**, the OpenCode plugin that gives coding
-agents persistent memory (Turso/libSQL vector search, auto-capture, user-profile learning, web explorer).
+This repository is a from-scratch **local agent-memory engine in Rust, inspired by `opencode-mem`**, the
+OpenCode plugin that gives coding agents persistent memory (Turso/libSQL vector search, auto-capture,
+user-profile learning, web explorer).
 
 Its compatibility promise splits by **what upstream can see**. Upstream sees exactly two surfaces: the
 OpenCode **plugin-loader contract** — `plugin/` must export `type PluginModule = { id?: string; server:
@@ -60,7 +61,7 @@ Full process: `docs/agents/workflow.md`.
   the test count move together; re-derive both before citing either. (Updated 2026-11-02 from
   `1ddfdad`/v2.33.0/117 files; the parity matrix is still pinned to an older commit — see
   `docs/agents/testing.md`.)
-- **Read-only reference:** never edit it, never `git add -f` it. All port work lands in this repo's code.
+- **Read-only reference:** never edit it, never `git add -f` it. All of this project's work lands in this repo's code.
 - Its `AGENTS.md` governs only that subtree (Bun tooling, Conventional Commits); those rules do not apply.
 - The upstream suite is the behavioural contract, but not every file is mirrored: each takes exactly one
   disposition — `port`, `covered-by` or `N-A` — per `docs/agents/testing.md`.
