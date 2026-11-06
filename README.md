@@ -8,11 +8,16 @@ The engine stores project-scoped memories in sharded Turso/libSQL databases, emb
 ten-mode `memory` tool, an optional `memory-usage` skill, and a Leptos web explorer over a REST API.
 
 **Status: pre-1.0.** Phases 0–6 of the port (memory engine, AI client, profile learning, episodic
-memory, plugin bridge, web explorer) are implemented and their suites are green. The remaining Phase 6
-items are acceptance/smoke closures, and Phase 7 is the hardening and drop-in rehearsal. The live swap
-on the owner's host executed on 2026-10-31 (`docs/runbooks/live-swap.md`, re-verified at
-`docs/evidence/deploy-20261103-1959.md`), while the one-week dogfood window (issue 81) and manual
-rehearsal sign-off (issue 28) remain open — do not point this port at a store you have not backed up.
+memory, plugin bridge, web explorer) are implemented and their suites are green. The web explorer's
+design-system rebuild is complete: waves 1–3 of issue 118 (Thaw theme + shell, controls + states, the
+three worst screens) merged on 2026-11-06, with browser evidence and regression lanes committed. The
+remaining Phase 6 items are acceptance/smoke closures (issues 24/29: the 37-row REST live smoke and
+the per-screen UI smoke) and the residuals close-out (issue 129: ConfirmGate→Dialog, tag-pill
+retirement, stats latency measurement, partial-store diagnostics). Phase 7 is the hardening and
+drop-in rehearsal. The live swap on the owner's host executed on 2026-10-31
+(`docs/runbooks/live-swap.md`, re-verified at `docs/evidence/deploy-20261103-1959.md`), while the
+one-week dogfood window (issue 81) and manual rehearsal sign-off (issue 28) remain open — do not
+point this port at a store you have not backed up.
 
 ## What it does
 
@@ -27,7 +32,10 @@ rehearsal sign-off (issue 28) remain open — do not point this port at a store 
 - **Portability** — `export` / `import` of an upstream-shaped JSON bundle, plus path migration for
   moved projects.
 - **Web explorer** — a Leptos/Thaw SPA over a token-gated REST API (upstream-compatible); health,
-  memories, tags, profile, sessions, maintenance, and the agent contribution view.
+  memories, tags, profile, sessions, maintenance, and the agent contribution view. The UI is fully
+  Thaw-native as of issue 118 waves 1–3: one theme, Thaw controls and a unified `StateBlock`
+  everywhere, paginated Memories, and state-complete Sessions, with regression lanes
+  (`web-ui/scripts/`) guarding the skill form, the state blocks, and the Sessions arms.
 
 ## Layout
 
