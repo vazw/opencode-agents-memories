@@ -557,12 +557,17 @@ pub fn SessionHistoryPanel() -> impl IntoView {
                         // pure classifier. A timeline failure renders INSIDE
                         // the picker arm — the picker stays usable. The row
                         // buffer is the live signal (the classifier reads the
-                        // CURRENT rows, not the roster closure's copy).
-                        let current_rows = rows.get_untracked();
+                        // CURRENT rows, not the roster closure's copy). Every
+                        // read below is TRACKED and the closure is passed as a
+                        // reactive child (`{timeline}`, never `{timeline()}`):
+                        // an invocation would paint one static node and never
+                        // re-run, pinning `sessions-loading` forever once the
+                        // roster is Ready (review-1 Finding 1).
+                        let current_rows = rows.get();
                         let timeline = session_state(
                             &current_rows,
-                            error.get_untracked().as_deref(),
-                            sessions_loading.get_untracked(),
+                            error.get().as_deref(),
+                            sessions_loading.get(),
                         );
                         match timeline {
                             SessionState::Loading => view! {
@@ -636,7 +641,7 @@ pub fn SessionHistoryPanel() -> impl IntoView {
                                 "Load timeline"
                             </Button>
                         </div>
-                        {timeline()}
+                        {timeline}
                     }
                         .into_any()
                 }

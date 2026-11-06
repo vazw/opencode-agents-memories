@@ -2598,7 +2598,8 @@ pub fn SettingsPanel() -> impl IntoView {
                             </MessageBar>
                         </div>
                     }
-                });                let cancel = (status == CleanupStatus::Armed).then(|| {
+                });
+                let cancel = (status == CleanupStatus::Armed).then(|| {
                     view! {
                         <Button
                             appearance=ButtonAppearance::Secondary
