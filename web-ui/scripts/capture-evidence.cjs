@@ -31,6 +31,7 @@ const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:49392';
 const sessionsArmsOnly = process.env.SESSIONS_ARMS_ONLY === '1';
 const pillsOnly = process.env.PILL_CONTRACT_ONLY === '1';
 const dialogOnly = process.env.DIALOG_ONLY === '1';
+const tagsOnly = process.env.TAGS_ONLY === '1';
 const laneExpect = process.env.LANE_EXPECT || 'post';
 const lanePageId = process.env.LANE_PAGE_ID || '';
 const outDir = process.env.EVIDENCE_DIR || path.join(__dirname, '..', '..', 'docs', 'evidence', 'webui-wave3-worst-screens');
@@ -415,7 +416,8 @@ const get = url => new Promise((resolve, reject) => http.get(url, r => { let bod
           return Promise.resolve(answer(200, {}));
         }
         if (path === '/api/tags') {
-          return Promise.resolve(answer(200, {project: [], user: [], memoryTags: [], memoryTagTotal: 0}));
+          const t = spec.tags || [];
+          return Promise.resolve(answer(200, {project: [], user: [], memoryTags: t, memoryTagTotal: t.length}));
         }
         if (path === '/api/projects') {
           return Promise.resolve(answer(200, [{projectId: 'proj-lane-alpha', sessionCount: 1,
@@ -478,6 +480,45 @@ const get = url => new Promise((resolve, reject) => http.get(url, r => { let bod
         memoryType: 'note', tags: ['rust'], createdAt: '1794000000000', isPinned: false},
     ],
   };
+  // The tags lane (2026-11-07 contrast wave): two ranked memory tags rendered as
+  // bare `<a class="tags-tag">` anchors on the dark panel. Wire keys are camelCase
+  // (`TagsPage` derives `rename_all = "camelCase"`, core_screens.rs:870); a
+  // snake_case fixture would decode to an empty screen and STOP.
+  const TAGS_SPEC = {
+    tags: [{tag: 'rust', count: 2}, {tag: 'css', count: 1}],
+  };
+  const tagLinks = `document.querySelectorAll('a.tags-tag')`;
+  const tagsReady = `${tagLinks}.length === 2`;
+  // The colour assertions never name a literal: the expected value is converted
+  // from the token's own computed value by a detached probe span, so the row
+  // survives any future palette re-tune and cannot be passed by a coincidence.
+  const tagsColorProbe = `(() => {
+    const card = document.querySelector('.tags-card');
+    if (!card) return null;
+    const accent = getComputedStyle(card).getPropertyValue('--accent').trim();
+    const anchor = document.querySelector('a.tags-tag');
+    if (!anchor || !accent) return null;
+    const probe = document.createElement('span');
+    probe.style.color = accent;
+    document.body.appendChild(probe);
+    const expected = getComputedStyle(probe).color;
+    probe.remove();
+    return {anchor: getComputedStyle(anchor).color, accent, expected,
+            underline: getComputedStyle(anchor).textDecorationLine};
+  })()`;
+  const navColorProbe = `(() => {
+    const provider = document.querySelector('.thaw-config-provider');
+    const nav = document.querySelector('a.thaw-nav-item[href]');
+    if (!provider || !nav) return null;
+    const fg2 = getComputedStyle(provider).getPropertyValue('--colorNeutralForeground2').trim();
+    if (!fg2) return null;
+    const probe = document.createElement('span');
+    probe.style.color = fg2;
+    document.body.appendChild(probe);
+    const expected = getComputedStyle(probe).color;
+    probe.remove();
+    return {nav: getComputedStyle(nav).color, fg2, expected};
+  })()`;
   const laneSetSpec = async spec => {
     await evaluate(`window.localStorage.setItem('__laneSpec', ${JSON.stringify(JSON.stringify(spec))})`);
   };
@@ -742,6 +783,100 @@ const get = url => new Promise((resolve, reject) => http.get(url, r => { let bod
     });
 
     finishLane('PILL_CONTRACT');
+  };
+
+  // =========================================================================
+  // Tags-screen anchor contrast (2026-11-07 wave): the tags screen renders
+  // bare `<a class="tags-tag">` anchors with no app anchor rule, so they
+  // compute browser-default blue on the dark panel. Three RED rows (two
+  // computed, one bundle-scoped static) + two CONTROL rows. The rule under
+  // test is `:where(a) { color: var(--accent); }` in public/styles.css C1.
+  // =========================================================================
+  const runTagsLane = async () => {
+    await call('Page.navigate', {url: base + '/'});
+    await waitFor(`location.origin === ${JSON.stringify(base)} && document.readyState === 'complete'`);
+    await laneSetSpec(TAGS_SPEC);
+
+    await laneRun('tag_link_color_not_browser_default', 'RED', 'tag anchors on /tags', async () => {
+      await laneGoto('/tags', tagsReady);
+      const seen = await evaluate(`(() => {
+        const anchor = document.querySelector('a.tags-tag');
+        if (!anchor) return null;
+        return {color: getComputedStyle(anchor).color,
+                underline: getComputedStyle(anchor).textDecorationLine};
+      })()`);
+      if (!seen) throw Error('FIXTURE: a.tags-tag never rendered');
+      const defaults = ['rgb(0, 0, 238)', 'rgb(85, 26, 139)'];
+      if (defaults.includes(seen.color)) {
+        throw Error(`the tag anchor computes the browser default ${seen.color} (underline: ${seen.underline})`);
+      }
+      return `color=${seen.color} (not browser default), underline=${seen.underline}`;
+    });
+
+    await laneRun('tag_link_resolves_accent_token', 'RED', 'tag anchors on /tags', async () => {
+      await laneGoto('/tags', tagsReady);
+      const seen = await evaluate(tagsColorProbe);
+      if (!seen) throw Error('FIXTURE: .tags-card or a.tags-tag never rendered');
+      if (seen.anchor !== seen.expected) {
+        throw Error(`the tag anchor computes ${seen.anchor}, not the accent token's ${seen.expected} (--accent=${seen.accent})`);
+      }
+      return `color=${seen.anchor} == probe-converted --accent=${seen.accent}`;
+    });
+
+    await laneRun('tag_rule_declares_token_not_literal', 'RED', 'stylesheet text', async () => {
+      // Scope: the BUNDLE under test (`WEBUI_DIST` or the working build), so a
+      // re-run against a preserved pre bundle greps THAT bundle's stylesheet
+      // and not the working tree (the pill_no_chip_selector precedent). The
+      // source file is the fallback only when the dist carries no styles
+      // entry, and the detail line says which was read.
+      const bundleCss = fs.readdirSync(distDir).find(name => name.startsWith('styles') && name.endsWith('.css'));
+      const scope = bundleCss
+        ? `bundle ${path.join(distDir, bundleCss)}`
+        : 'SOURCE (no styles entry in the dist)';
+      const css = fs.readFileSync(bundleCss ? path.join(distDir, bundleCss) : path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+      // A rule inside a /* comment */ is not a live rule: strip comments
+      // before the extraction, so a commented-out :where(a) cannot satisfy
+      // this row (found by the 2026-11-07 mutation check — the comment-wrapped
+      // rule passed the unstripped regex and the mutant run scored 2/3).
+      const liveCss = css.replace(/\/\*[\s\S]*?\*\//g, ' ');
+      const rule = liveCss.match(/:\s*where\(a\)\s*\{([^}]*)\}/);
+      if (!rule) throw Error(`no :where(a) rule found in ${scope}`);
+      if (!/color:\s*var\(--accent\)/.test(rule[1])) {
+        throw Error(`the :where(a) rule in ${scope} does not alias var(--accent): ${rule[1].trim()}`);
+      }
+      const hex = rule[1].match(/#[0-9a-fA-F]{3,8}/);
+      if (hex) throw Error(`the :where(a) rule in ${scope} carries the hex literal ${hex[0]}`);
+      return `:where(a) { ${rule[1].trim()} } in ${scope}`;
+    });
+
+    await laneRun('tag_rows_render_and_href_preserved', 'CONTROL', '2 ranked memory tags', async () => {
+      await laneGoto('/tags', tagsReady);
+      const seen = await evaluate(`(() => ({
+        links: ${tagLinks}.length,
+        rustHref: Boolean(document.querySelector('a.tags-tag[href="/project-memories?tags=rust"]')),
+        cssHref: Boolean(document.querySelector('a.tags-tag[href="/project-memories?tags=css"]')),
+        first: (document.querySelector('a.tags-tag') || {}).textContent || null,
+      }))()`);
+      if (!seen || seen.links !== 2) {
+        throw Error(`FIXTURE: ${seen ? seen.links : 'no'} a.tags-tag element(s) rendered, expected 2`);
+      }
+      if (!seen.rustHref || !seen.cssHref) {
+        throw Error(`the click-through hrefs broke (rust=${seen.rustHref} css=${seen.cssHref})`);
+      }
+      return `links=2 hrefs intact (first=${JSON.stringify(seen.first)})`;
+    });
+
+    await laneRun('nav_anchor_color_unchanged', 'CONTROL', 'nav anchor vs fg2 token', async () => {
+      await laneGoto('/tags', tagsReady);
+      const seen = await evaluate(navColorProbe);
+      if (!seen) throw Error('FIXTURE: .thaw-config-provider or a.thaw-nav-item[href] never rendered');
+      if (seen.nav !== seen.expected) {
+        throw Error(`the nav anchor computes ${seen.nav}, not the fg2 token's ${seen.expected} (--colorNeutralForeground2=${seen.fg2})`);
+      }
+      return `nav=${seen.nav} == probe-converted --colorNeutralForeground2=${seen.fg2}`;
+    });
+
+    finishLane('TAGS');
   };
 
   const runDialogLane = async () => {
@@ -1100,6 +1235,15 @@ const get = url => new Promise((resolve, reject) => http.get(url, r => { let bod
       const {identifier} = await call('Page.addScriptToEvaluateOnNewDocument', {source: fixtureSource});
       try {
         await runDialogLane();
+      } finally {
+        await call('Page.removeScriptToEvaluateOnNewDocument', {identifier});
+      }
+      return;
+    }
+    if (tagsOnly) {
+      const {identifier} = await call('Page.addScriptToEvaluateOnNewDocument', {source: fixtureSource});
+      try {
+        await runTagsLane();
       } finally {
         await call('Page.removeScriptToEvaluateOnNewDocument', {identifier});
       }
