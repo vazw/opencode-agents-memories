@@ -15,7 +15,16 @@
 //! Mutation contract: reverting ONLY the composition-root normalization
 //! (`src/main.rs`, Fix A) turns
 //! `test_relative_storage_root_answers_store_backed_routes` RED with exactly
-//! today's symptom — `/api/health` 200, `/api/tags` 500.
+//! today's symptom — `/api/health` 200, `/api/tags` 500. After B1
+//! (`crates/mem-store/src/db.rs` normalized-form containment) that argv-form
+//! input alone no longer distinguishes an A-reversion — B1's lexical anchor
+//! absorbs it — so the A-only mutant is pinned by
+//! `test_symlinked_relative_storage_root_answers_store_backed_routes`
+//! instead: a relative root whose path TRAVERSES A SYMLINKED directory.
+//! `ShardManager::new` canonicalizes through the link while B1 anchors
+//! lexically at cwd, so the two forms diverge and containment refuses the
+//! engine's own `metadata.db` — the silent-500 shape returns; Fix A makes
+//! both legs resolve through the same link and the routes answer 200.
 //!
 //! House rules (mirroring tests/production_api_wiring.rs): scratch under the
 //! repo's gitignored `.tmp/scratch`, serial mutex, kill-and-reap on drop,
@@ -273,6 +282,95 @@ fn test_relative_storage_root_answers_store_backed_routes() {
         status,
         200,
         "/api/tags must answer 200 for a RELATIVE --storage-root (the silent-500 RED pin); \
+         body: {}\nchild stderr:\n{}",
+        raw,
+        child_stderr(&stderr_path)
+    );
+    assert!(
+        response_body(&raw).contains("\"success\":true"),
+        "the success envelope must be true; raw: {raw}"
+    );
+}
+
+/// THE Fix-A pin: a RELATIVE `--storage-root` whose path TRAVERSES A
+/// SYMLINKED directory must still answer store-backed routes.
+///
+/// This is the input class ONLY Fix A guards now that B1 landed: B1's
+/// containment is deliberately lexical (`absolutize_for_containment` anchors
+/// a relative path at cwd without resolving symlinks), while
+/// `ShardManager::new` canonicalizes its storage path THROUGH the link
+/// (`crates/mem-store/src/shard_manager.rs:201`). Without Fix A the two legs
+/// disagree on the canonical prefix of the engine's own `metadata.db`,
+/// containment refuses it (`PathOutsideStorage`), and every store-backed
+/// route answers the silent 500 — with the whole suite otherwise green.
+/// Fix A normalizes the composition-root value first, so both legs resolve
+/// through the same link.
+///
+/// Layout: `<scratch>/real/inner` is the real root; `<scratch>/link` is a
+/// symlink to `real`; the engine is fed the RELATIVE form `link/inner`.
+/// (`/api/health` stays token-exempt; the 401→token→200 flow mirrors the
+/// argv-form pin above.)
+#[test]
+fn test_symlinked_relative_storage_root_answers_store_backed_routes() {
+    let _lock = serial();
+    let (layout_absolute, layout_relative) = scratch_root("symlink-root");
+    std::fs::create_dir_all(layout_absolute.join("real/inner")).expect("create real/inner");
+    std::os::unix::fs::symlink(layout_absolute.join("real"), layout_absolute.join("link"))
+        .expect("create the symlink fixture inside the scratch layout");
+    let root_relative = layout_relative.join("link").join("inner");
+
+    let dist = layout_absolute.join("dist");
+    write_shell(&dist);
+    let home = layout_absolute.join("home");
+    std::fs::create_dir_all(&home).expect("create the sandbox home");
+
+    let port = free_port();
+    let stderr_path = layout_absolute.join("engine.err");
+    let _child = spawn_engine(
+        &root_relative,
+        port,
+        &dist,
+        &home,
+        &layout_absolute.join("opencode-mem.log"),
+        &stderr_path,
+    );
+    wait_for_port(port);
+    wait_for_health(port, &stderr_path);
+
+    // The token is minted by the first token-less authenticated request
+    // (`/api/health` is token-exempt and mints nothing).
+    let (status, raw) = http_request(port, "/api/tags", None)
+        .expect("the token-less /api/tags request completes once the port accepts");
+    assert_eq!(
+        status, 401,
+        "a token-less /api/tags request must answer 401 (and write the token): {raw}"
+    );
+    let token = wait_for_token(&layout_absolute.join("real/inner/.auth-token"));
+
+    // Store-backed route 1: the shard registry.
+    let (status, raw) = http_request(port, "/api/tags", Some(&token))
+        .expect("the authenticated /api/tags request completes");
+    assert_eq!(
+        status,
+        200,
+        "/api/tags must answer 200 for a symlink-traversing RELATIVE --storage-root \
+         (the Fix-A RED pin); body: {}\nchild stderr:\n{}",
+        raw,
+        child_stderr(&stderr_path)
+    );
+    assert!(
+        response_body(&raw).contains("\"success\":true"),
+        "the success envelope must be true; raw: {raw}"
+    );
+
+    // Store-backed route 2 (F2): a second shard-listing consumer of the same
+    // containment wall — the original bug 500ed every such route, not one.
+    let (status, raw) = http_request(port, "/api/stats", Some(&token))
+        .expect("the authenticated /api/stats request completes");
+    assert_eq!(
+        status,
+        200,
+        "/api/stats must answer 200 for a symlink-traversing RELATIVE --storage-root; \
          body: {}\nchild stderr:\n{}",
         raw,
         child_stderr(&stderr_path)
