@@ -157,10 +157,12 @@ impl WebLauncher for RootWebLauncher {
                 ResolvedDist::Ready { dir } => dir.clone(),
                 ResolvedDist::Missing { .. } => {
                     // The engine's own `web.launch_failed` line is deliberately
-                    // short (`detail_short: true`) and its detail goes to
-                    // `tracing`, which has no subscriber on the run path — so
-                    // the composition root emits the diagnosable line itself,
-                    // from the one executable payload seam (W6.8/R1).
+                    // short (`detail_short: true`). The composition root emits
+                    // the diagnosable line itself, from the one executable
+                    // payload seam (W6.8/R1): `structured_stderr` always
+                    // reaches the process stderr, while `tracing` events only
+                    // reach the file sink through the `mem_core::logging`
+                    // facade target.
                     structured_stderr("web.dist_missing", "warn", "engine", dist.missing_payload());
                     return Err(dist.error_message());
                 }
@@ -471,6 +473,26 @@ fn main() {
     {
         config.storage_root = PathBuf::from(root);
     }
+    // HostConfig storage_root: make the engine's ONE storage root absolute so
+    // every holder agrees. This sits AFTER argv resolution (above) and the
+    // `HostConfig::from_env()` default (the `$HOME/...` fallback is already
+    // absolute but is normalized with the same expression), and BEFORE the
+    // purge/reembed/reap dispatches and the engine runtime — one point that
+    // covers argv + env + default. A relative `--storage-root` used to break
+    // ShardManager/ConnectionManager containment parity: the manager
+    // canonicalizes its own copy (`shard_manager.rs`), the connection manager
+    // kept the raw value, and `assert_path_inside_storage` refused the
+    // engine's own `metadata.db` — absolute target vs relative root — so
+    // every store-backed route answered a silent 500 (debug:
+    // engine-silent-500.debug-1). `canonicalize` resolves the real path for
+    // an existing root; `std::path::absolute` keeps a not-yet-existing root
+    // working (first-run-on-new-root, exactly the smoke scenario) without
+    // touching the filesystem; the last fallback keeps the raw value (an
+    // engine that cannot even resolve its cwd degrades the way it did
+    // before this fix rather than refusing to start).
+    config.storage_root = std::fs::canonicalize(&config.storage_root)
+        .or_else(|_| std::path::absolute(&config.storage_root))
+        .unwrap_or_else(|_| config.storage_root.clone());
     if let Some(host) = args.web_host.clone().filter(|host| !host.trim().is_empty()) {
         config.web_host = host;
     }

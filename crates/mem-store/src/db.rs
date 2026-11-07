@@ -573,29 +573,29 @@ impl Db for TursoDb {
 // Support plumbing used by the connection manager (next steps)
 // ---------------------------------------------------------------------------
 
-/// `assert_path_inside_storage` — strictly lexical (no `canonicalize`: the
-/// target may not exist). Mirrors upstream `relative(storageRoot, resolve(dbPath))`
-/// classification: escape iff the lexically computed relative path is `..`,
-/// starts with `..{sep}`, or is absolute. A FILENAME merely containing `..`
-/// is a single Normal component and stays allowed (upstream comment).
+/// `assert_path_inside_storage` — lexical comparison of NORMALIZED forms
+/// (no `canonicalize`: the target may not exist). Mirrors upstream
+/// `relative(storageRoot, resolve(dbPath))` classification: escape iff the
+/// lexically computed relative path is `..`, starts with `..{sep}`, or is
+/// absolute. A FILENAME merely containing `..` is a single Normal component
+/// and stays allowed (upstream comment).
 ///
-/// BOTH paths are `..`/`.` resolved FIRST (Node `path.relative` resolves
-/// before comparing), so a MID-PATH traversal such as
-/// `{root}/sub/../../outside.db` resolves outside the root and is rejected —
-/// not only a leading `..` component.
+/// B1 (engine-silent-500): BOTH sides are absolutized FIRST — a relative
+/// path anchors at the process cwd exactly like upstream `path.resolve` —
+/// then `..`/`.`-resolved, THEN compared. The same directory expressed in
+/// different path forms (a relative root from a manual `--storage-root`
+/// argv, an absolute `metadata.db` path from the ShardManager's own
+/// `canonicalize`) is therefore one directory and is accepted; the former
+/// absolute-vs-relative form refusal was the engine refusing its own
+/// registry. A genuinely different directory still fails the component
+/// prefix below, in every form combination.
 pub fn assert_path_inside_storage(storage_root: &Path, db_path: &Path) -> Result<(), StoreError> {
     use std::path::Component;
 
-    let root_is_absolute = storage_root.is_absolute();
-    let target_is_absolute = db_path.is_absolute();
-    if root_is_absolute != target_is_absolute {
-        return Err(escape_error(&db_path.to_string_lossy()));
-    }
-
-    let Some(root_normalized) = normalize_lexical(storage_root) else {
+    let Some(root_normalized) = normalize_lexical(&absolutize_for_containment(storage_root)) else {
         return Err(escape_error(&db_path.to_string_lossy()));
     };
-    let Some(target_normalized) = normalize_lexical(db_path) else {
+    let Some(target_normalized) = normalize_lexical(&absolutize_for_containment(db_path)) else {
         return Err(escape_error(&db_path.to_string_lossy()));
     };
 
@@ -607,6 +607,21 @@ pub fn assert_path_inside_storage(storage_root: &Path, db_path: &Path) -> Result
         return Err(escape_error(&db_path.to_string_lossy()));
     }
     Ok(())
+}
+
+/// B1: absolutizes a containment operand WITHOUT filesystem access — a
+/// relative path anchors at the process cwd (upstream `path.resolve`); when
+/// the cwd cannot be resolved the raw form is kept, which reproduces the
+/// pre-B1 lexical judgment between two relative forms.
+fn absolutize_for_containment(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        match std::env::current_dir() {
+            Ok(cwd) => cwd.join(path),
+            Err(_) => path.to_path_buf(),
+        }
+    }
 }
 
 /// Lexical `..`/`.` resolution (no filesystem access). Pops the last real
