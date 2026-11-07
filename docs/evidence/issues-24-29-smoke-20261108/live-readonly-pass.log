@@ -1,0 +1,37 @@
+19:37:31 live pass against http://127.0.0.1:3742 (token len=64 prefix=84b4…, never printed)
+19:37:31 GET-only mode: every call is a GET; the log self-check at exit enforces it
+LIVECALL GET /api/health
+GET /api/health -> 200 {"success":true,"status":"ok","authEnabled":false}
+LIVECALL GET /api/tags
+GET /api/tags -> 200 {"success":true,"data":{"project":[{"tag":"opencode_project_03b7931d97d0837c","displayName":"/home/vaz/Code/Personal/VPN-Auto-ReConnect","projectPath":"/home/vaz/Code/Personal/VPN-Auto-ReConnect","pro
+LIVECALL GET /api/memories?page=1
+GET /api/memories?page=1 -> 200 {"success":true,"data":{"items":[{"type":"memory","id":"auto-capture-36413315eba1bf052eeafe650e3167b370bd6a81c0c54def9755ac1c77972dfa","content":"Gate round 2 found one defect: Row 28's criterion pair
+LIVECALL GET /api/stats
+GET /api/stats -> 200 {"success":true,"data":{"total":5382,"byScope":{"user":0,"project":5382},"byType":{"action":1,"adr":1,"advisory":1,"amendment":1,"analysis":33,"append":1,"approval":1,"architecture":27,"architecture-d
+LIVECALL GET /api/user-profile
+GET /api/user-profile -> 200 {"success":true,"data":{"exists":true,"id":"profile_1791655775197_i8ytfa1","userId":"vaz@siamstr.com","displayName":"vazw","userName":"vazw","userEmail":"vaz@siamstr.com","version":181,"createdAt":"20
+LIVECALL GET /api/user-profiles
+GET /api/user-profiles -> 200 {"success":true,"data":[{"userId":"vaz@siamstr.com","displayName":"vazw","version":181,"totalPromptsAnalyzed":1430,"lastAnalyzedAt":"2026-11-07T12:43:29.286Z","isDefault":true},{"userId":"jakkaphat.j@
+LIVECALL GET /api/projects
+GET /api/projects -> 200 {"success":true,"data":[{"projectId":"/home/vaz/Code/Personal/Rust/opencode-agents-memory","sessionCount":347,"milestoneCount":0,"lastActivityAt":1794078421632},{"projectId":"/home/vaz/Code/Personal/R
+LIVECALL GET /skills/index.json
+GET /skills/index.json -> 200 {"skills":[]}
+LIVECALL GET /api/memories?page=1
+GET /api/memories?page=1 -> 200 {"success":true,"data":{"items":[{"type":"memory","id":"auto-capture-36413315eba1bf052eeafe650e3167b370bd6a81c0c54def9755ac1c77972dfa","content":"Gate round 2 found one defect: Row 28's criterion pair
+19:37:32 live search term harvested from live memory content: probe
+LIVECALL GET /api/search?q=probe
+GET /api/search?q=probe -> 200 {"success":true,"data":{"items":[{"type":"prompt","id":"prompt_1793311397853_hvz3eh2","sessionId":"ses_e90309e58ffeUH4XeVmlAW3zpa","content":"Verdict: NULL — negative, not marginal. Do not wire it. Th
+LIVECALL GET /api/projects
+GET /api/projects -> 200 {"success":true,"data":[{"projectId":"/home/vaz/Code/Personal/Rust/opencode-agents-memory","sessionCount":347,"milestoneCount":0,"lastActivityAt":1794078421632},{"projectId":"/home/vaz/Code/Personal/R
+19:37:32 live project id resolved (never printed in full)
+LIVECALL GET /api/projects/%2Fhome%2Fvaz%2FCode%2FPersonal%2FRust%2Fopencode-agents-memory/sessions
+GET /api/projects/%2Fhome%2Fvaz%2FCode%2FPersonal%2FRust%2Fopencode-agents-memory/sessions -> 200 {"success":true,"data":[{"agentId":"syseng","agentName":"syseng","createdAt":1794078421632,"filesTouched":["crates/mem-web/src/api/memories.rs","crates/mem-web/src/api/profile.rs","crates/mem-web/src/
+LIVECALL GET /api/projects/%2Fhome%2Fvaz%2FCode%2FPersonal%2FRust%2Fopencode-agents-memory/milestones
+GET /api/projects/%2Fhome%2Fvaz%2FCode%2FPersonal%2FRust%2Fopencode-agents-memory/milestones -> 200 {"success":true,"data":[]}
+LIVECALL GET /skills/index.json
+GET /skills/index.json -> 200 {"skills":[]}
+19:37:32 live catalog has no skill files (recorded, not asserted)
+LIVECALL GET /api/memories?page=1
+GET /api/memories?page=1 -> 200 {"success":true,"data":{"items":[{"type":"memory","id":"auto-capture-36413315eba1bf052eeafe650e3167b370bd6a81c0c54def9755ac1c77972dfa","content":"Gate round 2 found one defect: Row 28's criterion pair
+19:37:33 live GET-only self-check: PASS (11 GET calls, zero non-GET)
+19:37:33 LIVE PASS COMPLETE

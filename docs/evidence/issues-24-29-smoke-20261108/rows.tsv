@@ -1,0 +1,41 @@
+1	GET	/api/health	200	"success":true	ASSERTED	200	{"success":true,"status":"ok","authEnabled":false}
+2	GET	/api/tags	200	"success":true	ASSERTED	200	{"success":true,"data":{"project":[],"user":[],"memoryTags":[],"memoryTagTotal":0}}
+3	GET	/api/memories	200	"success":true	ASSERTED	200	{"success":true,"data":{"items":[],"total":0,"page":1,"pageSize":20,"totalPages":0}}
+4	POST	/api/memories	200	"id":"mem_	ASSERTED	200	{"success":true,"data":{"id":"mem_1794080292813_f247595bb"}}
+5	DELETE	/api/memories/mem_1794080292813_f247595bb	200	"success":true	ASSERTED	200	{"success":true,"data":{"deletedPrompt":false}}
+6	PUT	/api/memories/mem_1794080293039_801170023	200	"success":true	ASSERTED	200	{"success":true}
+7	POST	/api/memories/bulk-delete	200	"deleted":0	ASSERTED	200	{"success":true,"data":{"deleted":0}}
+8	PUT	/api/memories/bulk-delete	200	Memory not found	ASSERTED	200	{"success":false,"error":"Memory not found"}
+9	GET	/api/search?q=probe	200	"success":true	ASSERTED	200	{"success":true,"data":{"items":[{"type":"memory","id":"mem_1794080293039_801170023","content":"smoke probe-b seeded lifecycle, row 9 searches the term probe","
+10	GET	/api/stats	200	"success":true	ASSERTED	200	{"success":true,"data":{"total":1,"byScope":{"user":1,"project":0},"byType":{},"generatedAt":"2026-11-07T19:38:13.348Z","shards":[{"shardId":1,"scope":"user","s
+11	POST	/api/memories/mem_1794080293039_801170023/pin	200	"success":true	ASSERTED	200	{"success":true}
+12	POST	/api/memories/mem_1794080293039_801170023/unpin	200	"success":true	ASSERTED	200	{"success":true}
+13	POST	/api/cleanup	501	cleanup is not available in this build	ASSERTED	501	{"success":false,"error":"cleanup is not available in this build"}
+14	POST	/api/deduplicate	200	exactDuplicatesDeleted	ASSERTED	200	{"success":true,"data":{"exactDuplicatesDeleted":0,"nearDuplicateGroups":[],"nearDuplicateScan":{"pairsScanned":0,"pairBudget":15000000,"truncated":false,"unrea
+15	GET	/api/migration/detect	501	the endpoint is not available in this build	ASSERTED	501	{"success":false,"error":"the endpoint is not available in this build"}
+16	GET	/api/migration/tags/detect	501	the endpoint is not available in this build	ASSERTED	501	{"success":false,"error":"the endpoint is not available in this build"}
+17	POST	/api/migration/tags/run-batch	501	the endpoint is not available in this build	ASSERTED	501	{"success":false,"error":"the endpoint is not available in this build"}
+18	GET	/api/migration/tags/progress	501	the endpoint is not available in this build	ASSERTED	501	{"success":false,"error":"the endpoint is not available in this build"}
+19	POST	/api/migration/run	501	the endpoint is not available in this build	ASSERTED	501	{"success":false,"error":"the endpoint is not available in this build"}
+20	DELETE	/api/prompts/smoke-unknown	200	"success":	ASSERTED	200	{"success":false,"error":"Prompt not found"}
+21	POST	/api/prompts/bulk-delete	200	ids array is required	ASSERTED	200	{"success":false,"error":"ids array is required"}
+22	GET	/api/user-profile	200	"success":true	ASSERTED	200	{"success":true,"data":{"exists":false,"userId":"unknown","message":"No profile found. Keep chatting to build your profile."}}
+23	GET	/api/user-profile/changelog?profileId=probe	200	"success":true	ASSERTED	200	{"success":true,"data":[]}
+24	GET	/api/user-profile/snapshot?chlogId=probe	200	Changelog not found	ASSERTED	200	{"success":false,"error":"Changelog not found"}
+25	POST	/api/user-profile/refresh	200	"profileExists":false	ASSERTED	200	{"success":true,"data":{"message":"Profile refresh queued","profileExists":false,"decayApplied":false,"note":"Confidence decay runs immediately. Automatic profi
+26	POST	/api/user-profile/ai-cleanup	200	No profile found to clean up	ASSERTED	200	{"success":false,"error":"No profile found to clean up"}
+27	POST	/api/user-profile/ai-cleanup/apply	200	No pending cleanup found. Run AI cleanup first.	ASSERTED	200	{"success":false,"error":"No pending cleanup found. Run AI cleanup first."}
+28	PATCH	/api/user-profile/item	200	No profile found	ASSERTED	200	{"success":false,"error":"No profile found"}
+29	GET	/api/skills	200	"success":true	ASSERTED	200	{"success":true,"data":{"items":[]}}
+30	POST	/api/skills	200	"success":true	ASSERTED	200	{"success":true,"data":{"id":"ship-it","name":"Ship It","description":"Wave smoke ship-it skill","content":"## Ship\n\nShip the wave.","autoinvoke":true,"enable
+31	GET	/api/skills/ship-it	200	ship-it	ASSERTED	200	{"success":true,"data":{"id":"ship-it","name":"Ship It","description":"Wave smoke ship-it skill","content":"## Ship\n\nShip the wave.","autoinvoke":true,"enable
+32	PUT	/api/skills/ship-it	200	"success":true	ASSERTED	200	{"success":true,"data":{"id":"ship-it","name":"Ship It","description":"Wave smoke ship-it skill (updated row 32)","content":"## Ship\n\nShip the wave.","autoinv
+34	GET	/skills/index.json	200	skills	ASSERTED	200	{"skills":[{"name":"ship-it","version":"1794080294325","files":["ship-it.md"]}]}
+35	GET	/skills/ship-it/ship-it.md	200	## Ship	ASSERTED	200	--- name: "Ship It" description: "Wave smoke ship-it skill (updated row 32)" metadata:   opencode/autoinvoke: "true" ---  ## Ship  Ship the wave.
+33	DELETE	/api/skills/ship-it	200	"success":true	ASSERTED	200	{"success":true,"data":{"deleted":true}}
+36	GET	/api/projects/smoke-proj/sessions	200	"data":[]	ASSERTED	200	{"success":true,"data":[]}
+37	DELETE	/api/projects/smoke-proj/sessions/smoke-unknown	404	Session not found	ASSERTED	404	{"success":false,"error":"Session not found"}
+38	GET	/api/projects/smoke-proj/milestones	200	"data":[]	ASSERTED	200	{"success":true,"data":[]}
+39	GET	/api/user-profiles	200	"success":true	ASSERTED	200	{"success":true,"data":[]}
+40	GET	/api/projects	200	"success":true	ASSERTED	200	{"success":true,"data":[]}
+41	DELETE	/api/user-profile	200	"success":	ASSERTED	200	{"success":false,"error":"No profile found"}
