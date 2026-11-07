@@ -1,6 +1,6 @@
 # 29 — W6.5 · Leptos/Thaw web explorer UI (`web-ui`) (US 5.1)
 
-Status: ready-for-agent — 2026-10-27 (verified at HEAD: all ten client routes are `Live` — every screen incl. session-history exists and is wired; residual is AC3's live smoke and the parity proof it carries — brief under `## Agent Brief`)
+Status: done — 2026-11-08 (live per-screen smoke: census OK, 3 lanes post rc=0, sessions-arms OK, zero planned notices, zero console errors, zero foreign-origin requests on all 10 routes on scratch + live; parity proof composite recorded; AC3/AC4 ticked; evidence `docs/evidence/issues-24-29-smoke-20261108/`)
 
 ## What to build
 
@@ -10,8 +10,8 @@ The new `web-ui` package (outside the workspace graph per §0b D5 / ADR-0003): T
 
 - [x] `trunk build` produces `web-ui/dist`, which W6.1's static hosting serves (`GET /` loads the shell; unknown client-routed paths fall back to `index.html`).
 - [x] Exact wave pins respected: `leptos = "0.7"` (floor `^0.7.7` via thaw), `thaw = "^0.4.8"` (stable line), `trunk` + `wasm32-unknown-unknown`, no leptos `nightly` features.
-- [ ] `wasm-bindgen-test` for REST-client shape; manual smoke per screen against the Rust server.
-- [ ] Full parity: every upstream Svelte app screen is reproduced — memories list/search, tags, profile, settings, export/import, and the session-history/timeline tab rendering W6.3 data.
+- [x] `wasm-bindgen-test` for REST-client shape; manual smoke per screen against the Rust server. — **2026-11-08: wasm battery 238/0; live per-screen census + lanes + probes green (evidence `docs/evidence/issues-24-29-smoke-20261108/`).**
+- [x] Full parity: every upstream Svelte app screen is reproduced — memories list/search, tags, profile, settings, export/import, and the session-history/timeline tab rendering W6.3 data. — **2026-11-08 (ticked): parity proof composite — scratch empty states, fabricated-arm sessions behaviors (5 fixtures), live populated rendering (20 memories, 347-session roster, real profile), zero planned notices on all 10 routes both targets.**
 - [x] No login/prompt UI ships; the fetch seam supports Basic forwarding only when the server is auth-configured.
 
 ## Blocked by
@@ -68,3 +68,4 @@ recorded as the residual with its owner, not worked around.
 - Building screens — they exist; this is verification.
 - The sessions port wiring (issue 37 · AC6).
 - The desktop/mobile visual polish and any new screen.
+- **2026-11-08 (issues 24+29 acceptance wave — AC3/AC4 closed, one harness line changed):** the live per-screen smoke ran against the wave's scratch engine (port 43853, dist `web-ui/dist`, bundle id `web-ui-259e2ecdd2554e09`, wasm sha256 `38dedc58…`). (a) Census: `STEADY-STATE CENSUS OK` — 10 routes at steady state + skill-form fixture + memories-field-label association (uuid pair) + sessions-arms (loading→rows discriminator: rows ≥ 1 with loading = 0; plus roster-unavailable/roster-error/timeline-error/timeline-empty fixtures). (b) Lanes, all `LANE_EXPECT=post` rc=0 with `LANE_TABLE` outputs in the evidence dir: TAGS 5/5, PILL_CONTRACT 11/11, DIALOG 14/14 (in-lane CONTROL rows are the fixture discriminators). (c) Wave probe (scratch-only CDP script, output in `ui-probes.md`): `[data-testid="planned-notice"]` count 0, console errors 0, foreign-origin requests 0 on all 10 routes — against BOTH the scratch engine and live `127.0.0.1:3742`. 11 screenshots in the evidence dir. (d) Parity proof composite: scratch empty states + fabricated-arm sessions behaviors + live populated rendering (20 memories, search hits, real 347-session roster, real profile `exists:true`). **Sessions screen proven, not blocked** — issue 37's AC6 landed 2026-10-27; the screen renders live session rows. Harness hardening landed with the wave: `Page.bringToFront` as the first CDP call of every lane (`web-ui/scripts/capture-evidence.cjs`, tags-contrast review-1 R1 — Chrome drops held-key delivery to background tabs; environment-dependent robustness, no test seam). Gates: `cargo test --target wasm32-unknown-unknown` 238 passed / 0 failed (re-derived), trunk build clean. Evidence: `docs/evidence/issues-24-29-smoke-20261108/` (census PNGs, `lane-tags.md`, `lane-pill.md`, `lane-dialog.md`, `ui-probes.md`, `ui-census.md`).

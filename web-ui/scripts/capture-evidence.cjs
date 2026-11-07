@@ -62,6 +62,9 @@ const get = url => new Promise((resolve, reject) => http.get(url, r => { let bod
     ws.send(JSON.stringify({id:n, method, params}));
   });
   await call('Page.enable');
+  // Chrome drops held-key delivery to background tabs (tags-contrast review-1
+  // R1): raise the lane's tab before any lane work, as the first CDP call.
+  await call('Page.bringToFront');
   const evaluate = async expression => { const r = await call('Runtime.evaluate', {expression, awaitPromise:true, returnByValue:true}); if (r.exceptionDetails) { const d = r.exceptionDetails; throw Error(`${d.text}${d.exception && d.exception.description ? ': ' + d.exception.description : ''}`); } return r.result.value; };
   const shot = async name => {
     const {data} = await call('Page.captureScreenshot', {format:'png'});

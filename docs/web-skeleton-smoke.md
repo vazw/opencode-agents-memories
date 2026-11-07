@@ -468,7 +468,11 @@ without a pass or a fail, because the port it needs is not wired yet. The
 class split is recomputed from the result sheet: **19 asserted + 4 measured +
 14 blocked = 37**, with 0 unprobed rows.
 
-Binary under test: sha256 prefix `9dcded5b953f` (12 hex).
+Binary under test: sha256 prefix `9dcded5b953f` (12 hex). **Superseded
+2026-11-08 by the fresh 41-row sheet below** — the notes below are historical
+(the issue-37 blocker lines were wrong from issue 37's 2026-11-05 close-out on
+and are corrected by the wave addendum; they are kept verbatim as the record
+of what the 2026-10-21 run claimed).
 
 | route_row | request (method + route_path) | http_status | class | notes/unblocker |
 |---|---|---|---|---|
@@ -536,6 +540,156 @@ Binary under test: sha256 prefix `9dcded5b953f` (12 hex).
 > (`src/main.rs:212`) via `.with_sessions(episodic_session_port(deps.episodic.clone()))` and answers
 > 200 against seeded episodic history. The documented 501 stub answers only on the
 > composition-failed degrade path (`None => ApiServices::unavailable().with_skills(skills_port)`).
+
+## Fresh 41-row live smoke (issues 24+29 wave, 2026-11-08)
+
+The full 41-row table was re-smoked **live** by
+`scripts/smoke-rest-surface.sh` (tracked; `SMOKE_SELFTEST=1` runs the
+verdict-derivation selftest, `--live-base-url` the GET-only live mode) against
+a fresh scratch engine spawned from the worktree: absolute `--storage-root`
+under `.tmp/scratch/smoke-24-29/`, sandbox `HOME`, FIFO stdin guard, bounded
+SIGTERM watchdog, hardlink-copied model cache, ephemeral port
+(`tests/engine_manual_launch.rs` hygiene). Verdicts are **derived** by the
+harness from each live answer against the pre-registered table — never marked
+by hand; any mismatch STOPs the run with the raw response
+(`docs/evidence/issues-24-29-smoke-20261108/`: `rows.tsv`, `rest-run.log`,
+`README.md`).
+
+Binary under test: sha256 prefix `fbe5443f40a9` (12 hex), `cargo build
+--workspace` from this tree at `868d3ee`. Served UI bundle id
+`web-ui-259e2ecdd2554e09` (wasm sha256 `38dedc58…`).
+
+Seed actions (harness preconditions, not table rows): probe-a POSTed by row 4;
+probe-b POSTed between rows 5 and 6 and DELETEd after row 12 (the create → use
+→ delete lifecycle gives rows 6/9/11/12 the real embed path — row 9 searches
+the seeded term); ship-it POSTed by row 30 before rows 31/32/34/35; the
+catalog file is read by rows 34/35 before row 33's delete. Auth walk: all 38
+token-gated rows answered **401** token-less (health and the two catalog rows
+are exempt). D-11 wildcard: a second engine on `--web-host 0.0.0.0` **refuses
+its own web launch** (`web.launch_failed`, no socket) —
+`assert_network_auth` (`crates/mem-web/src/api_auth.rs:30-46`) fail-closes a
+non-loopback bind with no API token configured, which the production launcher
+never sets (`src/main.rs:176`); the 401-token-less/200-with-token catalog
+contract on a wildcard bind is pinned at the router seam
+(`crates/mem-web/tests/api_route_auth.rs:510-540`).
+
+Class split recomputed from `rows.tsv` by `awk`: **41 asserted + 0 measured +
+0 blocked = 41**, 0 FAIL, 0 MISSING, 0 seed failures.
+
+| route_row | request (method + route_path) | http_status | class | notes |
+|---|---|---|---|---|
+| 1 | GET /api/health | 200 | ASSERTED | `"success":true` |
+| 2 | GET /api/tags | 200 | ASSERTED | `"success":true` |
+| 3 | GET /api/memories | 200 | ASSERTED | `"success":true` |
+| 4 | POST /api/memories (probe-a) | 200 | ASSERTED | `"id":"mem_…`; embed-backed (cache provisioned) |
+| 5 | DELETE /api/memories/{probe-a} | 200 | ASSERTED | ok_empty body `{"success":true}` (envelope.rs:44-46) |
+| 6 | PUT /api/memories/{probe-b} (seeded) | 200 | ASSERTED | success path embeds; memories.rs:674-737 |
+| 7 | POST /api/memories/bulk-delete | 200 | ASSERTED | `{"ids":["probe-c"]}` never seeded → `"deleted":0` (memories.rs:646-655) |
+| 8 | PUT /api/memories/bulk-delete | 200 | ASSERTED | `Memory not found` — PUT branch is `update_bulk_delete_path` (memories.rs:841-843, mod.rs:422) |
+| 9 | GET /api/search?q=probe | 200 | ASSERTED | probe-b seeded; envelope asserted, hit-presence recorded |
+| 10 | GET /api/stats | 200 | ASSERTED | `"success":true` |
+| 11 | POST /api/memories/{probe-b}/pin (seeded) | 200 | ASSERTED | ok_empty (memories.rs:751-771) |
+| 12 | POST /api/memories/{probe-b}/unpin (seeded) | 200 | ASSERTED | ok_empty; probe-b teardown DELETE follows |
+| 13 | POST /api/cleanup | 501 | ASSERTED | stub message (maintenance.rs:55) |
+| 14 | POST /api/deduplicate | 200 | ASSERTED | composed port (issue 54); `exactDuplicatesDeleted` |
+| 15 | GET /api/migration/detect | 501 | ASSERTED | UNAVAILABLE_MESSAGE (mod.rs:614,643) |
+| 16 | GET /api/migration/tags/detect | 501 | ASSERTED | UNAVAILABLE_MESSAGE |
+| 17 | POST /api/migration/tags/run-batch | 501 | ASSERTED | UNAVAILABLE_MESSAGE |
+| 18 | GET /api/migration/tags/progress | 501 | ASSERTED | UNAVAILABLE_MESSAGE |
+| 19 | POST /api/migration/run | 501 | ASSERTED | UNAVAILABLE_MESSAGE |
+| 20 | DELETE /api/prompts/smoke-unknown | 200 | ASSERTED | status + envelope-presence only; body `business_error("Prompt not found")` (prompts.rs:45) |
+| 21 | POST /api/prompts/bulk-delete | 200 | ASSERTED | `ids array is required` (prompts.rs:57) |
+| 22 | GET /api/user-profile | 200 | ASSERTED | ok `ProfileMissingDto` on a fresh root (profile.rs:115-122) |
+| 23 | GET /api/user-profile/changelog?profileId=probe | 200 | ASSERTED | `{"success":true,"data":[]}` (profile.rs:255-267) |
+| 24 | GET /api/user-profile/snapshot?chlogId=probe | 200 | ASSERTED | `business_error("Changelog not found")` at 200 (profile.rs:284) |
+| 25 | POST /api/user-profile/refresh | 200 | ASSERTED | `"profileExists":false` (profile.rs:338-347, dto.rs:401-404) |
+| 26 | POST /api/user-profile/ai-cleanup | 200 | ASSERTED | `No profile found to clean up` (profile.rs:359-361) |
+| 27 | POST /api/user-profile/ai-cleanup/apply | 200 | ASSERTED | `No pending cleanup found. Run AI cleanup first.` (store_adapter.rs:838-849 → profile.rs:544-546) |
+| 28 | PATCH /api/user-profile/item `{"index":0}` | 200 | ASSERTED | profile guard precedes body validation (profile.rs:415-421) |
+| 29 | GET /api/skills | 200 | ASSERTED | `"success":true` |
+| 30 | POST /api/skills (ship-it) | 200 | ASSERTED | enabled omitted → stored enabled (manager.rs:354) |
+| 31 | GET /api/skills/ship-it | 200 | ASSERTED | `ship-it` |
+| 32 | PUT /api/skills/ship-it | 200 | ASSERTED | `"success":true` |
+| 34 | GET /skills/index.json (no token) | 200 | ASSERTED | enabled-only catalog (manager.rs:472-478) |
+| 35 | GET /skills/ship-it/ship-it.md (no token) | 200 | ASSERTED | POST content verbatim (content.rs:53-73) |
+| 33 | DELETE /api/skills/ship-it (after 34/35) | 200 | ASSERTED | `"success":true` |
+| 36 | GET /api/projects/smoke-proj/sessions | 200 | ASSERTED | `"data":[]` |
+| 37 | DELETE /api/projects/smoke-proj/sessions/smoke-unknown | 404 | ASSERTED | `Session not found` (no-existence-leak, §F; sessions.rs:37-40) |
+| 38 | GET /api/projects/smoke-proj/milestones | 200 | ASSERTED | `"data":[]` |
+| 39 | GET /api/user-profiles | 200 | ASSERTED | empty roster |
+| 40 | GET /api/projects | 200 | ASSERTED | empty roster |
+| 41 | DELETE /api/user-profile | 200 | ASSERTED | status + envelope-presence only; body `business_error("No profile found")` (profile.rs:221-223) |
+
+> **Addendum (issues 24+29, 2026-11-08).** The fresh sheet above replaces the
+> historical 37-row sheet (kept below, annotated by the earlier addenda) as the
+> current close-out record. **Every row's class move**, so no disposition is
+> silently unexplained:
+>
+> - **41-row re-baseline:** four rows never smoked before get their first
+>   row: 38 (milestones), 41 (`DELETE /api/user-profile`), 39/40 (the
+>   issues-115/116 rosters `GET /api/user-profiles`, `GET /api/projects`) —
+>   the route surface is 41 rows (`crates/mem-web/src/api/mod.rs:95`), not
+>   the historical 37.
+> - **Rows 15–19 BLOCKED→ASSERTED (501):** issue 37 is done (2026-11-05) and
+>   its AC6 was re-scoped 2026-10-25 to sessions-only (landed 2026-10-27), so
+>   the old "issue 37 (AC6) … not wired" blocker note is stale and gone. The
+>   maintenance slot has held the dedup port since issue 54; the migration
+>   methods answer `Err(PortError::Unavailable)` → `port_failure` → **501**
+>   with the fixed body `the endpoint is not available in this build`
+>   (`UNAVAILABLE_MESSAGE`, mod.rs:614,643) — the documented absent-service
+>   class (D-13/D-15, `docs/bridge-schema.md` §11). Issue 39 (PAUSED) owns the
+>   real services.
+> - **Row 14 501→200-composed:** the dedup port landed (issue 54) and is wired
+>   in the composition root; the answer carries `exactDuplicatesDeleted`.
+> - **Rows 4/9 MEASURED-500→ASSERTED-200:** the historical 500 was an
+>   environmental artifact of an unprovisioned model cache, not a code path —
+>   with the cache provisioned under the resolved config's data dir (the
+>   engine resolves the embedder cache at `$HOME/.opencode-mem/data/.cache`
+>   — `engine.rs:1548` → `composition.rs:419` → `config/mod.rs:342` — the CLI
+>   `--storage-root` overrides the store only), both rows answer their
+>   documented 200 contract.
+> - **Rows 6/11/12 (probe-b seeded):** re-pinned to the success arms — the
+>   seeded lifecycle exercises the real embed path (PUT embeds; pin/unpin
+>   answer ok_empty) instead of the vacuous miss arm (memories.rs:674-737,
+>   :751-771).
+> - **Row 8 re-pinned:** the PUT branch of the static `bulk-delete` path
+>   routes to `update_bulk_delete_path` → `Memory not found` (memories.rs:841-843,
+>   mod.rs:422); the historical note missed the branch split.
+> - **Row 23 re-pinned:** a fresh root answers `{"success":true,"data":[]}`
+>   (profile.rs:255-267); no "changelog" substring appears.
+> - **Row 24 re-pinned:** unknown changelog id is a 200 business error
+>   `Changelog not found` (profile.rs:284).
+> - **Row 27 re-pinned:** on a provider-less build `apply_cleanup` always
+>   answers `No pending cleanup found. Run AI cleanup first.`
+>   (store_adapter.rs:838-849 → profile.rs:544-546).
+> - **Row 28 re-pinned, index sub-case dropped:** the `active_profile` guard
+>   fires before type/action/index validation (profile.rs:415-421), so body
+>   `{"index":0}` answers `No profile found` and the r1 "index out of range"
+>   sub-case is unreachable behind the guard on a fresh root.
+> - **Rows 25/26 hedge→derived-pin:** `refresh` deterministically answers
+>   `"profileExists":false` on a fresh root (no profile → no decay;
+>   profile.rs:338-347) and `ai-cleanup` answers its first guard
+>   `No profile found to clean up` (profile.rs:359-361).
+> - **Rows 20/41 loose "success" sub:** status + envelope-presence only
+>   (`"success":`); the derived body note is the business error each answers.
+> - **Rows 29–35 no move (historical ASSERTED → fresh ASSERTED):** the wiring
+>   they ride is issue 26's W6.4 skills port; unchanged this wave.
+> - **Rows 1, 2, 3, 5, 7, 10, 13, 21, 22, 36 no move (historical ASSERTED →
+>   fresh ASSERTED, same class):** health, tags, memories list, memory delete,
+>   memories bulk-delete, stats, the cleanup 501 stub, prompts bulk-delete
+>   empty-body, fresh-root user-profile, and the sessions roster all answer
+>   their documented contracts on both sheets; row 21's body note is newly
+>   derived (prompts.rs:57, the pre-registered request restored by the r2
+>   harness fix) and row 36's historical note rode issue 37's addendum.
+> - **Row 37:** the historical sheet recorded 200; §F documents the
+>   404 no-existence-leak contract — the contract wins and the run confirms
+>   it (404 `Session not found`).
+>
+> The historical sheet's rows 15–19 carry "issue 37 (AC6) … not wired" blocker
+> notes; those notes were already stale when this wave ran (issue 37 closed
+> 2026-11-05, AC6 re-scoped sessions-only) and are superseded by the fresh
+> sheet's 501 assertions above — kept in the historical record, corrected
+> here.
 
 ### Reproduction recipe
 

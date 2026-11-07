@@ -1,0 +1,100 @@
+19:38:07 engine binary: target/debug/opencode-agents-memory
+19:38:07 web dist: web-ui/dist
+19:38:07 scratch root: /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issues-24-29/.tmp/scratch/smoke-24-29/20261107T193807Z/root
+19:38:07 model cache provisioned into /home/vaz/Code/Personal/Rust/opencode-agents-memory/.tmp/worktrees/issues-24-29/.tmp/scratch/smoke-24-29/20261107T193807Z/root/home/.opencode-mem/data/.cache/Xenova (resolved-config location)
+19:38:07 spawning scratch engine on 127.0.0.1:35967
+19:38:08 scratch engine healthy on port 35967
+19:38:08 token minted (64 hex, never printed)
+19:38:08 row 1: GET /api/health (expect 200 / "success":true)
+19:38:08 row 1: verdict=ASSERTED code=200
+19:38:08 row 2: GET /api/tags (expect 200 / "success":true)
+19:38:08 row 2: verdict=ASSERTED code=200
+19:38:08 row 3: GET /api/memories (expect 200 / "success":true)
+19:38:08 row 3: verdict=ASSERTED code=200
+19:38:08 row 4: POST /api/memories (expect 200 / "id":"mem_)
+19:38:12 row 4: verdict=ASSERTED code=200
+19:38:12 row 5: DELETE /api/memories/mem_1794080292813_f247595bb (expect 200 / "success":true)
+19:38:12 row 5: verdict=ASSERTED code=200
+19:38:12 seed action: probe-b POST (between rows 5 and 6)
+19:38:13 seed action: probe-b id minted
+19:38:13 row 6: PUT /api/memories/mem_1794080293039_801170023 (expect 200 / "success":true)
+19:38:13 row 6: verdict=ASSERTED code=200
+19:38:13 row 7: POST /api/memories/bulk-delete (expect 200 / "deleted":0)
+19:38:13 row 7: verdict=ASSERTED code=200
+19:38:13 row 8: PUT /api/memories/bulk-delete (expect 200 / Memory not found)
+19:38:13 row 8: verdict=ASSERTED code=200
+19:38:13 row 9: GET /api/search?q=probe (expect 200 / "success":true)
+19:38:13 row 9: verdict=ASSERTED code=200
+19:38:13 row 10: GET /api/stats (expect 200 / "success":true)
+19:38:13 row 10: verdict=ASSERTED code=200
+19:38:13 row 11: POST /api/memories/mem_1794080293039_801170023/pin (expect 200 / "success":true)
+19:38:13 row 11: verdict=ASSERTED code=200
+19:38:13 row 12: POST /api/memories/mem_1794080293039_801170023/unpin (expect 200 / "success":true)
+19:38:13 row 12: verdict=ASSERTED code=200
+19:38:13 seed action: probe-b teardown DELETE (after row 12)
+19:38:13 seed action: probe-b torn down
+19:38:13 row 13: POST /api/cleanup (expect 501 / cleanup is not available in this build)
+19:38:13 row 13: verdict=ASSERTED code=501
+19:38:13 row 14: POST /api/deduplicate (expect 200 / exactDuplicatesDeleted)
+19:38:13 row 14: verdict=ASSERTED code=200
+19:38:13 row 15: GET /api/migration/detect (expect 501 / the endpoint is not available in this build)
+19:38:13 row 15: verdict=ASSERTED code=501
+19:38:13 row 16: GET /api/migration/tags/detect (expect 501 / the endpoint is not available in this build)
+19:38:13 row 16: verdict=ASSERTED code=501
+19:38:13 row 17: POST /api/migration/tags/run-batch (expect 501 / the endpoint is not available in this build)
+19:38:13 row 17: verdict=ASSERTED code=501
+19:38:13 row 18: GET /api/migration/tags/progress (expect 501 / the endpoint is not available in this build)
+19:38:13 row 18: verdict=ASSERTED code=501
+19:38:13 row 19: POST /api/migration/run (expect 501 / the endpoint is not available in this build)
+19:38:13 row 19: verdict=ASSERTED code=501
+19:38:13 row 20: DELETE /api/prompts/smoke-unknown (expect 200 / "success":)
+19:38:13 row 20: verdict=ASSERTED code=200
+19:38:13 row 21: POST /api/prompts/bulk-delete (expect 200 / ids array is required)
+19:38:13 row 21: verdict=ASSERTED code=200
+19:38:13 row 22: GET /api/user-profile (expect 200 / "success":true)
+19:38:13 row 22: verdict=ASSERTED code=200
+19:38:13 row 23: GET /api/user-profile/changelog?profileId=probe (expect 200 / "success":true)
+19:38:13 row 23: verdict=ASSERTED code=200
+19:38:13 row 24: GET /api/user-profile/snapshot?chlogId=probe (expect 200 / Changelog not found)
+19:38:13 row 24: verdict=ASSERTED code=200
+19:38:13 row 25: POST /api/user-profile/refresh (expect 200 / "profileExists":false)
+19:38:13 row 25: verdict=ASSERTED code=200
+19:38:13 row 26: POST /api/user-profile/ai-cleanup (expect 200 / No profile found to clean up)
+19:38:13 row 26: verdict=ASSERTED code=200
+19:38:14 row 27: POST /api/user-profile/ai-cleanup/apply (expect 200 / No pending cleanup found. Run AI cleanup first.)
+19:38:14 row 27: verdict=ASSERTED code=200
+19:38:14 row 28: PATCH /api/user-profile/item (expect 200 / No profile found)
+19:38:14 row 28: verdict=ASSERTED code=200
+19:38:14 row 29: GET /api/skills (expect 200 / "success":true)
+19:38:14 row 29: verdict=ASSERTED code=200
+19:38:14 row 30: POST /api/skills (expect 200 / "success":true)
+19:38:14 row 30: verdict=ASSERTED code=200
+19:38:14 row 31: GET /api/skills/ship-it (expect 200 / ship-it)
+19:38:14 row 31: verdict=ASSERTED code=200
+19:38:14 row 32: PUT /api/skills/ship-it (expect 200 / "success":true)
+19:38:14 row 32: verdict=ASSERTED code=200
+19:38:14 row 34: GET /skills/index.json (expect 200 / skills)
+19:38:14 row 34: verdict=ASSERTED code=200
+19:38:14 row 35: GET /skills/ship-it/ship-it.md (expect 200 / ## Ship)
+19:38:14 row 35: verdict=ASSERTED code=200
+19:38:14 row 33: DELETE /api/skills/ship-it (expect 200 / "success":true)
+19:38:14 row 33: verdict=ASSERTED code=200
+19:38:14 row 36: GET /api/projects/smoke-proj/sessions (expect 200 / "data":[])
+19:38:14 row 36: verdict=ASSERTED code=200
+19:38:14 row 37: DELETE /api/projects/smoke-proj/sessions/smoke-unknown (expect 404 / Session not found)
+19:38:14 row 37: verdict=ASSERTED code=404
+19:38:14 row 38: GET /api/projects/smoke-proj/milestones (expect 200 / "data":[])
+19:38:14 row 38: verdict=ASSERTED code=200
+19:38:14 row 39: GET /api/user-profiles (expect 200 / "success":true)
+19:38:14 row 39: verdict=ASSERTED code=200
+19:38:14 row 40: GET /api/projects (expect 200 / "success":true)
+19:38:14 row 40: verdict=ASSERTED code=200
+19:38:14 row 41: DELETE /api/user-profile (expect 200 / "success":)
+19:38:14 row 41: verdict=ASSERTED code=200
+19:38:14 auth walk: 38 token-gated rows, token-less
+19:38:15 auth walk: 38/38 gated rows answered 401
+19:38:15 D-11: spawning second engine on --web-host 0.0.0.0 (throwaway root, seconds only)
+19:38:25 D-11: wildcard bind REFUSED the web launch (web.launch_failed, no socket) - fail-closed as derived; 401/200 contract pinned at api_route_auth.rs:510-540
+19:38:25 class split (awk recount of rows.tsv): total=41 ASSERTED=41 MEASURED=0 BLOCKED=0 FAIL=0 MISSING=0
+19:38:25 SMOKE RUN COMPLETE: 41/41 dispositioned, 0 FAIL, 0 MISSING, 0 seed failures
+19:38:26 teardown complete (rc=0)
