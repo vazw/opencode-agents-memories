@@ -616,7 +616,25 @@ pub const UNAVAILABLE_MESSAGE: &str = "the endpoint is not available in this bui
 /// The answer for a port failure. The detail goes to the log and never into the
 /// response (D-9); the absent-service class answers the documented `501` stub
 /// envelope instead of a `500` (issue 61).
+///
+/// The diagnostic rides the structured-stderr seam (ADR-0031): the tracing
+/// event's module target is never accepted by the production file sink
+/// (`mem_core::logging` only), so a mapped failure would otherwise be silent
+/// by construction. The emitted payload carries status + endpoint + an
+/// error-variant TOKEN — never the fault's own text (`Invalid`/`Store` wrap
+/// free text; ADR-0015 D-1 posture).
 pub fn port_failure(endpoint: &'static str, error: ports::PortError) -> Response {
+    let status = response_status(&error);
+    mem_core::diagnostics::structured_stderr(
+        "api.handler_failed",
+        "error",
+        "api",
+        serde_json::json!({
+            "endpoint": endpoint,
+            "status": status,
+            "variant": error_variant_token(&error),
+        }),
+    );
     tracing::error!(endpoint, error = %error, "api handler failed");
     match error {
         // The service is not wired in this build: the same class the explicit
@@ -638,6 +656,36 @@ pub fn port_failure(endpoint: &'static str, error: ports::PortError) -> Response
         ports::PortError::NotFound | ports::PortError::Invalid(_) | ports::PortError::Store(_) => {
             envelope::internal_error()
         }
+    }
+}
+
+/// The HTTP status of the response [`port_failure`] builds for `error`, kept
+/// in one place so the diagnostic line names the status the client actually
+/// received.
+fn response_status(error: &ports::PortError) -> u16 {
+    use axum::http::StatusCode;
+    match error {
+        ports::PortError::Unavailable => StatusCode::NOT_IMPLEMENTED.as_u16(),
+        ports::PortError::ModelMismatch(_) | ports::PortError::Busy => {
+            StatusCode::CONFLICT.as_u16()
+        }
+        ports::PortError::NotFound | ports::PortError::Invalid(_) | ports::PortError::Store(_) => {
+            StatusCode::INTERNAL_SERVER_ERROR.as_u16()
+        }
+    }
+}
+
+/// The closed token set naming `error`'s variant. Free text is never eligible:
+/// the `Invalid`/`Store` payloads are engine-fault strings (paths, IO text)
+/// and stay out of the diagnostics channel (ADR-0015 D-1).
+fn error_variant_token(error: &ports::PortError) -> &'static str {
+    match error {
+        ports::PortError::Unavailable => "Unavailable",
+        ports::PortError::NotFound => "NotFound",
+        ports::PortError::Invalid(_) => "Invalid",
+        ports::PortError::Store(_) => "Store",
+        ports::PortError::ModelMismatch(_) => "ModelMismatch",
+        ports::PortError::Busy => "Busy",
     }
 }
 
