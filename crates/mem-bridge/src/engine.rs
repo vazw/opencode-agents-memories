@@ -20,7 +20,6 @@
 //!   stderr, the status file naming the HOLDER, exit code 75 (M13, D-38,
 //!   D-39).
 
-use std::io::Write;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -36,6 +35,8 @@ use mem_profile::error::ProfileError;
 use mem_profile::profile_store::{DecaySweepReport, ProfileStore};
 use mem_profile::prompt::UserPromptManager;
 use mem_store::shard_manager::ShardManager;
+
+pub use mem_core::diagnostics::structured_stderr;
 
 use crate::capture::{CaptureParams, CaptureService};
 use crate::error_map::{self, ErrorKind};
@@ -92,41 +93,10 @@ pub const INJECT_BARRIER_BUDGET: Duration = Duration::from_secs(2);
 // Structured stderr (mandate 2)
 // ---------------------------------------------------------------------------
 
-/// The fixed fallback emitted when the diagnostics payload cannot be
-/// serialized: still one valid JSON object, so the NDJSON framing survives.
-const STDERR_SERIALIZE_FALLBACK: &str =
-    r#"{"component":"bridge","event":"stderr.serialize_failed","level":"error"}"#;
-
-/// Writes one structured-JSON diagnostics line to stderr.
-///
-/// Only the named level/component/event and the explicit extras are emitted:
-/// no request params ever reach here (capture params include the transcript).
-pub fn structured_stderr(event: &str, level: &str, component: &str, extras: serde_json::Value) {
-    let mut payload = serde_json::json!({
-        "component": component,
-        "event": event,
-        "level": level,
-    });
-    if let (serde_json::Value::Object(base), serde_json::Value::Object(more)) =
-        (&mut payload, &extras)
-    {
-        for (key, value) in more {
-            base.insert(key.clone(), value.clone());
-        }
-    }
-    // stderr logger: a serialization failure emits a fixed valid JSON line, never breaking NDJSON framing (ADR-0013 D-3)
-    let mut line = match serde_json::to_string(&payload) {
-        Ok(line) => line,
-        Err(error) => {
-            tracing::error!(error = %error, "structured stderr payload failed to serialize");
-            STDERR_SERIALIZE_FALLBACK.to_string()
-        }
-    };
-    line.push('\n');
-    let mut stderr = std::io::stderr().lock();
-    let _ = stderr.write_all(line.as_bytes());
-    let _ = stderr.flush();
-}
+// The emitter itself lives in `mem_core::diagnostics` (ADR-0031): one
+// byte-identical implementation shared with `mem-web`'s mapped-failure
+// diagnostics, re-exported here so every existing mem-bridge call site and
+// test keeps its seam.
 
 // ---------------------------------------------------------------------------
 // Engine

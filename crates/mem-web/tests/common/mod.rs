@@ -401,6 +401,37 @@ impl Drop for TempDir {
     }
 }
 
+/// Runs one `#[ignore]`d case in a CHILD of this same test binary, its stderr
+/// on a FILE (the structured-stderr emitter writes to the raw descriptor,
+/// which libtest's capture never intercepts), and returns what the child wrote
+/// there.
+///
+/// Mirrors `crates/mem-bridge/tests/common/mod.rs` (`run_captured`, issue 98
+/// D-98-11): one pattern, two consumers.
+pub fn run_captured(inner: &str, dir: &TempDir) -> String {
+    let log = dir.path().join("child.err");
+    let stderr = std::fs::File::create(&log).expect("create the child stderr file");
+    let status = std::process::Command::new(std::env::current_exe().expect("this test binary"))
+        .args([
+            "--exact",
+            inner,
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::from(stderr))
+        .status()
+        .expect("the child test binary runs");
+    let text = std::fs::read_to_string(&log).unwrap_or_default();
+    assert!(
+        status.success(),
+        "the child case `{inner}` must pass: {status}\n{text}"
+    );
+    text
+}
+
 /// Starts a real server for the socket-seam cases.
 ///
 /// The helper is async because `mem_web::server::start` is: the server is
