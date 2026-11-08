@@ -28,6 +28,32 @@ use crate::dialog_focus::{return_focus, trap_tab};
 /// The confirmation copy, one string for all three rows.
 pub const CONFIRM_DELETE_PROMPT: &str = "Delete permanently? This cannot be undone.";
 
+/// The unconditional kept-memories sentence: what a delete leaves behind even
+/// when the count is not derivable (`survivingDerived.memories == null`).
+pub const DELETE_KEPT_UNCONDITIONAL: &str =
+    "Memories learned from this prompt were kept and can be deleted separately.";
+
+/// The session-transcript sentence (ADR-0019 D-19-11 obligation 2): a delete
+/// never claims the transcript is gone.
+pub const DELETE_TRANSCRIPT_NOTICE: &str =
+    "The session transcript still contains it until you purge the session.";
+
+/// The three-surface delete copy (issue 43 W6c, D-19-11 obligation 2): history
+/// removal now, the kept derived memories (the count only when it is a number),
+/// and the transcript notice.
+pub fn delete_disclosure_copy(memories: Option<u64>) -> String {
+    match memories {
+        Some(count) => format!(
+            "Removed from the prompt history now; {count} memories learned from it were kept and \
+             can be deleted separately. {DELETE_TRANSCRIPT_NOTICE}"
+        ),
+        None => format!(
+            "Removed from the prompt history now. {DELETE_KEPT_UNCONDITIONAL} \
+             {DELETE_TRANSCRIPT_NOTICE}"
+        ),
+    }
+}
+
 /// One row's arm/confirm state.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConfirmState {
@@ -149,6 +175,9 @@ pub fn ConfirmDialog(
                         <DialogTitle attr:id=CONFIRM_TITLE_ID attr:data-testid="confirm-dialog-title">
                             {CONFIRM_DELETE_PROMPT}
                         </DialogTitle>
+                        <p class="confirm-disclosure" data-testid="confirm-erasure-disclosure">
+                            {delete_disclosure_copy(None)}
+                        </p>
                         <DialogActions attr:data-testid="confirm-dialog-actions">
                             <Button
                                 appearance=ButtonAppearance::Primary

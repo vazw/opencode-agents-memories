@@ -120,3 +120,40 @@ fn test_confirm_next_reruns_after_finished() {
         "a second attempt after Finished must run again"
     );
 }
+
+/// Issue 43 W6c (D-19-11 obligation 2) — the delete copy names all three
+/// surfaces, and the memory count appears only when it is a number.
+///
+/// Distinguishing input: `None` vs `Some(3)`. A copy that always prints a count
+/// fails the first arm; one that never prints it fails the second; a copy that
+/// drops the transcript sentence fails both.
+#[wasm_bindgen_test]
+fn test_delete_copy_names_three_surfaces_and_counts_only_a_number() {
+    let unknown = web_ui::confirm::delete_disclosure_copy(None);
+    assert!(
+        unknown.contains("Removed from the prompt history now"),
+        "{unknown}"
+    );
+    assert!(
+        unknown.contains("can be deleted separately"),
+        "the kept-memories surface is named without a count: {unknown}"
+    );
+    assert!(
+        !unknown.contains('0') && !unknown.contains('3'),
+        "no fabricated count when the number is unknown: {unknown}"
+    );
+    assert!(
+        unknown.contains("until you purge the session"),
+        "the transcript surface is always named: {unknown}"
+    );
+
+    let known = web_ui::confirm::delete_disclosure_copy(Some(3));
+    assert!(
+        known.contains("3 memories learned from it were kept"),
+        "a number renders as a count: {known}"
+    );
+    assert!(
+        known.contains("until you purge the session"),
+        "the transcript surface survives the counted arm: {known}"
+    );
+}
