@@ -530,8 +530,10 @@ pub trait PromptPort: Send + Sync {
     async fn delete_prompt(&self, id: &str) -> Result<PromptErasure, PortError>;
 
     /// The tier's sweep stamp (`sweep_state.last_swept_unix_ms`), or `None`
-    /// when the tier was never swept. The disclosure DTO answers `notYetSwept`
-    /// from this data, never from a constant.
+    /// when the tier was never swept. A stamp answers `swept`, its absence
+    /// `notYetSwept`, a failed read `sweepFailed` (never `notYetSwept`: a failed
+    /// read is not evidence that no sweep ran). The delete answer never reads
+    /// this — a delete's residue postdates any stamp (ADR-0019 :165-167).
     ///
     /// Default `Ok(None)`: a port that has no sweep table (a fake, or a build
     /// without the migration) answers honestly rather than failing the route.

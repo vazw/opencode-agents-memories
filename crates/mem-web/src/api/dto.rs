@@ -347,12 +347,16 @@ pub struct NotErasedEntryDto {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ErasureStateDto {
-    /// `"erased" | "pending"`.
+    /// `"pending"` on both HTTP paths in W6: `Erased` is the sweep report's
+    /// answer after a completed pass, never the delete DTO's (ADR-0019 :165-167).
     pub state: &'static str,
     /// `"user-prompts" | "memories"` — never `"milestones"` on a delete answer.
     pub tier: &'static str,
     /// `"swept" | "notYetSwept" | "sweepFailed" | "legacyPeerLive" |
-    /// "noSweepForTier"`.
+    /// "noSweepForTier"` (ADR-0019 D-19-3 as amended by W6c): `swept` only from
+    /// the status read's stamp, `sweepFailed` when the read fails (never
+    /// `notYetSwept`), `legacyPeerLive` unreachable from HTTP in W6c (the sweep's
+    /// block record is report-only).
     pub sweep_state: &'static str,
     pub surviving_derived: SurvivingDerivedDto,
     /// The tiers a delete leaves, vault tri-state included.

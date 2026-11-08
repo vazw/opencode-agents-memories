@@ -175,6 +175,13 @@ content-derived value.
 `milestones_rewritten` — the sweep's report and the disclosure DTO both use the amended spelling, and
 the meaning above is unchanged (no code rename of any earlier prose is implied).
 
+**Amended (issue 43 W6c, F2):** the flat DTO's `sweep_state` gains a fifth label, `swept`, for a tier
+whose `sweep_state` row exists (a completed pass); it is what the status read answers from the stamp,
+and it never turns a delete answer into `Erased` — a delete's residue postdates any stamp, so both
+delete paths stay `PendingErase` (`:165-167`). A stamp read that fails answers `sweepFailed`, never
+`notYetSwept`: a failed read is not evidence that no sweep ran, and `Unknown` is scoped to the vault
+tier by D-19-9.
+
 **D-19-4 — No queue; `PendingErase` may persist indefinitely; `--mode=sweep` is the operator lever (planned).**
 
 A queue is refused. It would store prompt ids — itself an erasure artefact — and its only worked-out

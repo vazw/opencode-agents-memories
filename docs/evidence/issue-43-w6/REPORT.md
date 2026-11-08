@@ -84,11 +84,54 @@ rows and unit cells only; no measurement was taken and none is claimed.
 * **D1** — `secure_delete` does not exist in this engine; the recovery is
   `wal_checkpoint(TRUNCATE)` + `VACUUM` under `experimental_vacuum(true)`, which
   the sweep now performs per target.
-* **D2** — the stamp table is the disclosure's source of truth: a tier with no
-  row answers `notYetSwept`, so `notYetSwept` is data, not a constant
-  (`test_sweep_state_is_empty_before_any_sweep`).
+* **D2** — the stamp table drives the **status read**: a row answers `swept`, its
+  absence `notYetSwept`, a failed read `sweepFailed`
+  (`test_a_swept_tier_answers_swept_from_the_stamp`,
+  `test_a_failed_stamp_read_answers_sweep_failed`). The **delete** answer is
+  `notYetSwept` by construction, not from the table — a delete's residue
+  postdates any stamp (`test_a_swept_stamp_does_not_turn_a_delete_into_erased`).
 * **D3** — `milestones_scrubbed` is the shipped spelling (ADR-0019 amended); a
   delete reports 0 by construction because it rewrites no milestone.
+
+## Rework after review-1 (REJECTED: F1 + F2 blockers, F3 P2)
+
+Prescription: `.tmp/progress/w6c.debug-1.md`. Both blockers were the same seam: the
+HTTP DTO was taking its labels from caller constants and from a mapping the ADR does
+not declare.
+
+* **F1 — `state: "erased"` on both delete paths.** ADR-0019 :165-167 makes `Erased`
+  the sweep report's answer after a completed pass; both HTTP delete paths answer
+  `PendingErase`. `delete_erasure(tier)` is now the only delete label builder and
+  takes no state input at all (it does not even read the stamp).
+* **F2 — the `sweep_state` mapping was untested, invented a label, and failed
+  open.** `status_erasure` maps the stamp through the amended D-19-3 set:
+  `Ok(Some)` → `swept` (the label the W6c amendment adds), `Ok(None)` →
+  `notYetSwept`, `Err` → `sweepFailed` (a failed read is not evidence that no
+  sweep ran; `Unknown` is vault-scoped by D-19-9).
+* **F3 (P2) — documentation only.** `surviving_derived.memories` is `null`
+  (R-19-3: `link_memory_to_prompt` has no caller); the `PromptErasure` port
+  widening (`profiles_deleted`, `changelogs_deleted`) has no DTO consumer in W6c
+  and is carried for the next wave, recorded on the field itself.
+
+The oracle was vacuous because every mem-web test saw the trait default `Ok(None)`.
+The fake now seeds `sweep_stamp` / `sweep_read_fails`, which supplies the
+discriminating inputs:
+
+| test | input | asserts |
+|---|---|---|
+| `test_a_swept_tier_answers_swept_from_the_stamp` | `sweep_state = Ok(Some(1_700_000_000_000))` | status read: `sweepState == "swept"`, `state == "pending"` |
+| `test_a_swept_stamp_does_not_turn_a_delete_into_erased` | same stamp, `DELETE` | `state == "pending"`, `sweepState == "notYetSwept"` |
+| `test_a_failed_stamp_read_answers_sweep_failed` | `sweep_state = Err(..)` | `sweepState == "sweepFailed"` |
+
+RED → GREEN (MEASURED in this tree): corrected oracle against `e1d6170` →
+**5 passed / 4 failed**, exit 101 (`w6c-rework-red.log`); after the fix →
+**9 passed / 0 failed** (`w6c-rework-green.log`).
+
+**M1 kill (MEASURED):** mutating `Ok(Some(_)) => "swept"` to `"notYetSwept"` in
+`prompts.rs` → **8 passed / 1 failed**, the failure being exactly
+`test_a_swept_tier_answers_swept_from_the_stamp` (`w6c-rework-m1.log`). Under the
+pre-rework oracle the same mutant was green — that is the vacuity the review
+measured. File restored from `.tmp/scratch/prompts.rs.bak`.
 
 ## Residuals (named, not closed)
 
@@ -100,3 +143,11 @@ rows and unit cells only; no measurement was taken and none is claimed.
 3. Windows post-drop opens untested (above).
 4. ADR-0025 stays `Proposed` — owner review has not landed.
 5. A3/A4 are fenced to issue 131.
+6. `legacyPeerLive` is declared vocabulary but unreachable from the HTTP DTO in
+   W6c: the stamp table stores successes only and the sweep's block record is
+   report-only (`mem-bridge/src/sweep.rs`). Persisting a failure record is a
+   follow-up; probing at answer time is refused here.
+7. The status read 404s for a deleted prompt, so it cannot report post-delete
+   state. Pre-existing blueprint rule (Step 18(f): unknown id ⇒ 404), not part of
+   F1/F2. A tombstone or tier-scoped read is a separate decision.
+8. F4/F5/F6/F7 stay P3 as ranked; F4 (Windows) needs an owner decision, not code.

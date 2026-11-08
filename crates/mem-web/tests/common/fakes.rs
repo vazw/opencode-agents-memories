@@ -104,6 +104,10 @@ struct FakeState {
     changelogs: Vec<ProfileChangelog>,
     pending_cleanup: Option<CleanupPreview>,
     pending_user: Option<String>,
+    /// The tier's `sweep_state` stamp (issue 43 W6c): `None` = never swept.
+    sweep_stamp: Option<i64>,
+    /// Makes `sweep_state` answer a store failure (the `sweepFailed` arm).
+    sweep_read_fails: bool,
 }
 
 /// The shared fake backend.
@@ -249,6 +253,8 @@ impl FakeBackend {
                 projects,
                 pending_cleanup: None,
                 pending_user: None,
+                sweep_stamp: None,
+                sweep_read_fails: false,
             }),
             migrator: Arc::new(Mutex::new(TagMigrator::new())),
             calls: Mutex::new(Vec::new()),
@@ -341,6 +347,17 @@ impl FakeBackend {
     pub fn seed_prompt(&self, prompt: PromptRow) {
         let mut state = self.state.lock().expect("fake state lock");
         state.prompts.push(prompt);
+    }
+
+    /// Seeds the tier's sweep stamp (issue 43 W6c): `Some` = a completed pass,
+    /// `None` = never swept (the default).
+    pub fn set_sweep_stamp(&self, stamp: Option<i64>) {
+        self.state.lock().expect("fake state lock").sweep_stamp = stamp;
+    }
+
+    /// Makes `sweep_state` answer a store failure (the D-19-3 `sweepFailed` arm).
+    pub fn set_sweep_read_failure(&self, fails: bool) {
+        self.state.lock().expect("fake state lock").sweep_read_fails = fails;
     }
 
     /// Replaces the seeded profile's `profile_data` (a test-only seed, never
@@ -864,6 +881,18 @@ impl PromptPort for FakeBackend {
             existed,
             ..PromptErasure::default()
         })
+    }
+
+    async fn sweep_state(&self, tier: &str) -> Result<Option<i64>, PortError> {
+        self.record(format!("sweep_state:{tier}"));
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| PortError::Store("lock".into()))?;
+        if state.sweep_read_fails {
+            return Err(PortError::Store("sweep_state read failed".into()));
+        }
+        Ok(state.sweep_stamp)
     }
 }
 

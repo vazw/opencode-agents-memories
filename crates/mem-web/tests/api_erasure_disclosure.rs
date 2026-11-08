@@ -26,6 +26,12 @@ const API_TOKEN: &str = "test-token";
 /// A router over the seeded fake backend.
 fn router() -> axum::Router {
     let (_backend, services) = fake_services();
+    router_for(services)
+}
+
+/// A router over a caller-supplied service bundle (a fake with a seeded
+/// `sweep_state`, or one whose `sweep_state` read fails).
+fn router_for(services: mem_web::api::ports::ApiServices) -> axum::Router {
     let state = app_state_with_api(
         WebAuth::new(None, None, "user"),
         Some(API_TOKEN),
@@ -41,7 +47,12 @@ fn router() -> axum::Router {
 
 /// The parsed `data` object of a successful envelope.
 async fn data_of(method: &str, path: &str) -> serde_json::Value {
-    let response = api_request(router(), method, path, Some(API_TOKEN), None).await;
+    data_of_with(router(), method, path).await
+}
+
+/// The parsed `data` object of a successful envelope, over a given router.
+async fn data_of_with(router: axum::Router, method: &str, path: &str) -> serde_json::Value {
+    let response = api_request(router, method, path, Some(API_TOKEN), None).await;
     assert_eq!(response.status, 200, "{method} {path}: {response:?}");
     let body = response.body_string();
     let parsed: serde_json::Value = serde_json::from_str(&body)
@@ -82,12 +93,16 @@ async fn test_delete_prompt_answer_carries_the_erasure_state() {
         !erasure.is_null(),
         "the erasure state is ALWAYS present on a delete answer: {data}"
     );
-    assert_eq!(erasure["state"], serde_json::json!("erased"));
+    assert_eq!(
+        erasure["state"],
+        serde_json::json!("pending"),
+        "a delete is PendingErase: the bytes leave only at the next sweep (ADR-0019 :165-167)"
+    );
     assert_eq!(erasure["tier"], serde_json::json!("user-prompts"));
     assert_eq!(
         erasure["sweepState"],
         serde_json::json!("notYetSwept"),
-        "a never-swept tier answers from the stamp table, not from a constant: {data}"
+        "a delete's medium step has not run, whatever the tier's stamp says: {data}"
     );
     assert_labels_not_paths(erasure, "DELETE /api/prompts/{id}");
 }
@@ -105,7 +120,11 @@ async fn test_delete_memory_answer_carries_the_erasure_state() {
     );
     let erasure = &data["erasure"];
     assert!(!erasure.is_null(), "{data}");
-    assert_eq!(erasure["state"], serde_json::json!("erased"));
+    assert_eq!(
+        erasure["state"],
+        serde_json::json!("pending"),
+        "a memory delete is PendingErase with noSweepForTier (ADR-0019 :166-167): {data}"
+    );
     assert_eq!(erasure["tier"], serde_json::json!("memories"));
     assert_eq!(erasure["sweepState"], serde_json::json!("noSweepForTier"));
     assert_labels_not_paths(erasure, "DELETE /api/memories/{id}");
@@ -181,6 +200,77 @@ async fn test_status_read_answers_pending_and_404_for_an_unknown_id() {
     assert!(
         response.body_string().contains(r#""success":false"#),
         "an unknown id uses the envelope"
+    );
+}
+
+/// (h) F2: a seeded stamp answers `swept` on the status read — the M1 killer.
+///
+/// Distinguishing input: `sweep_state` returns `Ok(Some(..))`. A mapping that
+/// answers `notYetSwept` for a swept tier survives every other case in this
+/// file (they all see the fake's `Ok(None)` default), which is exactly the
+/// vacuous oracle the review measured.
+#[tokio::test]
+async fn test_a_swept_tier_answers_swept_from_the_stamp() {
+    let (backend, services) = fake_services();
+    backend.set_sweep_stamp(Some(1_700_000_000_000));
+    let data = data_of_with(
+        router_for(services),
+        "GET",
+        &format!("/api/prompts/{PROMPT_ID}/erasure"),
+    )
+    .await;
+    assert_eq!(
+        data["sweepState"],
+        serde_json::json!("swept"),
+        "a tier with a stamp answers `swept`, never `notYetSwept`: {data}"
+    );
+    assert_eq!(
+        data["state"],
+        serde_json::json!("pending"),
+        "Erased is the sweep report's answer, never the HTTP DTO's (ADR-0019 :167): {data}"
+    );
+}
+
+/// (i) F1: a swept stamp must not turn a DELETE into `erased` — a delete's
+/// residue postdates any stamp (ADR-0019 :165-167).
+#[tokio::test]
+async fn test_a_swept_stamp_does_not_turn_a_delete_into_erased() {
+    let (backend, services) = fake_services();
+    backend.set_sweep_stamp(Some(1_700_000_000_000));
+    let data = data_of_with(
+        router_for(services),
+        "DELETE",
+        &format!("/api/prompts/{PROMPT_ID}"),
+    )
+    .await;
+    assert_eq!(
+        data["erasure"]["state"],
+        serde_json::json!("pending"),
+        "a delete after a completed sweep is still PendingErase: {data}"
+    );
+    assert_eq!(
+        data["erasure"]["sweepState"],
+        serde_json::json!("notYetSwept"),
+        "the medium step has not run for THIS delete: {data}"
+    );
+}
+
+/// (j) F2: a failed stamp read answers `sweepFailed`, never `notYetSwept`
+/// (a failed read is not evidence that no sweep ran).
+#[tokio::test]
+async fn test_a_failed_stamp_read_answers_sweep_failed() {
+    let (backend, services) = fake_services();
+    backend.set_sweep_read_failure(true);
+    let data = data_of_with(
+        router_for(services),
+        "GET",
+        &format!("/api/prompts/{PROMPT_ID}/erasure"),
+    )
+    .await;
+    assert_eq!(
+        data["sweepState"],
+        serde_json::json!("sweepFailed"),
+        "a failed stamp read is sweepFailed, never notYetSwept: {data}"
     );
 }
 

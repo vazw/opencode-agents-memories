@@ -46,7 +46,7 @@ pub async fn delete_prompt(
     match delete_prompt_by_id(&state, &id, cascade, "DELETE /api/prompts/{id}").await {
         Ok(Some(erasure)) => envelope::ok(&DeletedPromptDto {
             deleted_memory: erasure.deleted_memory,
-            erasure: erasure_state(&state, "user-prompts", "erased").await,
+            erasure: delete_erasure("user-prompts"),
         }),
         Ok(None) => envelope::business_error("Prompt not found"),
         Err(response) => response,
@@ -62,29 +62,22 @@ pub async fn erasure(State(state): State<Arc<AppState>>, Path(id): Path<String>)
         return envelope::business_error("id is required");
     }
     match state.api.prompts.prompt_by_id(&id).await {
-        Ok(Some(_)) => envelope::ok(&erasure_state(&state, "user-prompts", "pending").await),
+        Ok(Some(_)) => envelope::ok(&status_erasure(&state, "user-prompts").await),
         Ok(None) => envelope::json(StatusCode::NOT_FOUND, envelope::error("Prompt not found")),
         Err(error) => port_failure("GET /api/prompts/{id}/erasure", error),
     }
 }
 
-/// Builds one tier's erasure state. `sweep_state` is data: a tier with a stamp
-/// answers `swept`, one without answers `notYetSwept`, and a tier the sweep
-/// never covers answers `noSweepForTier`. The vault renders `unknown` (no vault
-/// port answers here), never `no`.
-pub(super) async fn erasure_state(
-    state: &Arc<AppState>,
+/// Builds one tier's erasure state from explicit labels. `sweep_state` is
+/// data: a tier with a stamp answers `swept`, one without answers
+/// `notYetSwept`, a failed read `sweepFailed`, and a tier the sweep never
+/// covers `noSweepForTier`. The vault renders `unknown` (no vault port answers
+/// here), never `no`.
+fn erasure_dto(
     tier: &'static str,
     lifecycle: &'static str,
+    sweep_state: &'static str,
 ) -> ErasureStateDto {
-    let sweep_state = if tier == "memories" {
-        "noSweepForTier"
-    } else {
-        match state.api.prompts.sweep_state(tier).await {
-            Ok(Some(_)) => "swept",
-            Ok(None) | Err(_) => "notYetSwept",
-        }
-    };
     ErasureStateDto {
         state: lifecycle,
         tier,
@@ -95,6 +88,35 @@ pub(super) async fn erasure_state(
         },
         not_erased: not_erased_map(None),
     }
+}
+
+/// The DELETE answer: `PendingErase`, always (ADR-0019 :165-167). A delete's
+/// residue postdates any stamp, so the tier's `sweep_state` row cannot make it
+/// `Erased`; the prompts tier's medium step has not run, and memories have no
+/// sweep at all.
+pub(super) fn delete_erasure(tier: &'static str) -> ErasureStateDto {
+    let sweep_state = if tier == "memories" {
+        "noSweepForTier"
+    } else {
+        "notYetSwept"
+    };
+    erasure_dto(tier, "pending", sweep_state)
+}
+
+/// The status read (H9): the tier's stamp, mapped through D-19-3. A stamp is
+/// `swept`, its absence `notYetSwept`, and a failed read `sweepFailed` — never
+/// `notYetSwept`, which would claim a sweep never ran when the tool cannot look.
+pub(super) async fn status_erasure(state: &Arc<AppState>, tier: &'static str) -> ErasureStateDto {
+    let sweep_state = if tier == "memories" {
+        "noSweepForTier"
+    } else {
+        match state.api.prompts.sweep_state(tier).await {
+            Ok(Some(_)) => "swept",
+            Ok(None) => "notYetSwept",
+            Err(_) => "sweepFailed",
+        }
+    };
+    erasure_dto(tier, "pending", sweep_state)
 }
 
 /// `POST /api/prompts/bulk-delete` — upstream `handleBulkDeletePrompts`.
@@ -167,6 +189,13 @@ async fn delete_prompt_by_id(
 /// adapter returned.
 struct DeletedPromptOutcome {
     deleted_memory: bool,
+    /// What the delete actually erased (`profiles_deleted`, `changelogs_deleted`,
+    /// `existed`). Carried for the next wave's disclosure — the DTO has no field
+    /// for these counts yet (ADR-0019 R-19-3: `surviving_derived` carries only
+    /// `memories`, which is `null` until provenance lands, and
+    /// `milestones_scrubbed`, which is 0 by construction), so W6c reads none of
+    /// it. Deleting the field instead would discard the only record of the
+    /// cascade the delete performed.
     #[allow(dead_code)]
     erasure: PromptErasure,
 }
