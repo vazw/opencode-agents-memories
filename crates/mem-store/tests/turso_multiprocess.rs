@@ -21,16 +21,23 @@ use mem_store::operation_lock::OPERATION_LOCK_FILE;
 use mem_store::platform::Platform;
 
 #[test]
-fn test_connect_options_enable_encryption_and_multiprocess_wal_on_unix() {
+fn test_connect_options_enable_encryption_and_drop_multiprocess_wal_on_unix() {
     let unix = ConnectOptions::for_config(&common::store_config("mp-opts"), Platform::Unix);
     assert!(
         unix.experimental.contains(&ExperimentalFeature::Encryption),
         "encryption flag is always on"
     );
     assert!(
-        unix.experimental
+        !unix
+            .experimental
             .contains(&ExperimentalFeature::MultiprocessWal),
-        "multiprocess WAL must be on for Unix"
+        "issue 43 W6a: the shipping option set must NOT carry the multiprocess token — every \
+         open is the legacy (single-process) mode now"
+    );
+    assert_eq!(
+        unix.experimental,
+        vec![ExperimentalFeature::Encryption],
+        "non-Windows keeps exactly the encryption flag"
     );
 
     let windows = ConnectOptions::for_config(&common::store_config("mp-opts"), Platform::Windows);
@@ -45,6 +52,11 @@ fn test_connect_options_enable_encryption_and_multiprocess_wal_on_unix() {
             .experimental
             .contains(&ExperimentalFeature::MultiprocessWal),
         "multiprocess WAL must stay off for Windows"
+    );
+    assert_eq!(
+        windows.experimental,
+        vec![ExperimentalFeature::Encryption],
+        "Windows and Unix now agree on the option set"
     );
 }
 

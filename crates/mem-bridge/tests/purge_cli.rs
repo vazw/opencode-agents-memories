@@ -1318,8 +1318,14 @@ fn purge_args(root: &Path, project: &str, session: &str, agent: &str) -> Vec<Str
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_purge_session_process_exits_zero_and_reports_counts() {
     let seeded = seed(TestDir::new("w71-purge-cli-zero"), true).await;
+    // Post-drop (issue 43 W6a) every open is legacy, so the seeding process owns
+    // the database file's lock: it must release before the CLI child can open the
+    // same root (the guard's restored safety property).
+    let Seeded { dir, store, facts } = seeded;
+    drop(store);
+    drop(facts);
     let home = scratch_home("zero");
-    let args = purge_args(seeded.dir.path(), PROJECT, SESSION, AGENT);
+    let args = purge_args(dir.path(), PROJECT, SESSION, AGENT);
     let output = run_child(&home, &args);
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -1354,7 +1360,7 @@ async fn test_purge_session_process_exits_zero_and_reports_counts() {
     }
 
     // Rows really gone.
-    let store = episodic_store(&seeded.dir).await;
+    let store = episodic_store(&dir).await;
     assert_eq!(store.count_sessions(Some(PROJECT)).await.expect("count"), 0);
     assert!(
         store
@@ -1369,11 +1375,30 @@ async fn test_purge_session_process_exits_zero_and_reports_counts() {
 async fn test_purge_session_honours_storage_root() {
     let a = seed(TestDir::new("w71-purge-root-a"), true).await;
     let b = seed(TestDir::new("w71-purge-root-b"), true).await;
-    let a_episodic = std::fs::read(a.dir.path().join("episodic.db")).expect("read a");
-    let a_facts = std::fs::read(a.dir.path().join("facts.db")).expect("read a facts");
+    // Both seeding processes must release their file locks before the CLI child
+    // opens root B (post-drop every open is legacy: one owner per file).
+    let (a_dir, b_dir) = {
+        let Seeded {
+            dir: a_dir,
+            store,
+            facts,
+        } = a;
+        drop(store);
+        drop(facts);
+        let Seeded {
+            dir: b_dir,
+            store,
+            facts,
+        } = b;
+        drop(store);
+        drop(facts);
+        (a_dir, b_dir)
+    };
+    let a_episodic = std::fs::read(a_dir.path().join("episodic.db")).expect("read a");
+    let a_facts = std::fs::read(a_dir.path().join("facts.db")).expect("read a facts");
 
     let home = scratch_home("root-b");
-    let args = purge_args(b.dir.path(), PROJECT, SESSION, AGENT);
+    let args = purge_args(b_dir.path(), PROJECT, SESSION, AGENT);
     let output = run_child(&home, &args);
     assert_eq!(
         output.status.code(),
@@ -1384,14 +1409,14 @@ async fn test_purge_session_honours_storage_root() {
 
     // B was erased; A is byte-identical and still holds its rows.
     assert_eq!(
-        std::fs::read(a.dir.path().join("episodic.db")).expect("read a"),
+        std::fs::read(a_dir.path().join("episodic.db")).expect("read a"),
         a_episodic
     );
     assert_eq!(
-        std::fs::read(a.dir.path().join("facts.db")).expect("read a facts"),
+        std::fs::read(a_dir.path().join("facts.db")).expect("read a facts"),
         a_facts
     );
-    let a_store = episodic_store(&a.dir).await;
+    let a_store = episodic_store(&a_dir).await;
     assert!(
         a_store
             .raw_context_for_session(PROJECT, SESSION, AGENT)
@@ -1399,7 +1424,7 @@ async fn test_purge_session_honours_storage_root() {
             .expect("raw")
             .is_some()
     );
-    let b_store = episodic_store(&b.dir).await;
+    let b_store = episodic_store(&b_dir).await;
     assert!(
         b_store
             .raw_context_for_session(PROJECT, SESSION, AGENT)
@@ -1505,6 +1530,41 @@ async fn test_purge_session_reports_busy_with_exit_75() {
     held.release();
 }
 
+/// Issue 43 W6a / finding D1: with the multiprocess flag dropped, a live engine
+/// holds the `.db` file itself, so `store.ready()` — not the operation lock — is
+/// where the busy condition surfaces. The CLI must map that wrapped lock refusal
+/// to exit **75** with the actionable wording, and delete nothing.
+///
+/// Inverted world (pre-fix): the `ready()` error is mapped to `Failed`, so the CLI
+/// exits 74 `purge.failed` and this test fails on the exit code.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_purge_busy_names_the_engine_holding_the_storage_root() {
+    // `seeded.store` is a live engine-shaped handle on `episodic.db`: post-drop
+    // every open is legacy, so it owns the database's file lock.
+    let seeded = seed(TestDir::new("w6a-purge-engine-held"), false).await;
+
+    let home = scratch_home("engine-held");
+    let args = purge_args(seeded.dir.path(), PROJECT, SESSION, AGENT);
+    let output = run_child(&home, &args);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(75), "{stderr}");
+    assert!(stderr.contains("purge.busy"), "{stderr}");
+    assert!(
+        stderr.contains("holds this storage root"),
+        "the busy line must name the cause and the remedy: {stderr}"
+    );
+    assert!(output.stdout.is_empty(), "no success line while busy");
+    assert!(
+        seeded
+            .store
+            .raw_context_for_session(PROJECT, SESSION, AGENT)
+            .await
+            .expect("raw")
+            .is_some(),
+        "nothing was read or deleted while the engine holds the root"
+    );
+}
+
 /// ADR-0012 D-11: the purge erasure leg is not shipped yet — W8b owns it — so
 /// the purge must be proved unable to reach the vault's directories. The fixture
 /// is synthetic opaque bytes on purpose: the property under test is that purge
@@ -1519,8 +1579,13 @@ async fn test_purge_session_reports_busy_with_exit_75() {
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_purge_does_not_touch_the_vault_directories() {
     let seeded = seed(TestDir::new("w72-purge-vault"), true).await;
+    // Post-drop (issue 43 W6a) the seeding process owns the database file's lock,
+    // so it must release before the CLI child opens the root.
+    let Seeded { dir, store, facts } = seeded;
+    drop(store);
+    drop(facts);
     let scope = "0123456789abcdef";
-    let vault_dir = seeded.dir.path().join("vault").join(scope);
+    let vault_dir = dir.path().join("vault").join(scope);
     std::fs::create_dir_all(&vault_dir).expect("create the vault-shaped directory");
     let db_bytes = b"\x00\x01synthetic encrypted vault page\xff\xfe".to_vec();
     std::fs::write(vault_dir.join("vault.db"), &db_bytes).expect("write the vault-shaped database");
@@ -1544,7 +1609,7 @@ async fn test_purge_does_not_touch_the_vault_directories() {
     let before = listing(&vault_dir);
 
     let home = scratch_home("vault-untouched");
-    let args = purge_args(seeded.dir.path(), PROJECT, SESSION, AGENT);
+    let args = purge_args(dir.path(), PROJECT, SESSION, AGENT);
     let output = run_child(&home, &args);
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();

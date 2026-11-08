@@ -19,8 +19,7 @@ use std::sync::mpsc::Receiver;
 
 use mem_store::config::StoreConfig;
 use mem_store::db::{
-    BatchMode, ConnectFactory, ConnectOptions, ExperimentalFeature, Statement, Value,
-    turso_connect_factory,
+    BatchMode, ConnectFactory, ConnectOptions, Statement, Value, turso_connect_factory,
 };
 use mem_store::error::StoreError;
 use mem_store::operation_lock::OPERATION_LOCK_FILE;
@@ -671,33 +670,62 @@ fn test_tshm_holder_child() {
     let legacy = std::env::var("MEM_STORE_TSHM_HOLDER_LEGACY").as_deref() == Ok("1");
     let config = child_config(&db_path);
 
+    /// The fixture's handle: the shipping seam for the post-drop (legacy) child,
+    /// and a **raw flag-on builder** for the pre-drop one. Production no longer
+    /// builds a multiprocess option set (the guard refuses it by construction), so
+    /// the only way to hold a `-tshm` — the file G2's split is about — is to speak
+    /// to turso directly.
+    enum HolderHandle {
+        Guarded(mem_store::db::DbHandle),
+        PreDrop(turso::Connection),
+    }
+
+    impl HolderHandle {
+        async fn execute(&self, sql: &str) -> Result<(), String> {
+            match self {
+                Self::Guarded(db) => db
+                    .execute(sql, Vec::new())
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| error.message()),
+                Self::PreDrop(connection) => connection
+                    .execute(sql, ())
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| error.to_string()),
+            }
+        }
+    }
+
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("child runtime");
     runtime.block_on(async {
-        let mut options = ConnectOptions::for_config(&config, Platform::current());
-        if legacy {
-            options
-                .experimental
-                .retain(|feature| !matches!(feature, ExperimentalFeature::MultiprocessWal));
-        }
-        let db = turso_connect_factory()
-            .connect(db_path.clone(), options)
+        let db = if legacy {
+            HolderHandle::Guarded(
+                turso_connect_factory()
+                    .connect(
+                        db_path.clone(),
+                        ConnectOptions::for_config(&config, Platform::current()),
+                    )
+                    .await
+                    .expect("the child's database opens"),
+            )
+        } else {
+            let database = turso::Builder::new_local(&db_path.to_string_lossy())
+                .experimental_multiprocess_wal(true)
+                .build()
+                .await
+                .expect("the pre-drop child's database opens");
+            HolderHandle::PreDrop(database.connect().expect("the pre-drop connection"))
+        };
+        db.execute("CREATE TABLE IF NOT EXISTS holder_rows (id INTEGER PRIMARY KEY, v TEXT)")
             .await
-            .expect("the child's database opens");
-        db.execute(
-            "CREATE TABLE IF NOT EXISTS holder_rows (id INTEGER PRIMARY KEY, v TEXT)",
-            Vec::new(),
-        )
-        .await
-        .expect("the child creates its table");
-        db.execute(
-            "INSERT INTO holder_rows (v) VALUES ('child-before')",
-            Vec::new(),
-        )
-        .await
-        .expect("the child's first write");
+            .expect("the child creates its table");
+        db.execute("INSERT INTO holder_rows (v) VALUES ('child-before')")
+            .await
+            .expect("the child's first write");
         println!("READY {}", std::process::id());
         std::io::stdout().flush().expect("flush READY");
 
@@ -719,9 +747,9 @@ fn test_tshm_holder_child() {
                         .map(|elapsed| elapsed.as_nanos())
                         .unwrap_or(0);
                     let sql = format!("INSERT INTO holder_rows (v) VALUES ('child-after-{id}')");
-                    match db.execute(&sql, Vec::new()).await {
-                        Ok(_) => println!("AFTER ok"),
-                        Err(error) => println!("AFTER err {}", error.message()),
+                    match db.execute(&sql).await {
+                        Ok(()) => println!("AFTER ok"),
+                        Err(error) => println!("AFTER err {error}"),
                     }
                 }
                 "exit" => break,
@@ -912,20 +940,19 @@ async fn test_g2_positive_control_tshm_split_is_silent() {
         )
         .await
         .expect("the next opener writes");
-    let new_meta =
-        std::fs::metadata(sidecar(&db_path, "-tshm")).expect("the next opener creates a new -tshm");
-    let after_ino = format!("{}:{}", new_meta.dev(), new_meta.ino());
-
+    // Post-drop (issue 43 W6a) the next opener is the legacy (production) mode, so
+    // it never recreates a `-tshm`: the split leaves no shared coordination state at
+    // all, and the child's identity is unrecoverable. Pre-drop this half asserted a
+    // *fresh* `-tshm` identity; the observable that survives the mode change is the
+    // absence, which is exactly what makes the split total.
     println!(
-        "[G2] TSHM_INO before={before} (len {}) AFTER=ok TSHM_INO after={after_ino} (len {}); \
-         pre-existing coordination bytes gone",
-        before_meta.len(),
-        new_meta.len()
+        "[G2] TSHM_INO before={before} (len {}) AFTER=ok; the post-drop opener leaves no \
+         `-tshm` at the path",
+        before_meta.len()
     );
-    assert_ne!(
-        (before_meta.dev(), before_meta.ino()),
-        (new_meta.dev(), new_meta.ino()),
-        "the next opener must get a different -tshm identity; the same inode means the raw \
+    assert!(
+        !sidecar(&db_path, "-tshm").exists(),
+        "the post-drop opener must not recreate a `-tshm`; a fresh file would mean the raw \
          unlink did not happen and this control is vacuous"
     );
 
