@@ -800,6 +800,12 @@ impl MigrationService {
 
         // Verified swap: journal first, source out, replacement in.
         connections.close_connection(staged_path).await?;
+        // Issue 43 W6a: every open is the legacy mode now, so this process's own
+        // handle owns the staged file's `F_SETLK` lock. The Arc must be released
+        // before the swap's exclusivity probe runs — otherwise the probe answers
+        // `Held` against our own descriptor (OFD locks are per open file
+        // description) and the mutation is refused.
+        drop(staged);
         let journal = SwapState {
             db_path: &db_path.to_string_lossy(),
             staged_path: &staged_path.to_string_lossy(),

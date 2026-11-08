@@ -561,10 +561,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).expect("create the temp dir");
         let options = ConnectOptions {
-            experimental: vec![
-                crate::db::ExperimentalFeature::Encryption,
-                crate::db::ExperimentalFeature::MultiprocessWal,
-            ],
+            experimental: vec![crate::db::ExperimentalFeature::Encryption],
             encryption: None,
             read_only: false,
             allow_unguarded_open: false,

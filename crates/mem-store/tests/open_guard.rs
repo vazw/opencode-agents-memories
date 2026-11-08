@@ -146,7 +146,7 @@ use mem_store::open_guard::{
 ///    cross-wave cargo serialiser for as long as it lives. Every read below goes
 ///    through [`FIXTURE_TIMEOUT`], and `Drop` kills + reaps on every path
 ///    (including a panic in the parent), so no fixture child can outlive a test.
-struct LegacyHolder {
+struct FixtureHolder {
     child: Option<std::process::Child>,
     stdin: Option<std::process::ChildStdin>,
     lines: std::sync::mpsc::Receiver<String>,
@@ -156,8 +156,20 @@ struct LegacyHolder {
 /// cache, short enough that a regression fails in seconds rather than minutes.
 const FIXTURE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
-impl LegacyHolder {
-    fn spawn(path: &std::path::Path) -> Self {
+impl FixtureHolder {
+    /// A flag-off (legacy, single-process) holder: it locks the `.db` file itself.
+    fn spawn_legacy(path: &std::path::Path) -> Self {
+        Self::spawn_mode(path, "legacy-holder")
+    }
+
+    /// A flag-on (`experimental_multiprocess_wal`) holder — the pre-drop opener
+    /// whose byte-0 lock lives on the `-tshm` sidecar, invisible to turso's `.db`
+    /// lock. This is the mixed-version peer the post-drop guard must refuse.
+    fn spawn_multiprocess(path: &std::path::Path) -> Self {
+        Self::spawn_mode(path, "multiprocess-holder")
+    }
+
+    fn spawn_mode(path: &std::path::Path, mode: &str) -> Self {
         let mut child = std::process::Command::new(
             std::env::current_exe().expect("the running test binary's path"),
         )
@@ -166,13 +178,13 @@ impl LegacyHolder {
         .arg("--ignored")
         .arg("--nocapture")
         .arg("--test-threads=1")
-        .env("MEM_FIXTURE_CHILD", "legacy-holder")
+        .env("MEM_FIXTURE_CHILD", mode)
         .env("MEM_FIXTURE_DB", path)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .expect("spawn the legacy-holder child");
+        .expect("spawn the fixture-holder child");
         let pid = child.id();
         let stdin = child.stdin.take();
         let stdout = child.stdout.take().expect("piped child stdout");
@@ -247,7 +259,7 @@ impl LegacyHolder {
     }
 }
 
-impl Drop for LegacyHolder {
+impl Drop for FixtureHolder {
     fn drop(&mut self) {
         if let Some(mut child) = self.child.take() {
             // `kill()` on an already-exited child is a harmless no-op; `wait()`
@@ -269,24 +281,8 @@ fn fixture_child_entry() {
         .as_str()
     {
         "legacy-holder" => legacy_holder_child(),
-        "guarded-open" => guarded_open_child(),
+        "multiprocess-holder" => multiprocess_holder_child(),
         _ => {}
-    }
-}
-
-/// The shipping option set over an explicit root, built locally so no other
-/// mem-store test binary is affected (all nine fields are `pub`).
-fn pair_config(root: std::path::PathBuf) -> StoreConfig {
-    StoreConfig {
-        storage_path: root,
-        embedding_dimensions: 2,
-        embedding_model: "test-model".to_string(),
-        max_vectors_per_shard: 1000,
-        container_tag_prefix: "opencode".to_string(),
-        database_encryption_enabled: false,
-        database_encryption_cipher: "aes256gcm".to_string(),
-        database_encryption_key: None,
-        allow_unguarded_open: false,
     }
 }
 
@@ -294,6 +290,18 @@ fn pair_config(root: std::path::PathBuf) -> StoreConfig {
 /// turso handle held open until the parent says `release` on stdin.
 #[cfg(unix)]
 fn legacy_holder_child() {
+    holder_child(false)
+}
+
+/// The flag-on holder body: `experimental_multiprocess_wal(true)`, the pre-drop
+/// opener whose `-tshm` byte-0 lock is the post-drop guard's oracle.
+#[cfg(unix)]
+fn multiprocess_holder_child() {
+    holder_child(true)
+}
+
+#[cfg(unix)]
+fn holder_child(multiprocess: bool) {
     use std::io::{BufRead, Write};
 
     let path = std::env::var("MEM_FIXTURE_DB").expect("MEM_FIXTURE_DB");
@@ -302,10 +310,11 @@ fn legacy_holder_child() {
         .build()
         .expect("child runtime");
     let (database, connection) = runtime.block_on(async move {
-        let database = turso::Builder::new_local(&path)
-            .build()
-            .await
-            .expect("the child's legacy database opens");
+        let mut builder = turso::Builder::new_local(&path);
+        if multiprocess {
+            builder = builder.experimental_multiprocess_wal(true);
+        }
+        let database = builder.build().await.expect("the child's database opens");
         let connection = database.connect().expect("the child's connection");
         // A SELECT proves the handle is a real, serving connection, not a builder
         // that never opened.
@@ -327,128 +336,12 @@ fn legacy_holder_child() {
     let _ = std::io::stdout().flush();
 }
 
-/// The concurrent-pair body: one guarded open through the shipping factory seam,
-/// then one real `SELECT 1`. It must never panic on the guard's answer — the
-/// parent parses the JSON report and makes the judgement, so a refusal is
-/// reported as data instead of a child crash.
-#[cfg(unix)]
-fn guarded_open_child() {
-    use mem_store::config::StoreConfig;
-    use mem_store::db::{ConnectOptions, turso_connect_factory};
-    use mem_store::platform::Platform;
-
-    let db = std::path::PathBuf::from(std::env::var("MEM_FIXTURE_DB").expect("MEM_FIXTURE_DB"));
-    let out = std::path::PathBuf::from(std::env::var("MEM_FIXTURE_OUT").expect("MEM_FIXTURE_OUT"));
-    let root = db.parent().expect("the database's parent").to_path_buf();
-    let config: StoreConfig = pair_config(root);
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("child runtime");
-    let report = runtime.block_on(async move {
-        match turso_connect_factory()
-            .connect(db, ConnectOptions::for_config(&config, Platform::current()))
-            .await
-        {
-            Ok(handle) => match handle.query("SELECT 1", Vec::new()).await {
-                Ok(_) => serde_json::json!({"outcome": "ok", "served": true}),
-                Err(error) => guarded_open_error_report(&error),
-            },
-            Err(error) => guarded_open_error_report(&error),
-        }
-    });
-    std::fs::write(out.with_extension("json"), report.to_string()).expect("write the child report");
-}
-
-/// The error half of a guarded-open child report. `direction` is resolved by
-/// matching the `StoreError` **variant**, never by matching the Display text —
-/// `direction_label` is tracing-only and the Display never renders the token.
-#[cfg(unix)]
-fn guarded_open_error_report(error: &StoreError) -> serde_json::Value {
-    let direction = match error {
-        StoreError::OpenBlocked {
-            direction: OpenDirection::LegacyAuthority,
-            ..
-        } => "legacy-authority",
-        StoreError::OpenBlocked {
-            direction: OpenDirection::Unknown { .. },
-            ..
-        } => "unknown",
-        StoreError::OpenBlocked {
-            direction: OpenDirection::ModeMarkerConflict { .. },
-            ..
-        } => "mode-marker-conflict",
-        StoreError::UnsupportedOpenMode { .. } => "unsupported-open-mode",
-        _ => "other",
-    };
-    serde_json::json!({
-        "outcome": "error",
-        "open_guard_refusal": error.is_open_guard_refusal(),
-        "direction": direction,
-        "text": error.to_string(),
-    })
-}
-
-#[cfg(unix)]
-#[test]
-fn test_probe_reports_held_for_a_live_legacy_holder() {
-    let dir = common::temp_dir("probe-held");
-    let path = dir.join("held.db");
-    let holder = LegacyHolder::spawn(&path);
-    let outcome = probe_database_file(&path);
-    holder.release();
-    println!(
-        "probe(platform = {:?}) against a live legacy holder = {outcome:?}",
-        LockKind::platform()
-    );
-    assert_eq!(
-        outcome,
-        ProbeOutcome::Held,
-        "45.4: a live flag-off holder holds the database file's lock; the probe must see it"
-    );
-    let _ = common::cleanup_temp_dir(&dir);
-}
-
-#[cfg(unix)]
-#[test]
-fn test_probe_reports_free_for_an_unheld_database_file() {
-    let dir = common::temp_dir("probe-free");
-    let path = dir.join("free.db");
-    std::fs::write(&path, b"").expect("create an empty database file");
-    let outcome = probe_database_file(&path);
-    println!("probe against an unheld file = {outcome:?}");
-    assert_eq!(
-        outcome,
-        ProbeOutcome::Free,
-        "an unheld file must read Free — the probe queries and takes nothing"
-    );
-    let _ = common::cleanup_temp_dir(&dir);
-}
-
-#[cfg(unix)]
-#[test]
-fn test_probe_reports_missing_for_an_absent_database_file() {
-    let dir = common::temp_dir("probe-missing");
-    let path = dir.join("absent.db");
-    let outcome = probe_database_file(&path);
-    assert_eq!(
-        outcome,
-        ProbeOutcome::Missing,
-        "an absent database is a known answer, not Unknown"
-    );
-    assert!(
-        !path.exists(),
-        "the probe must never create a database (O_RDWR without O_CREAT)"
-    );
-    let _ = common::cleanup_temp_dir(&dir);
-}
-
 #[cfg(unix)]
 #[test]
 fn test_probe_posix_variant_reports_held_for_a_live_legacy_holder() {
     let dir = common::temp_dir("probe-posix-held");
     let path = dir.join("held.db");
-    let holder = LegacyHolder::spawn(&path);
+    let holder = FixtureHolder::spawn_legacy(&path);
     let outcome = probe_database_file_with(&path, LockKind::Posix);
     holder.release();
     println!("probe(F_GETLK) against a live legacy holder = {outcome:?}");
@@ -472,132 +365,54 @@ fn test_probe_posix_variant_reports_free_for_an_unheld_database_file() {
 }
 
 // ---------------------------------------------------------------------------
-// Issue 60 — two concurrent guarded opens must never refuse each other
+// Post-drop single-owner — a live legacy holder owns the `.db` lock
 // ---------------------------------------------------------------------------
 
-const PAIR_ROUNDS: usize = 12;
-const PAIR_CHILD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-
-/// Bounded wait over an owned child: `Some(status)` when it exits in time;
-/// `None` after killing and reaping it on the deadline. It never panics on the
-/// deadline itself, so both pair children are always reaped before the caller
-/// judges either — a survivor would hold this process's `.tmp/build.lock`
-/// descriptor and stall every later serialised cargo call.
-#[cfg(unix)]
-fn reap_child_within(mut child: std::process::Child) -> Option<std::process::ExitStatus> {
-    let deadline = std::time::Instant::now() + PAIR_CHILD_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return Some(status),
-            Ok(None) if std::time::Instant::now() < deadline => {
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            }
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
-    }
-}
-
-/// Issue 60: two conforming processes opening one database concurrently must
-/// both succeed — that is the configuration multiprocess WAL exists to serve.
+/// Issue 60's two-conformer premise is gone: post-drop every open is legacy, so
+/// turso's `.db` lock makes exactly one process the owner. The guard's `-tshm`
+/// sensor does NOT see a legacy holder (it owns no `-tshm`), so this refusal comes
+/// from the engine's own file lock, not from the guard — the honest post-drop
+/// contract (ADR-0025 D-25-3).
 ///
-/// **Why this seam, not a unit seam.** A single-process fixture that *holds* the
-/// byte reads `Held` under both the old take-probe and the new query probe, so
-/// such a fixture cannot separate them and would be vacuous. The defect exists
-/// only as a race between two probes in two processes, so this fixture seeds one
-/// database, spawns two children back-to-back with no wait between them, and
-/// judges their **parsed** reports.
-///
-/// **The numbers.** The surviving pair harness (mem-profile fixture children, a
-/// `lock:probe` acquire racing on the coordination database) attests a guard
-/// refusal in 8 of 12 pairs
-/// (`.tmp/scratch/issue60/pairs/p1,p3,p4,p6,p7,p8,p9,p12`), so one 12-round run
-/// is all-green on the take-probe with probability `(1/3)^12 ≈ 1.9e-6`. The
-/// operative protection is the blueprint's ≤3-run RED gate.
+/// Inverted world: before the flip the guarded open was multiprocess, probed the
+/// `.db` and refused with `OpenBlocked`/`LegacyAuthority` — this test asserts the
+/// opposite shape (`is_open_guard_refusal() == false`, turso's lock text present).
 #[cfg(unix)]
 #[tokio::test]
-async fn test_two_concurrent_guarded_opens_never_refuse_each_other() {
-    let root = common::temp_dir("guarded-pair");
-    let config = pair_config(root.clone());
-    for round in 0..PAIR_ROUNDS {
-        let path = root.join(format!("pair-{round}.db"));
-        // The measured pair harness had the database already present: seed it
-        // through the same guarded seam, then drop the handle.
-        let seeded = turso_connect_factory()
-            .connect(
-                path.clone(),
-                ConnectOptions::for_config(&config, Platform::current()),
-            )
-            .await
-            .expect("seed the pair database through the guarded seam");
-        drop(seeded);
+async fn test_a_second_process_legacy_open_is_refused_by_the_engine_file_lock() {
+    let config = common::store_config("guard-single-owner");
+    let path = config.storage_path.join("owned.db");
+    // Seed through the guarded seam so the file is a real database.
+    let seeded = turso_connect_factory()
+        .connect(path.clone(), shipping_options(&config))
+        .await
+        .expect("seed the database");
+    drop(seeded);
 
-        let mut children = Vec::new();
-        for label in ["a", "b"] {
-            let out = root.join(format!("pair-{round}-{label}.out"));
-            let child = std::process::Command::new(
-                std::env::current_exe().expect("the running test binary's path"),
-            )
-            .arg("--exact")
-            .arg("fixture_child_entry")
-            .arg("--ignored")
-            .arg("--test-threads=1")
-            .env("MEM_FIXTURE_CHILD", "guarded-open")
-            .env("MEM_FIXTURE_DB", &path)
-            .env("MEM_FIXTURE_OUT", &out)
-            // An inherited override skips the probe (pre *and* post), which would
-            // make this test green on the mutant for the wrong reason.
-            .env_remove(mem_store::open_guard::ALLOW_UNGUARDED_OPEN_ENV)
-            .stdout(std::fs::File::create(out.with_extension("stdout")).expect("child stdout file"))
-            .stderr(std::fs::File::create(out.with_extension("stderr")).expect("child stderr file"))
-            .spawn()
-            .expect("spawn the guarded-open child");
-            children.push((label, out, child));
+    let holder = FixtureHolder::spawn_legacy(&path);
+    let refused = turso_connect_factory()
+        .connect(path.clone(), shipping_options(&config))
+        .await;
+    holder.release();
+    match refused {
+        Ok(_) => {
+            panic!("a live legacy holder owns the `.db` lock; a second process must be refused")
         }
-        // Reap both before judging either: a panic must never leave the second
-        // child running with this process's build-lock descriptor inherited.
-        let mut finished = Vec::new();
-        for (label, out, child) in children {
-            finished.push((label, out, reap_child_within(child)));
-        }
-        for (label, out, status) in finished {
-            let status = status.unwrap_or_else(|| {
-                panic!(
-                    "round {round}, side {label}: the guarded-open child did not finish within \
-                     {PAIR_CHILD_TIMEOUT:?} and was killed; stderr={}",
-                    std::fs::read_to_string(out.with_extension("stderr")).unwrap_or_default()
-                )
-            });
+        Err(error) => {
             assert!(
-                status.success(),
-                "round {round}, side {label}: the guarded-open child exited {status}; stderr={}",
-                std::fs::read_to_string(out.with_extension("stderr")).unwrap_or_default()
+                !error.is_open_guard_refusal(),
+                "the post-drop refusal is turso's `.db` lock, not the guard's `-tshm` sensor: \
+                 {error:?}"
             );
-            let report_path = out.with_extension("json");
-            let raw_report = std::fs::read_to_string(&report_path).unwrap_or_default();
-            let report: serde_json::Value =
-                serde_json::from_str(&raw_report).unwrap_or_else(|error| {
-                    panic!(
-                        "round {round}, side {label}: the child report must be JSON ({error}): \
-                         {raw_report:?}"
-                    )
-                });
-            assert_eq!(
-                report["outcome"],
-                serde_json::json!("ok"),
-                "round {round}, side {label}: guarded open was refused (direction={direction}, \
-                 open_guard_refusal={refusal}); raw report={raw_report}; stderr={stderr}",
-                direction = report["direction"].as_str().unwrap_or("<absent>"),
-                refusal = report["open_guard_refusal"].as_bool().unwrap_or(false),
-                raw_report = std::fs::read_to_string(&report_path).unwrap_or_default(),
-                stderr = std::fs::read_to_string(out.with_extension("stderr")).unwrap_or_default(),
+            let text = error.to_string();
+            assert!(
+                text.contains("File is locked by another process")
+                    || text.contains("Locking error"),
+                "the refusal must carry turso's lock text: {text}"
             );
         }
     }
-    let _ = common::cleanup_temp_dir(&root);
+    let _ = common::cleanup_temp_dir(&config.storage_path);
 }
 
 // ---------------------------------------------------------------------------
@@ -652,18 +467,14 @@ async fn test_factory_open_succeeds_with_a_stale_tshm_and_no_holder() {
     let path = config.storage_path.join("stale.db");
     let tshm = std::path::PathBuf::from(format!("{}-tshm", path.display()));
 
-    // Produce a real `.tshm` (valid magic, correct length) with a live handle…
+    // A post-drop database (a legacy open leaves no `-tshm`)…
     let handle = turso_connect_factory()
         .connect(path.clone(), shipping_options(&config))
         .await
         .expect("seed the database");
-    let bytes =
-        std::fs::read(&tshm).expect("G3's fixture needs a real `-tshm` while the handle is live");
     drop(handle);
-    // …and make sure it is still there afterwards: a stale sidecar, not a live one.
-    if !tshm.exists() {
-        std::fs::write(&tshm, &bytes).expect("restore the stale `-tshm`");
-    }
+    // …plus stale debris: presence, size and header are never signals.
+    std::fs::write(&tshm, b"stale debris, not a live lock").expect("seed a stale `-tshm`");
     assert!(
         tshm.exists(),
         "the fixture requires a `.tshm` on disk with no holder"
@@ -681,26 +492,40 @@ async fn test_factory_open_succeeds_with_a_stale_tshm_and_no_holder() {
     let _ = common::cleanup_temp_dir(&config.storage_path);
 }
 
+/// The shipping set plus the multiprocess-WAL token: the option set the post-drop
+/// O3 refuses by construction. Production can no longer build it; a pre-drop
+/// binary (and the guard's own tests) can.
+fn multiprocess_options(config: &StoreConfig) -> ConnectOptions {
+    let mut options = shipping_options(config);
+    options
+        .experimental
+        .push(ExperimentalFeature::MultiprocessWal);
+    options
+}
+
 #[cfg(unix)]
 #[tokio::test]
-async fn test_legacy_connect_options_are_refused_with_unsupported_open_mode() {
-    let config = common::store_config("guard-legacy-refused");
-    let path = config.storage_path.join("legacy.db");
+async fn test_multiprocess_connect_options_are_refused_with_unsupported_open_mode() {
+    let config = common::store_config("guard-multiprocess-refused");
+    let path = config.storage_path.join("multiprocess.db");
     let error = match TursoConnectFactory
-        .connect(path.clone(), legacy_options(&config))
+        .connect(path.clone(), multiprocess_options(&config))
         .await
     {
-        Ok(_) => panic!("O3: a legacy option set must be refused by construction"),
+        Ok(_) => {
+            panic!("post-drop O3: a multiprocess option set must be refused by construction")
+        }
         Err(error) => error,
     };
     match &error {
         StoreError::UnsupportedOpenMode { db_path, mode } => {
             assert_eq!(db_path, &path);
-            assert_eq!(*mode, "legacy");
+            assert_eq!(*mode, "multiprocess");
         }
         other => panic!(
             "45.3/45.10: the refusal must be the typed `UnsupportedOpenMode` tripwire (the \
-             structural guard against the first legacy opener landing silently), got {other:?}"
+             structural guard against the first multiprocess opener landing silently), got \
+             {other:?}"
         ),
     }
     assert!(
@@ -714,6 +539,207 @@ async fn test_legacy_connect_options_are_refused_with_unsupported_open_mode() {
         !path.exists(),
         "the refusal must not create the database (preflight runs before any turso call)"
     );
+    let _ = common::cleanup_temp_dir(&config.storage_path);
+}
+
+/// The two-arm positive control (blueprint Step 3): the `-tshm` sensor must
+/// separate the two kinds of live opener. A **flag-on** (pre-drop) child takes the
+/// byte-0 lock on the sidecar ⇒ `Held`; a **flag-off** (post-drop, legacy) child
+/// owns no sidecar at all ⇒ not `Held`. Without both arms a `Held` answer could be
+/// generic contention rather than the mixed-version authority.
+///
+/// Inverted world: a sensor that keyed on the `.db` file would read `Held` for
+/// **both** arms (both children lock the database), so the flag-off arm fails.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_the_tshm_sensor_separates_a_flag_on_holder_from_a_flag_off_one() {
+    let config = common::store_config("guard-two-arm-control");
+    let path = config.storage_path.join("two-arm.db");
+    let tshm = std::path::PathBuf::from(format!("{}-tshm", path.display()));
+    // A real database first, so both children open an existing file.
+    let seeded = turso_connect_factory()
+        .connect(path.clone(), shipping_options(&config))
+        .await
+        .expect("seed the database");
+    drop(seeded);
+
+    let multiprocess_holder = FixtureHolder::spawn_multiprocess(&path);
+    let flag_on = probe_database_file(&tshm);
+    multiprocess_holder.release();
+    assert_eq!(
+        flag_on,
+        ProbeOutcome::Held,
+        "arm 1: a live pre-drop (flag-on) holder locks the `-tshm` byte 0"
+    );
+
+    let legacy_holder = FixtureHolder::spawn_legacy(&path);
+    let flag_off = probe_database_file(&tshm);
+    legacy_holder.release();
+    assert_ne!(
+        flag_off,
+        ProbeOutcome::Held,
+        "arm 2: a flag-off holder locks the database, never the `-tshm` — a `Held` here \
+         would mean the sensor is reading the wrong file"
+    );
+    let _ = common::cleanup_temp_dir(&config.storage_path);
+}
+
+/// The upgrade path (blueprint Step 3): a database written by a **pre-drop**
+/// (flag-on) build — it has a `-tshm` — must open under the post-drop build once
+/// the old opener is gone, with its rows intact.
+///
+/// Inverted world: a guard that refused on the *presence* of a `-tshm` (rather than
+/// on a conflicting lock) would refuse this upgrade.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_a_pre_drop_multiprocess_database_opens_and_keeps_its_rows() {
+    let config = common::store_config("guard-upgrade-path");
+    let path = config.storage_path.join("pre-drop.db");
+    let tshm = std::path::PathBuf::from(format!("{}-tshm", path.display()));
+
+    // The pre-drop writer: a raw flag-on builder (the option set production no
+    // longer builds), left closed before the post-drop open.
+    {
+        let database = turso::Builder::new_local(&path.to_string_lossy())
+            .experimental_multiprocess_wal(true)
+            .build()
+            .await
+            .expect("the pre-drop writer opens");
+        let connection = database.connect().expect("the pre-drop connection");
+        connection
+            .execute("CREATE TABLE upgrade_rows (id INTEGER PRIMARY KEY)", ())
+            .await
+            .expect("create the table");
+        connection
+            .execute("INSERT INTO upgrade_rows (id) VALUES (7)", ())
+            .await
+            .expect("insert a row");
+    }
+    // Deterministic stale debris (the pre-drop sidecar shape): presence is never
+    // liveness, so the upgrade must not depend on whether turso unlinked it.
+    std::fs::write(&tshm, b"stale pre-drop sidecar").expect("seed the stale `-tshm`");
+
+    let handle = turso_connect_factory()
+        .connect(path, shipping_options(&config))
+        .await
+        .expect("post-drop: a pre-drop database must still open");
+    let rows = handle
+        .query("SELECT id FROM upgrade_rows", Vec::new())
+        .await
+        .expect("read the pre-drop row");
+    assert_eq!(
+        rows.first().and_then(|row| row.i64("id")),
+        Some(7),
+        "the pre-drop row survives the mode change"
+    );
+    drop(handle);
+    let _ = common::cleanup_temp_dir(&config.storage_path);
+}
+
+/// The production option set (post-drop: no token) opens, writes and reopens —
+/// the positive half of the atomic pair. Without the table inversion this open
+/// would be refused `UnsupportedOpenMode` (the brick).
+#[cfg(unix)]
+#[tokio::test]
+async fn test_production_connect_options_open_and_write_without_the_multiprocess_token() {
+    use mem_store::open_guard::WalMode;
+
+    let config = common::store_config("guard-production-opens");
+    let path = config.storage_path.join("production.db");
+    assert_eq!(
+        WalMode::from_options(&shipping_options(&config)),
+        WalMode::Legacy,
+        "post-drop: `for_config` must classify as the legacy (production) mode"
+    );
+    let handle = TursoConnectFactory
+        .connect(path.clone(), shipping_options(&config))
+        .await
+        .expect("post-drop: the production open must succeed");
+    handle
+        .execute(
+            "CREATE TABLE production_rows (id INTEGER PRIMARY KEY)",
+            Vec::new(),
+        )
+        .await
+        .expect("the production handle writes");
+    drop(handle);
+
+    let reopened = TursoConnectFactory
+        .connect(path, shipping_options(&config))
+        .await
+        .expect("the production open reopens");
+    let rows = reopened
+        .query("SELECT id FROM production_rows", Vec::new())
+        .await
+        .expect("the reopened handle reads");
+    assert_eq!(rows.len(), 0);
+    drop(reopened);
+    let _ = common::cleanup_temp_dir(&config.storage_path);
+}
+
+/// **The atomic-commit pin** (blueprint Step 1/2): one fixture root, three
+/// observations through [`TursoConnectFactory`] only — no injection exists there.
+///
+/// 1. a plain post-flip production open SUCCEEDS;
+/// 2. against a live flag-on (pre-drop) child the same open refuses
+///    `OpenBlocked`/`LegacyAuthority` (the `-tshm` sensor is invisible to turso's
+///    `.db` lock, so a silent no-op cannot pass this arm);
+/// 3. with no holder it clears.
+///
+/// Mutant→victim walk: the brick (flag dropped, table not inverted) fails (1); the
+/// silent no-op (table inverted, flag not dropped) fails (2), because the open
+/// classifies `Multiprocess`, ignores the holder and succeeds.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_post_flip_open_succeeds_refuses_a_flag_on_holder_and_clears_when_free() {
+    use mem_store::error::OpenDirection;
+
+    let config = common::store_config("guard-post-flip-triple");
+    let path = config.storage_path.join("triple.db");
+
+    // (1) the production open succeeds.
+    let plain = TursoConnectFactory
+        .connect(path.clone(), shipping_options(&config))
+        .await
+        .expect("post-flip: a plain production open must succeed");
+    plain
+        .query("SELECT 1", Vec::new())
+        .await
+        .expect("the production handle serves");
+    drop(plain);
+
+    // (2) a live flag-on holder takes the `-tshm` byte-0 lock ⇒ refuse.
+    let holder = FixtureHolder::spawn_multiprocess(&path);
+    let refused = TursoConnectFactory
+        .connect(path.clone(), shipping_options(&config))
+        .await;
+    holder.release();
+    match refused {
+        Ok(_) => panic!(
+            "a live flag-on holder must refuse the writable legacy open (the `-tshm` sensor is \
+             invisible to turso's `.db` lock, so nothing else can catch it)"
+        ),
+        Err(StoreError::OpenBlocked { db_path, direction }) => {
+            assert_eq!(db_path, path, "the refusal names the database file");
+            assert_eq!(
+                direction,
+                OpenDirection::LegacyAuthority,
+                "the direction is the pre-drop holder the `-tshm` sensor saw"
+            );
+        }
+        Err(other) => panic!("the refusal must be the typed `OpenBlocked`, got {other:?}"),
+    }
+
+    // (3) with the holder gone, the same open clears.
+    let cleared = TursoConnectFactory
+        .connect(path.clone(), shipping_options(&config))
+        .await;
+    assert!(
+        cleared.is_ok(),
+        "with no holder the writable legacy open must clear: {:?}",
+        cleared.err()
+    );
+    drop(cleared);
     let _ = common::cleanup_temp_dir(&config.storage_path);
 }
 
@@ -748,7 +774,7 @@ async fn test_connection_manager_surfaces_the_typed_refusal_unchanged() {
 
     let config = common::store_config("guard-manager-refusal");
     let path = config.storage_path.join("held.db");
-    let holder = LegacyHolder::spawn(&path);
+    let holder = FixtureHolder::spawn_multiprocess(&path);
     let manager = ConnectionManager::new(
         config.storage_path.clone(),
         config.clone(),
@@ -779,12 +805,12 @@ async fn test_connection_manager_surfaces_the_typed_refusal_unchanged() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn test_factory_open_refuses_a_live_legacy_holder() {
+async fn test_factory_open_refuses_a_live_multiprocess_holder() {
     use mem_store::error::OpenDirection;
 
-    let config = common::store_config("guard-refuses-legacy-holder");
+    let config = common::store_config("guard-refuses-multiprocess-holder");
     let path = config.storage_path.join("held.db");
-    let holder = LegacyHolder::spawn(&path);
+    let holder = FixtureHolder::spawn_multiprocess(&path);
     let result = TursoConnectFactory
         .connect(path.clone(), shipping_options(&config))
         .await;
@@ -792,8 +818,9 @@ async fn test_factory_open_refuses_a_live_legacy_holder() {
 
     match result {
         Ok(_) => panic!(
-            "45.4/45.8: a live flag-off holder must refuse a writable multiprocess open through \
-             the unmodified seam (no call-site change is allowed to be needed)"
+            "post-drop: a live pre-drop (flag-on) holder must refuse a writable legacy open \
+             through the unmodified seam (its `-tshm` lock is invisible to turso's `.db` lock, \
+             so only the guard can catch it)"
         ),
         Err(StoreError::OpenBlocked { db_path, direction }) => {
             assert_eq!(
@@ -840,7 +867,7 @@ async fn test_override_opens_the_same_mixed_configuration_the_guard_refuses() {
     let mut config = mem_store::config::from_core(&core_config(r#"{"allowUnguardedOpen": true}"#));
     config.storage_path = common::temp_dir("guard-override-opens");
     let path = config.storage_path.join("held.db");
-    let holder = LegacyHolder::spawn(&path);
+    let holder = FixtureHolder::spawn_multiprocess(&path);
 
     let options = shipping_options(&config);
     assert!(
@@ -872,25 +899,34 @@ async fn test_override_opens_the_same_mixed_configuration_the_guard_refuses() {
     let _ = common::cleanup_temp_dir(&config.storage_path);
 }
 
-/// O7's vacuity proof: a live **multiprocess** handle holds no OS lock on the
-/// database file, so probe B answers `Free` against our own handle. This is why
-/// `45.6` needs no clearance registry.
+/// O7's post-drop analog: this process's own live **legacy** handle owns no
+/// `-tshm`, so the sensor cannot see it. That is why clearance is structural
+/// (mode + writability + probe on a fresh descriptor), never identity-based: the
+/// guard could not learn who holds even if it wanted to.
+///
+/// Inverted world: before the flip the shipping handle was multiprocess, so the
+/// `-tshm` existed and the probe saw our own byte-0 lock (`Held`) — this test
+/// asserted `Missing` would fail there.
 #[cfg(unix)]
 #[tokio::test]
-async fn test_probe_reports_free_against_this_process_own_live_multiprocess_handle() {
+async fn test_the_tshm_sensor_does_not_see_this_process_own_legacy_handle() {
     let config = common::store_config("guard-own-live-handle");
     let path = config.storage_path.join("own.db");
+    let tshm = std::path::PathBuf::from(format!("{}-tshm", path.display()));
     let handle = turso_connect_factory()
         .connect(path.clone(), shipping_options(&config))
         .await
         .expect("open through the guarded seam");
-    let outcome = probe_database_file(&path);
-    println!("probe against our own live multiprocess handle = {outcome:?}");
+    let outcome = probe_database_file(&tshm);
+    println!("probe against our own live legacy handle's `-tshm` = {outcome:?}");
     assert_eq!(
         outcome,
-        ProbeOutcome::Free,
-        "O7: a multiprocess handle holds no lock on the database file, so probe B cannot see it — \
-         that is the proof `45.6` rests on"
+        ProbeOutcome::Missing,
+        "a legacy handle owns no `-tshm`; the sensor answers a known `Missing`, never `Held`"
+    );
+    assert!(
+        !tshm.exists(),
+        "a legacy (production) open must not create a `-tshm` sidecar"
     );
     drop(handle);
     let _ = common::cleanup_temp_dir(&config.storage_path);
@@ -921,16 +957,20 @@ fn file_inventory(dir: &std::path::Path) -> Vec<(String, u64)> {
     entries
 }
 
-/// 45.14 / Plan Gate B5: `.tshm` is byte-identical across a guarded open.
+/// 45.14 / Plan Gate B5 / issue 43 W6a: a stale `-tshm` is inert debris — a
+/// guarded (legacy) open must neither refuse it nor touch it.
 ///
-/// Shape is deliberate: **both** snapshots are taken with the **same handle
-/// live**, and only [`probe_database_file`] runs between them. A full open/close
-/// cycle writes turso's own state into `.tshm` (magic/version header, owner
-/// records, resize), so a cycle-shaped test could not attribute a difference to
-/// the probe. It reproduces the measurement it stands in for (`t2 S5`).
+/// Shape: the database is produced through the guarded seam and closed first, then
+/// the debris is written directly (zero-length and the measured 86 016-byte
+/// garbage). Between the two snapshots only [`probe_database_file`] runs, so any
+/// difference is attributable to the probe. The absent case is asserted too: a
+/// successful open must not create a `-tshm` that was not there.
+///
+/// Inverted world: a probe opened with `O_CREAT`/write intent changes the bytes or
+/// creates the file; the presence-as-signal mutant refuses the open.
 #[cfg(unix)]
 #[tokio::test]
-async fn test_guarded_open_leaves_tshm_byte_identical() {
+async fn test_guarded_open_leaves_a_stale_tshm_byte_identical() {
     let config = common::store_config("guard-tshm-identical");
     let path = config.storage_path.join("tshm.db");
     let tshm = std::path::PathBuf::from(format!("{}-tshm", path.display()));
@@ -942,43 +982,79 @@ async fn test_guarded_open_leaves_tshm_byte_identical() {
     handle
         .query("SELECT 1", Vec::new())
         .await
-        .expect("the live handle answers, so `.tshm` is fully materialised");
-
-    let before_bytes = std::fs::read(&tshm).expect("the live multiprocess handle owns a `.tshm`");
-    let before_files = file_inventory(&config.storage_path);
-    let outcome = probe_database_file(&path);
-    let after_bytes = std::fs::read(&tshm).expect("the `.tshm` still exists after the probe");
-    let after_files = file_inventory(&config.storage_path);
-
-    println!(
-        "tshm before_len={} after_len={} identical={} outcome={outcome:?}",
-        before_bytes.len(),
-        after_bytes.len(),
-        before_bytes == after_bytes
-    );
-    assert_eq!(
-        outcome,
-        ProbeOutcome::Free,
-        "the probe must have actually run (and answered) between the snapshots"
-    );
-    assert_eq!(
-        before_bytes, after_bytes,
-        "45.14: the probe must not touch turso's `.tshm` — a difference here is attributable to \
-         the probe because both snapshots were taken with the same handle live"
-    );
-    assert_eq!(
-        before_files, after_files,
-        "the file set must be unchanged across the probe"
-    );
+        .expect("the handle answers");
     drop(handle);
+    assert!(
+        !tshm.exists(),
+        "a legacy open must not create a `-tshm` (the fixture writes its own debris)"
+    );
+
+    for debris in [Vec::new(), vec![0xAB_u8; 86_016]] {
+        std::fs::write(&tshm, &debris).expect("seed the stale `-tshm`");
+        let before_bytes = std::fs::read(&tshm).expect("read the seeded debris");
+        let before_files = file_inventory(&config.storage_path);
+        let outcome = probe_database_file(&tshm);
+        let after_bytes = std::fs::read(&tshm).expect("the debris still exists after the probe");
+        let after_files = file_inventory(&config.storage_path);
+
+        println!(
+            "tshm debris_len={} before_len={} after_len={} identical={} outcome={outcome:?}",
+            debris.len(),
+            before_bytes.len(),
+            after_bytes.len(),
+            before_bytes == after_bytes
+        );
+        assert_eq!(
+            outcome,
+            ProbeOutcome::Free,
+            "stale debris with no holder must read `Free` (presence is never a signal)"
+        );
+        assert_eq!(
+            before_bytes, after_bytes,
+            "the probe must not touch the `-tshm` — bytes are the observable"
+        );
+        assert_eq!(
+            before_files, after_files,
+            "the file set must be unchanged across the probe"
+        );
+
+        let reopened = turso_connect_factory()
+            .connect(path.clone(), shipping_options(&config))
+            .await;
+        assert!(
+            reopened.is_ok(),
+            "stale `-tshm` debris must not refuse a writable legacy open: {:?}",
+            reopened.err()
+        );
+        drop(reopened);
+        assert_eq!(
+            std::fs::read(&tshm).expect("the debris survives a guarded open"),
+            before_bytes,
+            "a guarded open must not rewrite stale debris"
+        );
+    }
+
+    // Absent stays absent: the guard never creates the sensor file.
+    std::fs::remove_file(&tshm).expect("remove the debris");
+    let reopened = turso_connect_factory()
+        .connect(path, shipping_options(&config))
+        .await
+        .expect("a database with no `-tshm` opens");
+    drop(reopened);
+    assert!(
+        !tshm.exists(),
+        "a guarded open must leave an absent `-tshm` absent"
+    );
     let _ = common::cleanup_temp_dir(&config.storage_path);
 }
 
-/// 45.14 / A5: the marker is `root/.wal-mode`, it names this process and the
-/// multiprocess mode, and it is **not** inside `.tshm` or the database.
+/// 45.14 / A5 / issue 43 W6a: the marker is `root/.wal-mode`, it names this
+/// process and the **legacy** (post-drop production) mode, and it is **not** inside
+/// the database file. A legacy open owns no `-tshm`, which is itself the post-drop
+/// observable.
 #[cfg(unix)]
 #[tokio::test]
-async fn test_mode_marker_is_written_in_the_storage_root_and_absent_from_tshm_and_the_database() {
+async fn test_mode_marker_is_written_in_the_storage_root_and_absent_from_the_database() {
     let config = common::store_config("guard-marker-location");
     let path = config.storage_path.join("marker.db");
     let handle = turso_connect_factory()
@@ -1005,8 +1081,8 @@ async fn test_mode_marker_is_written_in_the_storage_root_and_absent_from_tshm_an
     );
     assert_eq!(
         parsed.get("mode").and_then(|mode| mode.as_str()),
-        Some("multiprocess"),
-        "the marker records the mode it was written under: {body}"
+        Some("legacy"),
+        "the marker records the post-drop production mode it was written under: {body}"
     );
     #[cfg(target_os = "linux")]
     assert!(
@@ -1017,23 +1093,17 @@ async fn test_mode_marker_is_written_in_the_storage_root_and_absent_from_tshm_an
         "Linux observes a start-time token, so the marker must carry it: {body}"
     );
 
-    let needle = b"\"mode\":\"multiprocess\"";
     let tshm = std::path::PathBuf::from(format!("{}-tshm", path.display()));
-    for (label, bytes) in [
-        (
-            "the `.tshm`",
-            std::fs::read(&tshm).expect("the live handle owns a `.tshm`"),
-        ),
-        (
-            "the database file",
-            std::fs::read(&path).expect("read the database file"),
-        ),
-    ] {
-        assert!(
-            !bytes.windows(needle.len()).any(|window| window == needle),
-            "A5: the marker must not be written into {label}"
-        );
-    }
+    assert!(
+        !tshm.exists(),
+        "a legacy open must not create a `-tshm`: the marker has no shared-memory file to avoid"
+    );
+    let needle = b"\"mode\":\"legacy\"";
+    let bytes = std::fs::read(&path).expect("read the database file");
+    assert!(
+        !bytes.windows(needle.len()).any(|window| window == needle),
+        "A5: the marker must not be written into the database file"
+    );
     drop(handle);
     let _ = common::cleanup_temp_dir(&config.storage_path);
 }
@@ -1108,26 +1178,27 @@ fn test_connect_options_never_re_publishes_the_override() {
 /// config `false` refuses it.
 #[cfg(unix)]
 #[tokio::test]
-async fn test_config_key_bypasses_the_guard_for_a_legacy_open() {
+async fn test_config_key_bypasses_the_guard_for_a_multiprocess_open() {
     let enabled = core_config(r#"{"allowUnguardedOpen": true}"#);
     let mut store = mem_store::config::from_core(&enabled);
     // The resolved config's `storage_path` is the user-level default; this test
     // owns a throwaway root (never a real one).
     store.storage_path = common::temp_dir("guard-config-bypass");
-    let path = store.storage_path.join("legacy-bypass.db");
+    let path = store.storage_path.join("multiprocess-bypass.db");
     let overridden = TursoConnectFactory
-        .connect(path.clone(), legacy_options(&store))
+        .connect(path.clone(), multiprocess_options(&store))
         .await;
     match &overridden {
         Ok(handle) => {
             let served = handle
                 .query("SELECT 1 AS one", Vec::new())
                 .await
-                .expect("the overridden legacy handle answers");
+                .expect("the overridden multiprocess handle answers");
             assert_eq!(served.first().and_then(|row| row.i64("one")), Some(1));
         }
         Err(error) => panic!(
-            "config `allowUnguardedOpen: true` must bypass the legacy refusal, got {error:?}"
+            "config `allowUnguardedOpen: true` must bypass the multiprocess refusal, got \
+             {error:?}"
         ),
     }
     drop(overridden);
@@ -1137,17 +1208,32 @@ async fn test_config_key_bypasses_the_guard_for_a_legacy_open() {
     store.storage_path = common::temp_dir("guard-config-refused");
     let refused = TursoConnectFactory
         .connect(
-            store.storage_path.join("legacy-refused.db"),
-            legacy_options(&store),
+            store.storage_path.join("multiprocess-refused.db"),
+            multiprocess_options(&store),
         )
         .await;
     match refused {
         Err(StoreError::UnsupportedOpenMode { .. }) => {}
-        Ok(_) => panic!("config `false` must refuse the legacy option set, got a successful open"),
+        Ok(_) => {
+            panic!("config `false` must refuse the multiprocess option set, got a successful open")
+        }
         Err(other) => {
             panic!("config `false` must refuse with `UnsupportedOpenMode`, got {other:?}")
         }
     }
+    // The post-drop production set needs no override at all: legacy is the mode.
+    let legacy = TursoConnectFactory
+        .connect(
+            store.storage_path.join("legacy-opens.db"),
+            legacy_options(&store),
+        )
+        .await;
+    assert!(
+        legacy.is_ok(),
+        "post-drop: the legacy (production) option set opens without any override: {:?}",
+        legacy.err()
+    );
+    drop(legacy);
     let _ = common::cleanup_temp_dir(&store.storage_path);
 }
 
@@ -1288,7 +1374,7 @@ async fn test_manager_surfaces_a_marker_failure_as_the_typed_refusal() {
 /// the same root the engine uses.
 #[cfg(unix)]
 #[tokio::test]
-async fn test_purge_session_option_set_stays_multiprocess() {
+async fn test_purge_session_option_set_is_the_legacy_production_mode() {
     use mem_store::open_guard::{WalMode, Writability};
 
     // Mirrors `mem-bridge/src/purge.rs:309-311` (its `from_core` + storage root): if
@@ -1298,9 +1384,9 @@ async fn test_purge_session_option_set_stays_multiprocess() {
     let options = ConnectOptions::for_config(&store, Platform::current());
     assert_eq!(
         WalMode::from_options(&options),
-        WalMode::Multiprocess,
-        "45.9: purge-session's option set is a multiprocess option set (so probe B applies \
-         and the guard cannot refuse it as legacy)"
+        WalMode::Legacy,
+        "post-drop: purge-session's option set is the legacy (production) option set — the same \
+         one every engine open uses"
     );
     assert_eq!(
         Writability::from_options(&options),
@@ -1313,8 +1399,8 @@ async fn test_purge_session_option_set_stays_multiprocess() {
     );
 
     // Behavioural half: the engine-shaped handle holds the same database, and the
-    // purge-shaped open must still be `Ok` (probe B answers Free against our own
-    // live multiprocess handle — O7).
+    // purge-shaped open must still be `Ok` (a second legacy open in the same
+    // process does not contend with its own POSIX lock).
     let path = store.storage_path.join("episodic.db");
     let engine_handle = turso_connect_factory()
         .connect(
@@ -1332,7 +1418,7 @@ async fn test_purge_session_option_set_stays_multiprocess() {
     assert!(
         purge_open.is_ok(),
         "45.9: the purge-shaped open must not be refused while the engine holds the same \
-         database (that is the configuration multiprocess WAL exists to serve): {:?}",
+         database: {:?}",
         purge_open.err()
     );
     drop(purge_open);

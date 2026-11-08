@@ -1716,21 +1716,27 @@ fn listing(root: &Path) -> Vec<String> {
     out
 }
 
-/// The MEASURED fresh-root file set of a default-flag run on the pre-change tree
+/// The MEASURED fresh-root file set of a default-flag run
 /// (`docs/evidence/issue129-residuals/sanitation-actor-error.md` records the
-/// run and the class of every entry). `opencode-mem.log` is the harness's own
-/// log sink: `spawn_engine_inner` points `OPENCODE_MEM_LOG_FILE` inside the
-/// root, so it appears here and not in the bare-binary measurement.
-const FRESH_ROOT_LISTING: [&str; 10] = [
+/// pre-change run and the class of every entry). `opencode-mem.log` is the
+/// harness's own log sink: `spawn_engine_inner` points
+/// `OPENCODE_MEM_LOG_FILE` inside the root, so it appears here and not in the
+/// bare-binary measurement.
+///
+/// Re-measured 2026-11-09 on the post-drop tree (issue 43 W6a, ADR-0025): the
+/// multiprocess-WAL token left `ConnectOptions::for_config`, so no open creates
+/// a `-tshm` shared-memory sidecar any more — the two `*.db-tshm` entries the
+/// pre-change run recorded are gone. Every other entry is unchanged; the
+/// failure that produced this re-measurement is quoted in
+/// `docs/evidence/issue-43-w6/README.md` §5.
+const FRESH_ROOT_LISTING: [&str; 8] = [
     ".engine.lock",
     ".wal-mode",
     "decay-sweep.json",
     "episodic.db",
-    "episodic.db-tshm",
     "episodic.db-wal",
     "opencode-mem.log",
     "user-profiles.db",
-    "user-profiles.db-tshm",
     "user-profiles.db-wal",
 ];
 

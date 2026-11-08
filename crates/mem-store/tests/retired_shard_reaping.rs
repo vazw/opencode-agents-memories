@@ -217,15 +217,17 @@ async fn test_eligible_retired_shard_is_fully_removed() {
     let rig = rig("w7-t1");
     let anchor = rig.anchor(1, &["anchor-row"]).await;
     let candidate = rig.inactive(0).await;
-    // Capture AFTER the fixture: the writable creation leaves the `-tshm`
-    // sidecar (and a real `-wal`); the fixture never creates or truncates the
-    // `-tshm` itself, because a truncation makes the read-only open reject it.
+    // Capture AFTER the fixture. Post-drop (issue 43 W6a) every open is the legacy
+    // mode, so no `-tshm` is produced: the fixture seeds the stale sidecar itself —
+    // debris, not a live lock, so the reaper must delete it with the shard.
+    let tshm = PathBuf::from(format!("{}-tshm", candidate.db_path.display()));
+    std::fs::write(&tshm, b"stale debris, no holder").expect("seed a stale -tshm");
     let captured = captured_targets(&candidate.db_path);
     assert!(
         captured
             .iter()
             .any(|(path, _)| path.to_string_lossy().ends_with("-tshm")),
-        "the writable creation must leave a -tshm sidecar: {captured:?}"
+        "the fixture must leave a -tshm sidecar to be reaped: {captured:?}"
     );
     let expected_bytes: u64 = captured.iter().map(|(_, size)| *size).sum();
 
@@ -532,7 +534,10 @@ async fn test_live_tshm_holder_is_skipped() {
     let anchor = rig.anchor(1, &["anchor-row"]).await;
     let candidate = rig.inactive(0).await;
     let tshm = PathBuf::from(format!("{}-tshm", candidate.db_path.display()));
-    assert!(tshm.exists(), "the writable creation leaves a -tshm");
+    // Post-drop (issue 43 W6a) no open produces a `-tshm`; the fixture seeds the
+    // sidecar the live holder then locks.
+    std::fs::write(&tshm, b"live-holder fixture").expect("seed the -tshm");
+    assert!(tshm.exists(), "the fixture must leave a -tshm to hold");
     let file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)

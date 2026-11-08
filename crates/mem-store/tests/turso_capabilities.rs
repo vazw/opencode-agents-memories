@@ -1395,12 +1395,13 @@ async fn test_production_open_leaves_the_canary_in_the_main_file_after_checkpoin
 
 /// AC15: `VACUUM` is refused in the production configuration — **control**.
 ///
-/// The shipping option set enables multiprocess WAL on non-Windows, and the
-/// vacuum feature is not enabled at all, so `VACUUM` is refused at translation
-/// with a plain (non-constraint) engine error — the same `StoreError` shape as
-/// the `SELEC 1` control. This is why `prompt.rs`'s best-effort VACUUM can
-/// never have run. If VACUUM ever succeeds here, that finding is void and this
-/// test fails.
+/// The refusal does not rest on the WAL mode: the vacuum feature is not enabled in
+/// the shipping option set at all (issue 43 W6a dropped the multiprocess-WAL token,
+/// so post-drop the set is `[Encryption]` on every platform, and the vacuum feature
+/// is absent from it either way), so `VACUUM` is refused at translation with a
+/// plain (non-constraint) engine error — the same `StoreError` shape as the
+/// `SELEC 1` control. This is why `prompt.rs`'s best-effort VACUUM can never have
+/// run. If VACUUM ever succeeds here, that finding is void and this test fails.
 #[tokio::test]
 async fn test_vacuum_is_refused_in_the_production_configuration() {
     let config = production_config("cap-vacuum-production");
@@ -2680,23 +2681,26 @@ async fn test_sidecar_inventory_per_phase() {
     let dir_b = common::temp_dir("cap-sidecars-flag-on");
     let path_b = dir_b.join("upgraded.db");
     let config_b = common::store_config("cap-sidecars-flag-on-config");
-    // The shipping builder writes straight into arm B's directory.
+    // The **pre-drop** opener writes arm B: a raw flag-on builder, because issue 43
+    // W6a dropped the multiprocess token from the shipping option set (and the guard
+    // refuses a set that still carries it). This arm measures the upgrade transition
+    // a pre-drop database takes, not what the shipping builder does.
     {
-        let db = turso_connect_factory()
-            .connect(
-                path_b.clone(),
-                ConnectOptions::for_config(&config_b, Platform::current()),
-            )
+        let database = turso::Builder::new_local(&path_b.to_string_lossy())
+            .experimental_multiprocess_wal(true)
+            .build()
             .await
-            .expect("open the shipping handle");
-        db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", vec![])
+            .expect("open the pre-drop flag-on handle");
+        let connection = database.connect().expect("the pre-drop connection");
+        connection
+            .execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", ())
             .await
             .expect("create t");
-        db.execute("INSERT INTO t (v) VALUES ('x')", vec![])
+        connection
+            .execute("INSERT INTO t (v) VALUES ('x')", ())
             .await
             .expect("insert into t");
         println!("[B flag-on, open+written] {:?}", file_inventory(&dir_b));
-        drop(db);
     }
     let b_closed = file_inventory(&dir_b);
     println!("[B flag-on, closed] {b_closed:?}");

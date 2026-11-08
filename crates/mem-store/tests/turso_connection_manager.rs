@@ -163,18 +163,12 @@ async fn test_opens_databases_with_experimental_encryption_flags_but_no_encrypti
     let captured = factory.captured.lock().unwrap().clone();
     assert_eq!(captured.len(), 1);
     let opts = &captured[0];
-    if cfg!(target_os = "windows") {
-        assert_eq!(opts.experimental, vec![ExperimentalFeature::Encryption]);
-    } else {
-        assert_eq!(
-            opts.experimental,
-            vec![
-                ExperimentalFeature::Encryption,
-                ExperimentalFeature::MultiprocessWal,
-            ],
-            "unix always adds multiprocess_wal"
-        );
-    }
+    assert_eq!(
+        opts.experimental,
+        vec![ExperimentalFeature::Encryption],
+        "issue 43 W6a: every platform's shipping option set is `[Encryption]` — the \
+         multiprocess token is gone"
+    );
     assert!(opts.encryption.is_none(), "encryption disabled");
 }
 
