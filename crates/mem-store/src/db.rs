@@ -269,15 +269,16 @@ pub struct ConnectOptions {
 }
 
 impl ConnectOptions {
-    /// Upstream `buildConnectOptions` + `tursoExperimentalFeatures`: the
-    /// encryption flag is always on, multiprocess WAL on non-Windows
-    /// platforms only. The actual key material is resolved separately
-    /// (`resolve_database_encryption`).
+    /// Upstream `buildConnectOptions` + `tursoExperimentalFeatures`: the encryption
+    /// flag is always on. Issue 43 W6a dropped the multiprocess-WAL token from this
+    /// set — every open is the single-process (legacy) mode now, and
+    /// [`crate::open_guard::decide`] refuses a set that still carries the token. The
+    /// key material is resolved separately (`resolve_database_encryption`).
     pub fn for_config(config: &StoreConfig, platform: Platform) -> Self {
-        let mut experimental = vec![ExperimentalFeature::Encryption];
-        if platform != Platform::Windows {
-            experimental.push(ExperimentalFeature::MultiprocessWal);
-        }
+        let experimental = vec![ExperimentalFeature::Encryption];
+        // Kept in the signature: platform no longer selects a feature, but callers
+        // pass it and the Windows/Linux option sets must stay equal (ADR-0025 D-25-3).
+        let _ = platform;
         let _ = &config.database_encryption_cipher;
         Self {
             experimental,
@@ -373,6 +374,16 @@ impl ConnectFactory for TursoConnectFactory {
     }
 }
 
+/// Whether this platform can answer the legacy-holder probe at all. On non-Unix
+/// there is no `fcntl`, so the guard is **absent**, not permissive-by-proof: a
+/// writable legacy open clears with
+/// [`crate::open_guard::Divergence::NoProbeOnPlatform`] recorded (ADR-0025
+/// D-25-3's Windows cell), never an `Unknown` refusal.
+#[cfg(unix)]
+const PROBE_ELIGIBLE: bool = true;
+#[cfg(not(unix))]
+const PROBE_ELIGIBLE: bool = false;
+
 /// The guarded body behind [`TursoConnectFactory::connect`] (issue 45).
 ///
 /// The probe is a **`fn` pointer injected here**, not reachable through
@@ -392,12 +403,18 @@ async fn open_guarded(
     let writability = crate::open_guard::Writability::from_options(&opts);
     // Bound before the borrow: `Preflight` must not hold a temporary.
     let env_override = std::env::var(crate::open_guard::ALLOW_UNGUARDED_OPEN_ENV).ok();
+    // The oracle is the target's `-tshm` sensor (turso's shared-WAL coordination
+    // file), never the database: a live pre-drop (flag-on) holder locks that
+    // sidecar, which turso's own `.db` lock cannot see (ADR-0025 D-25-2/D-25-4).
+    let probe_path = crate::sqlite_files::sidecar_path(&path, "-tshm");
     let clearance = crate::open_guard::preflight(
         &crate::open_guard::Preflight {
             storage_root: opts.storage_root.as_deref(),
             db_path: &path,
+            probe_path: &probe_path,
             mode,
             writability,
+            probe_eligible: PROBE_ELIGIBLE,
             allow_unguarded_open: opts.allow_unguarded_open(),
             env_override: env_override.as_deref(),
             process_probe: &crate::platform::SystemProcessProbe,
@@ -427,7 +444,7 @@ async fn open_guarded(
         });
     }
     let database = builder.build().await?;
-    if let Err(refusal) = crate::open_guard::postflight(&clearance, &path, probe) {
+    if let Err(refusal) = crate::open_guard::postflight(&clearance, &path, &probe_path, probe) {
         // 45.5: the handle never escapes — drop it before returning the refusal.
         drop(database);
         return Err(refusal);
@@ -907,6 +924,65 @@ mod tests {
             before, after,
             "45.5: a refused post-open must leave the rows and integrity_check unchanged"
         );
+        let _ = crate::sqlite_files::with_sqlite_file_lock_retry(
+            || std::fs::remove_dir_all(&config.storage_path),
+            1,
+            &crate::sqlite_files::system_retry_context(),
+        );
+    }
+
+    /// The sensor the guard queries is the target's `-tshm`, never the database —
+    /// and a writable legacy open pays for exactly **two** queries (preflight's and
+    /// postflight's). The path is the observable: a guard that probed `db_path`
+    /// would still answer correctly here (the file is free), so only the recorded
+    /// path can tell the two apart.
+    ///
+    /// Inverted world: `probe_path = db_path` (the pre-drop wiring) fails the path
+    /// assertion; a missing post-open re-probe fails the count.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_the_guard_queries_the_tshm_sensor_twice_and_never_the_database() {
+        static SENSOR_PATHS: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+        fn recording_probe(path: &Path) -> crate::open_guard::ProbeOutcome {
+            SENSOR_PATHS
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .push(path.to_path_buf());
+            crate::open_guard::ProbeOutcome::Free
+        }
+
+        let config = guard_config("sensor-path");
+        let path = config.storage_path.join("sensor.db");
+        SENSOR_PATHS
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clear();
+        let handle = open_guarded(
+            path.clone(),
+            ConnectOptions::for_config(&config, Platform::current()),
+            recording_probe,
+        )
+        .await
+        .expect("a free sensor clears the open");
+        drop(handle);
+
+        let seen = SENSOR_PATHS
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone();
+        let expected = crate::sqlite_files::sidecar_path(&path, "-tshm");
+        assert_eq!(
+            seen.len(),
+            2,
+            "one preflight query + one postflight re-probe: {seen:?}"
+        );
+        for probed in &seen {
+            assert_eq!(
+                probed, &expected,
+                "the guard must query the `-tshm` sensor, not the database"
+            );
+            assert_ne!(probed, &path, "the database file is never the oracle");
+        }
         let _ = crate::sqlite_files::with_sqlite_file_lock_retry(
             || std::fs::remove_dir_all(&config.storage_path),
             1,

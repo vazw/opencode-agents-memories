@@ -273,33 +273,49 @@ pub(crate) enum Decision {
 /// recorded as a value so it cannot rot into a comment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Divergence {
-    /// A read-only multiprocess opener skips probe B: it can be a victim, never an
-    /// aggressor (`turso_core-0.8.3/database.rs:991-993`).
+    /// A read-only legacy opener skips the `-tshm` probe: it can be a victim, never
+    /// an aggressor (`turso_core-0.8.3/database.rs:991-993` — the guard there
+    /// returns early on `flags.contains(ReadOnly)` whatever the holder's mode).
     ReadOnlySkipsLegacyProbe,
+    /// This platform has no probe at all (non-Unix, i.e. Windows): the guard is
+    /// **absent** there, not proven unnecessary. Recorded so the absence is a value,
+    /// not a comment (ADR-0025 D-25-3).
+    NoProbeOnPlatform,
 }
 
 /// `mode × writability × probe → outcome`. Pure: no filesystem, no env.
 ///
-/// O2 mirrors turso's direction matrix exactly — probe B (the legacy-holder lock)
-/// applies only to a **writable multiprocess** open, and probe A (a live
-/// multiprocess authority) is not implemented at all (O3 refuses the only opener
-/// that would need it).
+/// **Post-drop direction (issue 43 W6a).** `Legacy` is the production mode — the
+/// multiprocess token is gone from [`crate::db::ConnectOptions::for_config`] — so
+/// the writable `Legacy` cell is the one that reads the `-tshm` sensor, and
+/// `Multiprocess` is refused by construction (the inverted O3: no option set this
+/// tree builds carries the token). The probe still mirrors turso's direction
+/// matrix: a **read-only** opener is a victim, never an aggressor
+/// (`turso_core-0.8.3/database.rs:991-993`), so it skips the probe.
+///
+/// `probe_eligible` is whether this platform can answer the probe at all; `db.rs`
+/// computes it (`#[cfg(unix)]`) and passes it in, so this function stays pure and
+/// the Windows cell is a table row rather than a `cfg` fork.
 #[must_use]
 pub(crate) fn decide(
     mode: WalMode,
     writability: Writability,
     probe: Option<ProbeOutcome>,
+    probe_eligible: bool,
 ) -> Decision {
     match mode {
-        // O3: this tree cannot produce a legacy opener on non-Windows; on Windows
-        // legacy is the platform's only mode (flagged consequence), so the refusal
-        // is unconditional and the first legacy opener inherits it.
-        WalMode::Legacy => Decision::RefuseUnsupportedMode,
-        WalMode::Multiprocess => match writability {
-            // mirrors turso 0.8.3 database.rs:991-993 — a read-only multiprocess
-            // opener never refuses a legacy holder.
+        // O3 inverted: the first multiprocess opener to land silently would be a
+        // silent mixed-WAL window, so a hand-built option set carrying the token is
+        // refused whatever it would have seen.
+        WalMode::Multiprocess => Decision::RefuseUnsupportedMode,
+        WalMode::Legacy => match writability {
             Writability::ReadOnly => Decision::Clear {
                 divergence: Some(Divergence::ReadOnlySkipsLegacyProbe),
+            },
+            // No probe on this platform: the guard is absent, and the absence is
+            // recorded instead of being mistaken for a clean answer.
+            Writability::Writable if !probe_eligible => Decision::Clear {
+                divergence: Some(Divergence::NoProbeOnPlatform),
             },
             Writability::Writable => match probe {
                 Some(ProbeOutcome::Free) | Some(ProbeOutcome::Missing) => {
@@ -335,8 +351,15 @@ pub(crate) struct Preflight<'a> {
     /// has no marker to own).
     pub storage_root: Option<&'a Path>,
     pub db_path: &'a Path,
+    /// The file the probe queries: the target's `-tshm` sensor, never the database
+    /// itself. Errors still name `db_path` (that is the file the user knows).
+    pub probe_path: &'a Path,
     pub mode: WalMode,
     pub writability: Writability,
+    /// Whether this platform can answer the probe (`#[cfg(unix)]` at the `db.rs`
+    /// seam). `false` ⇒ no probe call and a recorded
+    /// [`Divergence::NoProbeOnPlatform`], never an `Unknown` refusal.
+    pub probe_eligible: bool,
     /// The config leg only, as copied by [`crate::db::ConnectOptions::for_config`];
     /// the env leg arrives separately in `env_override` and wins (issue 45b: nothing
     /// here is per-call).
@@ -357,6 +380,7 @@ pub(crate) struct Clearance {
     pub guarded: bool,
     pub mode: WalMode,
     pub writability: Writability,
+    pub probe_eligible: bool,
     pub override_active: bool,
 }
 
@@ -405,15 +429,20 @@ pub(crate) fn preflight(
     // which the override rule below demotes — so the behaviour is unchanged and the
     // warn's `bypassed` label honestly reads `unknown`, because nothing was probed.
     //
-    // Otherwise: only the writable-multiprocess cell reads a probe answer, so only
-    // that cell pays for one (`45.12`: read-only and legacy opens cost 0).
+    // Otherwise: only the writable-legacy cell reads a probe answer, so only that
+    // cell pays for one (`45.12`: read-only opens and no-probe platforms cost 0).
     let probe_outcome = match (preflight.mode, preflight.writability) {
-        (WalMode::Multiprocess, Writability::Writable) if !override_on => {
-            Some(probe(preflight.db_path))
+        (WalMode::Legacy, Writability::Writable) if !override_on && preflight.probe_eligible => {
+            Some(probe(preflight.probe_path))
         }
         _ => None,
     };
-    match decide(preflight.mode, preflight.writability, probe_outcome) {
+    match decide(
+        preflight.mode,
+        preflight.writability,
+        probe_outcome,
+        preflight.probe_eligible,
+    ) {
         Decision::Clear { divergence } => {
             if let Some(divergence) = divergence {
                 // The divergence is recorded as a value (A3), and observed here so
@@ -490,6 +519,7 @@ pub(crate) fn preflight(
         guarded: !override_on,
         mode: preflight.mode,
         writability: preflight.writability,
+        probe_eligible: preflight.probe_eligible,
         override_active: override_on,
     })
 }
@@ -509,21 +539,23 @@ fn rebind_refusal(error: StoreError, db_path: &Path) -> StoreError {
 /// The post-open re-probe (`45.5`): narrows the TOCTOU window that the pre-open
 /// probe cannot close.
 ///
-/// It re-probes only for a guarded writable multiprocess open. A `Held` answer is
-/// a refusal and the caller drops the database before returning it, so no owner is
-/// left behind.
+/// It re-probes only for a guarded writable legacy open on a platform that can
+/// answer. A `Held` answer is a refusal and the caller drops the database before
+/// returning it, so no owner is left behind.
 pub(crate) fn postflight(
     clearance: &Clearance,
     db_path: &Path,
+    probe_path: &Path,
     probe: ProbeFn,
 ) -> Result<(), StoreError> {
     if !(clearance.guarded
-        && clearance.mode == WalMode::Multiprocess
+        && clearance.probe_eligible
+        && clearance.mode == WalMode::Legacy
         && clearance.writability == Writability::Writable)
     {
         return Ok(());
     }
-    match probe(db_path) {
+    match probe(probe_path) {
         ProbeOutcome::Free | ProbeOutcome::Missing => Ok(()),
         ProbeOutcome::Held => Err(StoreError::OpenBlocked {
             db_path: db_path.to_path_buf(),
@@ -901,6 +933,11 @@ mod tests {
     /// without the token must not silently classify as legacy — and today's
     /// encryption-only list must.
     ///
+    /// Post-drop (issue 43 W6a) the shipping list is `[Encryption]` on every
+    /// platform, so it must classify `Legacy`; the token still classifies
+    /// `Multiprocess` when a caller hand-builds it (the refused-by-construction
+    /// cell).
+    ///
     /// Inverted world: if `from_options` keyed on "any experimental feature", the
     /// `[Encryption]` cell would read `Multiprocess` and this test fails.
     #[test]
@@ -924,17 +961,52 @@ mod tests {
                 false
             )),
             WalMode::Multiprocess,
-            "the production option set must classify as multiprocess"
+            "a hand-built list carrying the token still classifies as multiprocess (the cell \
+             `decide` refuses)"
         );
+        // The shipping option set: the token is gone, so it is the legacy mode.
+        let config = crate::config::StoreConfig {
+            storage_path: PathBuf::from("/tmp/mem-store-classifier-unused"),
+            embedding_dimensions: 2,
+            embedding_model: "test-model".to_string(),
+            max_vectors_per_shard: 1000,
+            container_tag_prefix: "opencode".to_string(),
+            database_encryption_enabled: false,
+            database_encryption_cipher: "aes256gcm".to_string(),
+            database_encryption_key: None,
+            allow_unguarded_open: false,
+        };
+        for platform in [
+            crate::platform::Platform::Unix,
+            crate::platform::Platform::Windows,
+        ] {
+            let shipping = ConnectOptions::for_config(&config, platform);
+            assert!(
+                !shipping
+                    .experimental
+                    .contains(&ExperimentalFeature::MultiprocessWal),
+                "post-drop `for_config` must not carry the multiprocess token on {platform:?}"
+            );
+            assert_eq!(
+                WalMode::from_options(&shipping),
+                WalMode::Legacy,
+                "the shipping option set is the production (legacy) mode on {platform:?}"
+            );
+        }
         assert_eq!(WalMode::Legacy.as_str(), "legacy");
         assert_eq!(WalMode::Multiprocess.as_str(), "multiprocess");
     }
 
-    /// 45.13: the whole `mode × writability × probe` product, one assertion per
-    /// cell. No filesystem race, no child process — the table is data.
+    /// 45.13 / issue 43 W6a: the **inverted** `mode × writability × probe` product,
+    /// one assertion per cell. No filesystem race, no child process — the table is
+    /// data.
     ///
-    /// Inverted world: any single arm of `decide` swapped (e.g. `Held` ⇒ `Clear`)
-    /// turns exactly that cell red while the rest stay green.
+    /// Post-drop the production mode is `Legacy` (the token is gone from
+    /// `for_config`), so `Legacy` carries the probe and `Multiprocess` is refused by
+    /// construction.
+    ///
+    /// Inverted world: any single arm swapped (e.g. `Held` ⇒ `Clear`) turns exactly
+    /// that cell red while the rest stay green.
     #[test]
     fn test_decision_table_covers_mode_and_writability() {
         let probes = [
@@ -945,89 +1017,105 @@ mod tests {
             Some(ProbeOutcome::Unknown { errno: Some(11) }),
             Some(ProbeOutcome::Unknown { errno: None }),
         ];
+        // The new O3: no option set this tree builds carries the token, so a
+        // multiprocess option set is refused whatever it would have seen.
         for writability in [Writability::Writable, Writability::ReadOnly] {
             for probe in probes {
                 assert_eq!(
-                    decide(WalMode::Legacy, writability, probe),
+                    decide(WalMode::Multiprocess, writability, probe, true),
                     Decision::RefuseUnsupportedMode,
-                    "O3: a legacy open is refused whatever it sees (writability {writability:?}, \
-                     probe {probe:?})"
+                    "post-drop O3: multiprocess is refused by construction \
+                     (writability {writability:?}, probe {probe:?})"
                 );
             }
         }
+        // Read-only skips the probe whatever it would say.
         for probe in probes {
             assert_eq!(
-                decide(WalMode::Multiprocess, Writability::ReadOnly, probe),
+                decide(WalMode::Legacy, Writability::ReadOnly, probe, true),
                 Decision::Clear {
                     divergence: Some(Divergence::ReadOnlySkipsLegacyProbe)
                 },
-                "a read-only multiprocess opener never refuses a legacy holder (probe {probe:?})"
+                "a read-only legacy opener never refuses a `-tshm` holder (probe {probe:?})"
             );
         }
-        for probe in [Some(ProbeOutcome::Free), Some(ProbeOutcome::Missing), None] {
-            let expected = match probe {
-                Some(ProbeOutcome::Free) | Some(ProbeOutcome::Missing) => {
-                    Decision::Clear { divergence: None }
-                }
-                // `None` is unreachable; it fails closed.
-                _ => Decision::Refuse(OpenDirection::Unknown { errno: None }),
-            };
+        // Writable legacy: the probe decides.
+        for probe in [Some(ProbeOutcome::Free), Some(ProbeOutcome::Missing)] {
             assert_eq!(
-                decide(WalMode::Multiprocess, Writability::Writable, probe),
-                expected,
-                "a writable multiprocess open clears on a known-free answer (probe {probe:?})"
+                decide(WalMode::Legacy, Writability::Writable, probe, true),
+                Decision::Clear { divergence: None },
+                "a writable legacy open clears on a known-free answer (probe {probe:?})"
             );
         }
         assert_eq!(
             decide(
-                WalMode::Multiprocess,
+                WalMode::Legacy,
                 Writability::Writable,
-                Some(ProbeOutcome::Held)
+                Some(ProbeOutcome::Held),
+                true
             ),
             Decision::Refuse(OpenDirection::LegacyAuthority),
-            "a live legacy holder refuses a writable multiprocess open"
+            "a live pre-drop (flag-on) holder refuses a writable legacy open"
         );
+        for errno in [Some(11), None] {
+            assert_eq!(
+                decide(
+                    WalMode::Legacy,
+                    Writability::Writable,
+                    Some(ProbeOutcome::Unknown { errno }),
+                    true
+                ),
+                Decision::Refuse(OpenDirection::Unknown { errno }),
+                "an unanswerable probe refuses rather than guesses"
+            );
+        }
         assert_eq!(
-            decide(
-                WalMode::Multiprocess,
-                Writability::Writable,
-                Some(ProbeOutcome::Unknown { errno: Some(11) })
-            ),
-            Decision::Refuse(OpenDirection::Unknown { errno: Some(11) }),
-            "an unanswerable probe refuses rather than guesses"
-        );
-        assert_eq!(
-            decide(
-                WalMode::Multiprocess,
-                Writability::Writable,
-                Some(ProbeOutcome::Unknown { errno: None })
-            ),
+            decide(WalMode::Legacy, Writability::Writable, None, true),
             Decision::Refuse(OpenDirection::Unknown { errno: None }),
-            "a defensive `Unknown{{None}}` refuses as well"
+            "the override path's `None` fails closed (then the override demotes it)"
         );
+        // No probe on this platform: the writable cell records the absence, and no
+        // probe answer (even one handed in) can turn it into a refusal.
+        for probe in probes {
+            assert_eq!(
+                decide(WalMode::Legacy, Writability::Writable, probe, false),
+                Decision::Clear {
+                    divergence: Some(Divergence::NoProbeOnPlatform)
+                },
+                "a platform without a probe records `NoProbeOnPlatform`, never `Unknown` \
+                 (probe {probe:?})"
+            );
+        }
     }
 
     /// 45.13's divergence is a value, not a comment: the read-only row records
-    /// *why* it clears, citing `turso_core-0.8.3/database.rs:991-993`.
+    /// *why* it clears, citing `turso_core-0.8.3/database.rs:990-993`.
+    ///
+    /// Re-derived for the inverted direction: that function returns `Ok(())` when
+    /// `!enable_multiprocess_wal || flags.contains(ReadOnly)`, i.e. a read-only
+    /// opener never rejects a holder, whichever mode the holder used — so a
+    /// read-only legacy opener is a victim, never an aggressor.
     #[test]
     fn test_decision_table_read_only_skips_the_legacy_probe_and_records_the_divergence() {
         assert_eq!(
             decide(
-                WalMode::Multiprocess,
+                WalMode::Legacy,
                 Writability::ReadOnly,
-                Some(ProbeOutcome::Held)
+                Some(ProbeOutcome::Held),
+                true
             ),
             Decision::Clear {
                 divergence: Some(Divergence::ReadOnlySkipsLegacyProbe)
             },
-            "0.8.3 :991-993 — `!enable_multiprocess_wal || flags.contains(ReadOnly) => Ok`, so a \
-             read-only opener is a victim, never an aggressor; the divergence must be recorded"
+            "0.8.3 :990-993 — a read-only opener is a victim, never an aggressor; the divergence \
+             must be recorded"
         );
         assert_eq!(
             decide(
-                WalMode::Multiprocess,
+                WalMode::Legacy,
                 Writability::Writable,
-                Some(ProbeOutcome::Held)
+                Some(ProbeOutcome::Held),
+                true
             ),
             Decision::Refuse(OpenDirection::LegacyAuthority),
             "the same probe answer refuses a writable open — the asymmetry is the point"
@@ -1346,8 +1434,10 @@ mod tests {
         Preflight {
             storage_root: Some(root),
             db_path,
+            probe_path: db_path,
             mode,
             writability: Writability::Writable,
+            probe_eligible: true,
             allow_unguarded_open,
             env_override: None,
             process_probe,
@@ -1397,11 +1487,13 @@ mod tests {
         let _guard = marker_test_guard();
         let root = marker_dir("override-marker-conflict");
         let db_path = root.join("db.db");
-        write_foreign_marker(&root, WalMode::Legacy);
+        // Post-drop this opener is `Legacy`, so the foreign (still-live) holder is
+        // the pre-drop `multiprocess` one — the mixed-version window the marker names.
+        write_foreign_marker(&root, WalMode::Multiprocess);
         let live = FixedProbe { alive: true };
 
         let overridden = preflight(
-            &marker_request(&root, &db_path, WalMode::Multiprocess, true, &live),
+            &marker_request(&root, &db_path, WalMode::Legacy, true, &live),
             always_free,
         );
         assert!(
@@ -1411,14 +1503,14 @@ mod tests {
         );
 
         let guarded = preflight(
-            &marker_request(&root, &db_path, WalMode::Multiprocess, false, &live),
+            &marker_request(&root, &db_path, WalMode::Legacy, false, &live),
             always_free,
         );
         match guarded {
             Err(StoreError::OpenBlocked {
                 direction: OpenDirection::ModeMarkerConflict { recorded },
                 ..
-            }) => assert_eq!(recorded, "legacy"),
+            }) => assert_eq!(recorded, "multiprocess"),
             other => panic!(
                 "the guarded control must refuse with the typed conflict, got {:?}",
                 other.err()
@@ -1440,7 +1532,7 @@ mod tests {
         let live = FixedProbe { alive: true };
 
         let overridden = preflight(
-            &marker_request(&root, &db_path, WalMode::Multiprocess, true, &live),
+            &marker_request(&root, &db_path, WalMode::Legacy, true, &live),
             always_free,
         );
         assert!(
@@ -1450,7 +1542,7 @@ mod tests {
         );
 
         let guarded = preflight(
-            &marker_request(&root, &db_path, WalMode::Multiprocess, false, &live),
+            &marker_request(&root, &db_path, WalMode::Legacy, false, &live),
             always_free,
         );
         assert!(
@@ -1510,7 +1602,7 @@ mod tests {
 
         OVERRIDE_PROBE_CALLS.store(0, std::sync::atomic::Ordering::SeqCst);
         let overridden = preflight(
-            &marker_request(&root, &db_path, WalMode::Multiprocess, true, &live),
+            &marker_request(&root, &db_path, WalMode::Legacy, true, &live),
             counting_probe,
         );
         assert!(
@@ -1526,7 +1618,7 @@ mod tests {
 
         OVERRIDE_PROBE_CALLS.store(0, std::sync::atomic::Ordering::SeqCst);
         let guarded = preflight(
-            &marker_request(&root, &db_path, WalMode::Multiprocess, false, &live),
+            &marker_request(&root, &db_path, WalMode::Legacy, false, &live),
             counting_probe,
         );
         assert_eq!(

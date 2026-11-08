@@ -174,7 +174,9 @@ impl std::fmt::Display for PurgeError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidScope(error) => write!(formatter, "{error}"),
-            Self::Busy => formatter.write_str("another consolidation or purge holds the locks"),
+            Self::Busy => formatter.write_str(
+                "another consolidation or purge, or a live engine, holds this storage root",
+            ),
             Self::Failed(message) => formatter.write_str(message),
         }
     }
@@ -358,10 +360,19 @@ pub fn run(config: &mem_core::config::Config, storage_root: &Path, request: &Pur
 
     let outcome = runtime.block_on(async {
         let store = EpisodicStore::new(storage_root.to_path_buf(), store_config.clone());
-        store
-            .ready()
-            .await
-            .map_err(|error| PurgeError::Failed(error.to_string()))?;
+        store.ready().await.map_err(|error| {
+            // Post-drop (issue 43 W6a) every open is the legacy mode, so a live
+            // engine owns the database file's lock and `ready()` — not the
+            // operation lock — is where "the engine holds this storage root"
+            // surfaces. Only a lock refusal is Busy (exit 75); any other
+            // readiness failure stays a failure (exit 74).
+            let message = error.to_string();
+            if mem_store::db::is_multi_process_lock_error(&message) {
+                PurgeError::Busy
+            } else {
+                PurgeError::Failed(message)
+            }
+        })?;
 
         // M22: a root with no facts.db never gets one. The store is
         // constructed (it touches no disk until `ready`) and the existence
@@ -390,7 +401,9 @@ pub fn run(config: &mem_core::config::Config, storage_root: &Path, request: &Pur
                 "purge.busy",
                 "warn",
                 "purge",
-                serde_json::json!({ "detail": "another consolidation or purge holds the locks" }),
+                serde_json::json!({
+                    "detail": "another consolidation or purge, or a live engine, holds this storage root"
+                }),
             );
             75
         }
