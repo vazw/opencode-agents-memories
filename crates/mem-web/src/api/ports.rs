@@ -400,6 +400,26 @@ pub enum PortError {
     /// storage root (D10): answered `409`. Carries no path and no content.
     #[error("another consolidation or purge is running on this storage root")]
     Busy,
+    /// Issue 130 — the read lane refused a REGISTERED shard whose DB file is
+    /// missing (stat-before-open). Answered **503** with a fixed body: the
+    /// shard file is not recreated by the read and the fault is neither a
+    /// "not wired" (501) nor a "broken here" (500). The payload rides the log
+    /// channel only — the file name is never echoed to the wire (the same
+    /// discipline the `Store` token rule keeps).
+    ///
+    /// TOCTOU is ACCEPTED and DOCUMENTED, not closed: nothing removes the
+    /// tiny stat→open window; a file deleted inside it is still recreated by
+    /// turso create-on-open (the pre-fix behavior, never data loss — the
+    /// create is create-if-missing over an absent file). `open_shard` stays
+    /// the last word; the refusal is advisory narrowing at the read lane.
+    /// Inverted world: a file observed recreated after a guarded read
+    /// answered 503 reopens the decision as a defect (issue 130 / the
+    /// 2026-11-08 shard-resurrection decision record).
+    #[error("shard storage is temporarily unavailable — the shard file is missing")]
+    ShardFileMissing {
+        /// The shard file's own name component, for diagnostics. Log-only.
+        file_name: String,
+    },
 }
 
 /// The memory store seam.
@@ -433,10 +453,16 @@ pub trait MemoryPort: Send + Sync {
         limit: usize,
     ) -> Result<Vec<MemoryRow>, PortError>;
 
-    /// One row lookup in one shard. Production adapters stat before open: a
-    /// missing shard file is a `Store` failure, never a silent recreation
-    /// (`open_shard` creates a missing database), so the anchor scan of
-    /// `delete_memory`, PUT, pin/unpin and the prompt cascade fails closed.
+    /// One row lookup in one shard. Production adapters stat before open on
+    /// the READ lanes — issue 130: `all_memories`,
+    /// `list_memories_by_container_tag`, `distinct_tags`, `search_in_shard`
+    /// refuse through the dedicated `ShardFileMissing` arm (a missing shard
+    /// file is a 503, never a silent recreation), and this method stats
+    /// directly so `find_memory`'s anchor scan (delete, PUT, pin/unpin, the
+    /// prompt cascade) fails closed too: a missing shard file is a `Store`
+    /// failure here, never a silent recreation (`open_shard` creates a
+    /// missing database). Write lanes keep create-on-open through the
+    /// explicit registration path.
     async fn memory_by_id(
         &self,
         shard: &ShardRef,
