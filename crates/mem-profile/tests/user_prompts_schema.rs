@@ -74,7 +74,7 @@ async fn user_version(db: &dyn Db) -> i64 {
 }
 
 #[tokio::test]
-async fn test_ready_upgrades_a_legacy_prompts_file_to_v2() {
+async fn test_ready_upgrades_a_legacy_prompts_file_to_v3() {
     let dir = common::temp_dir("prompts-upgrade");
     let config = common::store_config(dir.clone());
     seed_user_prompts(&config, 1, false, true).await;
@@ -85,7 +85,11 @@ async fn test_ready_upgrades_a_legacy_prompts_file_to_v2() {
         .await
         .expect("ready upgrades the legacy file");
 
-    assert_eq!(user_version(db.as_ref()).await, 2, "the open stamps v2");
+    assert_eq!(
+        user_version(db.as_ref()).await,
+        3,
+        "the open stamps the production maximum, v3 (issue 43 W6c sweep stamp)"
+    );
     let columns = column_names(db.as_ref()).await;
     for expected in ["capture_attempts", "provider_id", "model_id"] {
         assert!(
@@ -126,7 +130,9 @@ async fn test_ready_upgrades_a_legacy_prompts_file_to_v2() {
 async fn test_ready_refuses_a_newer_prompts_file_with_the_typed_label() {
     let dir = common::temp_dir("prompts-newer");
     let config = common::store_config(dir.clone());
-    seed_user_prompts(&config, 3, true, true).await;
+    // v4 is one above this build's maximum (v3 since issue 43 W6c), so the
+    // no-downgrade refusal is what is pinned — not a known version.
+    seed_user_prompts(&config, 4, true, true).await;
     let manager = UserPromptManager::new(dir.clone(), config, MAX_RETRIES);
 
     match manager.ready().await {
@@ -136,10 +142,10 @@ async fn test_ready_refuses_a_newer_prompts_file_with_the_typed_label() {
             supported,
         })) => {
             assert_eq!(label, USER_PROMPTS_DB_NAME, "the production label");
-            assert_eq!(found, 3);
+            assert_eq!(found, 4);
             assert_eq!(supported, USER_PROMPTS_MAX_KNOWN);
         }
-        Ok(_) => panic!("a v3 file must be refused through ready()"),
+        Ok(_) => panic!("a v4 file must be refused through ready()"),
         Err(other) => panic!("expected the typed refusal, got {other:?}"),
     }
     assert_eq!(USER_PROMPTS_DB_NAME, "user-prompts.db");

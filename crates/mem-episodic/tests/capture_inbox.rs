@@ -188,8 +188,8 @@ async fn test_capture_inbox_migration_v5_adds_table_and_is_idempotent() {
         .expect("user_version row");
     assert_eq!(
         version_row.i64("user_version"),
-        Some(7),
-        "the episodic db is at v7 (v5 inbox, v6 retention schema, v7 not_before)"
+        Some(8),
+        "the episodic db is at v8 (v5 inbox, v6 retention schema, v7 not_before, v8 sweep stamp)"
     );
     let tables: Vec<String> = db
         .query(
@@ -209,14 +209,14 @@ async fn test_capture_inbox_migration_v5_adds_table_and_is_idempotent() {
         .expect("enqueue");
 
     // A rebuilt store over the same root re-applies the set as a no-op
-    // (still v7) and the inbox row survives the rebuild (durable).
+    // (still v8) and the inbox row survives the rebuild (durable).
     let reopened = EpisodicStore::new(dir.path().to_path_buf(), dir.store_config());
     reopened.ready().await.expect("migration re-runs as no-op");
     let rebuilt_version = mem_store::db::query_one(db.as_ref(), "PRAGMA user_version", Vec::new())
         .await
         .expect("pragma")
         .expect("user_version row");
-    assert_eq!(rebuilt_version.i64("user_version"), Some(7));
+    assert_eq!(rebuilt_version.i64("user_version"), Some(8));
     assert_eq!(
         inbox.queued_count().await.expect("count"),
         1,

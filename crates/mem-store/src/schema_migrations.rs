@@ -61,19 +61,27 @@ pub struct MigrationOptions {
 
 /// Highest `metadata.db` schema version this build knows.
 pub const METADATA_MAX_KNOWN: i64 = 2;
-/// Highest `user_prompts` schema version this build knows: 2 because
-/// [`apply_user_prompts_schema`] applies v2 itself, so the migration slice
-/// (`user_prompts_migrations`) stays v1 — the same split
-/// [`EPISODIC_MAX_KNOWN`]` = 7` records.
-pub const USER_PROMPTS_MAX_KNOWN: i64 = 2;
-/// Highest `user_profiles` schema version this build knows.
-pub const USER_PROFILES_MAX_KNOWN: i64 = 1;
+/// Highest `user_prompts` schema version this build knows: 3 because
+/// [`apply_user_prompts_schema`] applies v2 and v3 itself, so the migration
+/// slice (`user_prompts_migrations`) stays v1 — the same split
+/// [`EPISODIC_MAX_KNOWN`]` = 8` records.
+pub const USER_PROMPTS_MAX_KNOWN: i64 = 3;
+/// Highest `user_profiles` schema version this build knows: v2 is the sweep
+/// stamp's `sweep_state` table (issue 43 W6c).
+pub const USER_PROFILES_MAX_KNOWN: i64 = 2;
 /// Highest memory-shard schema version this build knows.
 pub const MEMORY_SHARD_MAX_KNOWN: i64 = 3;
 /// Highest episodic schema version this build knows: `apply_episodic_schema`
-/// applies v6 and v7 itself while `episodic_migrations()` returns v1..v5, so
-/// deriving this from the slice would refuse every v6/v7 database.
-pub const EPISODIC_MAX_KNOWN: i64 = 7;
+/// applies v6, v7 and v8 itself while `episodic_migrations()` returns v1..v5,
+/// so deriving this from the slice would refuse every v6/v7/v8 database.
+pub const EPISODIC_MAX_KNOWN: i64 = 8;
+
+/// The sweep stamp's table, created by every W6c bump (issue 43): the last
+/// successful sweep of one tier. `tier TEXT PRIMARY KEY` so a re-sweep replaces
+/// its row; `last_swept_unix_ms INTEGER NOT NULL` so a stamp always names a
+/// time. No column changes, no row rewrite — `CREATE TABLE IF NOT EXISTS`
+/// only, which is what makes the three bumps data-migration-free.
+pub const SWEEP_STATE_DDL: &str = "CREATE TABLE IF NOT EXISTS sweep_state (tier TEXT PRIMARY KEY, last_swept_unix_ms INTEGER NOT NULL)";
 
 /// Upstream `getUserVersion`.
 async fn get_user_version(db: &dyn Db) -> Result<i64, StoreError> {
@@ -366,20 +374,28 @@ pub fn user_prompts_migrations() -> Vec<SchemaMigration> {
 
 /// Upstream `USER_PROFILES_MIGRATIONS` (data-only until W3.1 wired the
 /// profile store): baseline `user_profiles` + `user_profile_changelogs` with
-/// their indexes, DDL order preserved.
+/// their indexes, DDL order preserved. v2 (issue 43 W6c) is the sweep stamp's
+/// `sweep_state` table — one additive row, no column change.
 pub fn user_profiles_migrations() -> Vec<SchemaMigration> {
-    vec![SchemaMigration {
-        version: 1,
-        description: "Baseline user_profiles + changelogs",
-        statements: [
-            crate::sql::USER_PROFILES_DDL,
-            crate::sql::USER_PROFILE_CHANGELOGS_DDL,
-        ]
-        .into_iter()
-        .chain(crate::sql::USER_PROFILES_INDEXES.iter().copied())
-        .map(|sql| Statement::new(sql, Vec::new()))
-        .collect(),
-    }]
+    vec![
+        SchemaMigration {
+            version: 1,
+            description: "Baseline user_profiles + changelogs",
+            statements: [
+                crate::sql::USER_PROFILES_DDL,
+                crate::sql::USER_PROFILE_CHANGELOGS_DDL,
+            ]
+            .into_iter()
+            .chain(crate::sql::USER_PROFILES_INDEXES.iter().copied())
+            .map(|sql| Statement::new(sql, Vec::new()))
+            .collect(),
+        },
+        SchemaMigration {
+            version: 2,
+            description: "user-profiles-v2: the sweep stamp table (issue 43 W6c)",
+            statements: vec![Statement::new(SWEEP_STATE_DDL, Vec::new())],
+        },
+    ]
 }
 
 /// NET-NEW (R10): the episodic `agent_sessions` baseline (W4.1) plus the
@@ -477,7 +493,7 @@ pub enum PragmaOutcome {
 /// The result of [`apply_episodic_schema`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EpisodicSchemaOutcome {
-    /// The database's version after the apply (7 on success).
+    /// The database's version after the apply (8 on success).
     pub version: i64,
     /// The measured path the **v6** version pragma took.
     pub pragma: PragmaOutcome,
@@ -508,6 +524,19 @@ pub fn episodic_v6_migration(_dimensions: u32) -> SchemaMigration {
         version: 6,
         description: "episodic-v6: Convergent raw-context retention schema (W7.1)",
         statements,
+    }
+}
+
+/// The v8 migration step (issue 43 W6c): the sweep stamp's `sweep_state`
+/// table. It is applied ONLY by [`apply_episodic_schema`], after the v6/v7
+/// convergence legs — putting it in `episodic_migrations()` would stamp a
+/// fresh file 8 before the v6/v7 columns exist. One additive statement plus
+/// one pragma: no backup, no column change, no row rewrite.
+pub fn episodic_v8_migration() -> SchemaMigration {
+    SchemaMigration {
+        version: 8,
+        description: "episodic-v8: the sweep stamp table (issue 43 W6c)",
+        statements: vec![Statement::new(SWEEP_STATE_DDL, Vec::new())],
     }
 }
 
@@ -675,6 +704,23 @@ pub async fn apply_episodic_schema(
         version = 7;
     }
 
+    // The v8 leg (issue 43 W6c): the sweep stamp's table. `CREATE TABLE IF NOT
+    // EXISTS` converges on its own, so no probe is needed; one additive
+    // statement plus one pragma, and no backup (D-110-1's shape).
+    if options.max_known >= 8 && version < 8 {
+        db.batch(episodic_v8_migration().statements, BatchMode::Write)
+            .await?;
+        db.execute(&set_user_version_statement(8).sql, Vec::new())
+            .await?;
+        let stamped = get_user_version(db).await?;
+        if stamped != 8 {
+            return Err(StoreError::Internal {
+                message: "episodic v8 apply did not stamp user_version = 8".to_string(),
+            });
+        }
+        version = 8;
+    }
+
     Ok(EpisodicSchemaOutcome { version, pragma })
 }
 
@@ -689,7 +735,7 @@ pub async fn apply_episodic_schema(
 ///
 /// - **Precondition:** `options.max_known` is [`USER_PROMPTS_MAX_KNOWN`], this
 ///   set's maximum, and the file is not newer than it.
-/// - **Postcondition:** `PRAGMA user_version == 2` and every column of
+/// - **Postcondition:** `PRAGMA user_version == 3`, every column of
 ///   [`USER_PROMPTS_V2_COLUMNS`] exists.
 /// - **Convergence** exists only for the crash window between the v2 ALTER
 ///   batch and the version pragma: a file already carrying the columns
@@ -708,31 +754,63 @@ pub async fn apply_user_prompts_schema(
     options: &MigrationOptions,
     root: Option<&ExclusiveRoot>,
 ) -> Result<i64, StoreError> {
-    let version = apply_schema_migrations(db, &user_prompts_migrations(), options, root).await?;
-    if version >= 2 {
-        return Ok(version);
-    }
-    let mut missing: Vec<Statement> = Vec::new();
-    for (name, declaration) in USER_PROMPTS_V2_COLUMNS {
-        if !table_has_column(db, "user_prompts", name).await? {
-            missing.push(Statement::new(
-                user_prompts_v2_alter(name, declaration),
-                Vec::new(),
-            ));
+    let mut version =
+        apply_schema_migrations(db, &user_prompts_migrations(), options, root).await?;
+    if version < 2 {
+        let mut missing: Vec<Statement> = Vec::new();
+        for (name, declaration) in USER_PROMPTS_V2_COLUMNS {
+            if !table_has_column(db, "user_prompts", name).await? {
+                missing.push(Statement::new(
+                    user_prompts_v2_alter(name, declaration),
+                    Vec::new(),
+                ));
+            }
         }
+        if !missing.is_empty() {
+            db.batch(missing, BatchMode::Write).await?;
+        }
+        db.execute(&set_user_version_statement(2).sql, Vec::new())
+            .await?;
+        let stamped = get_user_version(db).await?;
+        if stamped != 2 {
+            return Err(StoreError::Internal {
+                message: format!(
+                    "user_prompts v2 apply did not stamp user_version = 2 (found {stamped})"
+                ),
+            });
+        }
+        version = 2;
     }
-    if !missing.is_empty() {
-        db.batch(missing, BatchMode::Write).await?;
+
+    // The v3 leg (issue 43 W6c): the sweep stamp's table. One additive
+    // `CREATE TABLE IF NOT EXISTS` plus one pragma; no backup (the v2 shape,
+    // not the episodic v6 one).
+    if options.max_known >= 3 && version < 3 {
+        db.batch(user_prompts_v3_migration().statements, BatchMode::Write)
+            .await?;
+        db.execute(&set_user_version_statement(3).sql, Vec::new())
+            .await?;
+        let stamped = get_user_version(db).await?;
+        if stamped != 3 {
+            return Err(StoreError::Internal {
+                message: format!(
+                    "user_prompts v3 apply did not stamp user_version = 3 (found {stamped})"
+                ),
+            });
+        }
+        version = 3;
     }
-    db.execute(&set_user_version_statement(2).sql, Vec::new())
-        .await?;
-    let stamped = get_user_version(db).await?;
-    if stamped != 2 {
-        return Err(StoreError::Internal {
-            message: format!(
-                "user_prompts v2 apply did not stamp user_version = 2 (found {stamped})"
-            ),
-        });
+    Ok(version)
+}
+
+/// The v3 migration step (issue 43 W6c): the sweep stamp's `sweep_state`
+/// table. It is applied ONLY by [`apply_user_prompts_schema`], after the v2
+/// column leg — putting it in `user_prompts_migrations()` would stamp a fresh
+/// file 3 before the v2 columns exist.
+pub fn user_prompts_v3_migration() -> SchemaMigration {
+    SchemaMigration {
+        version: 3,
+        description: "user-prompts-v3: the sweep stamp table (issue 43 W6c)",
+        statements: vec![Statement::new(SWEEP_STATE_DDL, Vec::new())],
     }
-    Ok(2)
 }
