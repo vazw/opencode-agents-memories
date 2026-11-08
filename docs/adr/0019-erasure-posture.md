@@ -171,6 +171,10 @@ pass.
 request id in the residual (no queue means no request lifetime to name); absolute paths or any
 content-derived value.
 
+**Amended (issue 43 W6c, Q2):** the shipped field name is `milestones_scrubbed`, not
+`milestones_rewritten` — the sweep's report and the disclosure DTO both use the amended spelling, and
+the meaning above is unchanged (no code rename of any earlier prose is implied).
+
 **D-19-4 — No queue; `PendingErase` may persist indefinitely; `--mode=sweep` is the operator lever (planned).**
 
 A queue is refused. It would store prompt ids — itself an erasure artefact — and its only worked-out

@@ -1,0 +1,7 @@
+### 1) --mode=sweep without --apply (expect 64)
+{"component":"sweep","detail":"--apply is required; the sweep mutates","event":"sweep.usage","level":"error"}
+exit=64
+
+### 2) --mode=sweep --apply on a fresh root (expect 0, absent targets skipped)
+{"baks_bytes":0,"baks_reaped":0,"event":"sweep.completed","milestone_compacted":0,"not_erased":[{"reason":"no per-session provenance; Phase 4","tier":"memories-shard"},{"reason":"the merged milestone summary and its embedding survive a contributor scrub; no re-summarization, no re-embed (owner ruling 2026-10-21)","tier":"milestones-recap"}],"outcome":"swept","stamped":[],"vacuumed":[],"vacuums_failed":[]}
+exit=0
