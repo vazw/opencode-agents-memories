@@ -1,8 +1,10 @@
 # 130 — shard resurrection on open-first read
 
 Status: done — 2026-11-08 (shard-resurrection wave, blueprint r3 STAMP sha256=b45b29067f80;
-fix commit `<pending>` on `fix/issue-130-shard-resurrection`; evidence:
-`docs/evidence/issue-130-shard-resurrection/{measurement.md,mutation-log.md}`; not merged to main yet)
+fix commit `21c8545` on `fix/issue-130-shard-resurrection` (branch off 7a3fd89 = origin/main; not
+merged to main yet); evidence:
+`docs/evidence/issue-130-shard-resurrection/{measurement.md,mutation-log.md}`; see the Fixed 2026-11-08
+comment below for the full digest and the named FILTERED-search residual)
 
 Filed from: issue 129 residuals r9, Step 4 route matrix (diagnosis STOP; syseng ruling
 Q2=ACCEPT-STOP, 2026-11-06). Matrix: `docs/evidence/issue129-residuals/partial-store-route-matrix.md`.
