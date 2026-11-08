@@ -91,8 +91,8 @@ const USAGE: &str = "\
 usage: opencode-agents-memory [--mode=<mode>] [--storage-root <path>] [options]
 
 Modes (--mode=<mode>): stdio (default), standalone, print-crates,
-  purge-session, reembed-scope, reap-shards. hang-on-shutdown is accepted only
-  when OPENCODE_MEM_HANG_ON_SHUTDOWN is set; mcp-stdio and mcp-http are
+  purge-session, reembed-scope, reap-shards, sweep. hang-on-shutdown is accepted
+  only when OPENCODE_MEM_HANG_ON_SHUTDOWN is set; mcp-stdio and mcp-http are
   recognised and refused with exit 78.
 
 Options:
@@ -105,7 +105,8 @@ Options:
   --agent <id>            purge-session: agent id
   --confirm <token>       purge-session: the printed confirmation token
   --scope <tag>           reembed-scope: container tag to re-embed
-  --apply                 reap-shards: perform the reap (dry run otherwise)
+  --apply                 reap-shards: perform the reap (dry run otherwise);
+                          sweep: required (the sweep mutates)
   -h, --help              print this help and exit
   --version               print the version and exit
 ";
@@ -318,6 +319,7 @@ fn parse_args<I: Iterator<Item = (String, Option<String>)>>(args: I) -> ParsedAr
             "--mode=standalone" => parsed.mode = Some("standalone".to_owned()),
             "--mode=hang-on-shutdown" => parsed.mode = Some("hang-on-shutdown".to_owned()),
             "--mode=reap-shards" => parsed.mode = Some("reap-shards".to_owned()),
+            "--mode=sweep" => parsed.mode = Some("sweep".to_owned()),
             "--storage-root" | "storage-root" => parsed.storage_root = inline,
             "--web-host" | "web-host" => parsed.web_host = inline,
             "--web-port" | "web-port" => {
@@ -508,6 +510,8 @@ fn main() {
     let mut reembed_tag: Option<String> = None;
     // The reap confirmation, built at parse time. `None` for every other mode.
     let mut reap_request: Option<mem_bridge::reap::ReapRequest> = None;
+    // The sweep request, built at parse time. `None` for every other mode.
+    let mut sweep_request: Option<mem_bridge::sweep::SweepRequest> = None;
     if let Some(mode) = args.mode.clone() {
         let mode = mode.trim().to_owned();
         if mode == "print-crates" {
@@ -543,6 +547,10 @@ fn main() {
             // The usage verdicts were already taken above, before the generic
             // unknown-flag refusal; only the request is built here.
             reap_request = Some(mem_bridge::reap::ReapRequest { apply: args.apply });
+        } else if mode == "sweep" {
+            // The sweep mutates, so `--apply` is mandatory; the runner answers
+            // 64 (not a dry run) when it is absent.
+            sweep_request = Some(mem_bridge::sweep::SweepRequest { apply: args.apply });
         } else {
             match LaunchMode::parse(&mode) {
                 Ok(parsed) => {
@@ -622,6 +630,17 @@ fn main() {
         ));
     }
 
+    // W6c — the erasure sweep dispatch also sits BEFORE the engine runtime: it
+    // takes the engine lock itself, so starting the engine here would make it
+    // refuse with 75 against its own process.
+    if let Some(request) = sweep_request {
+        std::process::exit(mem_bridge::sweep::run(
+            &core_config,
+            &config.storage_root,
+            &request,
+        ));
+    }
+
     // W-log-signature — install the structured-log sink ONCE at the
     // composition root, and derive the stats scan directory from that same
     // sink. Both stdio and standalone modes reach this point; the sync modes
@@ -679,4 +698,29 @@ fn main() {
         Some(Box::new(ProductionPortabilityFactory)),
     );
     std::process::exit(exit);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{USAGE, parse_args};
+
+    /// Issue 43 W6c — the sweep mode is accepted by the same parse table as
+    /// `reap-shards`, and `--apply` travels into the request unchanged.
+    #[test]
+    fn test_mode_sweep_parses_and_apply_travels() {
+        let parsed = parse_args(
+            vec![
+                ("--mode=sweep".to_string(), None),
+                ("--apply".to_string(), None),
+            ]
+            .into_iter(),
+        );
+        assert_eq!(parsed.mode.as_deref(), Some("sweep"));
+        assert!(parsed.apply, "--apply reaches the sweep request");
+        assert!(
+            !parsed.apply_inline,
+            "a bare --apply is not an inline value"
+        );
+        assert!(USAGE.contains("sweep"), "the usage text names the mode");
+    }
 }

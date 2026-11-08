@@ -12,6 +12,7 @@ pub mod gate;
 pub mod ids;
 pub mod inbox;
 pub mod milestone;
+pub mod milestone_compaction;
 pub mod payload;
 pub mod promotion;
 pub mod purge;
