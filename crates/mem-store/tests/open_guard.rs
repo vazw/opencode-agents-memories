@@ -584,6 +584,43 @@ async fn test_the_tshm_sensor_separates_a_flag_on_holder_from_a_flag_off_one() {
     let _ = common::cleanup_temp_dir(&config.storage_path);
 }
 
+/// Issue 43 W6c Step 17 group 4 — the sweep's preflight against a **real**
+/// holder: a live flag-on child (byte-0 lock on the `-tshm`) makes the sweep
+/// refuse, and the mirrored flag-off child clears.
+///
+/// The two arms share one sensor, so a preflight that read the database instead
+/// of the `-tshm`, or that ignored the probe direction, flips one of them.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_sweep_preflight_refuses_a_real_flag_on_holder_and_clears_a_flag_off_one() {
+    let config = common::store_config("sweep-preflight-two-arm");
+    let path = config.storage_path.join("sweep-arm.db");
+    let seeded = turso_connect_factory()
+        .connect(path.clone(), shipping_options(&config))
+        .await
+        .expect("seed the database");
+    drop(seeded);
+
+    let flag_on = FixtureHolder::spawn_multiprocess(&path);
+    let blocked = mem_store::sweep_probe::sweep_preflight_database(&config.storage_path, &path);
+    flag_on.release();
+    assert_eq!(
+        blocked,
+        Err(mem_store::sweep_probe::SweepPreflightBlock::LegacyPeerLive),
+        "arm 1: a live flag-on holder blocks the sweep"
+    );
+
+    let flag_off = FixtureHolder::spawn_legacy(&path);
+    let cleared = mem_store::sweep_probe::sweep_preflight_database(&config.storage_path, &path);
+    flag_off.release();
+    assert_eq!(
+        cleared,
+        Ok(()),
+        "arm 2: a flag-off holder locks the database, never the -tshm"
+    );
+    let _ = common::cleanup_temp_dir(&config.storage_path);
+}
+
 /// The upgrade path (blueprint Step 3): a database written by a **pre-drop**
 /// (flag-on) build — it has a `-tshm` — must open under the post-drop build once
 /// the old opener is gone, with its rows intact.
@@ -1528,4 +1565,59 @@ async fn test_hazard_requires_two_distinct_resolved_configs() {
     drop(guarded_open);
     drop(handle);
     let _ = common::cleanup_temp_dir(&root);
+}
+
+/// Issue 43 W6c (carried W6a review P2-1) — the **read-only divergence row is
+/// wired, not just tabulated**: the seam's classification of the open's
+/// writability decides whether the `-tshm` probe runs at all.
+///
+/// Two arms against ONE live flag-on holder, through [`TursoConnectFactory`]
+/// only (the seam production uses):
+///
+/// 1. a read-only option set CLEARS — a read-only open cannot lose rows to a
+///    mixed WAL window, so it skips the probe (`Divergence::ReadOnlySkipsLegacyProbe`);
+/// 2. the writable set on the same holder REFUSES.
+///
+/// Mutant→victim walk: inverting `Writability::from_options` (or wiring the
+/// read-only arm into the probe) makes arm 1 refuse and fails this test, while
+/// every pure `decide` cell still passes — that is the gap this test closes.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_the_read_only_divergence_row_is_wired_at_the_open_seam() {
+    let config = common::store_config("guard-read-only-divergence");
+    let path = config.storage_path.join("read-only.db");
+    let seeded = TursoConnectFactory
+        .connect(path.clone(), shipping_options(&config))
+        .await
+        .expect("seed the database");
+    drop(seeded);
+
+    let holder = FixtureHolder::spawn_multiprocess(&path);
+
+    let mut read_only = shipping_options(&config);
+    read_only.read_only = true;
+    let cleared = TursoConnectFactory.connect(path.clone(), read_only).await;
+    assert!(
+        cleared.is_ok(),
+        "a read-only open skips the legacy probe, so a live flag-on holder cannot refuse it: {:?}",
+        cleared.err()
+    );
+    drop(cleared);
+
+    let refused = TursoConnectFactory
+        .connect(path.clone(), shipping_options(&config))
+        .await;
+    holder.release();
+    assert!(
+        matches!(
+            refused,
+            Err(StoreError::OpenBlocked {
+                direction: mem_store::error::OpenDirection::LegacyAuthority,
+                ..
+            })
+        ),
+        "the writable arm on the same holder must refuse LegacyAuthority, got {:?}",
+        refused.err()
+    );
+    let _ = common::cleanup_temp_dir(&config.storage_path);
 }

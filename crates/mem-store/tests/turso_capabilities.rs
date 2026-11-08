@@ -49,8 +49,8 @@ use std::path::{Path, PathBuf};
 
 use mem_store::config::StoreConfig;
 use mem_store::db::{
-    BatchMode, ConnectFactory, ConnectOptions, Db, DbHandle, EncryptionOptions, ExecResult, Row,
-    Statement, Value, turso_connect_factory,
+    BatchMode, ConnectFactory, ConnectOptions, Db, DbHandle, EncryptionOptions, ExecResult,
+    ExperimentalFeature, Row, Statement, Value, turso_connect_factory,
 };
 use mem_store::error::StoreError;
 use mem_store::platform::Platform;
@@ -1491,6 +1491,112 @@ async fn test_vacuum_with_the_experimental_flag_erases_the_canary() {
     drop(connection);
     drop(database);
     common::cleanup_temp_dir(&dir).expect("cleanup temp dir");
+}
+
+/// Step 11 — the AC16 property **through the production constructor**:
+/// `ConnectOptions::for_sweep` carries `[Encryption, Vacuum]` (never the
+/// multiprocess token) and a handle it opens runs `VACUUM`, erasing the canary
+/// from every file under the directory.
+///
+/// This is the same mechanism AC16 proves with a raw builder; the claim here is
+/// that the shipping sweep option set reaches it, not that turso can VACUUM.
+#[tokio::test]
+async fn test_for_sweep_runs_vacuum_and_erases_the_canary() {
+    let config = common::store_config("cap-for-sweep");
+    let path = config.storage_path.join("sweep.db");
+    let options = ConnectOptions::for_sweep(&config, Platform::current());
+    assert_eq!(
+        options.experimental,
+        vec![ExperimentalFeature::Encryption, ExperimentalFeature::Vacuum],
+        "for_sweep is [Encryption, Vacuum]"
+    );
+    assert!(
+        !options
+            .experimental
+            .contains(&ExperimentalFeature::MultiprocessWal),
+        "for_sweep never carries the multiprocess token"
+    );
+    assert!(
+        !options.read_only,
+        "the sweep writes, so its open is writable"
+    );
+
+    let db = turso_connect_factory()
+        .connect(path.clone(), options)
+        .await
+        .expect("for_sweep opens");
+
+    db.execute(
+        "CREATE TABLE user_prompts (id TEXT PRIMARY KEY, content TEXT NOT NULL)",
+        Vec::new(),
+    )
+    .await
+    .expect("create the canary table");
+    db.execute(
+        "INSERT INTO user_prompts (id, content) VALUES ('canary', ?)",
+        vec![Value::Text(CANARY.to_string())],
+    )
+    .await
+    .expect("seed the canary");
+    db.execute("DELETE FROM user_prompts", Vec::new())
+        .await
+        .expect("delete the canary row");
+    db.query("PRAGMA wal_checkpoint(TRUNCATE)", Vec::new())
+        .await
+        .expect("checkpoint");
+    assert!(
+        file_contains(&path, CANARY),
+        "the canary must be in the main file before VACUUM, otherwise the absence assertion is vacuous"
+    );
+
+    db.execute("VACUUM", Vec::new())
+        .await
+        .expect("a for_sweep handle runs VACUUM");
+
+    assert!(
+        !dir_contains_canary(&config.storage_path),
+        "VACUUM through for_sweep removes the marker's bytes from every file"
+    );
+    let rows = db
+        .query("SELECT COUNT(*) AS count FROM user_prompts", Vec::new())
+        .await
+        .expect("the database still answers after VACUUM");
+    assert_eq!(
+        rows[0].i64("count"),
+        Some(0),
+        "the rewritten file is readable, not corrupt"
+    );
+
+    drop(db);
+    common::cleanup_temp_dir(&config.storage_path).expect("cleanup temp dir");
+}
+
+/// D-25-11: `Vacuum ∧ MultiprocessWal` is refused at **preflight**, one layer
+/// above turso's mid-VACUUM translation error. The refusal is typed and happens
+/// before any turso call, so the target file is never created.
+#[tokio::test]
+async fn test_vacuum_with_multiprocess_wal_is_refused_at_preflight() {
+    let config = common::store_config("cap-vacuum-mpwal-preflight");
+    let path = config.storage_path.join("sweep.db");
+    let mut options = ConnectOptions::for_sweep(&config, Platform::current());
+    options
+        .experimental
+        .push(ExperimentalFeature::MultiprocessWal);
+
+    let refused = match turso_connect_factory().connect(path.clone(), options).await {
+        Ok(_) => panic!("vacuum + multiprocess WAL must be refused before turso opens"),
+        Err(error) => error,
+    };
+    match refused {
+        StoreError::UnsupportedOpenMode { .. } => {}
+        other => panic!("expected a typed UnsupportedOpenMode refusal, got {other:?}"),
+    }
+    assert!(
+        !path.exists(),
+        "the preflight refusal must precede any turso call (no file created)"
+    );
+
+    common::cleanup_temp_dir(&config.storage_path).expect("cleanup temp dir");
 }
 
 /// AC17: the experimental flag does NOT make VACUUM work under multiprocess

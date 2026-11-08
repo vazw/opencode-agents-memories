@@ -241,6 +241,10 @@ pub struct EncryptionOptions {
 pub enum ExperimentalFeature {
     Encryption,
     MultiprocessWal,
+    /// `turso::Builder::experimental_vacuum(true)` — VACUUM is a translation
+    /// refusal without it (`turso_capabilities.rs` AC15). Set only by
+    /// [`ConnectOptions::for_sweep`], never by [`ConnectOptions::for_config`].
+    Vacuum,
 }
 
 /// Per-open options handed to a [`ConnectFactory`].
@@ -282,6 +286,26 @@ impl ConnectOptions {
         let _ = &config.database_encryption_cipher;
         Self {
             experimental,
+            encryption: None,
+            read_only: false,
+            allow_unguarded_open: config.allow_unguarded_open,
+            storage_root: Some(config.storage_path.clone()),
+        }
+    }
+
+    /// The sweep's option set (issue 43 W6c): `[Encryption, Vacuum]`, writable,
+    /// with the storage root set so the open guard still owns its marker.
+    ///
+    /// Never reachable from [`ConnectOptions::for_config`] — the sweep is the
+    /// only caller, and the vacuum feature is exactly what the shipping open
+    /// deliberately does not carry. `platform` is kept in the signature for the
+    /// same reason as `for_config` (the Windows/Linux option sets must stay
+    /// equal, ADR-0025 D-25-3).
+    #[must_use]
+    pub fn for_sweep(config: &StoreConfig, platform: Platform) -> Self {
+        let _ = platform;
+        Self {
+            experimental: vec![ExperimentalFeature::Encryption, ExperimentalFeature::Vacuum],
             encryption: None,
             read_only: false,
             allow_unguarded_open: config.allow_unguarded_open,
@@ -401,6 +425,10 @@ async fn open_guarded(
 ) -> Result<DbHandle, StoreError> {
     let mode = crate::open_guard::WalMode::from_options(&opts);
     let writability = crate::open_guard::Writability::from_options(&opts);
+    let vacuum = opts
+        .experimental
+        .iter()
+        .any(|feature| matches!(feature, ExperimentalFeature::Vacuum));
     // Bound before the borrow: `Preflight` must not hold a temporary.
     let env_override = std::env::var(crate::open_guard::ALLOW_UNGUARDED_OPEN_ENV).ok();
     // The oracle is the target's `-tshm` sensor (turso's shared-WAL coordination
@@ -414,6 +442,7 @@ async fn open_guarded(
             probe_path: &probe_path,
             mode,
             writability,
+            vacuum,
             probe_eligible: PROBE_ELIGIBLE,
             allow_unguarded_open: opts.allow_unguarded_open(),
             env_override: env_override.as_deref(),
@@ -436,6 +465,9 @@ async fn open_guarded(
         .any(|feature| matches!(feature, ExperimentalFeature::MultiprocessWal));
     if wants_multiprocess_wal {
         builder = builder.experimental_multiprocess_wal(true);
+    }
+    if vacuum {
+        builder = builder.experimental_vacuum(true);
     }
     if let Some(encryption) = opts.encryption {
         builder = builder.with_encryption(turso::EncryptionOpts {
