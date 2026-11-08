@@ -28,6 +28,7 @@ pub mod reembed;
 pub mod scope_resolver;
 pub mod skills;
 pub(crate) mod startup_audit;
+pub mod sweep;
 pub mod tools;
 pub mod truncation_report;
 pub mod vault_feeder;
