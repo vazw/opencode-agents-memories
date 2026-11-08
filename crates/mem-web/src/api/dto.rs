@@ -306,6 +306,9 @@ pub struct AddedMemoryDto {
 #[serde(rename_all = "camelCase")]
 pub struct DeletedMemoryDto {
     pub deleted_prompt: bool,
+    /// Issue 43 W6c: the erasure state is ALWAYS present (D-19-3), so a delete
+    /// answer is never readable as a complete erasure.
+    pub erasure: ErasureStateDto,
 }
 
 /// The `deletedMemory` data of `DELETE /api/prompts/{id}`.
@@ -313,6 +316,76 @@ pub struct DeletedMemoryDto {
 #[serde(rename_all = "camelCase")]
 pub struct DeletedPromptDto {
     pub deleted_memory: bool,
+    /// Issue 43 W6c: always present, additive (the field above is untouched).
+    pub erasure: ErasureStateDto,
+}
+
+/// What survives a delete that the DTO can count.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SurvivingDerivedDto {
+    /// Memories learned from the erased prompt; `None` when the count is not
+    /// derivable (the UI renders the unconditional sentence).
+    pub memories: Option<u64>,
+    /// Milestones whose contributors were scrubbed. Zero by construction on a
+    /// delete answer: the sweep has not run yet.
+    pub milestones_scrubbed: u64,
+}
+
+/// One tier a delete does NOT erase, with the vault's tri-state.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NotErasedEntryDto {
+    pub tier: &'static str,
+    /// `"yes" | "no" | "unknown"` — a failed vault open is `unknown`, never `no`
+    /// (ADR-0019 D-19-9, both directions pinned).
+    pub erased: &'static str,
+    pub reason: &'static str,
+}
+
+/// The erasure state of one deleted tier (ADR-0019 D-19-3, amended vocabulary).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ErasureStateDto {
+    /// `"erased" | "pending"`.
+    pub state: &'static str,
+    /// `"user-prompts" | "memories"` — never `"milestones"` on a delete answer.
+    pub tier: &'static str,
+    /// `"swept" | "notYetSwept" | "sweepFailed" | "legacyPeerLive" |
+    /// "noSweepForTier"`.
+    pub sweep_state: &'static str,
+    pub surviving_derived: SurvivingDerivedDto,
+    /// The tiers a delete leaves, vault tri-state included.
+    pub not_erased: Vec<NotErasedEntryDto>,
+}
+
+/// The `NOT_ERASED` map: the purge's surviving tiers plus the vault's
+/// tri-state. `vault_erased == None` (a failed/unavailable vault open) renders
+/// `"unknown"`, never `"no"` — the honest answer when the tool cannot look.
+#[must_use]
+pub fn not_erased_map(vault_erased: Option<bool>) -> Vec<NotErasedEntryDto> {
+    let vault = match vault_erased {
+        Some(true) => "yes",
+        Some(false) => "no",
+        None => "unknown",
+    };
+    vec![
+        NotErasedEntryDto {
+            tier: "vault",
+            erased: vault,
+            reason: "encrypted at rest; the sweep excludes it (ADR-0012 D-14, ADR-0019 D-19-6)",
+        },
+        NotErasedEntryDto {
+            tier: "memories-shard",
+            erased: "no",
+            reason: "no per-session provenance; Phase 4",
+        },
+        NotErasedEntryDto {
+            tier: "milestones-recap",
+            erased: "no",
+            reason: "the merged milestone summary and its embedding survive a contributor scrub",
+        },
+    ]
 }
 
 /// The `deleted` count of the bulk-delete endpoints.

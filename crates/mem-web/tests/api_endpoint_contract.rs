@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::fakes::{MEMORY_ID, PROJECT_TAG, USER_ID, fake_services};
+use common::fakes::{MEMORY_ID, PROJECT_TAG, PROMPT_ID, USER_ID, fake_services};
 use common::{api_request, app_state_with_api};
 use mem_web::api::{PLACEHOLDER_MARKER, ROUTE_TABLE, RouteExpectation};
 use mem_web::server::build_router;
@@ -29,7 +29,11 @@ fn router_with_fakes() -> (std::sync::Arc<common::fakes::FakeBackend>, axum::Rou
 
 #[tokio::test]
 async fn test_the_pinned_route_table_lists_every_upstream_endpoint() {
-    assert_eq!(ROUTE_TABLE.len(), 41, "the pinned table is 41 rows");
+    assert_eq!(
+        ROUTE_TABLE.len(),
+        42,
+        "the pinned table is 42 rows (issue 43 W6c adds the erasure status read)"
+    );
 
     let mut keys: Vec<(&str, &str)> = ROUTE_TABLE
         .iter()
@@ -48,8 +52,8 @@ async fn test_the_pinned_route_table_lists_every_upstream_endpoint() {
         .filter(|row| row.path.starts_with("/api/"))
         .count();
     assert_eq!(
-        api_rows, 39,
-        "33 upstream API entries + 2 session stubs + 1 port-only row + the W6.6 milestone row          + the 2 port-only rows of issues 115 (`GET /api/user-profiles`) and 116          (`GET /api/projects`)"
+        api_rows, 40,
+        "33 upstream API entries + 2 session stubs + 1 port-only row + the W6.6 milestone row          + the 2 port-only rows of issues 115 (`GET /api/user-profiles`) and 116          (`GET /api/projects`) + issue 43 W6c's `GET /api/prompts/{{id}}/erasure`"
     );
 
     let catalog_rows = ROUTE_TABLE
@@ -198,6 +202,12 @@ async fn test_every_api_response_uses_the_success_data_error_envelope() {
 /// The concrete URL a table row's parameterised path maps to (the fake seed's
 /// ids), so a reachability check can drive the real route.
 fn concrete_path(path: &str) -> String {
+    // Issue 43 W6c: the disclosure read is seeded by the fake prompt id, so its
+    // row is reachable like every other row (a `{id}` -> "ship-it" substitution
+    // would 404 against the prompt store, not against the router).
+    if path == "/api/prompts/{id}/erasure" {
+        return format!("/api/prompts/{PROMPT_ID}/erasure");
+    }
     path.replace("{project_id}", "probe")
         .replace("{session_id}", "probe")
         .replace("{file}", "ship-it.md")

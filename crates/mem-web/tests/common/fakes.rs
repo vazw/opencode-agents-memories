@@ -30,8 +30,8 @@ use mem_web::api::ports::{
     ApiServices, CatalogEntry, CleanupApplied, CleanupPreview, DedupReport, EmbedPort,
     MaintenancePort, MemoryPort, MemoryRow, MemoryUpdate, MigrationReport, MigrationRunReport,
     MilestonePort, NewMemory, NewSkill, PortError, ProfileChangelog, ProfileErasure, ProfilePort,
-    ProfileRecord, PromptPort, PromptRow, SearchHit, SessionPort, ShardRef, Skill, SkillPatch,
-    SkillPort, TagMigrationReport, TagRow,
+    ProfileRecord, PromptErasure, PromptPort, PromptRow, SearchHit, SessionPort, ShardRef, Skill,
+    SkillPatch, SkillPort, TagMigrationReport, TagRow,
 };
 
 /// The seeded project scope hash (16 lowercase hex).
@@ -852,14 +852,18 @@ impl PromptPort for FakeBackend {
         Ok(state.prompts.iter().find(|prompt| prompt.id == id).cloned())
     }
 
-    async fn delete_prompt(&self, id: &str) -> Result<(), PortError> {
+    async fn delete_prompt(&self, id: &str) -> Result<PromptErasure, PortError> {
         self.record(format!("delete_prompt:{id}"));
         let mut state = self
             .state
             .lock()
             .map_err(|_| PortError::Store("lock".into()))?;
+        let existed = state.prompts.iter().any(|prompt| prompt.id == id);
         state.prompts.retain(|prompt| prompt.id != id);
-        Ok(())
+        Ok(PromptErasure {
+            existed,
+            ..PromptErasure::default()
+        })
     }
 }
 

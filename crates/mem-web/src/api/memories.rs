@@ -622,7 +622,10 @@ pub async fn delete_memory(
     }
 
     match state.api.memory.delete_memory(&shard, &id).await {
-        Ok(()) => envelope::ok(&DeletedMemoryDto { deleted_prompt }),
+        Ok(()) => envelope::ok(&DeletedMemoryDto {
+            deleted_prompt,
+            erasure: super::prompts::erasure_state(&state, "memories", "erased").await,
+        }),
         Err(error) => port_failure("DELETE /api/memories/{id}", error),
     }
 }
