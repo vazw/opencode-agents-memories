@@ -656,6 +656,18 @@ pub fn port_failure(endpoint: &'static str, error: ports::PortError) -> Response
         ports::PortError::NotFound | ports::PortError::Invalid(_) | ports::PortError::Store(_) => {
             envelope::internal_error()
         }
+        // Issue 130: a read of a REGISTERED shard whose file is missing. The
+        // shard is not resurrected and the answer is neither the "not wired"
+        // 501 nor the "broken here" 500; the body is a FIXED string — no
+        // `file_name`, no path, no errno on the wire (ADR-0015 D-1). The wire
+        // status is built from [`response_status`]'s own mapping (the same
+        // single source the diagnostic uses), so the SSE line always names the
+        // status the client received.
+        ports::PortError::ShardFileMissing { .. } => envelope::json(
+            axum::http::StatusCode::from_u16(response_status(&error))
+                .unwrap_or(axum::http::StatusCode::SERVICE_UNAVAILABLE),
+            envelope::error("shard storage is temporarily unavailable — the shard file is missing"),
+        ),
     }
 }
 
@@ -672,6 +684,9 @@ fn response_status(error: &ports::PortError) -> u16 {
         ports::PortError::NotFound | ports::PortError::Invalid(_) | ports::PortError::Store(_) => {
             StatusCode::INTERNAL_SERVER_ERROR.as_u16()
         }
+        // Issue 130: the read lane's typed refusal for a missing registered
+        // shard file — temporarily unavailable, not broken.
+        ports::PortError::ShardFileMissing { .. } => StatusCode::SERVICE_UNAVAILABLE.as_u16(),
     }
 }
 
@@ -686,6 +701,7 @@ fn error_variant_token(error: &ports::PortError) -> &'static str {
         ports::PortError::Store(_) => "Store",
         ports::PortError::ModelMismatch(_) => "ModelMismatch",
         ports::PortError::Busy => "Busy",
+        ports::PortError::ShardFileMissing { .. } => "ShardFileMissing",
     }
 }
 

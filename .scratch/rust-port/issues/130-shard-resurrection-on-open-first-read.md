@@ -1,7 +1,10 @@
 # 130 — shard resurrection on open-first read
 
-Status: ready-for-agent — 2026-11-08 (triaged: bug CONFIRMED at HEAD `ec08ce2` — r9 matrix
-evidence stands, no behavior-touching commits since; agent brief in Comments)
+Status: done — 2026-11-08 (shard-resurrection wave, blueprint r3 STAMP sha256=b45b29067f80;
+fix commit `21c8545` on `fix/issue-130-shard-resurrection` (branch off 7a3fd89 = origin/main; not
+merged to main yet); evidence:
+`docs/evidence/issue-130-shard-resurrection/{measurement.md,mutation-log.md}`; see the Fixed 2026-11-08
+comment below for the full digest and the named FILTERED-search residual)
 
 Filed from: issue 129 residuals r9, Step 4 route matrix (diagnosis STOP; syseng ruling
 Q2=ACCEPT-STOP, 2026-11-06). Matrix: `docs/evidence/issue129-residuals/partial-store-route-matrix.md`.
@@ -81,3 +84,56 @@ shard; the response contract per route; and the TOCTOU window the 129 plan warne
     check (remove it → file recreated → test must fail); keep a fresh-root create path green.
   - **Sequencing:** small wave scheduled ahead of W6 implementation; the W6 architect draft
     (`.tmp/drafts/20261108-w6-erasure-design.md`) runs read-only in parallel — no file overlap.
+
+- **Fixed 2026-11-08 — shard-resurrection wave (blueprint-20261108-issue-130-shard-resurrection-r1,
+  plan-gate round 3 APPROVED, STAMP sha256=b45b29067f80).**
+  - **Brief points settled, per the brief's own numbering:**
+    1. *Fresh-root vs registered-missing.* The seam is `ProductionMemory::stat_shard_file`
+       (`crates/mem-web/src/api/store_adapter.rs`): read-only `std::fs::metadata` before any open on
+       the four read lanes (`all_memories`, `list_memories_by_container_tag`, `distinct_tags`,
+       `search_in_shard`). Registration-relative: the guard stats the `shards()`-yielded path, so a
+       fresh root with no registered shard never reaches it; explicit `create_shard` registration and
+       all write lanes keep create-on-open. `find_memory` keeps its own direct stats (fails closed as
+       `Store`, its typed arm staying fenced out — unchanged).
+    2. *Response contract per route.* New typed variant `PortError::ShardFileMissing { file_name }`
+       (`crates/mem-web/src/api/ports.rs`) → `port_failure` arm answers **503** with the FIXED body
+       `{"success":false,"error":"shard storage is temporarily unavailable — the shard file is missing"}`
+       — no `PortError::Store` remap; the frozen `scope_wide_delete.rs:373` 500 pin is byte-identical
+       (`git diff --stat` verified empty through every wave step). `response_status` maps the variant
+       to 503 and the wire arm is single-sourced through `response_status` (diagnostic line names the
+       status the client received). `ShardFileMissing` carries the file name on the LOG channel only —
+       never on the wire (same discipline as the `Store` token rule, ADR-0015 D-1).
+    3. *TOCTOU.* ACCEPTED and DOCUMENTED (variant doc, guard doc): nothing closes the stat→open
+       window; a file deleted inside it is still recreated by turso create-on-open (the pre-fix
+       behavior, never data loss). Inverted world pinned: a file observed recreated after a guarded
+       read answered 503 reopens the decision as a defect.
+  - **Test evidence (MEASURED, TDD RED-first):** acceptance suite `crates/mem-web/tests/
+    shard_resurrection.rs` — RED 16:55 UTC (A red on the no-resurrection assertion; B/C red on
+    500-vs-503; D/E green), then five-test-truth intermediate (A/D/E pass; B/C pass body + red 503)
+    with the interim `Store` mapping, then 5/5 green after the typed arm — no test edited to pass.
+    Layer pins: 4a unit pins in `store_adapter.rs` (`#[cfg(test)]`); 4b/4c premises `crates/mem-store/
+    tests/shard_open_premise.rs`. Mutation kills (all MEASURED, single-edit + revert, log at
+    `docs/evidence/issue-130-shard-resurrection/mutation-log.md`): 1→A, 2→C, 2b→B, 3a→4b+4c RED +
+    mem-web setup-abort (fixture panic) + 4a green, 3b→4c RED + 4b GREEN + 4a method-head pin RED +
+    B/C RED + A green-with-reason (blueprint line 170), 4(i)/(ii)→B/C RED (single-source status arm;
+    initial survival of 4(ii) diagnosed — ship deviation recorded in the ledger/handoff).
+    Gates: workspace 2493/0, fmt clean, both clippy gates + wasm lanes green.
+  - **Live verification (MEASURED, standalone child engine,** `.tmp/scratch/issue-130-live/
+    …/transcript.txt`**):** healthy `GET /api/tags` 200 with the registered tag; shard file deleted
+    under the running engine; `GET /api/tags` 503 (fixed body, file never echoed), file still absent;
+    `GET /api/memories?includePrompts=false` 503, file still absent; `GET /api/stats` 200 with
+    `fileExists:false` + `Shard DB file missing: <fileName>` (fileName-only, inline with
+    `test_stats_missing_shard_file_sets_file_name_only_error_and_succeeds`); engine log emits
+    `{"event":"api.handler_failed","status":503,"variant":"ShardFileMissing"}`. Every observation
+    matched its pre-registered value.
+  - **Residual named, NOT fixed here (syseng round-3 blocker note: "keep the filtered-search
+    residual named in the issue digest"):** the tag-FILTERED branch of `GET /api/search`
+    (`crates/mem-web/src/api/memories.rs`, `filter_tags` non-empty) still resurrects a deleted
+    registered shard through `verify_shards`' per-shard `open_shard`
+    (`crates/mem-web/src/api/store_adapter.rs`, model-facts verify) — create-on-open runs BEFORE the
+    wave's `search_in_shard` guard ever sees the shard, and the request continues past the recreated
+    schema-less file. The GLOBAL branch is covered by this wave: its tag discovery goes through
+    `distinct_container_tags` → the guarded `distinct_tags`, which answers the 503 refusal before
+    anything opens. Closing the residual needs a decision on mem-store-side `verify_shards` open
+    semantics (read-only verify should not create) — explicitly out of scope here. Also note-only
+    (per gate round 3): ProductionFacts open sites unwired.

@@ -267,6 +267,45 @@ impl ProductionMemory {
             .map_err(store_failure)
     }
 
+    /// Issue 130 — stats the shard's DB file BEFORE any open on the READ
+    /// lanes (`all_memories`, `list_memories_by_container_tag`,
+    /// `distinct_tags`, `search_in_shard`).
+    ///
+    /// `open_shard` CREATES a missing database file (turso create-on-open,
+    /// ConnectionManager::get_connection → open_database), so an open-first
+    /// read silently resurrects a registered shard whose file was deleted and
+    /// then answers the D-9 500 on the schema-less file. The guard reads
+    /// only: never creates, never writes.
+    ///
+    /// The refusal carries the file name FOR THE LOG LINE ONLY (mirrors
+    /// `collect_shard_stats`' per-shard error naming); it is never echoed to
+    /// the wire. TOCTOU is ACCEPTED and DOCUMENTED, not closed: the
+    /// stat→open window is advisory — a file deleted inside the window is
+    /// still recreated by turso (the pre-fix behavior, never data loss; the
+    /// create is create-if-missing over an absent file). Narrowing it would
+    /// put an existence refusal inside mem-store's `open_database` (a
+    /// write-semantics change — issue 130's "gated on its own" sketch line,
+    /// deliberately not taken). Inverted world: a file observed recreated
+    /// after this guard refused reopens the decision as a defect.
+    async fn stat_shard_file(&self, shard: &ShardRef) -> Result<(), PortError> {
+        if let Err(error) = std::fs::metadata(&shard.db_path) {
+            let file_name = shard
+                .db_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            tracing::warn!(
+                error = %error,
+                scope = shard.scope.as_str(),
+                scope_hash = %shard.scope_hash,
+                shard_index = shard.shard_index,
+                "read refused: registered shard file missing"
+            );
+            return Err(PortError::ShardFileMissing { file_name });
+        }
+        Ok(())
+    }
+
     /// The typed refusal for one shard of `shard`'s scope.
     fn refusal(&self, shard: &ShardRef, shard_id: i64, stored_model: Option<String>) -> PortError {
         let config = self.manager.config();
@@ -440,6 +479,7 @@ impl MemoryPort for ProductionMemory {
     }
 
     async fn all_memories(&self, shard: &ShardRef) -> Result<Vec<MemoryRow>, PortError> {
+        self.stat_shard_file(shard).await?;
         let db = self.open(shard).await?;
         let rows = db
             .query(mem_store::sql::GET_ALL_MEMORIES, Vec::new())
@@ -454,6 +494,7 @@ impl MemoryPort for ProductionMemory {
         container_tag: &str,
         limit: usize,
     ) -> Result<Vec<MemoryRow>, PortError> {
+        self.stat_shard_file(shard).await?;
         let db = self.open(shard).await?;
         let rows = vector::list_memories_by_container_tag(db.as_ref(), container_tag, limit)
             .await
@@ -489,6 +530,7 @@ impl MemoryPort for ProductionMemory {
     }
 
     async fn distinct_tags(&self, shard: &ShardRef) -> Result<Vec<TagRow>, PortError> {
+        self.stat_shard_file(shard).await?;
         let db = self.open(shard).await?;
         let rows = db
             .query(mem_store::sql::GET_DISTINCT_TAGS, Vec::new())
@@ -602,6 +644,7 @@ impl MemoryPort for ProductionMemory {
         limit: usize,
         query_text: Option<&str>,
     ) -> Result<Vec<SearchHit>, PortError> {
+        self.stat_shard_file(shard).await?;
         let db = self.open(shard).await?;
         let hits =
             vector::search_in_shard(db.as_ref(), query_vector, container_tag, limit, query_text)
@@ -1510,11 +1553,18 @@ impl FactStore for ProductionFacts {
 
 #[cfg(test)]
 mod tests {
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use mem_store::db::{Row, Value};
+    use mem_core::scope::Scope;
+    use mem_store::config::StoreConfig;
+    use mem_store::connection::ConnectionManager;
+    use mem_store::db::{Row, TursoConnectFactory, Value};
+    use mem_store::platform::{Platform, SystemProcessProbe};
+    use mem_store::shard_manager::ShardManager;
 
     use super::exported_memory;
+    use super::{PortError, ProductionMemory, ShardRef};
 
     /// One `memories` row carrying the given content.
     fn row_with_content(content: &str) -> Row {
@@ -1584,5 +1634,168 @@ mod tests {
         assert_eq!(memory.content, "the plain content");
         assert_eq!(memory.id, "m-1");
         assert_eq!(memory.memory_type.as_deref(), Some("note"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Issue 130 — layer-1 pin: the stat-before-open guard itself.
+    // (House law: the private predicate is tested in its owning layer.)
+    // -----------------------------------------------------------------------
+
+    /// The file name the pins use for the fixture shard.
+    const PIN_FILE_NAME: &str = "project_a1b2c3d4e5f67890_shard_0.db";
+
+    /// A unique temp storage root for one pin case.
+    fn pin_root(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default();
+        std::env::temp_dir().join(format!(
+            "mem-web-stat-guard-{label}-{nanos}-{}",
+            std::process::id()
+        ))
+    }
+
+    /// A [`ProductionMemory`] over a manager rooted at `root` (the guard never
+    /// reads the manager, but the adapter carries it).
+    fn pin_memory(root: &Path) -> ProductionMemory {
+        let config = StoreConfig {
+            storage_path: root.to_path_buf(),
+            embedding_dimensions: 768,
+            embedding_model: "test-model".to_string(),
+            max_vectors_per_shard: 1000,
+            container_tag_prefix: "opencode".to_string(),
+            database_encryption_enabled: false,
+            database_encryption_cipher: "aes256gcm".to_string(),
+            database_encryption_key: None,
+            allow_unguarded_open: false,
+        };
+        let connections = Arc::new(ConnectionManager::new(
+            config.storage_path.clone(),
+            config.clone(),
+            Platform::current(),
+            Arc::new(TursoConnectFactory),
+        ));
+        let manager = ShardManager::new(
+            config.storage_path.clone(),
+            config.clone(),
+            connections,
+            Arc::new(SystemProcessProbe),
+            None,
+        );
+        ProductionMemory::new(manager)
+    }
+
+    /// A [`ShardRef`] the shape `shards()` yields in production.
+    fn pin_shard_ref(root: &Path) -> ShardRef {
+        ShardRef {
+            scope: Scope::Project,
+            scope_hash: "a1b2c3d4e5f67890".to_string(),
+            shard_index: 0,
+            db_path: root.join(PIN_FILE_NAME),
+            shard_id: Some(1),
+            vector_count: 0,
+            is_active: true,
+        }
+    }
+
+    /// The guard answers `Ok` for a PRESENT file and leaves it in place; a
+    /// DELETED file refuses with the typed variant and stays deleted (the
+    /// guard is read-only: it never recreates). Kills the "guard deleted or
+    /// reordered after the open" mutant at this layer: an open-first decision
+    /// would answer a recreated-handle path `Ok` and leave the file recreated.
+    #[tokio::test]
+    async fn shard_file_guard_refuses_when_metadata_errors() {
+        let root = pin_root("halves");
+        std::fs::create_dir_all(&root).expect("the pin root is creatable");
+        let memory = pin_memory(&root);
+
+        let shard = pin_shard_ref(&root);
+        let db_path = shard.db_path.clone();
+
+        // PRESENT half: Ok(()) and the file untouched.
+        std::fs::write(&db_path, b"not a real database").expect("the pin file is writable");
+        assert!(
+            memory.stat_shard_file(&shard).await.is_ok(),
+            "a present shard file passes the guard"
+        );
+        assert!(db_path.exists(), "the guard never removes a present file");
+
+        // DELETED half: the typed refusal, and the file STAYS deleted.
+        std::fs::remove_file(&db_path).expect("the pin file is removable");
+        let refused = memory.stat_shard_file(&shard).await;
+        match refused {
+            Err(PortError::ShardFileMissing { file_name }) => {
+                assert_eq!(file_name, PIN_FILE_NAME, "the payload names the file only");
+            }
+            other => panic!("a deleted shard file must refuse with ShardFileMissing: {other:?}"),
+        }
+        assert!(
+            !db_path.exists(),
+            "the guard is read-only: it must not recreate the file it refused"
+        );
+    }
+
+    /// The method-head pin (discriminator table, 4a): the guard call sits at
+    /// the HEAD of every read method. This drives one of them (`all_memories`)
+    /// through the port seam with a deleted file and demands the typed
+    /// refusal. Kills the kill-3b MOVE (guard call removed from the method
+    /// heads → the lane answers the generic `Store` flavor instead) and the
+    /// "reordered after `self.open`" mutant (the open recreates first → the
+    /// file exists again by the end).
+    #[tokio::test]
+    async fn shard_file_guard_sits_at_the_method_head() {
+        use crate::api::ports::MemoryPort;
+
+        let root = pin_root("method-head");
+        std::fs::create_dir_all(&root).expect("the pin root is creatable");
+        let memory = pin_memory(&root);
+        let shard = pin_shard_ref(&root);
+        let db_path = shard.db_path.clone();
+        std::fs::write(&db_path, b"to be deleted").expect("the pin file is writable");
+        std::fs::remove_file(&db_path).expect("the pin file is removable");
+
+        match memory.all_memories(&shard).await {
+            Err(PortError::ShardFileMissing { file_name }) => {
+                assert_eq!(file_name, PIN_FILE_NAME);
+            }
+            Err(PortError::Store(detail)) => panic!(
+                "the read lane answered the generic Store refusal — the guard call is not at the method head (the MOVE mutant): {detail}"
+            ),
+            other => panic!("the guarded read lane must refuse with ShardFileMissing: {other:?}"),
+        }
+        assert!(
+            !db_path.exists(),
+            "the guarded lane must not recreate the file it refused"
+        );
+    }
+
+    /// The `ShardFileMissing` payload carries ONLY the file name: no errno
+    /// text, no path separator. The wire never sees it either (the 503 body is
+    /// fixed — pinned at the router level); this pin fixes the payload shape
+    /// at the seam that owns it.
+    #[tokio::test]
+    async fn shard_file_guard_carries_no_free_text() {
+        let root = pin_root("payload");
+        std::fs::create_dir_all(&root).expect("the pin root is creatable");
+        let memory = pin_memory(&root);
+        let shard = pin_shard_ref(&root);
+        let db_path = shard.db_path.clone();
+        std::fs::write(&db_path, b"to be deleted").expect("the pin file is writable");
+        std::fs::remove_file(&db_path).expect("the pin file is removable");
+
+        let refused = memory.stat_shard_file(&shard).await;
+        let Err(PortError::ShardFileMissing { file_name }) = refused else {
+            panic!("the pin requires the typed refusal shape");
+        };
+        assert_eq!(file_name, PIN_FILE_NAME);
+        assert!(
+            !file_name.contains('/'),
+            "the payload is a name component, never a path"
+        );
+        assert!(
+            !file_name.contains("No such file"),
+            "the payload never carries errno text"
+        );
     }
 }
