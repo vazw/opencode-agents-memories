@@ -206,13 +206,42 @@ A grilling session was conducted across all five phases, producing concrete, loc
 **Recorded follow-up (not a swap blocker).**
 - `src/main.rs:207` hardcodes the web `user_id` to `"unknown"`, so `GET /api/user-profile` without `?userId=` shows no profile even though the JSON-RPC `profile` path resolves it. It gets its own issue when the swap lands.
 
+### Phase 6 acceptance closure & live-smoke discipline (addendum 2026-11-08)
+
+Phase 6's last acceptance items — issue 24 AC2 and issue 29 ACs 3–4 — closed on the live smoke
+(`docs/evidence/issues-24-29-smoke-20261108/`; issues 24 and 29 `done`). The acceptance instrument is
+a decision implementers should reuse, not just a result:
+
+- **Pre-registered expectations, derived from handler source.** The 41-row table (route surface
+  re-derived from `ROUTE_TABLE` — four routes had never been smoked) pins status + response
+  substring per row before any run. **Stop-on-mismatch is binding:** a failing row stops the run;
+  expectations are never patched to green. Two rounds of plan gate caught seven mis-derived rows
+  before run time (wrong-branch pins; one criterion whose mutant could not fail under its input) —
+  the derivation is specification code and gets the gate's scrutiny.
+- **Seed actions are harness steps, not row verdicts.** Seeded fixtures (probe memories, ship-it
+  skill, catalog) run between rows; a seed failure STOPs the run rather than becoming a passing or
+  failing row, keeping success pins non-vacuous.
+- **Acceptance = independent re-execution.** The reviewer re-ran the harness on its own scratch
+  engine and demanded per-row identical results, plus mutation spot-checks on the verdict-derivation
+  selftest (a deliberately-wrong 418-vs-200 control proves the selftest is not toothless).
+- **Observed-behavior corrections are recorded, not smoothed.** The engine refuses its own wildcard
+  (`0.0.0.0`) web launch fail-closed (`api_token` hardcoded `None` at `main.rs:176`; refusal
+  pre-socket at `api_auth.rs:30-46`) — recorded as the wildcard-half evidence, the pre-registered
+  401 shape being unreachable through the production launcher; the 401/200 contract stays pinned at
+  `api_route_auth.rs:510-540`. The ONNX embedder cache resolves at `$HOME/.opencode-mem/data/.cache`
+  via the *resolved config* (`engine.rs:1548` → `composition.rs:419` → `config/mod.rs:342`), not
+  relative to `--storage-root`.
+- **Structured failure visibility:** mapped handler failures now emit `api.handler_failed`
+  (status + endpoint + variant token, no wildcard arm) per **ADR-0031** — the live smoke's STOP
+  diagnoses were possible because the silent-500 saga (2026-11-07) made failures observable.
+
 ## Testing Decisions
 
 - **Phase 2:** Golden-vector tests for embedding parity; provider tests use mock HTTP servers (no real API keys); privacy tests verify malformed tag handling and permission rejection.
 - **Phase 3:** Cross-process claim protocol tested under repeat loops (any flake = blocking defect); decay math is pure (unit-tested); AI cleanup tested with mock provider.
 - **Phase 4:** Net-new acceptance tests written first (record shape, scope binding, migration); filter-matrix tests for timeline queries; compaction identity preservation test.
 - **Phase 5:** Message schema frozen and tested before JS/Rust lanes split; shutdown tests (no orphaned processes).
-- **Phase 6:** REST handler tests derive from upstream handler code + tests; `wasm-bindgen-test` for REST client shape; manual smoke per screen.
+- **Phase 6:** REST handler tests derive from upstream handler code + tests; `wasm-bindgen-test` for REST client shape; manual smoke per screen (superseded 2026-11-08: acceptance runs through the tracked harness `scripts/smoke-rest-surface.sh` + CDP lanes with pre-registered, handler-derived expectations — see the Phase 6 acceptance addendum above).
 - **Phase 7 (live swap):** the copy-based dry run is the test seam, not new unit tests — `copy-store.sh` (checkpointed copies), `store-state.sh` (per-DB versions, counts, fingerprints), `probe.mjs` (stdio JSON-RPC + HTTP). The live store is never an input. The backup restore is rehearsed by restoring into a scratch directory, opening it with the engine, and comparing counts, versions, and `integrity_check` against the pre-state. The real-host verification battery is a smoke checklist, not a suite; the port's existing suites remain the behavioral contract. The export→import probe is the fallback-path check, run on a scratch store.
 
 ## Out of Scope
@@ -239,3 +268,4 @@ A grilling session was conducted across all five phases, producing concrete, loc
 - Model pins: coder → MiMo (fallback Beam Free), all other agents → Beam Free.
 - Live-swap evidence (all dated 2026-10-30): dry run `.tmp/progress/live-store-dryrun-20261030T154208Z.md` (gitignored — issue 80 transcribes the decisive measurements into `docs/evidence/`); podman real-host smoke `.tmp/progress/real-host-podman-after-20261030T145706Z.md`; current-project export `~/.opencode-mem/exports/opencode-agents-memory-20261030T151445Z.json` (917 memories, schemaVersion 1).
 - The live store's base files read 3,052 rows with `immutable=1`; the 3,091 figure is from the checkpointed copy (WAL applied). The live store was still being written during the dry run — do not compare counts taken at different times.
+- Post-PRD scope, owner-directed 2026-11-08: a **FactKG transfer experiment** measured the grounding premise on the port (correct evidence grounds responses — b=8 vs c=2 paired correctness, zero confident false-supported; artifacts `docs/evidence/factkg-experiment/`). The follow-on — claim-vs-evidence verification for the facts/consolidation tier — is queued behind the vault feature; design constraint: the Unknown class must be first-class (missing evidence is not contradiction; observed errors were high-confidence false contradictions).
