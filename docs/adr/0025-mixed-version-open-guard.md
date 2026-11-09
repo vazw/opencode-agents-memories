@@ -1,11 +1,11 @@
 # 0025 — The Mixed-Version Open Guard
 
-- **Status:** Proposed
+- **Status:** Accepted (owner, 2026-11-09)
 - **Date:** 2026-11-09
 - **Implementation:** landed in issue 43 W6a (the flip: `MultiprocessWal` dropped from
   `for_config`, `decide` inverted, the `-tshm` sensor wired) and W6c (the sweep, the
-  stamp migrations, the wired read-only divergence row). **Acceptance is pending owner
-  review** — the status stays `Proposed` until it lands.
+  stamp migrations, the wired read-only divergence row). **Accepted by the owner
+  on 2026-11-09**, with the deployment clarification below.
 - **Builds on:** ADR-0021 (schema-version discipline: newer-file/older-build is the
   refusal direction), ADR-0007 (D-31/D-39: multiprocess WAL is architecturally
   unnecessary — one engine per storage root). **Supersedes:** the routed
@@ -13,6 +13,16 @@
   `user_version`" retirement default (issue 43 `:120-122`).
 
 ## Context
+
+**Owner ruling, 2026-11-09 (READ: direct acceptance):**
+
+> Accept ADR0025 But no one is ussing our old build. we are on developments phase, only me using this on my laptop.
+
+Current deployment is development-only: the owner is the sole user on one laptop;
+no other users run old builds. Still-launchable old binaries below describe a
+technical hazard, not a deployed old-build population. The guard is retained;
+D-25-9's retirement policy is unchanged. Future guard removal requires separate
+authorization; this acceptance grants none.
 
 Issue 43 W6a dropped `MultiprocessWal` from
 `ConnectOptions::for_config` — the shipping option set is `[Encryption]` on every

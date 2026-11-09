@@ -1,6 +1,8 @@
 # 43 — W9.0 · Database base hardening (review findings)
 
-Status: ready-for-human — 2026-10-27 (umbrella, not a single wave: **W0** `af01156`, **W1 write side**
+Status: landed — residual (A3/A4 owned by issue 131; named validation/platform limits retained) — 2026-11-09; W6a `4878834`, W6c final `df6c744` / main merge `24552db`; see dated outcome under Comments.
+
+Historical landing summary (2026-10-27 onward; umbrella, not a single wave): **W0** `af01156`, **W1 write side**
 `3d5e940` and the **liveness blocker** `aa0dcc4` are landed; **W2 is landed on `main` at `e0bbd37`**
 (merge of `12feaa2` over `c558e52`, base `dc5bcad`; shard v3 + `shard_stats` + embedding fingerprint;
 review approved after one rework); **W3 is landed on `main` at `a4df6e7`** (count/model authority: typed read+write refusals incl. `update_memory`, count-at-commit, the re-embed CLI, ADR-0018 D-18-13; review approved after **two** reworks); **W4 is landed on `main` at `030a0bd`** (one active shard: metadata v2 repair + `WHERE is_active = 1` partial unique index, one-transaction rotation, validated reactivation, reconcile skip; ADR-0022; 12 tests, `mem-store` 45/380/0/12, review approved first pass; residual R-22-2 tracked as **issue 77**) — at this **2026-10-27 snapshot** W5
@@ -18,7 +20,7 @@ Next: owner picks **70** (wire method set), **28** (live swap), or the **zstd ad
 The **ADR-0019 text** landed `Accepted` at `b36920e`, and **issue 72** consumed `delete_memories` at `6d2c1f4`.
 **Blocks issue 39 (retention cleanup) and issue 41 (scheduler).**
 
-**W6 close-out, 2026-11-09 (umbrella still `ready-for-human`).** Both waves landed:
+**W6 close-out, 2026-11-09 (umbrella delivery fulfilled; residuals retained).** Both waves landed:
 **W6a** on `issue-43/w6a-substrate` (`3db778d` tests, `8b44e56` the atomic flip,
 `d62edb0` ADR-0025 + evidence), merged at `4878834`; **W6c** on
 `issue-43/w6c-erasure` (`ac22307` sweep-stamp migrations, `ed2c11a` `Vacuum` /
@@ -32,9 +34,22 @@ passed / 0 failed / 33 ignored**, `mem-web` 43 suites, `mem-bridge --test sweep`
 --all --check` clean, `trunk build` green, wasm `confirm` 6/6; evidence in
 `docs/evidence/issue-43-w6/REPORT.md`.
 
-**Why it stays `ready-for-human`:** the tracker's own rule needs BOTH waves AND
-owner acceptance of ADR-0025. **ADR-0025 is still `Proposed` — the owner has not
-reviewed it**, so that condition is unmet and the umbrella is not closed.
+**Disposition follow-up, 2026-11-09:** the rule needs BOTH landed waves AND
+owner acceptance of ADR-0025, not acceptance alone. **MEASURED:**
+`git merge-base --is-ancestor` exits 0 for W6a merge `4878834` and W6c final
+`df6c744` at pinned main merge `24552db`. **READ:** the owner explicitly accepted
+ADR-0025 on 2026-11-09 (exact ruling under Comments). Checklist:
+`{w6a_landed: true, w6c_landed: true, owner_accepted: true,
+other_umbrella_requirements_met: true}`. The earlier landing summary records
+W0–W5/W7 delivered and W8 measured; issue 72 `6d2c1f4` supersedes the historical
+W1b delete-by-id gap. No other current umbrella requirement is outstanding.
+Thus umbrella delivery criteria are fulfilled; the former acceptance-pending
+`ready-for-human` reason is superseded, not the residual validation below.
+
+Deployment is development-only: the owner is sole user on one laptop; no other
+users run old builds. Still-launchable old binaries remain a technical hazard,
+not a deployed population. Guard retained; ADR-0025 D-25-9 retirement policy
+unchanged, and future removal requires separate authorization.
 
 Residuals carried, none hidden:
 
@@ -48,7 +63,13 @@ Residuals carried, none hidden:
    cell stays `needs_validation`.
 3. **Windows post-drop opens are untested** — no runner exists here; the Windows
    cell is a table row plus unit cells, and nothing more is claimed.
-4. **A3/A4 remain fenced to issue 131.**
+4. **A3/A4 remain fenced to issue 131.** This umbrella disposition neither closes
+   issue 131 nor claims its native cross-user/platform validation.
+5. **macOS remains natively unmeasured**, like Windows: POSIX-lock table/unit
+   cells are not native-platform proof (`docs/evidence/issue-43-w6/REPORT.md`).
+6. **REPORT residuals 6–8 remain open** — unreachable HTTP `legacyPeerLive`,
+   deleted-prompt status 404 / separate tombstone-or-tier-read decision, and ranked
+   P3 findings. Owner acceptance validates none of these.
 
 ## RE-VERIFICATION 2026-10-25 (architecture pass) — read this before the items below
 
@@ -452,6 +473,10 @@ needs a control that fails when the fact stops holding:
    flag carries `-tshm` sidecars. Open it *without* the flag and verify correctness. **Every existing user's
    storage root is in exactly that state on upgrade.** If this is unsafe, the whole option dies regardless of
    erasure, and options 2/3 come back.
+   **Deployment correction, 2026-11-09 (READ: owner ruling under Comments):**
+   “Every existing user's” above is a historical population generalization, now
+   superseded: development phase, sole user on own laptop, no other old-build users.
+   The measured stale-sidecar behavior and technical old-binary hazard are unchanged.
 2. **Crash recovery.** `SIGKILL` mid-write, reopen, verify committed rows survive and nothing is corrupt.
    Changing WAL mode changes what is durable — this is the load-bearing one.
 3. **Sidecar expectations.** Which sidecars appear with the flag off (`-shm` vs `-tshm`), and whether stale
@@ -668,6 +693,30 @@ and 43.4 are independent of retention and can run in parallel. 43.6–43.8 are o
 a benchmark.
 
 ## Comments
+
+### Outcome 2026-11-09 — accepted ADR, delivered umbrella, retained residuals
+
+**READ — direct owner ruling:**
+
+> Accept ADR0025 But no one is ussing our old build. we are on developments phase, only me using this on my laptop.
+
+ADR-0025 is Accepted. Development-only, sole-owner laptop use corrects the old
+population premise; it does not authorize guard removal or change D-25-9.
+**MEASURED:** ancestry checks for W6a merge
+`48788349c4466206c801962d8483dcd24bfcc652` and final W6c
+`df6c744b2d7df5b728184300df64be279ed483b0` both exit 0 at main merge
+`24552dbb5c659cfac85ca2ac266fcbaf8702d011`. Combined with the explicit ruling,
+the current W6 umbrella conjunction is true; prior wave dispositions and issue 72
+landing are recorded in the top summary. Delivered scope closes with the leading
+`landed — residual` status, not blanket done. Missing either ancestry would keep
+umbrella delivery open even with acceptance.
+
+The vacuum cell remains `needs_validation`; native Windows/macOS proof is absent;
+A3/A4 ownership stays with issue 131 without adjudicating that issue here. All
+other named W6 residuals remain carried. Historical W1b/triage and 2026-10-25
+measurements below remain dated records; their superseding current entries govern.
+See `docs/evidence/issue-43-w6/REPORT.md`'s dated follow-up; no runtime gates were
+rerun for this docs-only outcome.
 
 - Filed 2026-10-25 from two concurrent reviews of the database design handover. Every TRUE claim above was
   re-verified in the tree; the two refuted ones are listed so a future reader does not re-open them.

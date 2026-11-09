@@ -151,3 +151,31 @@ measured. File restored from `.tmp/scratch/prompts.rs.bak`.
    state. Pre-existing blueprint rule (Step 18(f): unknown id ⇒ 404), not part of
    F1/F2. A tombstone or tier-scoped read is a separate decision.
 8. F4/F5/F6/F7 stay P3 as ranked; F4 (Windows) needs an owner decision, not code.
+
+## Follow-up 2026-11-09 — owner acceptance and deployment correction
+
+**READ — direct owner ruling:**
+
+> Accept ADR0025 But no one is ussing our old build. we are on developments phase, only me using this on my laptop.
+
+ADR-0025 is now **Accepted** (owner, 2026-11-09). The `Proposed` wording in
+“What landed” and residual 4 above records the historical close-out state; this
+follow-up supersedes that acceptance-pending statement, not the original evidence.
+Deployment is development-only, with the owner as sole user on one laptop and no
+other users running old builds. A still-launchable pre-drop binary remains a
+technical hazard, not evidence of a fielded old-build population. The guard and
+D-25-9 retirement policy remain unchanged; removal needs separate authorization.
+
+**MEASURED — ancestry only:** `git merge-base --is-ancestor` exits 0 for both
+W6a merge `48788349c4466206c801962d8483dcd24bfcc652` and W6c final
+`df6c744b2d7df5b728184300df64be279ed483b0` at pinned main merge
+`24552dbb5c659cfac85ca2ac266fcbaf8702d011`. Together with owner acceptance,
+these fulfill issue 43's recorded umbrella delivery rule. Its current disposition
+is landed with residuals, not unqualified done; see issue 43's dated Comments outcome.
+
+No runtime gates were rerun for this documentation follow-up. Original rows, counts
+and claims above remain historical evidence, not new measurements. The
+`vacuum-under-legacy-holder` cell remains `needs_validation`; Windows / macOS
+remain natively unmeasured. A3/A4 stay owned by issue 131, with no disposition of
+that issue inferred here. Residuals 1–3 and 5–8 remain visible and are not closed
+by acceptance, including `legacyPeerLive`, deleted-prompt status and P3 limits.
