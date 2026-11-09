@@ -212,6 +212,10 @@ pub const COUNT_VECTORS_BY_CONTAINER_TAG: &str =
 // vector-search.ts L385 (getAllMemories).
 pub const GET_ALL_MEMORIES: &str = r#"SELECT * FROM memories ORDER BY created_at DESC"#;
 
+// Stats Candidate A narrow projection (no ORDER BY, no content/vector).
+pub const GET_STATS_MEMORIES: &str =
+    r#"SELECT container_tag, type, created_at, tags FROM memories"#;
+
 // vector-search.ts L439-449 (getDistinctTags, 7-column DISTINCT).
 pub const GET_DISTINCT_TAGS: &str = r#"
       SELECT DISTINCT

@@ -28,10 +28,10 @@ use serde_json::{Value, json};
 use mem_web::api::dto::{MilestoneItemDto, ProjectRowDto};
 use mem_web::api::ports::{
     ApiServices, CatalogEntry, CleanupApplied, CleanupPreview, DedupReport, EmbedPort,
-    MaintenancePort, MemoryPort, MemoryRow, MemoryUpdate, MigrationReport, MigrationRunReport,
-    MilestonePort, NewMemory, NewSkill, PortError, ProfileChangelog, ProfileErasure, ProfilePort,
-    ProfileRecord, PromptErasure, PromptPort, PromptRow, SearchHit, SessionPort, ShardRef, Skill,
-    SkillPatch, SkillPort, TagMigrationReport, TagRow,
+    MaintenancePort, MemoryPort, MemoryRow, MemoryStatsRow, MemoryUpdate, MigrationReport,
+    MigrationRunReport, MilestonePort, NewMemory, NewSkill, PortError, ProfileChangelog,
+    ProfileErasure, ProfilePort, ProfileRecord, PromptErasure, PromptPort, PromptRow, SearchHit,
+    SessionPort, ShardRef, Skill, SkillPatch, SkillPort, TagMigrationReport, TagRow,
 };
 
 /// The seeded project scope hash (16 lowercase hex).
@@ -574,6 +574,25 @@ impl MemoryPort for FakeBackend {
             .iter()
             .filter(|(owner, _)| owner == shard)
             .map(|(_, row)| row.clone())
+            .collect())
+    }
+
+    async fn stats_memories(&self, shard: &ShardRef) -> Result<Vec<MemoryStatsRow>, PortError> {
+        self.record(format!("stats_memories:{}", shard.scope_hash));
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| PortError::Store("lock".into()))?;
+        Ok(state
+            .memories
+            .iter()
+            .filter(|(owner, _)| owner == shard)
+            .map(|(_, row)| MemoryStatsRow {
+                container_tag: row.container_tag.clone(),
+                memory_type: row.memory_type.clone(),
+                created_at: row.created_at,
+                tags: row.tags.clone(),
+            })
             .collect())
     }
 

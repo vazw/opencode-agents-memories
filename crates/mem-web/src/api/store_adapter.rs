@@ -68,8 +68,8 @@ use serde_json::{Value as JsonValue, json};
 
 use super::dto::{MilestoneItemDto, ProjectRowDto, PromotedFactDto};
 use super::ports::{
-    CatalogEntry, CleanupApplied, CleanupPreview, EmbedPort, MemoryPort, MemoryRow, MemoryUpdate,
-    MilestonePort, NewMemory, NewSkill, PortError, ProfileChangelog as ChangelogDto,
+    CatalogEntry, CleanupApplied, CleanupPreview, EmbedPort, MemoryPort, MemoryRow, MemoryStatsRow,
+    MemoryUpdate, MilestonePort, NewMemory, NewSkill, PortError, ProfileChangelog as ChangelogDto,
     ProfileErasure, ProfilePort, ProfileRecord, PromptErasure, PromptPort, PromptRow, SearchHit,
     SessionPort, ShardRef, Skill, SkillPatch, TagRow,
 };
@@ -137,6 +137,20 @@ fn memory_row(row: &Row) -> MemoryRow {
         git_repo_url: row.text("git_repo_url"),
         is_pinned: row.i64("is_pinned").unwrap_or(0) != 0,
         has_tags_vector: !row.is_null("tags_vector"),
+    }
+}
+
+/// Stats Candidate A narrow projection mapping.
+///
+/// `container_tag` / `created_at` are NOT NULL in the frozen DDL (`sql.rs`), so
+/// their `unwrap_or_default()` fallbacks are unreachable; `tags` / `type` are
+/// nullable and map through `Option`.
+fn stats_memory_row(row: &Row) -> MemoryStatsRow {
+    MemoryStatsRow {
+        container_tag: row.text("container_tag").unwrap_or_default(),
+        memory_type: row.text("type"),
+        created_at: row.i64("created_at").unwrap_or(0),
+        tags: row.text("tags"),
     }
 }
 
@@ -268,8 +282,8 @@ impl ProductionMemory {
     }
 
     /// Issue 130 — stats the shard's DB file BEFORE any open on the READ
-    /// lanes (`all_memories`, `list_memories_by_container_tag`,
-    /// `distinct_tags`, `search_in_shard`).
+    /// lanes (`all_memories`, `stats_memories`,
+    /// `list_memories_by_container_tag`, `distinct_tags`, `search_in_shard`).
     ///
     /// `open_shard` CREATES a missing database file (turso create-on-open,
     /// ConnectionManager::get_connection → open_database), so an open-first
@@ -486,6 +500,15 @@ impl MemoryPort for ProductionMemory {
             .await
             .map_err(store_failure)?;
         Ok(rows.iter().map(memory_row).collect())
+    }
+
+    async fn stats_memories(&self, shard: &ShardRef) -> Result<Vec<MemoryStatsRow>, PortError> {
+        self.stat_shard_file(shard).await?;
+        let db = self.open(shard).await?;
+        let rows = mem_store::vector::get_stats_memories(db.as_ref())
+            .await
+            .map_err(store_failure)?;
+        Ok(rows.iter().map(stats_memory_row).collect())
     }
 
     async fn list_memories_by_container_tag(

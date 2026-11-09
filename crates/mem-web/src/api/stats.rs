@@ -141,7 +141,7 @@ pub(crate) async fn collect_shard_stats(
         let mut newest: Option<i64> = None;
         let mut tag_groups: BTreeMap<String, u64> = BTreeMap::new();
 
-        match state.api.memory.all_memories(&shard).await {
+        match state.api.memory.stats_memories(&shard).await {
             Ok(rows) => {
                 for row in &rows {
                     if row.container_tag.contains(USER_MARKER) {

@@ -430,6 +430,9 @@ mod frozen {
     /// legacy-migrator.ts L172-174 (shard_metadata value probe; Rust generalizes the key to a bound param)
     pub const FROZEN_GET_SHARD_METADATA_VALUE: &str =
         r#"SELECT value FROM shard_metadata WHERE key = ?"#;
+    /// Stats Candidate A narrow projection (no ORDER BY, no content/vector).
+    pub const FROZEN_GET_STATS_MEMORIES: &str =
+        r#"SELECT container_tag, type, created_at, tags FROM memories"#;
 }
 
 use mem_store::config::{Platform, StoreConfig};
@@ -1764,4 +1767,15 @@ async fn test_frozen_keyword_like_escape_matches_literals() {
         vec!["mem_literal", "mem_wildcard"],
         "bare wildcards widen the match"
     );
+}
+
+// ---------------------------------------------------------------------------
+// stats candidate A
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_golden_sql_stats_memories() {
+    assert_eq!(sql::GET_STATS_MEMORIES, frozen::FROZEN_GET_STATS_MEMORIES);
+    assert!(!sql::GET_STATS_MEMORIES.contains("ORDER BY"));
+    assert!(!sql::GET_STATS_MEMORIES.contains("*"));
 }

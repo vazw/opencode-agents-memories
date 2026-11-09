@@ -12,8 +12,9 @@ use mem_store::schema_migrations::{
 };
 use mem_store::vector::{
     MemoryInsert, ProjectAssociation, count_all_vectors, count_vectors_by_container_tag,
-    get_all_memories, get_distinct_tags, get_project_path_counts, insert_vector,
-    insert_vector_statement, resolve_session_id, update_project_association, vector_to_text,
+    get_all_memories, get_distinct_tags, get_project_path_counts, get_stats_memories,
+    insert_vector, insert_vector_statement, resolve_session_id, update_project_association,
+    vector_to_text,
 };
 
 use mem_store::config::StoreConfig;
@@ -429,4 +430,43 @@ async fn test_insert_vector_statement_batch_matches_single_insert() {
     }
     assert_eq!(batched.i64("created_at"), single.i64("created_at"));
     assert_eq!(batched.i64("updated_at"), single.i64("updated_at"));
+}
+
+#[tokio::test]
+async fn test_get_stats_memories_narrow_projection_no_order_by() {
+    let config = common::store_config("vec-stats");
+    let db = prepared_db(&config, "shard.db", 2).await;
+    // Insert a row with heavy content and vector.
+    let mut rec = record("heavy", 10, true, Some("/proj/a"));
+    rec.content = "payload".to_string();
+    insert_vector(db.as_ref(), &rec).await.unwrap();
+
+    let rows = get_stats_memories(db.as_ref()).await.expect("stats");
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert!(row.text("container_tag").is_some());
+    assert!(row.text("type").is_some());
+    assert!(row.i64("created_at").is_some());
+    assert!(row.text("tags").is_some());
+
+    // Narrow projection: content and vector must be absent.
+    assert!(row.text("content").is_none());
+    assert!(row.get("vector").is_none());
+
+    // EXPLAIN QUERY PLAN must show SCAN memories (no index, no temp btree).
+    let plan = db
+        .query(
+            &format!("EXPLAIN QUERY PLAN {}", mem_store::sql::GET_STATS_MEMORIES),
+            Vec::new(),
+        )
+        .await
+        .expect("plan");
+    let plan_text = plan
+        .iter()
+        .map(|r| r.text("detail").unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(plan_text.contains("SCAN memories"));
+    assert!(!plan_text.contains("USING INDEX idx_created_at"));
+    assert!(!plan_text.contains("USE TEMP B-TREE"));
 }

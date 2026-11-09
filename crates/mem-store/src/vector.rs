@@ -177,6 +177,11 @@ pub async fn get_all_memories(db: &dyn Db) -> Result<Vec<Row>, StoreError> {
     db.query(crate::sql::GET_ALL_MEMORIES, Vec::new()).await
 }
 
+/// Stats Candidate A narrow projection (no ORDER BY, no content/vector).
+pub async fn get_stats_memories(db: &dyn Db) -> Result<Vec<Row>, StoreError> {
+    db.query(crate::sql::GET_STATS_MEMORIES, Vec::new()).await
+}
+
 /// Upstream `getDistinctTags`.
 pub async fn get_distinct_tags(db: &dyn Db) -> Vec<Row> {
     db.query(crate::sql::GET_DISTINCT_TAGS, Vec::new())

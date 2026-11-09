@@ -18,8 +18,8 @@ use common::fakes::{PROJECT_HASH, USER_HASH, USER_ID, USER_TAG, fake_services, m
 use common::{api_request, app_state_with_api, throwaway_log_dir};
 use mem_core::scope::Scope;
 use mem_web::api::ports::{
-    ApiServices, MemoryPort, MemoryRow, MemoryUpdate, NewMemory, PortError, SearchHit, ShardRef,
-    TagRow,
+    ApiServices, MemoryPort, MemoryRow, MemoryStatsRow, MemoryUpdate, NewMemory, PortError,
+    SearchHit, ShardRef, TagRow,
 };
 use mem_web::server::build_router;
 use mem_web::web_auth::WebAuth;
@@ -555,9 +555,45 @@ async fn test_stats_missing_shard_file_sets_file_name_only_error_and_succeeds() 
     assert_eq!(dead.scope, Scope::Project);
 }
 
-// -------------------------------------------------------------------------
-// Shard-listing failure is a hard error (upstream `shardsError` removal)
-// -------------------------------------------------------------------------
+#[tokio::test]
+async fn test_stats_order_independent_timestamp_and_tag_accumulation() {
+    let dir = TempDir::new("stats-order");
+    let log_dir = dir.path().join("logs");
+    std::fs::create_dir_all(&log_dir).expect("the log dir is creatable");
+
+    let (backend, _) = fake_services();
+
+    let user_db = dir.path().join("user_aaaaaaaaaaaaaaaa_shard_0.db");
+    let project_db = dir.path().join("project_bbbbbbbbbbbbbbbb_shard_0.db");
+    std::fs::write(&user_db, b"").expect("the user db file is writable");
+    std::fs::write(&project_db, b"").expect("the project db file is writable");
+    backend.set_shard_db_path(Scope::User, USER_HASH, user_db);
+    backend.set_shard_db_path(Scope::Project, PROJECT_HASH, project_db);
+    backend.set_shard_meta(Scope::User, USER_HASH, 3, true);
+    backend.set_shard_meta(Scope::Project, PROJECT_HASH, 0, true);
+
+    let user = backend.user_shard();
+
+    // Out-of-order timestamps: 1500, 3000, 1000
+    backend.seed_memory(&user, row("m1", USER_TAG, 1500, "shared-tag"));
+    backend.seed_memory(&user, row("m2", USER_TAG, 3000, "shared-tag"));
+    backend.seed_memory(&user, row("m3", USER_TAG, 1000, "other-tag"));
+
+    let (status, body) = get_stats(stats_router(backend, log_dir), "").await;
+    assert_eq!(status, 200, "{body}");
+    let data = &body["data"];
+
+    let user_stats = data["shards"]
+        .as_array()
+        .expect("shards is an array")
+        .iter()
+        .find(|shard| shard["scope"] == "user")
+        .expect("the user shard is present");
+    assert_eq!(user_stats["memoryCount"], 3);
+    assert_eq!(user_stats["duplicateTagCount"], 1);
+    assert_eq!(user_stats["oldestCreatedAt"], "1970-01-01T00:00:01.000Z");
+    assert_eq!(user_stats["newestCreatedAt"], "1970-01-01T00:00:03.000Z");
+}
 
 /// A port whose shard listing fails — the stats handler must answer the fixed
 /// 500 instead of an empty-total success.
@@ -746,4 +782,182 @@ async fn test_stats_profile_section_counts_profile_arrays() {
             "the unseeded profile is bare {{exists:false}}: {body}"
         );
     }
+}
+
+#[tokio::test]
+async fn test_stats_uses_narrow_projection_seam() {
+    let dir = TempDir::new("stats-seam");
+    let (backend, _) = common::fakes::fake_services();
+    let user_db = dir.path().join("user_c1c2c3d4e5f67890_shard_0.db");
+    let project_db = dir.path().join("project_c1c2c3d4e5f67890_shard_0.db");
+    std::fs::write(&user_db, b"").expect("the user db file is writable");
+    std::fs::write(&project_db, b"").expect("the project db file is writable");
+    backend.set_shard_db_path(Scope::User, USER_HASH, user_db);
+    backend.set_shard_db_path(Scope::Project, PROJECT_HASH, project_db);
+
+    let log_dir = throwaway_log_dir();
+    let router = stats_router(backend.clone(), log_dir);
+    let (_status, _body) = get_stats(router, "").await;
+    let calls = backend.calls();
+    assert!(
+        calls
+            .iter()
+            .any(|c| c == &format!("stats_memories:{}", PROJECT_HASH)),
+        "stats_memories must be called: {calls:?}"
+    );
+    assert!(
+        !calls
+            .iter()
+            .any(|c| c == &format!("all_memories:{}", PROJECT_HASH)),
+        "all_memories must NOT be called: {calls:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_stats_memories_default_fallback() {
+    // A port that does NOT override stats_memories: it must delegate to
+    // all_memories and project into MemoryStatsRow.
+    struct DefaultPort {
+        rows: Vec<MemoryRow>,
+    }
+    #[async_trait::async_trait]
+    impl MemoryPort for DefaultPort {
+        async fn shards(
+            &self,
+            _scope: Option<Scope>,
+            _scope_hash: Option<&str>,
+        ) -> Result<Vec<ShardRef>, PortError> {
+            Ok(Vec::new())
+        }
+        async fn verify_shards(&self, _shards: &[ShardRef]) -> Result<(), PortError> {
+            Ok(())
+        }
+        async fn all_memories(&self, _shard: &ShardRef) -> Result<Vec<MemoryRow>, PortError> {
+            Ok(self.rows.clone())
+        }
+        async fn list_memories_by_container_tag(
+            &self,
+            _shard: &ShardRef,
+            _container_tag: &str,
+            _limit: usize,
+        ) -> Result<Vec<MemoryRow>, PortError> {
+            Ok(Vec::new())
+        }
+        async fn memory_by_id(
+            &self,
+            _shard: &ShardRef,
+            _id: &str,
+        ) -> Result<Option<MemoryRow>, PortError> {
+            Ok(None)
+        }
+        async fn distinct_tags(&self, _shard: &ShardRef) -> Result<Vec<TagRow>, PortError> {
+            Ok(Vec::new())
+        }
+        async fn insert_memory(
+            &self,
+            _scope: Scope,
+            _scope_hash: &str,
+            _memory: NewMemory,
+        ) -> Result<(), PortError> {
+            Ok(())
+        }
+        async fn update_memory(
+            &self,
+            _shard: &ShardRef,
+            _update: MemoryUpdate,
+        ) -> Result<(), PortError> {
+            Ok(())
+        }
+        async fn delete_memory(&self, _shard: &ShardRef, _id: &str) -> Result<(), PortError> {
+            Ok(())
+        }
+        async fn pin_memory(&self, _shard: &ShardRef, _id: &str) -> Result<(), PortError> {
+            Ok(())
+        }
+        async fn unpin_memory(&self, _shard: &ShardRef, _id: &str) -> Result<(), PortError> {
+            Ok(())
+        }
+        async fn search_in_shard(
+            &self,
+            _shard: &ShardRef,
+            _query_vector: &[f32],
+            _container_tag: &str,
+            _limit: usize,
+            _query_text: Option<&str>,
+        ) -> Result<Vec<SearchHit>, PortError> {
+            Ok(Vec::new())
+        }
+    }
+
+    let shard = ShardRef {
+        scope: Scope::Project,
+        scope_hash: "aaaaaaaaaaaaaaaa".to_string(),
+        shard_index: 0,
+        db_path: std::path::PathBuf::from("/tmp/fake.db"),
+        shard_id: None,
+        vector_count: 0,
+        is_active: true,
+    };
+    let mut r = memory_row("m1", "tag");
+    r.container_tag = "tag".to_string();
+    r.memory_type = Some("note".to_string());
+    r.created_at = 42;
+    r.tags = Some("t".to_string());
+    let port = DefaultPort { rows: vec![r] };
+    let out: Vec<MemoryStatsRow> = port.stats_memories(&shard).await.expect("stats");
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].container_tag, "tag");
+    assert_eq!(out[0].memory_type, Some("note".to_string()));
+    assert_eq!(out[0].created_at, 42);
+    assert_eq!(out[0].tags, Some("t".to_string()));
+}
+
+#[tokio::test]
+async fn test_stats_by_type_skips_empty_kind() {
+    let dir = TempDir::new("stats-empty-strings");
+    let log_dir = dir.path().join("logs");
+    std::fs::create_dir_all(&log_dir).expect("the log dir is creatable");
+
+    let (backend, _) = fake_services();
+    let user_db = dir.path().join("user_aaaaaaaaaaaaaaaa_shard_0.db");
+    std::fs::write(&user_db, b"").expect("the user db file is writable");
+    backend.set_shard_db_path(Scope::User, USER_HASH, user_db);
+    backend.set_shard_meta(Scope::User, USER_HASH, 3, true);
+    let user = backend.user_shard();
+
+    // TWO empty-tag rows, not one: a lone `tags: Some("")` contributes
+    // `count - 1 == 0` to duplicateTagCount, so one row leaves the tag-filter
+    // mutant alive. Both also carry an empty `type`.
+    let mut empty_1 = row("empty-1", USER_TAG, 1000, "");
+    empty_1.memory_type = Some(String::new());
+    let mut empty_2 = row("empty-2", USER_TAG, 2000, "");
+    empty_2.memory_type = Some(String::new());
+    backend.seed_memory(&user, empty_1);
+    backend.seed_memory(&user, empty_2);
+    backend.seed_memory(&user, row("typed-1", USER_TAG, 3000, "solo"));
+
+    let (status, body) = get_stats(stats_router(backend, log_dir), "").await;
+    assert_eq!(status, 200, "{body}");
+    let data = &body["data"];
+
+    assert_eq!(data["total"], 3, "{data}");
+    assert_eq!(
+        data["byType"],
+        serde_json::json!({ "context": 1 }),
+        "a row with an empty `type` must contribute no byType key"
+    );
+
+    let user_stats = data["shards"]
+        .as_array()
+        .expect("shards is an array")
+        .iter()
+        .find(|shard| shard["scope"] == "user")
+        .expect("the user shard is present");
+    assert_eq!(user_stats["memoryCount"], 3, "every row still counts");
+    assert_eq!(
+        user_stats["duplicateTagCount"], 0,
+        "two empty-string `tags` rows are not a duplicate group"
+    );
+    assert_eq!(user_stats["oldestCreatedAt"], "1970-01-01T00:00:01.000Z");
+    assert_eq!(user_stats["newestCreatedAt"], "1970-01-01T00:00:03.000Z");
 }

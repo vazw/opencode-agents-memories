@@ -67,6 +67,26 @@ pub struct MemoryRow {
     pub has_tags_vector: bool,
 }
 
+/// Stats Candidate A narrow projection row (container_tag, type, created_at, tags).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryStatsRow {
+    pub container_tag: String,
+    pub memory_type: Option<String>,
+    pub created_at: i64,
+    pub tags: Option<String>,
+}
+
+impl From<MemoryRow> for MemoryStatsRow {
+    fn from(row: MemoryRow) -> Self {
+        Self {
+            container_tag: row.container_tag,
+            memory_type: row.memory_type,
+            created_at: row.created_at,
+            tags: row.tags,
+        }
+    }
+}
+
 /// One `getDistinctTags` row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TagRow {
@@ -446,6 +466,11 @@ pub trait MemoryPort: Send + Sync {
 
     async fn all_memories(&self, shard: &ShardRef) -> Result<Vec<MemoryRow>, PortError>;
 
+    async fn stats_memories(&self, shard: &ShardRef) -> Result<Vec<MemoryStatsRow>, PortError> {
+        let rows = self.all_memories(shard).await?;
+        Ok(rows.into_iter().map(MemoryStatsRow::from).collect())
+    }
+
     async fn list_memories_by_container_tag(
         &self,
         shard: &ShardRef,
@@ -454,7 +479,7 @@ pub trait MemoryPort: Send + Sync {
     ) -> Result<Vec<MemoryRow>, PortError>;
 
     /// One row lookup in one shard. Production adapters stat before open on
-    /// the READ lanes — issue 130: `all_memories`,
+    /// the READ lanes — issue 130: `all_memories`, `stats_memories`,
     /// `list_memories_by_container_tag`, `distinct_tags`, `search_in_shard`
     /// refuse through the dedicated `ShardFileMissing` arm (a missing shard
     /// file is a 503, never a silent recreation), and this method stats
