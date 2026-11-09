@@ -524,7 +524,33 @@ pub trait PromptPort: Send + Sync {
 
     async fn prompt_by_id(&self, id: &str) -> Result<Option<PromptRow>, PortError>;
 
-    async fn delete_prompt(&self, id: &str) -> Result<(), PortError>;
+    /// Deletes one prompt (and its derived profiles) and returns what the
+    /// erasure actually did — the adapter no longer discards `PromptDeletion`
+    /// (issue 43 W6c).
+    async fn delete_prompt(&self, id: &str) -> Result<PromptErasure, PortError>;
+
+    /// The tier's sweep stamp (`sweep_state.last_swept_unix_ms`), or `None`
+    /// when the tier was never swept. A stamp answers `swept`, its absence
+    /// `notYetSwept`, a failed read `sweepFailed` (never `notYetSwept`: a failed
+    /// read is not evidence that no sweep ran). The delete answer never reads
+    /// this — a delete's residue postdates any stamp (ADR-0019 :165-167).
+    ///
+    /// Default `Ok(None)`: a port that has no sweep table (a fake, or a build
+    /// without the migration) answers honestly rather than failing the route.
+    async fn sweep_state(&self, _tier: &str) -> Result<Option<i64>, PortError> {
+        Ok(None)
+    }
+}
+
+/// What one prompt delete erased, for the disclosure DTO.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PromptErasure {
+    /// Whether the prompt row existed (`false` ⇒ the 404/soft-miss path).
+    pub existed: bool,
+    /// Derived profile rows erased.
+    pub profiles_deleted: u64,
+    /// Their changelog snapshots erased.
+    pub changelogs_deleted: u64,
 }
 
 /// The user-profile store seam (including the AI-cleanup pending session).
@@ -894,7 +920,7 @@ impl PromptPort for UnavailablePort {
         Err(PortError::Unavailable)
     }
 
-    async fn delete_prompt(&self, _id: &str) -> Result<(), PortError> {
+    async fn delete_prompt(&self, _id: &str) -> Result<PromptErasure, PortError> {
         Err(PortError::Unavailable)
     }
 }

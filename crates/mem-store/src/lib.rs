@@ -8,6 +8,7 @@
 /// Stable crate identifier for composition checks.
 pub const CRATE_NAME: &str = "mem-store";
 
+pub mod bak_reaping;
 pub mod config;
 pub mod connection;
 pub mod db;
@@ -36,6 +37,7 @@ pub mod shard_path_migration;
 pub mod shard_registry_sql;
 pub mod sql;
 pub mod sqlite_files;
+pub mod sweep_probe;
 pub mod user_prompts_sql;
 pub mod vector;
 pub mod vector_utils;

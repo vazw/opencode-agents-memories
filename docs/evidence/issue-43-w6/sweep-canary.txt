@@ -1,0 +1,22 @@
+# Issue 43 W6c — the erasure canary
+
+## Command
+
+```
+CARGO_TARGET_DIR=.tmp/scratch/target-w6c cargo test -p mem-bridge --test sweep
+```
+
+## Cases (Step 17 group 1 + group 5)
+
+- `test_sweep_erases_the_canary_bytes_from_all_three_targets` — one marker row per tier, logically deleted, plus a `.bak` copy carrying the marker. Asserts the marker IS on disk before the sweep (non-vacuity), then that it is gone from `user-prompts.db`, `user-profiles.db`, `episodic.db`, each `-wal`, and that the `.bak` is reaped; each tier still answers and is stamped.
+- `test_sweep_state_is_empty_before_any_sweep` — a migrated, never-swept database has no stamp row, so `notYetSwept` comes from data.
+- `test_the_tshm_sensor_separates_a_flag_on_holder_from_a_flag_off_one` (mem-store `open_guard`) — the sensor the sweep preflight reads.
+- `test_sweep_preflight_refuses_a_real_flag_on_holder_and_clears_a_flag_off_one` — the preflight against REAL children.
+
+## Result
+
+```
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+Raw log: `.tmp/scratch/w6c-step17-canary.log` (gitignored scratch; re-run the command above to reproduce).

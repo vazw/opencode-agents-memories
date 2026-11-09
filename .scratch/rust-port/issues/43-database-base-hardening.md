@@ -18,6 +18,38 @@ Next: owner picks **70** (wire method set), **28** (live swap), or the **zstd ad
 The **ADR-0019 text** landed `Accepted` at `b36920e`, and **issue 72** consumed `delete_memories` at `6d2c1f4`.
 **Blocks issue 39 (retention cleanup) and issue 41 (scheduler).**
 
+**W6 close-out, 2026-11-09 (umbrella still `ready-for-human`).** Both waves landed:
+**W6a** on `issue-43/w6a-substrate` (`3db778d` tests, `8b44e56` the atomic flip,
+`d62edb0` ADR-0025 + evidence), merged at `4878834`; **W6c** on
+`issue-43/w6c-erasure` (`ac22307` sweep-stamp migrations, `ed2c11a` `Vacuum` /
+`for_sweep` / wired read-only row, `ab5dde8` sweep preflight + runner + `.bak`
+reaper + canary, `1435d63` `--mode=sweep` dispatch + milestone counter,
+`647d5e6` erasure disclosure DTO/port/route, `3755eb0` web-ui three-surface
+copy, and the C8 commit carrying this line, ADR-0019's amendment and
+`docs/evidence/issue-43-w6/`). Gates at close: workspace **313 suites / 2538
+passed / 0 failed / 33 ignored**, `mem-web` 43 suites, `mem-bridge --test sweep`
+9, `mem-store --test open_guard` 29/1 ignored, both clippy gates exit 0, `fmt
+--all --check` clean, `trunk build` green, wasm `confirm` 6/6; evidence in
+`docs/evidence/issue-43-w6/REPORT.md`.
+
+**Why it stays `ready-for-human`:** the tracker's own rule needs BOTH waves AND
+owner acceptance of ADR-0025. **ADR-0025 is still `Proposed` — the owner has not
+reviewed it**, so that condition is unmet and the umbrella is not closed.
+
+Residuals carried, none hidden:
+
+1. **The pre-issue-45 binary blind spot** — a still-launchable pre-drop binary
+   can open the same file flag-on; the guard refuses it when it holds the
+   `-tshm`, a peer holding nothing is invisible (ADR-0025's accepted posture).
+2. **`vacuum-under-legacy-holder` is unmeasured and unreachable post-W6a** — no
+   process in this tree opens flag-on, and the sweep holds the engine lock, so no
+   measurement is possible without a purpose-built pre-drop binary
+   (`docs/evidence/issue-43-w6/NEEDS_VALIDATION-vacuum-legacy-holder.md`). The
+   cell stays `needs_validation`.
+3. **Windows post-drop opens are untested** — no runner exists here; the Windows
+   cell is a table row plus unit cells, and nothing more is claimed.
+4. **A3/A4 remain fenced to issue 131.**
+
 ## RE-VERIFICATION 2026-10-25 (architecture pass) — read this before the items below
 
 An architecture review re-derived every claim from the tree and from turso probes. **Four claims in this

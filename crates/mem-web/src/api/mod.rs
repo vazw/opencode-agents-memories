@@ -92,7 +92,7 @@ pub struct RouteSpec {
 /// additions.
 ///
 /// Both the contract test and the auth walk iterate this constant.
-pub const ROUTE_TABLE: [RouteSpec; 41] = [
+pub const ROUTE_TABLE: [RouteSpec; 42] = [
     RouteSpec {
         method: "GET",
         path: "/api/health",
@@ -234,6 +234,13 @@ pub const ROUTE_TABLE: [RouteSpec; 41] = [
     RouteSpec {
         method: "DELETE",
         path: "/api/prompts/{id}",
+        upstream_line: ":638",
+        module: "api/prompts.rs",
+        expectation: RouteExpectation::Success,
+    },
+    RouteSpec {
+        method: "GET",
+        path: "/api/prompts/{id}/erasure",
         upstream_line: ":638",
         module: "api/prompts.rs",
         expectation: RouteExpectation::Success,
@@ -442,6 +449,7 @@ pub fn api_router() -> Router<Arc<AppState>> {
         )
         .route("/api/migration/run", post(maintenance::run_migration))
         .route("/api/prompts/{id}", delete(prompts::delete_prompt))
+        .route("/api/prompts/{id}/erasure", get(prompts::erasure))
         .route(
             "/api/prompts/bulk-delete",
             post(prompts::bulk_delete_prompts).delete(reject_bulk_delete_id),

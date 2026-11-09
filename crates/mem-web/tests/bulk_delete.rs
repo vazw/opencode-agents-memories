@@ -309,10 +309,12 @@ async fn test_delete_prompt_endpoint_reports_the_deleted_memory_flag() {
     )
     .await;
     assert_eq!(cascaded.status, 200, "{}", cascaded.body_string());
-    assert_eq!(
-        cascaded.body_string(),
-        r#"{"success":true,"data":{"deletedMemory":true}}"#
-    );
+    // Issue 43 W6c: the body gained the always-present `erasure` object; the
+    // upstream flag is unchanged (the pin moved from an exact body to the flag
+    // plus the disclosure's presence).
+    let body: Value = serde_json::from_str(&cascaded.body_string()).expect("JSON");
+    assert_eq!(body["data"]["deletedMemory"], json!(true));
+    assert!(!body["data"]["erasure"].is_null(), "{body}");
     assert!(
         backend.memory(MEMORY_ID).is_none(),
         "the cascade deleted the linked memory"
@@ -326,11 +328,13 @@ async fn test_delete_prompt_endpoint_reports_the_deleted_memory_flag() {
         None,
     )
     .await;
+    let body: Value = serde_json::from_str(&uncascaded.body_string()).expect("JSON");
     assert_eq!(
-        uncascaded.body_string(),
-        r#"{"success":true,"data":{"deletedMemory":false}}"#,
+        body["data"]["deletedMemory"],
+        json!(false),
         "without ?cascade=true the linked memory is kept"
     );
+    assert!(!body["data"]["erasure"].is_null(), "{body}");
 
     let missing = api_request(
         router,

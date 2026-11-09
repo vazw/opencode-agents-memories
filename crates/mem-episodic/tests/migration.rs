@@ -127,13 +127,13 @@ async fn test_fresh_db_creates_agent_sessions_v2() {
 
     let db = store.ready().await.expect("ready");
 
-    // user_version == 7 after the v1..v5 set plus the convergent v6 retention schema and
-    // issue 110's v7 `capture_inbox.not_before`.
+    // user_version == 8 after the v1..v5 set plus the convergent v6 retention schema,
+    // issue 110's v7 `capture_inbox.not_before`, and issue 43 W6c's v8 sweep stamp.
     let row = query_one(db.as_ref(), "PRAGMA user_version", Vec::new())
         .await
         .expect("pragma user_version")
         .expect("user_version row");
-    assert_eq!(row.i64("user_version"), Some(7));
+    assert_eq!(row.i64("user_version"), Some(8));
 
     // All fourteen columns, in declaration order (v6 appends agent_role).
     let columns = table_columns(db.as_ref()).await;
@@ -193,7 +193,7 @@ async fn test_fresh_db_is_idempotent() {
     )
     .await
     .expect("re-apply");
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 
     let tables: Vec<String> = second
         .query(
@@ -245,7 +245,7 @@ async fn test_upgrade_does_not_touch_existing_migrations() {
         .await
         .expect("pragma")
         .expect("row");
-    assert_eq!(version.i64("user_version"), Some(7));
+    assert_eq!(version.i64("user_version"), Some(8));
 
     // No other migration set is applied to the dedicated episodic database.
     let foreign_tables: Vec<String> = db
@@ -453,7 +453,7 @@ async fn test_upgrade_v1_to_v2_adds_soft_delete_columns() {
         .await
         .expect("pragma")
         .expect("row");
-    assert_eq!(version.i64("user_version"), Some(7));
+    assert_eq!(version.i64("user_version"), Some(8));
 
     let columns = table_columns(db.as_ref()).await;
     assert_eq!(
@@ -581,7 +581,7 @@ async fn test_v3_migration_creates_episodic_milestones_table_and_index() {
         .await
         .expect("pragma user_version")
         .expect("user_version row");
-    assert_eq!(version.i64("user_version"), Some(7));
+    assert_eq!(version.i64("user_version"), Some(8));
 
     let columns = milestone_columns(db.as_ref()).await;
     assert_eq!(
@@ -680,7 +680,7 @@ async fn test_v2_migration_is_idempotent() {
     )
     .await
     .expect("re-apply");
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 
     // Re-applying never duplicates columns or the v2 index.
     let columns = table_columns(db.as_ref()).await;

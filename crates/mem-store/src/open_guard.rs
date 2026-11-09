@@ -356,6 +356,10 @@ pub(crate) struct Preflight<'a> {
     pub probe_path: &'a Path,
     pub mode: WalMode,
     pub writability: Writability,
+    /// Whether this open carries [`crate::db::ExperimentalFeature::Vacuum`].
+    /// `Vacuum ∧ MultiprocessWal` refuses at preflight (ADR-0025 D-25-11) — one
+    /// layer above turso's mid-VACUUM translation error.
+    pub vacuum: bool,
     /// Whether this platform can answer the probe (`#[cfg(unix)]` at the `db.rs`
     /// seam). `false` ⇒ no probe call and a recorded
     /// [`Divergence::NoProbeOnPlatform`], never an `Unknown` refusal.
@@ -410,6 +414,18 @@ fn direction_label(direction: &OpenDirection) -> &'static str {
     }
 }
 
+/// D-25-11 (issue 43 W6c): the one option-set combination refused before any
+/// turso call. VACUUM is a translation error under multiprocess WAL
+/// (`turso_capabilities.rs` AC17), so the refusal is typed one layer above it —
+/// and it is a pure predicate so the cell is data, not a buried branch.
+///
+/// Unreachable from production option sets (`for_sweep` never carries the
+/// multiprocess token); kept as the durable rule for future selectable-WAL work.
+#[must_use]
+pub(crate) fn vacuum_with_multiprocess_is_refused(vacuum: bool, multiprocess: bool) -> bool {
+    vacuum && multiprocess
+}
+
 /// Refuses **before** any turso call, and never mutates the database file.
 ///
 /// Order: classify → [`decide`] → if the decision refuses, apply the override (one
@@ -419,6 +435,18 @@ pub(crate) fn preflight(
     preflight: &Preflight<'_>,
     probe: ProbeFn,
 ) -> Result<Clearance, StoreError> {
+    // D-25-11: the combination is refused before the override is even consulted.
+    // The override bypasses the legacy-holder *probe*; it cannot make turso
+    // translate a VACUUM under multiprocess WAL, so it must not bypass this.
+    if vacuum_with_multiprocess_is_refused(
+        preflight.vacuum,
+        preflight.mode == WalMode::Multiprocess,
+    ) {
+        return Err(StoreError::UnsupportedOpenMode {
+            db_path: preflight.db_path.to_path_buf(),
+            mode: "vacuum-multiprocess",
+        });
+    }
     let (override_on, override_source) = override_state(preflight);
     // No probe runs while the override is active — **neither** this one (the
     // pre-open probe) nor the post-open re-probe (`postflight` returns early on
@@ -726,6 +754,21 @@ fn read_marker(path: &Path) -> Result<Option<ModeMarker>, StoreError> {
     Ok(serde_json::from_str::<ModeMarker>(&contents).ok())
 }
 
+/// The mode a **live** marker in `root` claims, or `None` when there is no live
+/// claim (absent, dead, empty or unparsable).
+///
+/// Issue 43 W6c's sweep preflight uses this as one of its two inputs: a live
+/// `multiprocess` marker refuses the sweep regardless of the `-tshm` sensor
+/// (ADR-0025 R3). Mode truth is not clearance — the sweep's probe still decides
+/// when this answers `None`.
+pub(crate) fn live_marker_mode(root: &Path, probe: &dyn ProcessProbe) -> Option<WalMode> {
+    let marker = read_marker(&marker_path(root)).ok().flatten()?;
+    probe
+        .liveness(marker.state.pid, marker.start_time)
+        .is_alive()
+        .then_some(marker.mode)
+}
+
 /// Records (or validates) the A5 mode marker for a **writable** open.
 ///
 /// Branches, all tested with an injected [`ProcessProbe`]:
@@ -995,6 +1038,33 @@ mod tests {
         }
         assert_eq!(WalMode::Legacy.as_str(), "legacy");
         assert_eq!(WalMode::Multiprocess.as_str(), "multiprocess");
+    }
+
+    /// D-25-11 (issue 43 W6c): the `Vacuum ∧ MultiprocessWal` cell, as data.
+    ///
+    /// The refusal is a pure predicate so the combination is a table row rather
+    /// than a branch buried in `preflight`; the integration assertion in
+    /// `turso_capabilities.rs` proves the same cell through the production
+    /// factory. Inverted world: dropping the `&&` turns exactly the
+    /// `(true, true)` cell red.
+    #[test]
+    fn test_vacuum_with_multiprocess_is_refused_by_the_pure_cell() {
+        assert!(
+            vacuum_with_multiprocess_is_refused(true, true),
+            "vacuum + multiprocess WAL refuses"
+        );
+        assert!(
+            !vacuum_with_multiprocess_is_refused(true, false),
+            "vacuum alone clears"
+        );
+        assert!(
+            !vacuum_with_multiprocess_is_refused(false, true),
+            "multiprocess alone clears (it is refused elsewhere)"
+        );
+        assert!(
+            !vacuum_with_multiprocess_is_refused(false, false),
+            "neither token clears"
+        );
     }
 
     /// 45.13 / issue 43 W6a: the **inverted** `mode × writability × probe` product,
@@ -1437,6 +1507,7 @@ mod tests {
             probe_path: db_path,
             mode,
             writability: Writability::Writable,
+            vacuum: false,
             probe_eligible: true,
             allow_unguarded_open,
             env_override: None,

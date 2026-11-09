@@ -139,6 +139,10 @@ fn canonical(row: &RouteSpec) -> Canonical {
             ("DELETE", "/api/prompts/{id}") => {
                 ("DELETE", format!("/api/prompts/{PROMPT_ID}"), None)
             }
+            // Issue 43 W6c: the disclosure status read (H9).
+            ("GET", "/api/prompts/{id}/erasure") => {
+                ("GET", format!("/api/prompts/{PROMPT_ID}/erasure"), None)
+            }
             ("POST", "/api/prompts/bulk-delete") => (
                 "POST",
                 "/api/prompts/bulk-delete".to_string(),
@@ -341,8 +345,9 @@ async fn test_every_new_route_requires_the_api_token() {
         );
         assert_no_credentials(&format!("{} {}", row.method, row.path), &response);
     }
-    // 41 rows − `/api/health` − the 2 catalog rows = 38 token-gated rows.
-    assert_eq!(walked, 38, "the token walk covers every /api/* row");
+    // 42 rows − `/api/health` − the 2 catalog rows = 39 token-gated rows
+    // (issue 43 W6c adds `GET /api/prompts/{id}/erasure`).
+    assert_eq!(walked, 39, "the token walk covers every /api/* row");
 }
 
 #[tokio::test]
@@ -370,7 +375,7 @@ async fn test_every_new_route_is_refused_for_a_foreign_host_header() {
         );
         assert_no_credentials(&format!("{} {}", row.method, row.path), &response);
     }
-    assert_eq!(walked, 40, "the Host walk covers every non-health row");
+    assert_eq!(walked, 41, "the Host walk covers every non-health row");
 }
 
 #[tokio::test]
@@ -405,7 +410,7 @@ async fn test_every_new_route_is_gated_by_basic_auth() {
         );
         assert_no_credentials(&format!("{} {}", row.method, row.path), &response);
     }
-    assert_eq!(walked, 40, "the Basic walk covers every non-health row");
+    assert_eq!(walked, 41, "the Basic walk covers every non-health row");
 }
 
 #[tokio::test]
@@ -429,7 +434,7 @@ async fn test_every_new_route_answers_a_reachable_response() {
         assert_no_credentials(&format!("{} {}", row.method, row.path), &response);
     }
     assert_eq!(
-        walked, 40,
+        walked, 41,
         "the reachability walk covers every non-health row"
     );
 }

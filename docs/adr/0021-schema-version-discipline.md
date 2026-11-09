@@ -39,15 +39,22 @@ maximum. The maximum is a constant **beside the set**, not derived from the migr
 |---|---|---|
 | `metadata.db` | `METADATA_MAX_KNOWN` | 2 (W4) |
 | memory shards | `MEMORY_SHARD_MAX_KNOWN` | 3 (W2's v3) |
-| `user_prompts` | `USER_PROMPTS_MAX_KNOWN` | 2 (W5) |
-| `user_profiles` | `USER_PROFILES_MAX_KNOWN` | 1 |
-| episodic | `EPISODIC_MAX_KNOWN` | 7 (issue 110's v7) |
+| `user_prompts` | `USER_PROMPTS_MAX_KNOWN` | 3 (issue 43 W6c's sweep stamp) |
+| `user_profiles` | `USER_PROFILES_MAX_KNOWN` | 2 (issue 43 W6c's sweep stamp) |
+| episodic | `EPISODIC_MAX_KNOWN` | 8 (issue 43 W6c's sweep stamp) |
 | `facts.db` | `FACTS_MAX_KNOWN` | 1 |
 | `vault.db` | `VAULT_MAX_KNOWN` | 1 |
 
-Deriving the maximum from the slice is wrong: `apply_episodic_schema` applies v6 and v7 while
-`episodic_migrations()` returns v1..v5, so a derived maximum would refuse every v6 or v7 database on the
-second open. `EPISODIC_MAX_KNOWN` is therefore 7, not 5.
+Deriving the maximum from the slice is wrong: `apply_episodic_schema` applies v6, v7 and v8 while
+`episodic_migrations()` returns v1..v5, so a derived maximum would refuse every v6, v7 or v8 database on the
+second open. `EPISODIC_MAX_KNOWN` is therefore 8, not 5.
+
+**Amendment (issue 43 W6c, 2026-11-09).** The three bumps are data-migration-free: each adds only
+`CREATE TABLE IF NOT EXISTS sweep_state (tier TEXT PRIMARY KEY, last_swept_unix_ms INTEGER NOT NULL)`, the
+table the sweep writes its truthful stamp into — no column change, no row rewrite, no second backup. The
+prompts v3 and profiles v2 legs are applied by their own appliers after the v2/v1 folds; the episodic v8 leg
+runs after v6/v7, which is why none of the three can live in the migration slice (a slice-level row would
+stamp a fresh file above its own pending legs).
 
 **D-21-3 — Refuse before the pending check, on `current`, never on `target`.**
 `apply_schema_migrations` reads `user_version` and returns

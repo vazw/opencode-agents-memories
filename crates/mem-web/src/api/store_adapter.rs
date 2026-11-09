@@ -70,8 +70,8 @@ use super::dto::{MilestoneItemDto, ProjectRowDto, PromotedFactDto};
 use super::ports::{
     CatalogEntry, CleanupApplied, CleanupPreview, EmbedPort, MemoryPort, MemoryRow, MemoryUpdate,
     MilestonePort, NewMemory, NewSkill, PortError, ProfileChangelog as ChangelogDto,
-    ProfileErasure, ProfilePort, ProfileRecord, PromptPort, PromptRow, SearchHit, SessionPort,
-    ShardRef, Skill, SkillPatch, TagRow,
+    ProfileErasure, ProfilePort, ProfileRecord, PromptErasure, PromptPort, PromptRow, SearchHit,
+    SessionPort, ShardRef, Skill, SkillPatch, TagRow,
 };
 
 /// The dependencies the production wiring needs (the W5.x composition root
@@ -711,15 +711,41 @@ impl PromptPort for ProductionPrompts {
             .map_err(profile_failure)
     }
 
-    async fn delete_prompt(&self, id: &str) -> Result<(), PortError> {
+    async fn delete_prompt(&self, id: &str) -> Result<PromptErasure, PortError> {
         // Issue 48: the manager erases the contributing profiles and only then
-        // deletes the prompt (E2). The REST surface reports nothing about the
-        // erasure — `DELETE /api/user-profile` is the surface that reports counts.
-        self.manager
+        // deletes the prompt (E2). Issue 43 W6c: the `PromptDeletion` the
+        // manager returns is the disclosure's source, so it is no longer
+        // discarded here.
+        let deletion = self
+            .manager
             .delete_prompt(id)
             .await
-            .map(|_deletion| ())
-            .map_err(profile_failure)
+            .map_err(profile_failure)?;
+        Ok(match deletion {
+            mem_profile::erasure::PromptDeletion::Deleted { erasure } => PromptErasure {
+                existed: true,
+                profiles_deleted: erasure.map(|report| report.profiles_deleted).unwrap_or(0),
+                changelogs_deleted: erasure.map(|report| report.changelogs_deleted).unwrap_or(0),
+            },
+            mem_profile::erasure::PromptDeletion::Absent => PromptErasure::default(),
+        })
+    }
+
+    async fn sweep_state(&self, tier: &str) -> Result<Option<i64>, PortError> {
+        let db = self.manager.ready().await.map_err(profile_failure)?;
+        // A build without the W6c migration leg still answers honestly: the
+        // table is created idempotently, then the tier is looked up.
+        db.execute(mem_store::schema_migrations::SWEEP_STATE_DDL, Vec::new())
+            .await
+            .map_err(store_failure)?;
+        let row = query_one(
+            db.as_ref(),
+            "SELECT last_swept_unix_ms FROM sweep_state WHERE tier = ?",
+            vec![Value::Text(tier.to_string())],
+        )
+        .await
+        .map_err(store_failure)?;
+        Ok(row.map(|row| row.i64("last_swept_unix_ms").unwrap_or_default()))
     }
 }
 

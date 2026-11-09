@@ -17,11 +17,15 @@ use mem_store::schema_migrations::{MigrationOptions, USER_PROMPTS_MAX_KNOWN};
 
 const PROMPTS_DB: &str = "user-prompts.db";
 
+/// The v2 leg pinned under a **v2-max** build: this suite is the v2 battery,
+/// and the production maximum moved to v3 with issue 43 W6c (the v3 sweep-stamp
+/// leg is covered by `tests/sweep_stamp.rs`). A v3 file is therefore still
+/// "newer than this build" here — the refusal's shape is what is pinned.
 fn migration_options(db_path: &Path) -> MigrationOptions {
     MigrationOptions {
         db_path: Some(db_path.to_path_buf()),
         label: "test",
-        max_known: USER_PROMPTS_MAX_KNOWN,
+        max_known: 2,
     }
 }
 
@@ -292,7 +296,10 @@ async fn test_v2_file_is_a_noop_and_stays_2() {
     let proof = common::exclusive_root(&config.storage_path);
     let options = migration_options(&db_path);
 
-    assert_eq!(USER_PROMPTS_MAX_KNOWN, 2, "the prompts set's maximum is v2");
+    assert_eq!(
+        USER_PROMPTS_MAX_KNOWN, 3,
+        "the production maximum is v3; this suite pins the v2 leg under max_known = 2"
+    );
     let first = mem_store::schema_migrations::apply_user_prompts_schema(
         db.as_ref(),
         &options,
@@ -326,7 +333,7 @@ async fn test_a_v2_file_runs_no_write() {
     let options = MigrationOptions {
         db_path: None,
         label: "test",
-        max_known: USER_PROMPTS_MAX_KNOWN,
+        max_known: 2,
     };
 
     let version = mem_store::schema_migrations::apply_user_prompts_schema(&db, &options, None)
@@ -373,7 +380,10 @@ async fn test_v3_file_is_refused_before_the_pending_check() {
         }) => {
             assert_eq!(label, "test");
             assert_eq!(found, 3);
-            assert_eq!(supported, USER_PROMPTS_MAX_KNOWN);
+            assert_eq!(
+                supported, 2,
+                "this suite pins the v2 leg, so a v3 file is newer than it"
+            );
         }
         other => panic!("expected a typed refusal before the pending check, got {other:?}"),
     }
@@ -442,7 +452,7 @@ async fn test_missing_table_at_v1_is_surfaced_not_swallowed() {
     let options = MigrationOptions {
         db_path: None,
         label: "test",
-        max_known: USER_PROMPTS_MAX_KNOWN,
+        max_known: 2,
     };
     let outcome =
         mem_store::schema_migrations::apply_user_prompts_schema(&double, &options, None).await;

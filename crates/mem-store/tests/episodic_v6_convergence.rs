@@ -9,7 +9,8 @@
 //! failing on a duplicate column.
 //!
 //! Since issue 110 the same apply continues to v7
-//! (`capture_inbox.not_before`), so the observed `user_version` is 7; the
+//! (`capture_inbox.not_before`), and since issue 43 W6c to v8 (the
+//! `sweep_state` sweep stamp), so the observed `user_version` is 8; the
 //! assertions below are unchanged in meaning.
 
 mod common;
@@ -143,8 +144,8 @@ async fn test_v6_rerun_after_a_partial_application_converges() {
     )
     .await
     .expect("the retry converges instead of a duplicate-column error");
-    assert_eq!(outcome.version, 7);
-    assert_eq!(user_version(&*db).await, 7);
+    assert_eq!(outcome.version, 8);
+    assert_eq!(user_version(&*db).await, 8);
 
     let columns = table_columns(&*db, "agent_sessions").await;
     assert_eq!(
@@ -189,8 +190,8 @@ async fn test_v6_partial_application_with_a_missing_table_converges() {
     )
     .await
     .expect("the retry converges and creates the missing table");
-    assert_eq!(outcome.version, 7);
-    assert_eq!(user_version(&*db).await, 7);
+    assert_eq!(outcome.version, 8);
+    assert_eq!(user_version(&*db).await, 8);
     assert_eq!(
         table_columns(&*db, "episodic_segments").await,
         [
@@ -228,12 +229,12 @@ async fn test_v6_pragma_path_is_the_measured_constant() {
     )
     .await
     .expect("first apply");
-    assert_eq!(outcome.version, 7);
+    assert_eq!(outcome.version, 8);
     assert_eq!(
         outcome.pragma, V6_PRAGMA_PATH_MEASURED,
         "the first apply must take the MEASURED pragma path"
     );
-    assert_eq!(user_version(&*db).await, 7);
+    assert_eq!(user_version(&*db).await, 8);
 }
 
 /// Wraps the real handle and refuses the FIRST batch containing the version
@@ -303,8 +304,8 @@ async fn test_v6_pragma_refusal_falls_back_and_converges() {
     .await
     .expect("the fallback path converges");
     assert_eq!(outcome.pragma, PragmaOutcome::Fallback);
-    assert_eq!(outcome.version, 7);
-    assert_eq!(user_version(db.as_ref()).await, 7);
+    assert_eq!(outcome.version, 8);
+    assert_eq!(user_version(db.as_ref()).await, 8);
 
     for table in ["episodic_raw_context", "episodic_segments"] {
         assert!(
@@ -335,7 +336,7 @@ async fn test_v6_reopen_reports_not_attempted() {
     )
     .await
     .expect("first apply");
-    assert_eq!(first.version, 7);
+    assert_eq!(first.version, 8);
 
     let reopened = apply_episodic_schema(
         &*db,
@@ -348,7 +349,7 @@ async fn test_v6_reopen_reports_not_attempted() {
     assert_eq!(
         reopened,
         EpisodicSchemaOutcome {
-            version: 7,
+            version: 8,
             pragma: PragmaOutcome::NotAttempted,
         },
         "the reopen path never claims a pragma path it did not run"

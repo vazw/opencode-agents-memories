@@ -174,10 +174,20 @@ async fn test_delete_endpoint_removes_every_copy_in_the_scope_and_keeps_the_neig
     assert_eq!(response.status, 200, "{}", response.body_string());
     let body = json_body(&response);
     assert_eq!(body["success"], json!(true));
+    // Issue 43 W6c: the DTO gained the always-present `erasure` object. The
+    // upstream flag and the "never a copy count" rule are unchanged.
     assert_eq!(
-        body["data"],
-        json!({"deletedPrompt": false}),
-        "the wire DTO carries the prompt flag only — never a copy count"
+        body["data"]["deletedPrompt"],
+        json!(false),
+        "the wire DTO still carries the prompt flag"
+    );
+    assert!(
+        !body["data"]["erasure"].is_null(),
+        "the disclosure object is always present: {body}"
+    );
+    assert!(
+        body["data"].get("count").is_none() && body["data"].get("copies").is_none(),
+        "never a copy count: {body}"
     );
 
     assert_eq!(

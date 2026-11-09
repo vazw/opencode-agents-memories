@@ -2,6 +2,10 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-09
+- **Implementation:** landed in issue 43 W6a (the flip: `MultiprocessWal` dropped from
+  `for_config`, `decide` inverted, the `-tshm` sensor wired) and W6c (the sweep, the
+  stamp migrations, the wired read-only divergence row). **Acceptance is pending owner
+  review** — the status stays `Proposed` until it lands.
 - **Builds on:** ADR-0021 (schema-version discipline: newer-file/older-build is the
   refusal direction), ADR-0007 (D-31/D-39: multiprocess WAL is architecturally
   unnecessary — one engine per storage root). **Supersedes:** the routed
