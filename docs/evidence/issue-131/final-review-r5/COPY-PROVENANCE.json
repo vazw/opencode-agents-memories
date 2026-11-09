@@ -1,0 +1,112 @@
+[
+  {
+    "source": ".tmp/progress/blueprint-20261109-0955-issue131-fixture-r5.review-3.md",
+    "copy": "docs/evidence/issue-131/final-review-r5/review-3.md",
+    "sha256": "0e84053054ce95939fae57cd8866c32721d03d5f74b9bf2c7d51533d0a033ee6"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M2-instrumentation.diff",
+    "copy": "docs/evidence/issue-131/final-review-r5/M2-instrumentation.diff",
+    "sha256": "396a6e488c5a4cc2307df70b1ad86db4b80eb8b64b97e50fb86ea759048772a8"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M2-mutant.log",
+    "copy": "docs/evidence/issue-131/final-review-r5/M2-mutant.log",
+    "sha256": "56f3c8a1cc050e6da1901978cba1f224d98e68dffe31479e9c23213b7e09984d"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M2-mutant.sha256",
+    "copy": "docs/evidence/issue-131/final-review-r5/M2-mutant.sha256",
+    "sha256": "38bf896774d6b11ed28de7c6bea50cafbf5dcf7cf065368b0da79803df4f01b8"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M2-mutation.diff",
+    "copy": "docs/evidence/issue-131/final-review-r5/M2-mutation.diff",
+    "sha256": "5b3d3a4e96bbbac9375f3b91618eaaad540ec4c0792b4177c54e1e1946c91b1d"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M2-production.log",
+    "copy": "docs/evidence/issue-131/final-review-r5/M2-production.log",
+    "sha256": "d159f4c2f1d6ebea3bcef013552144ec122d83609228c59bfd3b3747e79fc9e9"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M2-production.sha256",
+    "copy": "docs/evidence/issue-131/final-review-r5/M2-production.sha256",
+    "sha256": "6b695c8f9484880772c131832778a4ce2b43b74ac636237e590b2ebdfc237508"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M4-instrumentation.diff",
+    "copy": "docs/evidence/issue-131/final-review-r5/M4-instrumentation.diff",
+    "sha256": "25cb40871861dd589bc0f918a11445457bef31e4693645678ea34ca06d4cabc5"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M4-mutant.log",
+    "copy": "docs/evidence/issue-131/final-review-r5/M4-mutant.log",
+    "sha256": "c398a66d114e033ef3c4e37334e6de93a9073e0337e70ee2b5ccf0adb077db64"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M4-mutant.sha256",
+    "copy": "docs/evidence/issue-131/final-review-r5/M4-mutant.sha256",
+    "sha256": "8d2e34100a2fbf0dc045b2ed0cba7ec094e3a065a2f7c0c00d75769d9a481d8d"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M4-mutation.diff",
+    "copy": "docs/evidence/issue-131/final-review-r5/M4-mutation.diff",
+    "sha256": "740fe3f1b1dc3915a877d4a126baa1c78be5fcd7d737c0878218ef940e4d80cc"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M4-production.log",
+    "copy": "docs/evidence/issue-131/final-review-r5/M4-production.log",
+    "sha256": "111d5fdf7f9fe2b400b84d315bd561ac4d265b4098683d762a5b6ca910268bba"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M4-production.sha256",
+    "copy": "docs/evidence/issue-131/final-review-r5/M4-production.sha256",
+    "sha256": "25814b9b0f4be0af4c04db3db6638916cfb986c095b493ba588b91774e3e59c3"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M5-instrumentation.diff",
+    "copy": "docs/evidence/issue-131/final-review-r5/M5-instrumentation.diff",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M5-mutant.log",
+    "copy": "docs/evidence/issue-131/final-review-r5/M5-mutant.log",
+    "sha256": "89451cbaff220860820305ab02644d4b63366eec7883495f323daa9e1fbbd2e9"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M5-mutant.sha256",
+    "copy": "docs/evidence/issue-131/final-review-r5/M5-mutant.sha256",
+    "sha256": "78aa7338e8403eb3cf957ce702638016a05fbdec1a235db880df8f9344ddc937"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M5-mutation.diff",
+    "copy": "docs/evidence/issue-131/final-review-r5/M5-mutation.diff",
+    "sha256": "3cd976cb3c5eb9f0771c6c9e9e26681e49735814070401ac5a62353a06178837"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M5-production.log",
+    "copy": "docs/evidence/issue-131/final-review-r5/M5-production.log",
+    "sha256": "94d833d96abe46895b5d680fc42efb6c01bcf2b1969f0e9fa73f453c1fe51ec6"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/M5-production.sha256",
+    "copy": "docs/evidence/issue-131/final-review-r5/M5-production.sha256",
+    "sha256": "d5407f927f01fab8d42745d4c85eac827fb80324828832a3392e0d1ccab44408"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/independent-runs.jsonl",
+    "copy": "docs/evidence/issue-131/final-review-r5/independent-runs.jsonl",
+    "sha256": "797c5c267b19169bb98585ee525715e9caec3383ffda12fbfab87e2dc3c813fe"
+  },
+  {
+    "source": ".tmp/progress/issue131-review-final/probe-plan.txt",
+    "copy": "docs/evidence/issue-131/final-review-r5/probe-plan.txt",
+    "sha256": "a873edd829cf0bbc87444773553fdcc5a5f6f453ff54b010ea74ad2a9b9ceccb"
+  },
+  {
+    "source": ".tmp/scratch/issue131-review-final/probes.py",
+    "copy": "docs/evidence/issue-131/final-review-r5/probes.py",
+    "sha256": "55b5065c806761fc78eb4c560dc220cb86477d2cfdf20e6cad13dbefad3d2ec0"
+  }
+]

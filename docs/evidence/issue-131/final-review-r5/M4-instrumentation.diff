@@ -1,0 +1,16 @@
+--- 
++++ 
+@@ -392,10 +392,12 @@
+     fn test_signal_zero_never_targets_zero_negative_or_unrepresentable_pid() {
+         for pid in [u32::MAX, 0] {
+             let mut calls = 0;
+-            let result = signal_zero_with(pid, |_, _| {
++            let result = signal_zero_with(pid, |target, signal| {
+                 calls += 1;
++                println!("M4 recorder pid={pid} target={target} signal={signal} calls={calls}");
+                 Ok(())
+             });
++            println!("M4 pid={pid} result={result:?} calls={calls}");
+             assert_eq!(calls, 0, "invalid pid={pid} must not reach syscall");
+             assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+         }

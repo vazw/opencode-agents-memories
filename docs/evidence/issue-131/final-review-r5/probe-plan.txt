@@ -1,0 +1,1 @@
+Independent reviewer remaining duty: M2 ENOENT+ESRCH verdict; M4 u32::MAX checked conversion; parser first-delimiter mutant. Scratch only .tmp/scratch/issue131-review-final/, own separate target per copy. No live source/target mutation. Prior completed gates reused only upon exact source identity verification.

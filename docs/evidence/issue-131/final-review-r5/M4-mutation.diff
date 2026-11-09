@@ -1,0 +1,14 @@
+--- 
++++ 
+@@ -217,10 +217,7 @@
+     pid: u32,
+     syscall: impl FnOnce(libc::pid_t, libc::c_int) -> std::io::Result<()>,
+ ) -> std::io::Result<()> {
+-    let target = libc::pid_t::try_from(pid)
+-        .ok()
+-        .filter(|target| *target > 0)
+-        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
++    let target = pid as libc::pid_t;
+     syscall(target, 0)
+ }
+ 

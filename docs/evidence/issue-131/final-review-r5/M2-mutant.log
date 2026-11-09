@@ -1,0 +1,27 @@
+warning: unused variable: `signal0`
+   --> crates/mem-store/src/platform.rs:232:5
+    |
+232 |     signal0: impl FnOnce(u32) -> std::io::Result<()>,
+    |     ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_signal0`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+
+running 1 test
+M2 metadata=2 configured_signal=Some(3) pid42/token7 actual=Alive calls=0 (configured errno not observed when skipped)
+
+thread 'platform::tests::test_hidden_proc_holder_stays_alive_unless_signal_reports_esrch' (16715) panicked at crates/mem-store/src/platform.rs:380:13:
+assertion `left == right` failed: metadata=2 signal=Some(3) pid42/token7
+  left: Alive
+ right: Dead
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+platform::tests::test_hidden_proc_holder_stays_alive_unless_signal_reports_esrch --- FAILED
+
+failures:
+
+failures:
+    platform::tests::test_hidden_proc_holder_stays_alive_unless_signal_reports_esrch
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 62 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mem-store --lib`

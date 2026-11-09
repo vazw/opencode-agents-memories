@@ -1,0 +1,14 @@
+--- 
++++ 
+@@ -241,10 +241,7 @@
+             start_time: start_time(pid),
+         },
+         // hidepid can hide a live holder: only signal0 ESRCH corroborates absence.
+-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => match signal0(pid) {
+-            Err(error) if error.raw_os_error() == Some(libc::ESRCH) => ObservedProcess::Absent,
+-            _ => ObservedProcess::Present { start_time: None },
+-        },
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ObservedProcess::Present { start_time: None },
+         // Permissions and I/O errors cannot prove the holder is gone.
+         Err(_) => ObservedProcess::Present { start_time: None },
+     }

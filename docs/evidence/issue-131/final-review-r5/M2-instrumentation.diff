@@ -1,0 +1,25 @@
+--- 
++++ 
+@@ -366,9 +366,9 @@
+     #[test]
+     fn test_hidden_proc_holder_stays_alive_unless_signal_reports_esrch() {
+         for (metadata_errno, signal_errno, expected, calls) in [
++            (libc::ENOENT, Some(libc::ESRCH), Liveness::Dead, 1),
+             (libc::ENOENT, None, Liveness::Alive, 1),
+             (libc::ENOENT, Some(libc::EPERM), Liveness::Alive, 1),
+-            (libc::ENOENT, Some(libc::ESRCH), Liveness::Dead, 1),
+             (libc::ENOENT, Some(libc::EINVAL), Liveness::Alive, 1),
+             (libc::ENOENT, Some(libc::EIO), Liveness::Alive, 1),
+             (libc::EACCES, Some(libc::ESRCH), Liveness::Alive, 0),
+@@ -378,8 +378,10 @@
+                 signal_errno,
+                 calls: std::sync::atomic::AtomicUsize::new(0),
+             };
++            let actual = probe.liveness(42, Some(7));
++            println!("M2 metadata={metadata_errno} configured_signal={signal_errno:?} pid42/token7 actual={actual:?} calls={} (configured errno not observed when skipped)", probe.calls.load(std::sync::atomic::Ordering::SeqCst));
+             assert_eq!(
+-                probe.liveness(42, Some(7)),
++                actual,
+                 expected,
+                 "metadata={metadata_errno} signal={signal_errno:?} pid42/token7"
+             );

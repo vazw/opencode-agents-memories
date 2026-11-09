@@ -1,0 +1,11 @@
+--- 
++++ 
+@@ -168,7 +168,7 @@
+ fn read_proc_start_time(pid: u32) -> Option<u64> {
+     let stat =
+         std::fs::read_to_string(Path::new("/proc").join(pid.to_string()).join("stat")).ok()?;
+-    let after_comm = stat.rsplit_once(')')?.1;
++    let after_comm = stat.split_once(')')?.1;
+     after_comm.split_whitespace().nth(19)?.parse().ok()
+ }
+ 

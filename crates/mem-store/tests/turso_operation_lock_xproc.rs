@@ -20,11 +20,6 @@ use mem_store::operation_lock::{
 };
 use mem_store::platform::SystemProcessProbe;
 
-/// Every "stale owner" fixture uses `u32::MAX`: on Linux `pid_max` never
-/// reaches it, so the pid cannot be allocated even on a long-running host
-/// (the blueprint's literal `999999` may well be alive there).
-const DEAD_PID: u32 = u32::MAX;
-
 fn lock_path(storage: &Path) -> PathBuf {
     storage.join(OPERATION_LOCK_FILE)
 }
@@ -111,26 +106,92 @@ fn test_acquire_refuses_while_live_holder_present() {
     common::cleanup_temp_dir(&storage).expect("cleanup temp dir");
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn test_stale_lock_from_dead_pid_is_reclaimed() {
-    let storage = common::temp_dir("oplock-stale");
-    let path = common::write_lock_state(&storage, OPERATION_LOCK_FILE, DEAD_PID, Some("stale"));
-    assert!(path.exists(), "stale fixture must exist before acquire");
+    for attempt in 0..3 {
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .expect("spawn naturally exiting child");
+        let status = child.wait().expect("reap child");
+        let dead_pid = child.id();
+        assert!(status.success(), "child status {status}");
+        let target = libc::pid_t::try_from(dead_pid).expect("representable child PID");
+        assert!(target > 0);
+        let absent = || {
+            match std::fs::metadata(format!("/proc/{dead_pid}")) {
+                Ok(_) => return false,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => panic!("fixture metadata failed: {error}"),
+            }
+            // SAFETY: checked positive child PID; signal0 delivers no signal.
+            if unsafe { libc::kill(target, 0) } == 0 {
+                return false;
+            }
+            let error = std::io::Error::last_os_error();
+            assert_eq!(error.raw_os_error(), Some(libc::ESRCH), "fixture signal0");
+            true
+        };
+        if !absent() {
+            continue;
+        }
+        let storage = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.tmp/scratch/issue131-fixture-r4")
+            .join(format!("stale-{}-{dead_pid}-{attempt}", std::process::id()));
+        std::fs::create_dir_all(&storage).expect("fixture directory");
+        let path = common::write_lock_state(&storage, OPERATION_LOCK_FILE, dead_pid, Some("stale"));
+        assert!(path.exists(), "stale fixture must exist before acquire");
+        let result =
+            acquire_turso_operation_lock(&storage, Arc::new(SystemProcessProbe), "reclaim");
+        if !absent() {
+            drop(result);
+            common::cleanup_temp_dir(&storage).expect("cleanup reused fixture");
+            continue;
+        }
+        println!(
+            "reaped pid={dead_pid} status={status} pre/post proc=NotFound signal0=ESRCH attempt={attempt}"
+        );
+        let lock = result.expect("a dead-pid lock must be reclaimed, not propagated");
+        let body = std::fs::read_to_string(&path).expect("read reclaimed lock file");
+        let state: LockState = serde_json::from_str(&body).expect("parse reclaimed lock file");
+        assert_eq!(
+            state.pid,
+            std::process::id(),
+            "the stale lock must be replaced by the acquiring process"
+        );
+        assert_ne!(state.pid, dead_pid);
+        drop(lock);
+        common::cleanup_temp_dir(&storage).expect("cleanup temp dir");
+        return;
+    }
+    panic!("fixture unavailable: all three reaped PIDs reused");
+}
 
-    let lock = acquire_turso_operation_lock(&storage, Arc::new(SystemProcessProbe), "reclaim")
-        .expect("a dead-pid lock must be reclaimed, not propagated");
-
-    let body = std::fs::read_to_string(&path).expect("read reclaimed lock file");
-    let state: LockState = serde_json::from_str(&body).expect("parse reclaimed lock file");
-    assert_eq!(
-        state.pid,
-        std::process::id(),
-        "the stale lock must be replaced by the acquiring process"
+#[test]
+fn test_unrepresentable_holder_pid_is_not_reclaimed() {
+    let storage = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../.tmp/scratch/issue131-fixture-r4")
+        .join(format!("invalid-{}", std::process::id()));
+    std::fs::create_dir_all(&storage).expect("fixture directory");
+    let path = common::write_lock_state(&storage, OPERATION_LOCK_FILE, u32::MAX, None);
+    let bytes = std::fs::read(&path).expect("original lock bytes");
+    let holder = read_live_lock(&storage, OPERATION_LOCK_FILE, &SystemProcessProbe);
+    assert!(
+        holder.is_some(),
+        "unrepresentable holder lock must be retained"
     );
-    assert_ne!(state.pid, DEAD_PID);
-
-    drop(lock);
-    common::cleanup_temp_dir(&storage).expect("cleanup temp dir");
+    assert_eq!(holder.expect("retained holder").pid, u32::MAX);
+    assert_eq!(std::fs::read(&path).expect("retained lock bytes"), bytes);
+    let error = acquire_turso_operation_lock(&storage, Arc::new(SystemProcessProbe), "invalid")
+        .err()
+        .expect("invalid holder must block acquisition");
+    assert!(matches!(
+        error,
+        StoreError::MigrationLocked { pid: u32::MAX, .. }
+    ));
+    assert_eq!(std::fs::read(&path).expect("blocked lock bytes"), bytes);
+    common::cleanup_temp_dir(&storage).expect("cleanup fixture");
 }
 
 #[test]

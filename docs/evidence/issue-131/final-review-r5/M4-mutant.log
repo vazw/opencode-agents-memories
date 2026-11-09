@@ -1,0 +1,20 @@
+
+running 1 test
+M4 recorder pid=4294967295 target=-1 signal=0 calls=1
+M4 pid=4294967295 result=Ok(()) calls=1
+
+thread 'platform::tests::test_signal_zero_never_targets_zero_negative_or_unrepresentable_pid' (9762) panicked at crates/mem-store/src/platform.rs:398:13:
+assertion `left == right` failed: invalid pid=4294967295 must not reach syscall
+  left: 1
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+platform::tests::test_signal_zero_never_targets_zero_negative_or_unrepresentable_pid --- FAILED
+
+failures:
+
+failures:
+    platform::tests::test_signal_zero_never_targets_zero_negative_or_unrepresentable_pid
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 62 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mem-store --lib`

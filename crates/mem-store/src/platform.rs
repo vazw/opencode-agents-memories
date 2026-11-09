@@ -192,22 +192,60 @@ pub fn process_start_time(pid: u32) -> Option<u64> {
 #[cfg(target_os = "linux")]
 #[must_use]
 pub fn observe_process(pid: u32) -> ObservedProcess {
+    observe_process_with(
+        pid,
+        |pid| std::fs::metadata(Path::new("/proc").join(pid.to_string())).map(|_| ()),
+        read_proc_start_time,
+        signal_zero,
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn signal_zero(pid: u32) -> std::io::Result<()> {
+    signal_zero_with(pid, |target, signal| {
+        // SAFETY: adapter supplies a checked positive PID and signal 0 only.
+        if unsafe { libc::kill(target, signal) } == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn signal_zero_with(
+    pid: u32,
+    syscall: impl FnOnce(libc::pid_t, libc::c_int) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let target = libc::pid_t::try_from(pid)
+        .ok()
+        .filter(|target| *target > 0)
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    syscall(target, 0)
+}
+
+#[cfg(target_os = "linux")]
+fn observe_process_with(
+    pid: u32,
+    metadata: impl FnOnce(u32) -> std::io::Result<()>,
+    start_time: impl FnOnce(u32) -> Option<u64>,
+    signal0: impl FnOnce(u32) -> std::io::Result<()>,
+) -> ObservedProcess {
     if pid == 0 {
         return ObservedProcess::Absent;
     }
-    match std::fs::metadata(Path::new("/proc").join(pid.to_string())) {
+    match metadata(pid) {
         // The process may exit between these two reads; that is why the token
         // is optional rather than an error (an unreadable token means "alive").
         Ok(_) => ObservedProcess::Present {
-            start_time: read_proc_start_time(pid),
+            start_time: start_time(pid),
         },
-        // The only absence accepted as proof of death.
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ObservedProcess::Absent,
-        // Any other error (permissions, `hidepid=` mounts, I/O errors) cannot
-        // prove the process is gone, so the holder stays alive. Caveat: a
-        // `hidepid=` mount reports ENOENT for other users' pids, so that case is
-        // indistinguishable from absence — a pre-existing limit of a
-        // `/proc`-based probe, not something the start-time token changes.
+        // hidepid can hide a live holder: only signal0 ESRCH corroborates absence.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => match signal0(pid) {
+            Err(error) if error.raw_os_error() == Some(libc::ESRCH) => ObservedProcess::Absent,
+            _ => ObservedProcess::Present { start_time: None },
+        },
+        // Permissions and I/O errors cannot prove the holder is gone.
         Err(_) => ObservedProcess::Present { start_time: None },
     }
 }
@@ -294,6 +332,200 @@ pub fn system_sleep(delay: Duration) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    struct GatheringProbe {
+        metadata_errno: i32,
+        signal_errno: Option<i32>,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl ProcessProbe for GatheringProbe {
+        fn is_alive(&self, pid: u32) -> bool {
+            self.liveness(pid, None).is_alive()
+        }
+
+        fn liveness(&self, pid: u32, recorded: Option<u64>) -> Liveness {
+            let observed = observe_process_with(
+                pid,
+                |_| Err(std::io::Error::from_raw_os_error(self.metadata_errno)),
+                |_| panic!("unreadable metadata must not read start time"),
+                |_| {
+                    self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    self.signal_errno.map_or(Ok(()), |errno| {
+                        Err(std::io::Error::from_raw_os_error(errno))
+                    })
+                },
+            );
+            decide_liveness(pid, recorded, observed, ProcObservability::ProcFs)
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_hidden_proc_holder_stays_alive_unless_signal_reports_esrch() {
+        for (metadata_errno, signal_errno, expected, calls) in [
+            (libc::ENOENT, None, Liveness::Alive, 1),
+            (libc::ENOENT, Some(libc::EPERM), Liveness::Alive, 1),
+            (libc::ENOENT, Some(libc::ESRCH), Liveness::Dead, 1),
+            (libc::ENOENT, Some(libc::EINVAL), Liveness::Alive, 1),
+            (libc::ENOENT, Some(libc::EIO), Liveness::Alive, 1),
+            (libc::EACCES, Some(libc::ESRCH), Liveness::Alive, 0),
+        ] {
+            let probe = GatheringProbe {
+                metadata_errno,
+                signal_errno,
+                calls: std::sync::atomic::AtomicUsize::new(0),
+            };
+            assert_eq!(
+                probe.liveness(42, Some(7)),
+                expected,
+                "metadata={metadata_errno} signal={signal_errno:?} pid42/token7"
+            );
+            assert_eq!(probe.calls.load(std::sync::atomic::Ordering::SeqCst), calls);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_signal_zero_never_targets_zero_negative_or_unrepresentable_pid() {
+        for pid in [u32::MAX, 0] {
+            let mut calls = 0;
+            let result = signal_zero_with(pid, |_, _| {
+                calls += 1;
+                Ok(())
+            });
+            assert_eq!(calls, 0, "invalid pid={pid} must not reach syscall");
+            assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+        }
+        for errno in [
+            None,
+            Some(libc::ESRCH),
+            Some(libc::EPERM),
+            Some(libc::EINVAL),
+            Some(libc::EIO),
+        ] {
+            let mut targets = Vec::new();
+            let result = signal_zero_with(42, |target, signal| {
+                targets.push((target, signal));
+                errno.map_or(Ok(()), |errno| {
+                    Err(std::io::Error::from_raw_os_error(errno))
+                })
+            });
+            assert_eq!(targets, [(42, 0)]);
+            assert_eq!(result.err().and_then(|error| error.raw_os_error()), errno);
+        }
+        for (pid, expected) in [(u32::MAX, Liveness::Alive), (0, Liveness::Dead)] {
+            let mut calls = 0;
+            let observed = observe_process_with(
+                pid,
+                |_| Err(std::io::Error::from_raw_os_error(libc::ENOENT)),
+                |_| panic!("unexpected start-time read"),
+                |pid| {
+                    signal_zero_with(pid, |_, _| {
+                        calls += 1;
+                        Ok(())
+                    })
+                },
+            );
+            assert_eq!(
+                decide_liveness(pid, Some(7), observed, ProcObservability::ProcFs),
+                expected
+            );
+            assert_eq!(calls, 0);
+        }
+        assert_eq!(SystemProcessProbe.liveness(0, None), Liveness::Dead);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_start_time_parser_handles_comm_with_spaces_and_right_parens() {
+        struct RestoreName([libc::c_char; 16]);
+        impl Drop for RestoreName {
+            fn drop(&mut self) {
+                // SAFETY: saved PR_GET_NAME buffer remains valid and NUL-terminated.
+                assert_eq!(
+                    unsafe { libc::prctl(libc::PR_SET_NAME, self.0.as_ptr()) },
+                    0
+                );
+            }
+        }
+        let mut old = [0; 16];
+        // SAFETY: PR_GET_NAME writes at most 16 bytes into this buffer.
+        assert_eq!(
+            unsafe { libc::prctl(libc::PR_GET_NAME, old.as_mut_ptr()) },
+            0
+        );
+        let _restore = RestoreName(old);
+        // SAFETY: static NUL-terminated comm; changes current test thread only.
+        assert_eq!(
+            unsafe { libc::prctl(libc::PR_SET_NAME, c"a) b)c".as_ptr()) },
+            0
+        );
+        // SAFETY: gettid has no arguments or memory preconditions.
+        let tid = u32::try_from(unsafe { libc::gettid() }).expect("positive thread ID");
+        let text = std::fs::read_to_string(format!("/proc/{tid}/stat")).expect("thread stat");
+        let prefix = format!("{tid} (a) b)c) ");
+        let suffix = text.strip_prefix(&prefix).expect("exact hard comm fixture");
+        // Independent oracle: known exact prefix, then numeric fields 4 onward.
+        let fields: Vec<i128> = suffix
+            .split_whitespace()
+            .skip(1)
+            .map(|field| field.parse().expect("numeric stat field"))
+            .collect();
+        let field22 = u64::try_from(fields[22 - 4]).expect("positive start time");
+        let field21 = u64::try_from(fields[21 - 4]).expect("field21");
+        let field23 = u64::try_from(fields[23 - 4]).expect("field23");
+        assert_ne!(field22, field21);
+        assert_ne!(field22, field23);
+        let parsed = process_start_time(tid);
+        println!(
+            "tid={tid} comm=a) b)c field21={field21} field22={field22} field23={field23} parsed={parsed:?}"
+        );
+        assert_eq!(
+            parsed,
+            Some(field22),
+            "exact field22 with embedded right parentheses"
+        );
+        assert_eq!(
+            decide_liveness(
+                tid,
+                Some(field21),
+                ObservedProcess::Present { start_time: parsed },
+                ProcObservability::ProcFs
+            ),
+            Liveness::Dead
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_system_probe_reclaims_exited_child_and_preserves_self() {
+        let probe = SystemProcessProbe;
+        assert_eq!(probe.liveness(std::process::id(), None), Liveness::Alive);
+        for _ in 0..3 {
+            let mut child = std::process::Command::new("true")
+                .spawn()
+                .expect("spawn natural exit");
+            let pid = child.id();
+            assert!(child.wait().expect("reap child").success());
+            match std::fs::metadata(format!("/proc/{pid}")) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    assert_eq!(
+                        signal_zero(pid).unwrap_err().raw_os_error(),
+                        Some(libc::ESRCH)
+                    );
+                    assert_eq!(probe.liveness(pid, None), Liveness::Dead);
+                    println!("reaped child pid={pid}: absent proc, signal0 ESRCH, Dead");
+                    return;
+                }
+                Ok(_) => continue, // PID reused; never assert death for its new owner.
+                Err(error) => panic!("child fixture metadata: {error}"),
+            }
+        }
+        panic!("fixture-unavailable: all three reaped child PIDs reused");
+    }
 
     /// The three host classes the probe must answer for. Only Linux can be run
     /// here, so they are named as data and every class goes through
