@@ -1,7 +1,6 @@
 # 131 — liveness probe: hidepid=2 ENOENT reads as death (A3) + parser hard-case test (A4)
 
-Status: ready-for-agent — 2026-11-08 (born-triaged: category `bug`, cross-user only; owner ruled
-"separate issue" out of W6, A4 rides; brief in Comments)
+Status: done — 2026-11-09; landed 7dfa639eaa837f9517732e9fdec8a0eeb924d1a3; verified review outcome recorded under Comments
 
 Filed from: W6 erasure architect draft `.tmp/drafts/20261108-w6-erasure-design.md` §4 R9
 (2026-11-08); owner ruling same day (open-question Q3). Root authority: the opsec W6-design audit
@@ -56,3 +55,27 @@ hardening/correctness of a shared primitive, not a W6 blocker.
   `NotFound ⇒ Absent` and documents the hidepid indistinguishability itself; the opsec audit
   (REPORT `:59-61`) bounds exposure to cross-user, outside the stated threat model. Fix shape and
   A4 rider carried verbatim from the architect draft §4 R9.
+
+- **2026-11-09 — verified landing and review outcome.** MEASURED landing commit
+  `7dfa639eaa837f9517732e9fdec8a0eeb924d1a3` is reachable from root `main`;
+  approved source identities and all 81 `docs/evidence/issue-131/SHA256SUMS` entries
+  verified during integration. READ final independent runtime review
+  `docs/evidence/issue-131/final-review-r5/review-3.md`: **APPROVED**;
+  `docs/evidence/issue-131/REPORT.md` §Final independent disposition supersedes earlier
+  OPEN/BLOCKED records without erasing them. READ transcription review
+  `.tmp/progress/blueprint-20261109-0955-issue131-fixture-r5.review-4.md`: **APPROVED**.
+  Historical problem and triage statements above describe pre-fix behavior, not current source.
+  READ reviewed delivery evidence: injected ENOENT requires corroborating ESRCH for death;
+  success/EPERM/unknown observations retain holder; checked positive PID conversion rejects
+  invalid targets before signal calls; parser handles `comm` containing spaces/right parentheses
+  with exact field22 oracle; reviewed cross-process suite covers retained holder behavior.
+  Independent M2/M4/M5 production controls pass and their mutants fail distinguishing
+  assertions (durable review table and six raw logs); synthetic/injected measurements satisfy
+  this issue's non-native gate. Completed package/workspace/fmt/clippy/audit/validator gates
+  retain provenance in `docs/evidence/issue-131/reconciliation-r5/review-1.md` and associated
+  reviewer-gate logs, as carried forward by final review; not rerun for this status draft.
+  Normal integration commit hook passed; no new runtime measurement inferred from landing.
+  **Unmeasured limitations retained:** native cross-user hidepid/EPERM execution, live lock
+  theft/atomic PID reuse, and non-Linux runtime recovery. These are measurement limits,
+  not claims of passed validation. No guard retirement or W6/ADR disposition follows from
+  Issue131 closure; those docs remain separately reviewed scope.
