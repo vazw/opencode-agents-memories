@@ -94,6 +94,43 @@ properties real in the shipped path, is any guarantee asserted rather than measu
 `opsec` reviews the *implementation*, `syseng` gates the *design*. Neither substitutes for the other,
 and neither substitutes for the measurement.
 
+### 6. Wave closeout — worktree cleanup
+
+After independent review approval and integration, retire finished worktrees and their exclusive
+regenerable caches through this checklist. Unsafe trees stay retained with a reason and next action.
+
+1. **Preserve evidence first.** Move required decisions, measurement artifacts, logs, blueprints and
+   ledgers outside the retiring tree. Durable decisions and required evidence belong in tracked
+   repository evidence/docs or durable linked issue/ADR records, not solely another `.tmp/`. Preserve
+   historical ledgers byte-for-byte; record archive locations and checksums in a fresh closeout record.
+   Verify copied artifacts and links remain usable after removal.
+2. **Verify delivery.** Confirm branch commits are integrated into the intended destination and pushed
+   when the wave's delivery contract requires it. Record destination/ref/commit and push status or an
+   explicit not-applicable reason. Unknown integration or push status blocks cleanup. This does not
+   authorize branch deletion or require every wave to push.
+3. **Verify inactivity.** Confirm no sessions or processes use the tree or its caches: planners, coders,
+   tests, build shells, and engine/plugin processes included. Move or finish sessions and stop only
+   owned inactive work after coordination. Recheck immediately before removal; uncertainty blocks it.
+   Run removal from a surviving checkout outside the candidate tree.
+4. **Inspect all contents.** Check tracked modifications, staged changes, untracked files and ignored
+   contents, including `.tmp/`, build caches and storage; clean `git status` alone is insufficient.
+   Preserve required files first. Dirty, active, locked, unintegrated or otherwise unsafe trees remain
+   with an explicit retained reason and next action. Unknown ownership, symlinks or concurrent work
+   means retain, not guess. Never reset, clean, unlock or force away blockers to make removal succeed.
+5. **Remove only verified safe paths.** Use `git worktree remove <absolute-worktree-path>` for a positively
+   identified safe clean worktree; never use force without explicit separate approval. Git refusal is
+   a retained blocker. Reclaim only confirmed exclusive regenerable target caches associated with the
+   retired tree; verify resolved paths and ownership, not names alone. Shared/external
+   `CARGO_TARGET_DIR`, live staged plugin, live storage, backups and uncertain paths are excluded.
+   An embedded target disappears with safe worktree removal; do not delete it twice. Any separately
+   scoped external exclusive cache cleanup needs the same inactivity/path verification, not broad
+   recursive deletion.
+6. **Record closeout in a surviving location.** Record removed paths or retained reasons, next actions,
+   preserved evidence locations and command outcomes. Measure before/after allocated usage, reclaimed
+   bytes and remaining repository usage; state scope and units, with external exclusive cache usage
+   separate where applicable. Disclose concurrent growth or failed measurements; never guess savings.
+   A docs-only workflow update performs no cleanup and reclaims no disk.
+
 ## Recording — always
 
 Every run leaves three things behind:
