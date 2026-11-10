@@ -23,6 +23,38 @@ use web_ui::screens::{
 };
 use web_ui::state_block::{SessionState, session_state};
 
+#[wasm_bindgen_test]
+fn test_home_summary_uses_payload_values_including_zero() {
+    use web_ui::core_screens::{ByScopeView, ShardStatsView, StatsView};
+    let stats = StatsView {
+        total: 7,
+        by_scope: ByScopeView {
+            user: 0,
+            project: 3,
+        },
+        shards: vec![
+            ShardStatsView {
+                is_active: true,
+                ..Default::default()
+            },
+            ShardStatsView {
+                is_active: false,
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
+    assert_eq!(
+        web_ui::screens::home_summary(&stats),
+        [
+            ("Total memories", 7),
+            ("User memories", 0),
+            ("Project memories", 3),
+            ("Active shards", 1),
+        ]
+    );
+}
+
 /// One timeline row for the classifier tables.
 fn row(id: &str) -> SessionRow {
     SessionRow {

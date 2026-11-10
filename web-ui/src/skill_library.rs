@@ -107,6 +107,16 @@ pub fn skills_error_view(message: &str) -> SkillsView {
     SkillsView::Error(message.to_string())
 }
 
+pub fn skills_empty_copy(total: usize, visible: usize) -> Option<&'static str> {
+    if total == 0 {
+        Some("No skills yet")
+    } else if visible == 0 {
+        Some("No skills match your search")
+    } else {
+        None
+    }
+}
+
 pub fn filter_skills(rows: &[SkillRowView], query: &str) -> Vec<SkillRowView> {
     let q = query.trim().to_lowercase();
     if q.is_empty() {
@@ -566,7 +576,7 @@ pub fn SkillLibraryPanel() -> impl IntoView {
                 SkillsView::Empty => view! {
                     <StateBlock
                         kind=BlockKind::Empty
-                        message="No skills"
+                        message=skills_empty_copy(0, 0).unwrap_or("No skills yet")
                         class="state-empty"
                         testid="skills-empty"
                     />
@@ -583,14 +593,24 @@ pub fn SkillLibraryPanel() -> impl IntoView {
                 .into_any(),
                 SkillsView::Loaded { .. } => {
                     let filtered = visible_rows();
-                    if filtered.is_empty() && rows.get().is_empty() {
+                    if filtered.is_empty() {
+                        let library_empty = rows.get().is_empty();
+                        let copy = skills_empty_copy(rows.get().len(), 0).unwrap_or_default();
+                        let testid = if library_empty { "skills-empty" } else { "skills-filtered-empty" };
                         view! {
-                            <StateBlock
-                                kind=BlockKind::Empty
-                                message="No skills"
-                                class="state-empty"
-                                testid="skills-empty"
-                            />
+                            <div class="skills-filter-feedback" data-testid=testid>
+                                <p>{copy}</p>
+                                {(!library_empty).then(|| view! {
+                                    <Button
+                                        class="skills-clear"
+                                        attr:data-testid="skills-clear-filters"
+                                        button_type=ButtonType::Button
+                                        on_click=move |_| search.set(String::new())
+                                    >
+                                        "Clear search"
+                                    </Button>
+                                })}
+                            </div>
                         }
                         .into_any()
                     } else {
@@ -689,7 +709,7 @@ pub fn SkillLibraryPanel() -> impl IntoView {
                                     on:change=move |e| draft_enabled.set(event_target_checked(&e)) />
                                 "Enabled"
                             </label>
-                            {move || form_error.get().map(|m| view! { <p class="skill-form-error">{m}</p> })}
+                            {move || form_error.get().map(|m| view! { <p class="skill-form-error" data-testid="skill-form-error">{m}</p> })}
                             <Button
                                 class="skill-save"
                                 attr:data-testid="skill-save"

@@ -29,14 +29,16 @@ use crate::api::auth::{AuthContext, read_marker_token};
 use crate::api::envelope::{ApiEnvelope, ApiError};
 use crate::api_request::{self, RequestSpec};
 use crate::confirm::{ConfirmDeleteButton, ConfirmEvent, ConfirmState, confirm_next};
-use crate::core_screens::{MemoriesPanel, ProfilePanel, SettingsPanel, StatsPanel, TagsPanel};
+use crate::core_screens::{
+    MemoriesPanel, ProfilePanel, SettingsPanel, StatsPanel, StatsView, TagsPanel,
+};
 use crate::export_import::ExportImportPanel;
 use crate::nav::ScreenState;
 use crate::paths::{EndpointId, encode_component, project_path};
 use crate::routes::{Owner, RouteId};
 use crate::skill_library::SkillLibraryPanel;
 use crate::state_block::{BlockKind, SessionState, StateBlock, session_state};
-use thaw::{Badge, BadgeAppearance, BadgeColor, Button};
+use thaw::{Badge, BadgeAppearance, BadgeColor, Button, ButtonType, Card};
 
 /// The pure placeholder description for a screen state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,8 +102,70 @@ pub fn ScreenBody(route: RouteId, state: ScreenState) -> impl IntoView {
 // Home panel (extracted from the Ready arm)
 // ---------------------------------------------------------------------------
 
+/// Ordered Home counters from the server payload, including zero values.
+pub fn home_summary(stats: &crate::core_screens::StatsView) -> [(&'static str, u64); 4] {
+    [
+        ("Total memories", stats.total),
+        ("User memories", stats.by_scope.user),
+        ("Project memories", stats.by_scope.project),
+        (
+            "Active shards",
+            crate::core_screens::active_shard_count(&stats.shards) as u64,
+        ),
+    ]
+}
+
+/// One Home resource's fetch state: the two resources stay independent, so a
+/// stats failure never hides a healthy health check (and vice versa).
+#[derive(Debug, Clone)]
+enum HomeResource<T> {
+    Pending,
+    Ready(T),
+    Failed(String),
+}
+
 #[component]
 pub fn HomePanel() -> impl IntoView {
+    let auth = AuthContext {
+        local_token: read_marker_token(),
+        basic: None,
+    };
+    let stats = RwSignal::new(HomeResource::<StatsView>::Pending);
+    let health = RwSignal::new(HomeResource::<String>::Pending);
+
+    let load_stats = Callback::new({
+        let auth = auth.clone();
+        move |_: ()| {
+            let auth = auth.clone();
+            stats.set(HomeResource::Pending);
+            leptos::task::spawn_local(async move {
+                match api_request::request::<StatsView>(&crate::core_screens::stats_spec(), &auth)
+                    .await
+                {
+                    Ok(view) => stats.set(HomeResource::Ready(view)),
+                    Err(failure) => stats.set(HomeResource::Failed(failure.to_string())),
+                }
+            });
+        }
+    });
+    let load_health = Callback::new({
+        let auth = auth.clone();
+        move |_: ()| {
+            let auth = auth.clone();
+            health.set(HomeResource::Pending);
+            leptos::task::spawn_local(async move {
+                match crate::core_screens::health(&auth).await {
+                    Ok(status) => health.set(HomeResource::Ready(status.status)),
+                    Err(failure) => health.set(HomeResource::Failed(failure.to_string())),
+                }
+            });
+        }
+    });
+    Effect::new(move |_| {
+        load_stats.run(());
+        load_health.run(());
+    });
+
     view! {
         <section class="home-panel" data-testid="home-panel">
             <h2>"OpenCode Memory Explorer"</h2>
@@ -109,6 +173,93 @@ pub fn HomePanel() -> impl IntoView {
                 "Browse the memories, prompts and skills stored for this project. \
                  Pick a screen from the navigation."
             </p>
+            {move || match stats.get() {
+                HomeResource::Pending => view! {
+                    <div class="home-resource home-resource-loading" data-testid="home-stats-loading">
+                        <p>"Loading stats…"</p>
+                        <Button
+                            class="home-retry"
+                            attr:data-testid="home-stats-retry"
+                            button_type=ButtonType::Button
+                            disabled=true
+                            on_click=move |_| load_stats.run(())
+                        >
+                            "Retry"
+                        </Button>
+                    </div>
+                }
+                .into_any(),
+                HomeResource::Failed(message) => view! {
+                    <div class="home-resource home-resource-error" data-testid="home-stats-error">
+                        <p>{message}</p>
+                        <Button
+                            class="home-retry"
+                            attr:data-testid="home-stats-retry"
+                            button_type=ButtonType::Button
+                            disabled=false
+                            on_click=move |_| load_stats.run(())
+                        >
+                            "Retry"
+                        </Button>
+                    </div>
+                }
+                .into_any(),
+                HomeResource::Ready(stats_view) => {
+                    let cards = home_summary(&stats_view)
+                        .into_iter()
+                        .map(|(label, value)| {
+                            view! {
+                                <Card class="home-summary-card" attr:data-testid="home-summary-card">
+                                    <dl>
+                                        <dt>{label}</dt>
+                                        <dd>{value}</dd>
+                                    </dl>
+                                </Card>
+                            }
+                        })
+                        .collect_view();
+                    view! { <div class="home-summaries" data-testid="home-stats-ready">{cards}</div> }
+                        .into_any()
+                }
+            }}
+            {move || match health.get() {
+                HomeResource::Pending => view! {
+                    <div class="home-resource home-resource-loading" data-testid="home-health-loading">
+                        <p>"Checking health…"</p>
+                        <Button
+                            class="home-retry"
+                            attr:data-testid="home-health-retry"
+                            button_type=ButtonType::Button
+                            disabled=true
+                            on_click=move |_| load_health.run(())
+                        >
+                            "Retry"
+                        </Button>
+                    </div>
+                }
+                .into_any(),
+                HomeResource::Failed(message) => view! {
+                    <div class="home-resource home-resource-error" data-testid="home-health-error">
+                        <p>{message}</p>
+                        <Button
+                            class="home-retry"
+                            attr:data-testid="home-health-retry"
+                            button_type=ButtonType::Button
+                            disabled=false
+                            on_click=move |_| load_health.run(())
+                        >
+                            "Retry"
+                        </Button>
+                    </div>
+                }
+                .into_any(),
+                HomeResource::Ready(status) => view! {
+                    <p class="home-health-status" data-testid="home-health-ready">
+                        {format!("Service status: {status}")}
+                    </p>
+                }
+                .into_any(),
+            }}
         </section>
     }
 }

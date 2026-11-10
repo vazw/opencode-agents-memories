@@ -9,6 +9,14 @@ use web_ui::skill_library::{
 };
 
 #[wasm_bindgen_test]
+fn test_skills_empty_copy_distinguishes_library_and_filter() {
+    use web_ui::skill_library::skills_empty_copy;
+    assert_eq!(skills_empty_copy(0, 0), Some("No skills yet"));
+    assert_eq!(skills_empty_copy(2, 0), Some("No skills match your search"));
+    assert_eq!(skills_empty_copy(2, 1), None);
+}
+
+#[wasm_bindgen_test]
 fn test_list_and_get_skill_specs_match_the_pinned_templates() {
     let spec = list_skills_spec();
     assert_eq!(spec.method, "GET");

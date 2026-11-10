@@ -1446,6 +1446,9 @@ pub fn ProfilePanel() -> impl IntoView {
                 IdentityControl::Hidden => ().into_any(),
                 IdentityControl::Picker { options, selected } => {
                     view! {
+                        <label class="profile-identity-label" for="profile-identity-select">
+                            "Identity"
+                        </label>
                         <select
                             id="profile-identity-select"
                             class="profile-identity-select"
@@ -1817,12 +1820,6 @@ fn stats_date_or_dash(value: Option<&String>) -> String {
     value.map_or_else(|| "—".to_string(), |stamp| stamp.clone())
 }
 
-/// The bar-width percentage of one counter against the peak (`max(1, …)`).
-fn stats_bar_width(count: u64, peak: u64) -> String {
-    let percent = (count as f64 / peak as f64) * 100.0;
-    format!("width: {percent:.1}%")
-}
-
 /// The overview cards, the daily table and the shards table (upstream
 /// `StatsView.svelte`'s render logic, English-only — D8: no i18n layer in
 /// this UI; upstream's ~240 keys are a named follow-up).
@@ -1909,8 +1906,8 @@ fn stats_overview(stats: &StatsView, active_shards: usize) -> AnyView {
     .into_any()
 }
 
-/// The 14-day daily table: one row per day, counter bars scaled by
-/// [`daily_peak`], error buckets collapsible per row.
+/// The 14-day daily table: one row per day, native `progress` bars whose max
+/// is the common [`daily_peak`], error buckets collapsible per row.
 fn stats_daily_table(daily: &[DailyStatsView]) -> AnyView {
     if daily.is_empty() {
         return view! { <p class="stats-empty">"No activity recorded"</p> }.into_any();
@@ -1947,11 +1944,16 @@ fn stats_daily_table(daily: &[DailyStatsView]) -> AnyView {
             let cells: Vec<_> = row_cells
                 .into_iter()
                 .map(|(label, count)| {
+                    let name = format!("{} {label}", day.date);
                     view! {
                         <td class="stats-counter">
                             <span class="stats-count">{count}</span>
-                            <span class="stats-bar" style=stats_bar_width(count, peak)></span>
-                            <span class="visually-hidden">{label}</span>
+                            <progress
+                                class="stats-progress"
+                                value={count.to_string()}
+                                max={peak.to_string()}
+                                aria-label=name
+                            ></progress>
                         </td>
                     }
                 })
@@ -2063,11 +2065,18 @@ fn stats_loaded_view(stats: &StatsView) -> AnyView {
         {daily_error}
         <section class="stats-section" aria-label="Daily activity">
             <h3>"Daily activity (14 days)"</h3>
-            {stats_daily_table(&stats.daily)}
+            <div class="stats-daily-scroll">{stats_daily_table(&stats.daily)}</div>
         </section>
         <section class="stats-section" aria-label="Shards">
             <h3>"Shards"</h3>
-            {stats_shards_table(&stats.shards)}
+            <div
+                class="stats-shards-region"
+                role="region"
+                tabindex="0"
+                aria-label="Shard diagnostics"
+            >
+                {stats_shards_table(&stats.shards)}
+            </div>
         </section>
     }
     .into_any()

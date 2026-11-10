@@ -1,0 +1,613 @@
+{
+  "health": {
+    "success": true,
+    "status": "ok",
+    "authEnabled": false
+  },
+  "stats": {
+    "total": 7,
+    "byScope": {
+      "user": 0,
+      "project": 3
+    },
+    "byType": {
+      "fact": 7
+    },
+    "generatedAt": "2026-11-01T12:00:00Z",
+    "daily": [
+      {
+        "date": "2026-11-01",
+        "captures": 0,
+        "captureSkipped": 2,
+        "profileInjections": 7,
+        "compactionInjections": 1,
+        "errors": {
+          "fixture": 2
+        }
+      }
+    ],
+    "shards": [
+      {
+        "shardId": 0,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 0,
+        "fileName": "fixture-shard-00.db",
+        "fileExists": true,
+        "isActive": true,
+        "registeredVectorCount": 2,
+        "memoryCount": 40,
+        "error": null
+      },
+      {
+        "shardId": 1,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 1,
+        "fileName": "fixture-shard-01.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 39,
+        "error": null
+      },
+      {
+        "shardId": 2,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 2,
+        "fileName": "fixture-shard-02.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 38,
+        "error": "Synthetic shard error"
+      },
+      {
+        "shardId": 3,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 3,
+        "fileName": "fixture-shard-03.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 37,
+        "error": null
+      },
+      {
+        "shardId": 4,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 4,
+        "fileName": "fixture-shard-04.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 36,
+        "error": null
+      },
+      {
+        "shardId": 5,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 5,
+        "fileName": "fixture-shard-05.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 35,
+        "error": null
+      },
+      {
+        "shardId": 6,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 6,
+        "fileName": "fixture-shard-06.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 34,
+        "error": null
+      },
+      {
+        "shardId": 7,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 7,
+        "fileName": "fixture-shard-07.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 33,
+        "error": null
+      },
+      {
+        "shardId": 8,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 8,
+        "fileName": "fixture-shard-08.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 32,
+        "error": null
+      },
+      {
+        "shardId": 9,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 9,
+        "fileName": "fixture-shard-09.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 31,
+        "error": null
+      },
+      {
+        "shardId": 10,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 10,
+        "fileName": "fixture-shard-10.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 30,
+        "error": null
+      },
+      {
+        "shardId": 11,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 11,
+        "fileName": "fixture-shard-11.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 29,
+        "error": null
+      },
+      {
+        "shardId": 12,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 12,
+        "fileName": "fixture-shard-12.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 28,
+        "error": null
+      },
+      {
+        "shardId": 13,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 13,
+        "fileName": "fixture-shard-13.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 27,
+        "error": null
+      },
+      {
+        "shardId": 14,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 14,
+        "fileName": "fixture-shard-14.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 26,
+        "error": null
+      },
+      {
+        "shardId": 15,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 15,
+        "fileName": "fixture-shard-15.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 25,
+        "error": null
+      },
+      {
+        "shardId": 16,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 16,
+        "fileName": "fixture-shard-16.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 24,
+        "error": null
+      },
+      {
+        "shardId": 17,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 17,
+        "fileName": "fixture-shard-17.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 23,
+        "error": null
+      },
+      {
+        "shardId": 18,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 18,
+        "fileName": "fixture-shard-18.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 22,
+        "error": null
+      },
+      {
+        "shardId": 19,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 19,
+        "fileName": "fixture-shard-19.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 21,
+        "error": null
+      },
+      {
+        "shardId": 20,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 20,
+        "fileName": "fixture-shard-20.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 20,
+        "error": null
+      },
+      {
+        "shardId": 21,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 21,
+        "fileName": "fixture-shard-21.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 19,
+        "error": null
+      },
+      {
+        "shardId": 22,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 22,
+        "fileName": "fixture-shard-22.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 18,
+        "error": null
+      },
+      {
+        "shardId": 23,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 23,
+        "fileName": "fixture-shard-23.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 17,
+        "error": null
+      },
+      {
+        "shardId": 24,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 24,
+        "fileName": "fixture-shard-24.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 16,
+        "error": null
+      },
+      {
+        "shardId": 25,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 25,
+        "fileName": "fixture-shard-25.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 15,
+        "error": null
+      },
+      {
+        "shardId": 26,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 26,
+        "fileName": "fixture-shard-26.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 14,
+        "error": null
+      },
+      {
+        "shardId": 27,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 27,
+        "fileName": "fixture-shard-27.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 13,
+        "error": null
+      },
+      {
+        "shardId": 28,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 28,
+        "fileName": "fixture-shard-28.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 12,
+        "error": null
+      },
+      {
+        "shardId": 29,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 29,
+        "fileName": "fixture-shard-29.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 11,
+        "error": null
+      },
+      {
+        "shardId": 30,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 30,
+        "fileName": "fixture-shard-30.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 10,
+        "error": null
+      },
+      {
+        "shardId": 31,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 31,
+        "fileName": "fixture-shard-31.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 9,
+        "error": null
+      },
+      {
+        "shardId": 32,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 32,
+        "fileName": "fixture-shard-32.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 8,
+        "error": null
+      },
+      {
+        "shardId": 33,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 33,
+        "fileName": "fixture-shard-33.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 7,
+        "error": null
+      },
+      {
+        "shardId": 34,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 34,
+        "fileName": "fixture-shard-34.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 6,
+        "error": null
+      },
+      {
+        "shardId": 35,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 35,
+        "fileName": "fixture-shard-35.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 5,
+        "error": null
+      },
+      {
+        "shardId": 36,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 36,
+        "fileName": "fixture-shard-36.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 4,
+        "error": null
+      },
+      {
+        "shardId": 37,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 37,
+        "fileName": "fixture-shard-37.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 3,
+        "error": null
+      },
+      {
+        "shardId": 38,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 38,
+        "fileName": "fixture-shard-38.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 2,
+        "error": null
+      },
+      {
+        "shardId": 39,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 39,
+        "fileName": "fixture-shard-39.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 1,
+        "error": null
+      }
+    ]
+  },
+  "roster": [
+    {
+      "userId": "fixture-a",
+      "displayName": "Fixture A",
+      "isDefault": true
+    },
+    {
+      "userId": "fixture-b",
+      "displayName": "Fixture B"
+    }
+  ],
+  "profile": {
+    "exists": true,
+    "userId": "fixture-a",
+    "displayName": "Fixture A",
+    "version": 2,
+    "profileData": {
+      "preferences": [
+        {
+          "description": "Use concise output"
+        },
+        {
+          "description": "Keep exact counts"
+        }
+      ],
+      "patterns": [
+        {
+          "description": "Review evidence"
+        }
+      ],
+      "workflows": []
+    }
+  },
+  "tags": {
+    "project": [
+      {
+        "tag": "project Unicode \u7a7a\u9593 with spaces and a very long descriptive label abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+        "projectName": "Synthetic project"
+      }
+    ],
+    "user": [
+      {
+        "tag": "fixture-user",
+        "displayName": "Fixture User"
+      }
+    ],
+    "memoryTags": [
+      {
+        "tag": "long Unicode \u7a7a\u9593 tag with spaces abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+        "count": 7
+      }
+    ],
+    "memoryTagTotal": 1
+  },
+  "skills": {
+    "items": [
+      {
+        "id": "fixture-skill",
+        "name": "Fixture skill",
+        "description": "Synthetic description",
+        "content": "Synthetic content",
+        "enabled": true,
+        "autoinvoke": false
+      }
+    ]
+  },
+  "memories": {
+    "items": [
+      {
+        "type": "memory",
+        "id": "fixture-mem-1",
+        "content": "Fixture memory one",
+        "memoryType": "note",
+        "tags": [],
+        "createdAt": "2026-11-01T12:00:00Z",
+        "isPinned": false
+      },
+      {
+        "type": "prompt",
+        "id": "fixture-prompt-1",
+        "content": "Fixture prompt one",
+        "sessionId": "fixture-session",
+        "createdAt": "2026-11-01T11:00:00Z",
+        "displayName": "Fixture"
+      }
+    ],
+    "total": 2,
+    "page": 1,
+    "limit": 100
+  },
+  "scenarios": {
+    "normal": "Original baseline fixture with 40 declared shards",
+    "home-stats-ok": "Delayed stats200 and health500",
+    "home-health-ok": "Delayed stats500 and health200",
+    "home-zero": "Delayed all-zero stats200",
+    "empty-skills": "Empty skills library",
+    "zero": "All-zero daily counters, same date",
+    "save-error": "Skill POST500",
+    "save-success": "Skill POST200",
+    "stats-error": "Stats500 after ready snapshot"
+  }
+}

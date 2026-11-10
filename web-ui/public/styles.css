@@ -210,6 +210,63 @@ body {
   font-size: 1.15rem;
 }
 
+.home-summaries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.home-summary-card {
+  min-width: 10rem;
+}
+
+.home-summary-card dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.home-summary-card dd {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-resource {
+  margin-top: 0.75rem;
+}
+
+.home-resource-error {
+  color: var(--warn-text);
+}
+
+.home-resource-loading {
+  color: var(--muted);
+}
+
+.home-retry {
+  margin-top: 0.5rem;
+}
+
+.skills-clear {
+  margin-top: 0.5rem;
+}
+
+.home-health-status {
+  margin-top: 0.75rem;
+}
+
+.skills-filter-feedback {
+  margin: 0.5rem 0;
+}
+
+.profile-identity-label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-weight: 500;
+}
+
 .planned-notice {
   background: var(--warn-bg);
   border-color: var(--warn-border);
@@ -233,25 +290,8 @@ body {
 /* ---------------------------------------------------------------------------
  * Shared primitives
  *
- * `.visually-hidden` is the screen-reader-only clipping recipe: the Stats
- * counter labels are the only visible symptom when it is missing, but every
- * label it wraps is read by assistive tech instead of painted.
- *
  * `.state-block` provides common spacing for loading/empty/error states.
  * ------------------------------------------------------------------------- */
-
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
-}
 
 .state-block {
   margin: 0.75rem 0;
@@ -377,7 +417,12 @@ body {
 }
 
 .export-download {
-  margin-bottom: 0.75rem;
+  /* ponytail: Thaw buttons are inline-flex, so the following import label shared
+   * their line box and margin-bottom never moved it. Block-level display is the
+   * one-line fix; a wrapper element would be the upgrade path if the button ever
+   * needs to sit beside another control. */
+  display: block;
+  margin-bottom: 1rem;
 }
 
 .import-input {
@@ -985,9 +1030,9 @@ body {
  * Stats (this wave)
  *
  * The tables are what make the collapsed columns readable (padding + collapse);
- * `.stats-bar` carries the height and the colour — it previously had a width
- * only, so every counter bar was invisible. The five panels above must not
- * change: no rule here overrides them.
+ * `.stats-progress` is a native `<progress>` whose max is the shared daily
+ * peak — the replaced `.stats-bar` span had no accessible value semantics.
+ * The five panels above must not change: no rule here overrides them.
  * ------------------------------------------------------------------------- */
 
 .stats-panel {
@@ -1098,11 +1143,23 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.stats-bar {
+.stats-progress {
   display: block;
-  height: 0.5rem;
-  background: var(--accent);
-  border-radius: 999px;
+  width: 8rem;
+  height: 0.75rem;
+}
+
+.stats-daily-scroll {
+  overflow-x: auto;
+}
+
+.stats-shards-region {
+  max-block-size: 24rem;
+  overflow: auto;
+}
+
+.stats-shards-region:focus-visible {
+  outline: 2px solid var(--accent);
 }
 
 .stats-no-errors {
