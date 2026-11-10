@@ -1,7 +1,11 @@
 # 118 — the web UI draws 1 of 58 Thaw components: a hand-rolled design system sits beside the framework
 
-Status: ready-for-human — **waves 1 (theme + shell), 2 (controls + states) and 3 (the three worst
-screens) are built and live-verified; wave 3 merged to main at a21eb2d on 2026-11-06 (review 2 APPROVED
+Status: ready-for-human — **waves 1 (theme + shell), 2 (controls + states), 3 (the three worst
+screens) and the wave-4 polish sweep are built and live-verified; wave 4 merged to main at fa8d62c on
+2026-11-10 (review 4 APPROVED after reviews 1–3 caught measurable defects and hygiene gaps, each fixed
+via debugger prescription and re-verified on the rebuilt bundle; independent opsec APPROVED, 0
+confirmed findings — run `opsec-20261110-118-w4`). Wave 3 merged to main at a21eb2d on 2026-11-06
+(review 2 APPROVED
 after review 1 caught a frozen Sessions timeline layer — untracked reads + a once-invoked closure — and
 stale wave-2 evidence, both fixed with a permanent Sessions arms lane guard in `capture-evidence.cjs`).
 `.tmp/blueprints/blueprint-20261106-issue-118-webui-wave3-worst-screens-r2.md`, stamp
@@ -82,6 +86,10 @@ renders a 6,624 px page).
   native dropdowns; a shared `StateBlock` over `Skeleton` / `Spinner` / `MessageBar` replacing five
   ad-hoc loading/empty/error forms.
 - **Wave 3 — the three worst screens.** Memories, Settings, Sessions, in that order.
+- **Wave 4 — polish and accessibility sweep (built, review-4 + opsec APPROVED, merged at fa8d62c).**
+  Payload-driven Home summary cards (exact values including zero, no fake numerics while pending), the
+  profile picker `for`-label fix, a skills empty-vs-filtered copy split, export-panel spacing, and
+  accessible stats bars with a keyboard-reachable overflow path.
 
 ## Constraints (they decide the design, so they belong in the issue)
 
@@ -138,4 +146,39 @@ which this build renders as an attribute *named* `attr:aria-label`, so the nav n
 Not judged here (needs the live data, after the operator stages the bundle): the ±2 % `docH` pair against
 `before.json`, `slack > 0` on the four tall routes, and the two `data-testid` selects (R11) — the preview has
 no API. Note `.githooks/pre-commit` still passes `--min-emitted=185`; raising it is outside this wave's footprint.
+
+## Wave 4 outcome (MEASURED 2026-11-10, dist-after-r3 `web-ui-ca2b5df9fdce9bc9` served at 127.0.0.1:49418 through the chrome-devtools MCP; merged to main at fa8d62c, evidence at 2daf585)
+
+Blueprint `.tmp/blueprints/blueprint-20261110-1007-issue-118-wave4-polish-r2.md` (stamp `sha256=33e999b2a84d`,
+SYS-APPROVED 2026-11-10T10:13Z). RED→GREEN per region: two new pure oracles
+(`test_home_summary_uses_payload_values_including_zero` kills the `total=user+project`, `active=all-shards`
+and zero-hidden mutants; `test_skills_empty_copy_distinguishes_library_and_filter` kills the always-copy and
+inverted-guard mutants) plus four discriminating browser RED cases (Home zero-payload no-markup, Profile
+0≠1 label, Skills filtered silence, Stats zero-progress no-region, both themes) on the hash-pinned baseline
+dist. Full evidence + disclosures: `docs/evidence/issue-118-wave4/README.md` and `after/RESULTS-green-r3.md`.
+
+| Claim | Before | After (MEASURED, `W4_TEST=all` 12/12 PASS, script `923d0558…`, fixture `517b3dca…`) |
+|---|---|---|
+| Home summary cards | fake numerics while pending; duplicate label text | `labelCounts [1,1,1,1]`; zero payload renders four `0` cards; loading arm until ready |
+| Home panel heading | UA-default margins (regression caught by review-1) | shared `.home-panel h2` rule: `18.4px` / `0px` |
+| Profile picker label | 0 `for`-bound labels | 1 `for`-bound label (`profile-identity-select`) |
+| Skills empty states | one silent copy for library-empty and filter-empty | `skills_empty_copy(0,0)` vs `(2,0)` vs `None` oracle; distinct `skills-empty` / `skills-filtered-empty` / `skills-clear-filters` arms |
+| Export spacing | 0 px gap between export blocks | `vGap 16.81px ≥ 12` at 1280 & 390, light & dark (4/4 combos) |
+| Stats bars / overflow | `attr:aria-label` rendered literally; overflow not keyboard-reachable | accessible bars with real names; overflow reachable via keyboard (Tab-15 probe, contrast ≥ 4.5:1 both themes) |
+| Tags link | — | `%20`-encoded href, Unicode `空間` round-trip, 7-wrap rects, no page overflow |
+| Console/network, 6 routes | — | 0 uncaught exceptions, 0 console errors, 0 failed requests |
+| Gates | — | fmt + clippy ×2 green; wasm suite 241 passed / 0 failed (20 `test result:` lines); class census 187/187 missing=0 dead=0; token census 0/0; baseline 44/44 SHA256 OK; served==disk 4/4 |
+
+Review chain (kept for traceability, one `REVIEW-<n>` file each): review-1 REJECTED (5 findings: duplicate
+label, heading regression, ledger hygiene, malformed SHA256SUMS, unreproducible suite count) → debug-1 →
+rework; review-2 REJECTED (B1 unserved dist, B2 stale durable evidence, B3 residual ledger defects) →
+debug-2 → rework in three phases (harness A1/A4/A5, lane switch to dist-after-r3, durable evidence
+refresh); review-3 REJECTED (ledger cursor shape, missing handoff-4) → ledger consolidation + handoff-4 →
+**review-4 APPROVED**; independent blocking **opsec APPROVED** (0 confirmed, 0 needs_validation, 1 rejected
+candidate `HomePanel-auth-context-marker-read` refuted at source; 10/10 coverage).
+
+Measured residuals (disclosed, not fixed here): the skill-delete confirmation's prompt-specific erasure
+disclosure (`before/extra.json`) needs a separately bounded approval; the acceptance script's
+`tags_unchanged_matrix` single-Tab assertion proves less than its name claims (actual tag focus was
+established by the validation-local corrected probe; script hash `923d0558…` binds the shipped assertion).
 
