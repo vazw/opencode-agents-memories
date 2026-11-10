@@ -340,6 +340,7 @@ fn seed_rows(storage: &Path, store_config: &StoreConfig, rows: &[SeedRow]) {
                     project_path: Some("/repo/openapi-demo".to_string()),
                     project_name: Some("openapi-demo".to_string()),
                     git_repo_url: None,
+                    source_prompt_created_at: None,
                 },
             )
             .await

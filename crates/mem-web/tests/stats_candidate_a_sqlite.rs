@@ -93,6 +93,7 @@ async fn seeded_project_shard(label: &str) -> (RealStore, ShardInfo) {
                 project_path: None,
                 project_name: None,
                 git_repo_url: None,
+                source_prompt_created_at: None,
             },
         )
         .await

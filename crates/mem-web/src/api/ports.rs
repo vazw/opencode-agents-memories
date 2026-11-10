@@ -333,12 +333,14 @@ pub struct TagMigrationBatchReport {
     pub errors: usize,
 }
 
-/// `POST /api/cleanup` answer (the seam is pre-wired; no service exists yet).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `POST /api/cleanup` answer (issue 39).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CleanupReport {
     pub deleted_count: u64,
     pub user_count: u64,
     pub project_count: u64,
+    pub prompts_deleted: u64,
+    pub protected_memories_skipped: u64,
 }
 
 /// `POST /api/deduplicate` answer (upstream `IDeduplicationResult`).

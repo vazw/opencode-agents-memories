@@ -35,6 +35,7 @@ pub mod shard_inventory;
 pub mod shard_manager;
 pub mod shard_path_migration;
 pub mod shard_registry_sql;
+pub mod shard_retention_sql;
 pub mod sql;
 pub mod sqlite_files;
 pub mod sweep_probe;
@@ -45,6 +46,7 @@ pub mod vector_utils;
 pub use mem_core::scope;
 
 pub use crate::db::{TursoConnectFactory, turso_connect_factory};
+pub use crate::shard_manager::SweepOutcome;
 
 // Workspace-stack re-exports consumed by downstream crates that build on the
 // storage layer (W4.1 `mem-episodic`): keeps those crates free of new

@@ -187,6 +187,7 @@ async fn parts(prefix: &str, summarizer: Option<Arc<dyn CaptureSummarizer>>) -> 
         Arc::new(DefaultTier1Writer::new(CaptureWriterDeps {
             shards: shards.clone(),
             embedder: embedder.clone(),
+            prompt_stamps: Arc::new(mem_bridge::capture::AbsentPromptStampSource),
         })),
         embedder.clone(),
         summarizer,

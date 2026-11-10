@@ -113,7 +113,8 @@ pub struct ShardFactsOutcome {
 /// `resolve_write_shard`) and
 /// [`ShardManager::ensure_shard_schema`](crate::shard_manager::ShardManager::ensure_shard_schema)
 /// (shard init and the scope-wide delete), so `add`, `forget`, the scope-wide
-/// delete, re-embed and the legacy migrator all self-heal.
+/// delete, re-embed and the legacy migrator all self-heal. Since issue 39,
+/// applies v1..v4.
 pub async fn ensure_v3(db: &dyn Db, dimensions: u32) -> Result<i64, StoreError> {
     let version = apply_schema_migrations(
         db,

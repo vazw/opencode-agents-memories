@@ -17,6 +17,7 @@ use common::real_store::{
 };
 use common::{api_request, app_state_with_api};
 use mem_core::scope::Scope;
+use mem_profile::prompt::UserPromptManager;
 use mem_web::api::deduplication::{MAX_NEAR_SCAN_PAIRS, production_deduplication_port};
 use mem_web::api::ports::ApiServices;
 use mem_web::server::build_router;
@@ -29,8 +30,15 @@ const TOKEN: &str = "test-token";
 
 /// A router whose maintenance port is the real deduplication pass.
 fn router(store: &RealStore, enabled: bool) -> axum::Router {
+    let prompts = Arc::new(UserPromptManager::new(
+        store.config.storage_path.clone(),
+        store.config.clone(),
+        3,
+    ));
     let services = ApiServices::unavailable().with_maintenance(production_deduplication_port(
         store.manager.clone(),
+        prompts,
+        30,
         enabled,
         0.9,
     ));

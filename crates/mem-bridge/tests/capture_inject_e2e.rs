@@ -40,6 +40,7 @@ fn runtime_services(
         Arc::new(DefaultTier1Writer::new(CaptureWriterDeps {
             shards: shards.clone(),
             embedder: embedder.clone(),
+            prompt_stamps: Arc::new(mem_bridge::capture::AbsentPromptStampSource),
         })),
         embedder.clone(),
         Some(Arc::new(FixedSummarizer {

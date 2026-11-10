@@ -176,8 +176,9 @@ impl DedupStore for FakeStore {
 }
 
 fn router_with(store: Arc<FakeStore>) -> axum::Router {
-    let services = ApiServices::unavailable()
-        .with_maintenance(Arc::new(ProductionDeduplication::new(store, true, 0.9)));
+    let services = ApiServices::unavailable().with_maintenance(Arc::new(
+        ProductionDeduplication::for_dedup_only(store, true, 0.9),
+    ));
     let state = app_state_with_api(
         WebAuth::new(None, None, "user"),
         Some(TOKEN),

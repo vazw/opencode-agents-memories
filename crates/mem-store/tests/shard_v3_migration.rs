@@ -131,7 +131,7 @@ async fn test_a_fresh_shard_is_v3_and_has_no_stats_row() {
         .await
         .expect("initialize a fresh shard");
 
-    assert_eq!(user_version(db.as_ref()).await, 3, "the fresh shard is v3");
+    assert_eq!(user_version(db.as_ref()).await, 4, "the fresh shard is v4");
     assert!(
         table_exists(db.as_ref(), "shard_stats").await,
         "the v3 migration must create shard_stats"
@@ -173,9 +173,9 @@ async fn test_upgrading_a_v2_shard_preserves_rows_vectors_and_metadata() {
 
     let version = shard_facts::ensure_v3(db.as_ref(), DIMS)
         .await
-        .expect("upgrade to v3");
-    assert_eq!(version, 3);
-    assert_eq!(user_version(db.as_ref()).await, 3);
+        .expect("upgrade to v4");
+    assert_eq!(version, 4);
+    assert_eq!(user_version(db.as_ref()).await, 4);
 
     let count = shard_facts::sync_count(db.as_ref())
         .await
@@ -234,8 +234,8 @@ async fn test_a_v3_shaped_file_stamped_v2_converges() {
     let version = shard_facts::ensure_v3(db.as_ref(), DIMS)
         .await
         .expect("converge instead of failing on the existing table");
-    assert_eq!(version, 3, "the pragma catches up with the committed DDL");
-    assert_eq!(user_version(db.as_ref()).await, 3);
+    assert_eq!(version, 4, "the pragma catches up with the committed DDL");
+    assert_eq!(user_version(db.as_ref()).await, 4);
 
     drop(db);
     common::cleanup_temp_dir(&config.storage_path).expect("cleanup");
@@ -245,26 +245,26 @@ async fn test_a_v3_shaped_file_stamped_v2_converges() {
 // AC6
 // ---------------------------------------------------------------------------
 
-/// A v4 shard is refused by this build (it knows v3), with the typed error.
+/// A v5 shard is refused by this build (it knows v4), with the typed error.
 #[tokio::test]
-async fn test_a_v4_shard_is_refused_by_this_build() {
-    let config = common::store_config("v3-refuse-v4");
+async fn test_a_v5_shard_is_refused_by_this_build() {
+    let config = common::store_config("v4-refuse-v5");
     let db = common::open_real_db(&config, "shard.db")
         .await
         .expect("open");
-    db.execute(&sql::set_user_version_sql(4), Vec::new())
+    db.execute(&sql::set_user_version_sql(5), Vec::new())
         .await
-        .expect("stamp v4");
+        .expect("stamp v5");
 
     let error = shard_facts::ensure_v3(db.as_ref(), DIMS)
         .await
-        .expect_err("a v4 file must be refused by a v3 build");
+        .expect_err("a v5 file must be refused by a v4 build");
     assert!(
         matches!(
             error,
             StoreError::SchemaNewerThanBuild {
-                found: 4,
-                supported: 3,
+                found: 5,
+                supported: 4,
                 ..
             }
         ),
@@ -291,7 +291,7 @@ fn test_memory_shard_max_known_matches_the_highest_migration() {
         highest,
         "MEMORY_SHARD_MAX_KNOWN must track the set's highest version"
     );
-    assert_eq!(declared, 3, "W2's v3 is the highest step");
+    assert_eq!(declared, 4, "v4 is the highest step");
 }
 
 // ---------------------------------------------------------------------------
@@ -375,7 +375,7 @@ async fn test_a_v2_shard_is_upgraded_by_the_next_write() {
     let db = manager.open_shard(&path).await.expect("reopen");
     assert_eq!(
         user_version(db.as_ref()).await,
-        3,
+        4,
         "the next write upgrades the file lazily"
     );
     assert_eq!(stats_count(db.as_ref()).await, Some(2));
@@ -424,7 +424,7 @@ async fn test_a_second_write_does_not_re_run_the_upgrade() {
     );
 
     let db = manager.open_shard(&path).await.expect("reopen");
-    assert_eq!(user_version(db.as_ref()).await, 3, "still v3");
+    assert_eq!(user_version(db.as_ref()).await, 4, "still v4");
     assert_eq!(stats_count(db.as_ref()).await, Some(3));
     assert_eq!(
         stats_rows(db.as_ref()).await,

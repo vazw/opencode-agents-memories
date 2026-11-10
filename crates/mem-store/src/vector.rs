@@ -43,7 +43,26 @@ pub struct MemoryInsert {
     pub project_path: Option<String>,
     pub project_name: Option<String>,
     pub git_repo_url: Option<String>,
+    pub source_prompt_created_at: Option<i64>,
 }
+
+/// Local insert statement with retention stamp for memories carrying a tags vector (issue 39 option a).
+pub const INSERT_WITH_STAMP_TAGS: &str = r#"
+  INSERT INTO memories (
+    id, content, vector, tags_vector, container_tag, tags, type, created_at, updated_at,
+    metadata, session_id, display_name, user_name, user_email, project_path, project_name, git_repo_url,
+    source_prompt_created_at
+  ) VALUES (?, ?, vector32(?), vector32(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"#;
+
+/// Local insert statement with retention stamp for memories without a tags vector (issue 39 option a).
+pub const INSERT_WITH_STAMP_WITHOUT_TAGS: &str = r#"
+  INSERT INTO memories (
+    id, content, vector, tags_vector, container_tag, tags, type, created_at, updated_at,
+    metadata, session_id, display_name, user_name, user_email, project_path, project_name, git_repo_url,
+    source_prompt_created_at
+  ) VALUES (?, ?, vector32(?), NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"#;
 
 /// Upstream `vectorToJson` (serde_json maps non-finite floats to `null`,
 /// matching `JSON.stringify`).
@@ -121,6 +140,10 @@ fn insert_args(value: &MemoryInsert) -> Result<Vec<Value>, StoreError> {
             .clone()
             .map(Value::Text)
             .unwrap_or(Value::Null),
+        value
+            .source_prompt_created_at
+            .map(Value::Integer)
+            .unwrap_or(Value::Null),
     ]);
     Ok(params)
 }
@@ -128,13 +151,14 @@ fn insert_args(value: &MemoryInsert) -> Result<Vec<Value>, StoreError> {
 /// Upstream `insertVector` statement form — the frozen INSERT chosen by
 /// `tags_vector.is_some()` plus the frozen `insert_args` params. Consumed by
 /// `insert_vector` and the migration/re-embed batch write paths.
+/// Since issue 39, uses local constants with `source_prompt_created_at`.
 pub fn insert_vector_statement(value: &MemoryInsert) -> Result<Statement, StoreError> {
     // the frozen INSERT needs the serialized params, so building it is fallible (ADR-0013 D-3)
     let params = insert_args(value)?;
     if value.tags_vector.is_some() {
-        Ok(Statement::new(crate::sql::INSERT_WITH_TAGS, params))
+        Ok(Statement::new(INSERT_WITH_STAMP_TAGS, params))
     } else {
-        Ok(Statement::new(crate::sql::INSERT_WITHOUT_TAGS, params))
+        Ok(Statement::new(INSERT_WITH_STAMP_WITHOUT_TAGS, params))
     }
 }
 

@@ -70,7 +70,7 @@ pub const USER_PROMPTS_MAX_KNOWN: i64 = 3;
 /// stamp's `sweep_state` table (issue 43 W6c).
 pub const USER_PROFILES_MAX_KNOWN: i64 = 2;
 /// Highest memory-shard schema version this build knows.
-pub const MEMORY_SHARD_MAX_KNOWN: i64 = 3;
+pub const MEMORY_SHARD_MAX_KNOWN: i64 = 4;
 /// Highest episodic schema version this build knows: `apply_episodic_schema`
 /// applies v6, v7 and v8 itself while `episodic_migrations()` returns v1..v5,
 /// so deriving this from the slice would refuse every v6/v7/v8 database.
@@ -323,6 +323,14 @@ pub fn memory_shard_migrations(dimensions: u32) -> Vec<SchemaMigration> {
             // placeholder 0 is a W7 reaping trigger (ADR-0018).
             statements: vec![Statement::new(
                 crate::shard_facts::SHARD_STATS_DDL,
+                Vec::new(),
+            )],
+        },
+        SchemaMigration {
+            version: 4,
+            description: "source_prompt_created_at: the capture-time retention stamp (issue 39)",
+            statements: vec![Statement::new(
+                crate::shard_retention_sql::RETENTION_STAMP_ALTER,
                 Vec::new(),
             )],
         },

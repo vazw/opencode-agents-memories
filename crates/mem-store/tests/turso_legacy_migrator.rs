@@ -497,6 +497,7 @@ async fn test_does_not_skip_migration_when_index_exists_but_embedding_dimensions
             project_path: None,
             project_name: None,
             git_repo_url: None,
+            source_prompt_created_at: None,
         },
     )
     .await

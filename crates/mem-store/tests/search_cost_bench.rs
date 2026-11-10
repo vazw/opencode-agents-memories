@@ -1192,7 +1192,8 @@ fn narrow_ddl(dims: u32) -> String {
           project_name TEXT,
           git_repo_url TEXT,
           is_pinned INTEGER DEFAULT 0,
-          session_id TEXT
+          session_id TEXT,
+          source_prompt_created_at INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_container_tag ON memories(container_tag);
         CREATE INDEX IF NOT EXISTS idx_type ON memories(type);
@@ -1208,7 +1209,7 @@ fn narrow_ddl(dims: u32) -> String {
         CREATE INDEX IF NOT EXISTS idx_memory_vectors_tag ON memory_vectors(container_tag);
         {shard_metadata};
         {shard_stats};
-        PRAGMA user_version = 3;
+        PRAGMA user_version = 4;
         "#,
         dims = dims,
         shard_metadata = mem_store::sql::shard_metadata_ddl().trim(),
@@ -1435,6 +1436,7 @@ fn memory_insert(plan: &RowPlan, index: usize, container_tag: &str) -> MemoryIns
         project_path: None,
         project_name: None,
         git_repo_url: None,
+        source_prompt_created_at: None,
     }
 }
 

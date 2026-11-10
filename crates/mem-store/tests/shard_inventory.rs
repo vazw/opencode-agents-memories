@@ -92,6 +92,7 @@ fn record(hash: &str, id: &str, created: i64, project_path: Option<&Path>) -> Me
         project_path: project_path.map(|p| p.to_string_lossy().to_string()),
         project_name: Some("FixtureProject".to_string()),
         git_repo_url: None,
+        source_prompt_created_at: None,
     }
 }
 

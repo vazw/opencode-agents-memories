@@ -1,10 +1,8 @@
 # 39 — W8.1 · Make `POST /api/cleanup` real (retention cleanup)
 
-Status: **PAUSED** — 2026-10-25 (owner: "Pause everything, fix the base first"). Blocked on issue 43
-(43.1 duplicate ids, 43.2 vector_count), and its storage design is re-opening: two independent reviews
-converged on the finding below.
+Status: done — 2026-11-10 (reviewed APPROVED: `blueprint-20261110-issue39-retention-hybrid-r2.review-1.md`, ADR-0032)
 
-## PAUSE NOTE — 2026-10-25 (read before resuming)
+## PAUSE NOTE — 2026-10-25 (resolved 2026-11-10)
 
 **Two independent reviews of the database design handover converged on the same finding: as specified, this
 feature does nothing today.** `linked_memory_id` has **zero writers**, so phase 1 reads an empty set, phase 2
@@ -232,3 +230,4 @@ the Grounds section records A and C as rejected with the reasons above.
   `journal_mode` pragma does not imply `DELETE`, and absence of a raw `execute_batch` does not imply no
   transactional batch.
 - Sibling issue 40 covers `POST /api/deduplicate`.
+- Landed 2026-11-10 via blueprint `blueprint-20261110-issue39-retention-hybrid-r2.md` (stamp `838b3b50ddbd`, SysEng approved). Owner ruled Hybrid retention design (capture-time stamp `source_prompt_created_at` + deterministic $k=2$ grace $p + 2r > c$ derived from stored facts); vector.rs-local constants preserve golden SQL freeze; 47.1-B2′ profile invalidation join implemented before prompt deletion. Full gates and reviewer APPROVED (`blueprint-20261110-issue39-retention-hybrid-r2.review-1.md`). Recorded in ADR-0032.

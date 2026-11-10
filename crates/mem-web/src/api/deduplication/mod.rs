@@ -36,15 +36,17 @@
 //! the greedy scan and the run guard are provable with a fake while the real
 //! glue stays in [`store`].
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use async_trait::async_trait;
+use mem_profile::prompt::UserPromptManager;
 use mem_store::shard_manager::ShardManager;
 
 use super::ports::{
-    DedupDuplicate, DedupMemoryRef, DedupReport, MaintenancePort, MigrationReport,
+    CleanupReport, DedupDuplicate, DedupMemoryRef, DedupReport, MaintenancePort, MigrationReport,
     MigrationRunReport, NearDuplicateGroup, NearDuplicateScanReport, PortError,
     TagMigrationProgressView, TagMigrationReport,
 };
@@ -407,17 +409,60 @@ impl Drop for ScanLease {
     }
 }
 
-/// `MaintenancePort` with a real `deduplicate()`; every other method keeps the
-/// documented `Unavailable` semantics (migrations are 37/39's to wire).
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// `MaintenancePort` with a real `deduplicate()` and `cleanup()`; every other
+/// method keeps the documented `Unavailable` semantics (migrations are 37's to wire).
 pub struct ProductionDeduplication {
     service: DedupService,
+    shards: Option<ShardManager>,
+    prompts: Option<Arc<UserPromptManager>>,
+    retention_days: u32,
+    cleanup_running: Arc<AtomicBool>,
+}
+
+struct CleanupRunGuard<'a> {
+    running: &'a AtomicBool,
+}
+
+impl<'a> Drop for CleanupRunGuard<'a> {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Release);
+    }
 }
 
 impl ProductionDeduplication {
-    /// Wraps a store-backed service.
-    pub fn new(store: Arc<dyn DedupStore>, enabled: bool, threshold: f64) -> Self {
+    /// Wraps a store-backed service and retention sweep dependencies.
+    pub fn new(
+        store: Arc<dyn DedupStore>,
+        shards: ShardManager,
+        prompts: Arc<UserPromptManager>,
+        retention_days: u32,
+        enabled: bool,
+        threshold: f64,
+    ) -> Self {
         Self {
             service: DedupService::new(store, enabled, threshold),
+            shards: Some(shards),
+            prompts: Some(prompts),
+            retention_days,
+            cleanup_running: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Helper for test fixtures that only exercise deduplication.
+    pub fn for_dedup_only(store: Arc<dyn DedupStore>, enabled: bool, threshold: f64) -> Self {
+        Self {
+            service: DedupService::new(store, enabled, threshold),
+            shards: None,
+            prompts: None,
+            retention_days: 30,
+            cleanup_running: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -468,6 +513,75 @@ impl MaintenancePort for ProductionDeduplication {
     async fn deduplicate(&self) -> Result<DedupReport, PortError> {
         self.service.run().await
     }
+
+    async fn cleanup(&self) -> Result<CleanupReport, PortError> {
+        let (shards, prompts) = match (&self.shards, &self.prompts) {
+            (Some(s), Some(p)) => (s, p),
+            _ => return Err(PortError::Unavailable),
+        };
+
+        if self
+            .cleanup_running
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(PortError::Invalid("cleanup is already running".to_string()));
+        }
+        let _guard = CleanupRunGuard {
+            running: &self.cleanup_running,
+        };
+        tokio::task::yield_now().await;
+
+        let now = now_millis();
+        let retention_ms = i64::from(self.retention_days).saturating_mul(86_400_000);
+        let cutoff = now.saturating_sub(retention_ms);
+        let two_retention_ms = retention_ms.saturating_mul(2);
+
+        // Phase 1: Read expired prompt facts
+        let facts = prompts
+            .expired_prompt_facts(cutoff)
+            .await
+            .map_err(|e| PortError::Store(e.to_string()))?;
+
+        let mut grace_ids = HashSet::new();
+        for fact in facts {
+            if fact.created_at.saturating_add(two_retention_ms) > cutoff
+                && let Some(linked_id) = fact.linked_memory_id
+            {
+                grace_ids.insert(linked_id);
+            }
+        }
+
+        // Phase 2: Sweep per shard
+        let sweep_outcome = shards
+            .run_retention_sweep(cutoff, retention_ms, two_retention_ms, &grace_ids)
+            .await
+            .map_err(|e| PortError::Store(e.message()))?;
+
+        // Phase 3: Erase + delete prompts + clear dangling links
+        let prompts_deleted = prompts
+            .delete_expired_prompts(cutoff)
+            .await
+            .map_err(|e| PortError::Store(e.to_string()))?;
+
+        let _links_cleared = prompts
+            .clear_links(&sweep_outcome.deleted_ids)
+            .await
+            .map_err(|e| PortError::Store(e.to_string()))?;
+
+        // Phase 4: Best-effort VACUUM
+        if let Err(e) = prompts.vacuum().await {
+            tracing::warn!(error = %e, "cleanup: vacuum skipped (DB busy)");
+        }
+
+        Ok(CleanupReport {
+            deleted_count: sweep_outcome.deleted_count,
+            user_count: sweep_outcome.user_count,
+            project_count: sweep_outcome.project_count,
+            prompts_deleted,
+            protected_memories_skipped: sweep_outcome.protected_memories_skipped,
+        })
+    }
 }
 
 /// The composition-root injection point: `src/main.rs` calls it with the
@@ -477,15 +591,19 @@ impl MaintenancePort for ProductionDeduplication {
 /// 37/39 fuse their own ports around it rather than adding a second
 /// `.with_maintenance(..)` call (the field holds one port).
 ///
-/// This 3-arg form keeps a fresh never-set cancel flag, so a caller that has
+/// This form keeps a fresh never-set cancel flag, so a caller that has
 /// no shutdown signal to share (tests, embedded uses) keeps the old shape.
 pub fn production_deduplication_port(
     shards: ShardManager,
+    prompts: Arc<UserPromptManager>,
+    retention_days: u32,
     enabled: bool,
     threshold: f64,
 ) -> Arc<dyn MaintenancePort> {
     production_deduplication_port_with_cancel(
         shards,
+        prompts,
+        retention_days,
         enabled,
         threshold,
         Arc::new(AtomicBool::new(false)),
@@ -501,10 +619,15 @@ pub fn production_deduplication_port(
 /// shutdown budget is not held hostage by detached CPU work.
 pub fn production_deduplication_port_with_cancel(
     shards: ShardManager,
+    prompts: Arc<UserPromptManager>,
+    retention_days: u32,
     enabled: bool,
     threshold: f64,
     cancel: Arc<AtomicBool>,
 ) -> Arc<dyn MaintenancePort> {
-    let store = Arc::new(store::ShardDedupStore::new(shards));
-    Arc::new(ProductionDeduplication::new(store, enabled, threshold).with_cancellation(cancel))
+    let store = Arc::new(store::ShardDedupStore::new(shards.clone()));
+    Arc::new(
+        ProductionDeduplication::new(store, shards, prompts, retention_days, enabled, threshold)
+            .with_cancellation(cancel),
+    )
 }

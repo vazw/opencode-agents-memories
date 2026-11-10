@@ -55,6 +55,7 @@ async fn fixture_writer(dir: &TestDir) -> FixedScopeRealWriter {
         deps: mem_bridge::capture::CaptureWriterDeps {
             shards,
             embedder: Arc::new(common::FakeEmbedder::with_vector(common::unit_vector(0))),
+            prompt_stamps: Arc::new(mem_bridge::capture::AbsentPromptStampSource),
         },
     }
 }

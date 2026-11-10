@@ -22,7 +22,7 @@
 
 #![allow(dead_code)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -51,6 +51,16 @@ pub struct ShardInfo {
     pub vector_count: u64,
     pub is_active: bool,
     pub created_at: i64,
+}
+
+/// The outcome of a shard-level retention sweep pass (issue 39).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SweepOutcome {
+    pub deleted_count: u64,
+    pub user_count: u64,
+    pub project_count: u64,
+    pub protected_memories_skipped: u64,
+    pub deleted_ids: Vec<String>,
 }
 
 /// Later-wave seam (W1.3 search fan-out, inventory, migrations).
@@ -1661,6 +1671,94 @@ impl ShardManager {
             .ok_or_else(|| StoreError::Internal {
                 message: format!("Failed to reassign shard {shard_id}"),
             })
+    }
+
+    /// Upstream `cleanupService` shard-level retention sweep (issue 39).
+    ///
+    /// Migrates each touched shard (v4 migrate-on-touch), selects candidates using
+    /// [`RETENTION_CANDIDATES_SELECT`], filters in Rust (skips pinned, stamped grace,
+    /// and NULL-stamp grace via `grace_ids`), and deletes survivors in one batch
+    /// per shard before adopting the stored count into the registry.
+    pub async fn run_retention_sweep(
+        &self,
+        cutoff: i64,
+        retention_ms: i64,
+        two_retention_ms: i64,
+        grace_ids: &HashSet<String>,
+    ) -> Result<SweepOutcome, StoreError> {
+        let metadata = self.ensure_initialized().await?;
+        let rows = metadata
+            .query(
+                crate::shard_retention_sql::LIST_ALL_SHARDS_FOR_RETENTION,
+                Vec::new(),
+            )
+            .await?;
+        let shards: Vec<ShardInfo> = rows
+            .into_iter()
+            .map(|row| self.row_to_shard_info(row))
+            .collect();
+
+        let mut outcome = SweepOutcome::default();
+        let cutoff_sub_retention = cutoff.saturating_sub(retention_ms);
+
+        for shard in shards {
+            let db = self.open_shard(&shard.db_path).await?;
+            self.ensure_shard_schema(db.as_ref(), self.config.embedding_dimensions)
+                .await?;
+
+            let candidates = db
+                .query(
+                    crate::shard_retention_sql::RETENTION_CANDIDATES_SELECT,
+                    vec![Value::Integer(cutoff), Value::Integer(cutoff_sub_retention)],
+                )
+                .await?;
+
+            let mut shard_to_delete: Vec<String> = Vec::new();
+            for row in candidates {
+                let Some(id) = row.text("id") else {
+                    continue;
+                };
+                let container_tag = row.text("container_tag").unwrap_or_default();
+                let is_pinned = row.i64("is_pinned").unwrap_or(0) == 1;
+                let stamp = row.i64("source_prompt_created_at");
+
+                if is_pinned {
+                    outcome.protected_memories_skipped += 1;
+                    continue;
+                }
+
+                if let Some(s) = stamp {
+                    // Stamped grace: exempt ⇔ s + 2r > c
+                    if s.saturating_add(two_retention_ms) > cutoff {
+                        outcome.protected_memories_skipped += 1;
+                        continue;
+                    }
+                } else {
+                    // NULL-stamp grace: exempt ⇔ grace_ids.contains(&id)
+                    if grace_ids.contains(&id) {
+                        outcome.protected_memories_skipped += 1;
+                        continue;
+                    }
+                }
+
+                if container_tag.contains("_user_") {
+                    outcome.user_count += 1;
+                } else if container_tag.contains("_project_") {
+                    outcome.project_count += 1;
+                }
+
+                shard_to_delete.push(id);
+            }
+
+            if !shard_to_delete.is_empty() {
+                crate::vector::delete_memories(db.as_ref(), &shard_to_delete).await?;
+                self.adopt_stored_count(db.as_ref(), shard.id).await?;
+                outcome.deleted_count += shard_to_delete.len() as u64;
+                outcome.deleted_ids.extend(shard_to_delete);
+            }
+        }
+
+        Ok(outcome)
     }
 }
 

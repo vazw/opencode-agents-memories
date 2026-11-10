@@ -223,6 +223,8 @@ impl WebLauncher for RootWebLauncher {
                         .with_maintenance(
                             production_deduplication_port_with_cancel(
                                 deps.shards.clone(),
+                                deps.prompts.clone(),
+                                core_config.auto_cleanup_retention_days,
                                 core_config.deduplication_enabled,
                                 core_config.deduplication_similarity_threshold,
                                 Arc::clone(&deduplication_cancelled),

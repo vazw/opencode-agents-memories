@@ -1302,6 +1302,7 @@ impl MaintenancePort for FakeBackend {
     }
 
     async fn cleanup(&self) -> Result<mem_web::api::ports::CleanupReport, PortError> {
+        self.record("cleanup".to_string());
         Err(PortError::Unavailable)
     }
 

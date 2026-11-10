@@ -1,8 +1,6 @@
 # 41 — W8.3 · Scheduled retention cleanup (daily tick)
 
-Status: paused — 2026-10-27 (blocked on issue 39, itself `PAUSED` behind 43: `POST /api/cleanup` is still
-the documented 501 and `MaintenancePort::cleanup` returns `Unavailable`, so there is nothing for a tick to
-call. Re-verified at `8023dd8`; the scheduler precedent is live and ready.)
+Status: ready-for-human — 2026-11-10 (unblocked by issue 39 completion; awaits open decisions: trigger source, interval, in-memory state, auto_cleanup_enabled default true hazard)
 
 ## What to build
 

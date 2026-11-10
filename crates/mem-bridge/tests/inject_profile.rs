@@ -806,6 +806,7 @@ async fn test_inject_tiers_render_in_the_ruling_order() {
                 project_path: None,
                 project_name: None,
                 git_repo_url: None,
+                source_prompt_created_at: None,
             },
         )
         .await

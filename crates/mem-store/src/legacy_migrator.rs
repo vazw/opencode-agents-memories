@@ -362,6 +362,7 @@ fn row_to_record(row: &crate::db::Row) -> Option<MemoryInsert> {
         project_path: truthy_text(row, "project_path"),
         project_name: truthy_text(row, "project_name"),
         git_repo_url: truthy_text(row, "git_repo_url"),
+        source_prompt_created_at: None,
     })
 }
 

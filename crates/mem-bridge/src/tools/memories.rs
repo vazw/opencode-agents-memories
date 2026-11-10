@@ -181,6 +181,7 @@ impl MemoriesService {
                 .map(|path| path.display().to_string()),
             project_name: scope.project_name.clone(),
             git_repo_url: scope.git_repo_url.clone(),
+            source_prompt_created_at: None,
         };
 
         // (4) one `BatchMode::Write` of the insert and the statement-measured

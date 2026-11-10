@@ -272,8 +272,8 @@ async fn test_creates_backup_before_destructive_upgrade_when_version_positive() 
     .await
     .expect("applies v2");
     assert_eq!(
-        version, 3,
-        "the backup test's subject is the backup; v3 moves the stamp"
+        version, 4,
+        "the backup test's subject is the backup; v4 moves the stamp"
     );
 
     let backups: Vec<PathBuf> = std::fs::read_dir(&config.storage_path)
@@ -401,7 +401,7 @@ async fn test_failure_at_version_zero_leaves_original_untouched_and_reraises() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_memory_shard_migrations_apply_v1_through_v3() {
+async fn test_memory_shard_migrations_apply_v1_through_v4() {
     let config = common::store_config("mig-mem");
     let db = common::open_real_db(&config, "shard.db")
         .await
@@ -415,7 +415,7 @@ async fn test_memory_shard_migrations_apply_v1_through_v3() {
     )
     .await
     .expect("applies");
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     let stats = db
         .query(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='shard_stats'",
@@ -429,11 +429,20 @@ async fn test_memory_shard_migrations_apply_v1_through_v3() {
         .query("PRAGMA table_info(memories)", Vec::new())
         .await
         .expect("table_info");
-    assert_eq!(columns.len(), 18, "v1 17 columns + session_id");
+    assert_eq!(
+        columns.len(),
+        19,
+        "v1 17 columns + session_id + source_prompt_created_at"
+    );
     assert!(
         columns
             .iter()
             .any(|row| row.text("name").as_deref() == Some("session_id"))
+    );
+    assert!(
+        columns
+            .iter()
+            .any(|row| row.text("name").as_deref() == Some("source_prompt_created_at"))
     );
     let indexes = db
         .query(
@@ -633,8 +642,8 @@ async fn test_v3_stamped_shard_without_shard_stats_is_repaired_on_write() {
             .await
             .expect("version probe")
             .and_then(|row| row.i64("user_version")),
-        Some(3),
-        "the repair never moves the stamp"
+        Some(4),
+        "the repair never moves the stamp; v4 migration brings it to 4"
     );
     drop(db);
 

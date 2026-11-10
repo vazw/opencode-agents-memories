@@ -605,13 +605,27 @@ pub struct TagMigrationBatchDto {
     pub errors: usize,
 }
 
-/// `POST /api/cleanup` data (never served in this build — D-15).
+/// `POST /api/cleanup` data (issue 39).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CleanupDto {
     pub deleted_count: u64,
     pub user_count: u64,
     pub project_count: u64,
+    pub prompts_deleted: u64,
+    pub protected_memories_skipped: u64,
+}
+
+impl From<super::ports::CleanupReport> for CleanupDto {
+    fn from(report: super::ports::CleanupReport) -> Self {
+        Self {
+            deleted_count: report.deleted_count,
+            user_count: report.user_count,
+            project_count: report.project_count,
+            prompts_deleted: report.prompts_deleted,
+            protected_memories_skipped: report.protected_memories_skipped,
+        }
+    }
 }
 
 /// `POST /api/deduplicate` data.

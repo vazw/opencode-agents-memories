@@ -20,6 +20,7 @@ use mem_episodic::raw_context::MAX_RAW_CONTEXT_BYTES;
 use mem_episodic::record::NewAgentSession;
 use mem_episodic::record::{Decision, WorkItem};
 
+use mem_profile::error::ProfileError;
 use mem_store::db::{BatchMode, Value};
 use mem_store::serde_json::Value as Json;
 use mem_store::shard_manager::ShardManager;
@@ -68,10 +69,35 @@ pub fn capture_summary_row_id(container_tag: &str, capture_id: &str) -> String {
     format!("{CAPTURE_SUMMARY_ID_PREFIX}{}", sha256::hex(&digest))
 }
 
+/// The capture-time source of a prompt's creation timestamp (issue 39).
+/// `Ok(None)` is the normal answer for a prompt row that does not exist
+/// (fresh root — no production writer of prompts, issue 47 A2) and yields a
+/// NULL stamp. An Err is a store fault the caller classifies.
+pub trait PromptStampSource: Send + Sync {
+    fn prompt_created_at<'a>(
+        &'a self,
+        prompt_id: &'a str,
+    ) -> BoxFuture<'a, Result<Option<i64>, ProfileError>>;
+}
+
+/// A prompt stamp source that always yields `Ok(None)`.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct AbsentPromptStampSource;
+
+impl PromptStampSource for AbsentPromptStampSource {
+    fn prompt_created_at<'a>(
+        &'a self,
+        _prompt_id: &'a str,
+    ) -> BoxFuture<'a, Result<Option<i64>, ProfileError>> {
+        Box::pin(std::future::ready(Ok(None)))
+    }
+}
+
 /// Everything the writer needs besides the resolved scope.
 pub struct CaptureWriterDeps {
     pub shards: Arc<ShardManager>,
     pub embedder: Arc<dyn mem_embed::embedder::Embedder>,
+    pub prompt_stamps: Arc<dyn PromptStampSource>,
 }
 
 /// The capture summary content handed to the tier-1 writer (upstream's
@@ -90,6 +116,8 @@ pub struct CaptureSummaryInput {
     pub tags: Vec<String>,
     /// The eligible user-message id (tier-1 metadata only).
     pub prompt_id: Option<String>,
+    /// The capture-time retention stamp (issue 39).
+    pub source_prompt_created_at: Option<i64>,
 }
 
 /// What one tier-1 write did.
@@ -256,6 +284,25 @@ pub async fn write_capture_summary(
                     // The write: `insert_vector_statement` in ONE
                     // `BatchMode::Write` transaction.
                     let created_at = now_millis();
+                    let source_prompt_created_at = match input.source_prompt_created_at {
+                        Some(stamp) => Some(stamp),
+                        None => match input.prompt_id.as_deref() {
+                            Some(prompt_id) => {
+                                match deps.prompt_stamps.prompt_created_at(prompt_id).await {
+                                    Ok(stamp) => stamp,
+                                    Err(error) => {
+                                        tracing::warn!(
+                                            prompt_id = %prompt_id,
+                                            error = %error,
+                                            "failed to resolve prompt stamp; degrading to null stamp"
+                                        );
+                                        None
+                                    }
+                                }
+                            }
+                            None => None,
+                        },
+                    };
                     let metadata = capture_summary_metadata(input);
                     let insert = MemoryInsert {
                         id: row_id.clone(),
@@ -279,6 +326,7 @@ pub async fn write_capture_summary(
                         project_path: scope.project_path.as_ref().map(|p| p.display().to_string()),
                         project_name: scope.project_name.clone(),
                         git_repo_url: scope.git_repo_url.clone(),
+                        source_prompt_created_at,
                     };
                     let statement =
                         insert_vector_statement(&insert).map_err(CaptureWriterError::Failed)?;
@@ -1720,6 +1768,7 @@ fn capture_summary_input(
         memory_type: memory_type.to_string(),
         tags: tags.to_vec(),
         prompt_id: prompt_id_of(params),
+        source_prompt_created_at: None,
     }
 }
 

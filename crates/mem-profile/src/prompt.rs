@@ -53,6 +53,14 @@ pub struct UserPrompt {
     pub model_id: Option<String>,
 }
 
+/// Fact row read during retention phase 1 (issue 39).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpiredPromptFact {
+    pub id: String,
+    pub linked_memory_id: Option<String>,
+    pub created_at: i64,
+}
+
 /// The prompt store over one `user-prompts.db`.
 pub struct UserPromptManager {
     storage_path: PathBuf,
@@ -466,15 +474,72 @@ impl UserPromptManager {
         Ok(())
     }
 
-    /// Upstream `deleteOldPrompts`.
-    pub async fn delete_old_prompts(&self, cutoff_time: i64) -> Result<u64, ProfileError> {
+    /// Expired prompt facts probe for retention sweep phase 1 (issue 39).
+    pub async fn expired_prompt_facts(
+        &self,
+        cutoff: i64,
+    ) -> Result<Vec<ExpiredPromptFact>, ProfileError> {
         let db = self.ready().await?;
+        let rows = db
+            .query(
+                "SELECT id, linked_memory_id, created_at FROM user_prompts WHERE created_at < ?",
+                vec![Value::Integer(cutoff)],
+            )
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| ExpiredPromptFact {
+                id: row.text("id").unwrap_or_default(),
+                linked_memory_id: row.text("linked_memory_id"),
+                created_at: row.i64("created_at").unwrap_or_default(),
+            })
+            .collect())
+    }
+
+    /// Retention pruning joined to B2′ profile invalidation (issue 39).
+    ///
+    /// Reads `MIN(created_at)` across the expired batch, triggers B2′ invalidation
+    /// on the watermark before deleting, and aborts if erasure fails (fail toward
+    /// privacy, E2 ordering).
+    pub async fn delete_expired_prompts(&self, cutoff_time: i64) -> Result<u64, ProfileError> {
+        let db = self.ready().await?;
+        let row = query_one(
+            db.as_ref(),
+            "SELECT MIN(created_at) AS min_created_at FROM user_prompts WHERE created_at < ?",
+            vec![Value::Integer(cutoff_time)],
+        )
+        .await?;
+
+        let min_created_at = row.as_ref().and_then(|r| r.i64("min_created_at"));
+        if let (Some(min_ts), Some(eraser)) = (min_created_at, &self.eraser) {
+            eraser.erase_derived_from(min_ts).await.map_err(|error| {
+                ProfileError::ErasureFailed {
+                    prompt_id: format!("retention-batch-{cutoff_time}"),
+                    message: error.message(),
+                }
+            })?;
+        }
+
         let result = db
             .execute(
                 "DELETE FROM user_prompts WHERE created_at < ?",
                 vec![Value::Integer(cutoff_time)],
             )
             .await?;
+        Ok(result.changes)
+    }
+
+    /// Clears `linked_memory_id` on user prompts referencing deleted memories (issue 39).
+    pub async fn clear_links(&self, memory_ids: &[String]) -> Result<u64, ProfileError> {
+        if memory_ids.is_empty() {
+            return Ok(0);
+        }
+        let db = self.ready().await?;
+        let placeholders = placeholders(memory_ids.len());
+        let sql = format!(
+            "UPDATE user_prompts SET linked_memory_id = NULL WHERE linked_memory_id IN ({placeholders})"
+        );
+        let result = db.execute(sql.as_str(), text_values(memory_ids)).await?;
         Ok(result.changes)
     }
 
@@ -561,6 +626,21 @@ impl UserPromptManager {
             )
             .await?;
         Ok(rows.iter().map(row_to_prompt).collect())
+    }
+
+    /// Upstream `getPromptById` - creation timestamp probe (issue 39).
+    pub async fn get_prompt_created_at(
+        &self,
+        prompt_id: &str,
+    ) -> Result<Option<i64>, ProfileError> {
+        let db = self.ready().await?;
+        let row = query_one(
+            db.as_ref(),
+            "SELECT created_at FROM user_prompts WHERE id = ?",
+            vec![Value::Text(prompt_id.to_string())],
+        )
+        .await?;
+        Ok(row.as_ref().and_then(|r| r.i64("created_at")))
     }
 
     /// Upstream `getPromptById`.

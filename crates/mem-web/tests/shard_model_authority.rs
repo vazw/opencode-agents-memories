@@ -167,6 +167,7 @@ async fn insert_row(manager: &ShardManager, shard: &ShardInfo, id: &str, content
             project_path: None,
             project_name: None,
             git_repo_url: None,
+            source_prompt_created_at: None,
         },
     )
     .await

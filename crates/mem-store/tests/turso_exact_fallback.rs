@@ -62,6 +62,7 @@ async fn test_finds_memories_via_exact_cosine_scan_without_vector_indexes() {
         project_path: None,
         project_name: None,
         git_repo_url: None,
+        source_prompt_created_at: None,
     };
     insert_vector(db.as_ref(), &row).await.expect("insert");
 

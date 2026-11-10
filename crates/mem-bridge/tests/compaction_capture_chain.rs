@@ -155,6 +155,7 @@ async fn seed_into(shards: &ShardManager, shard: &ShardInfo, rows: &[SeedRow<'_>
                 project_path: None,
                 project_name: None,
                 git_repo_url: None,
+                source_prompt_created_at: None,
             },
         )
         .await

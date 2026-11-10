@@ -39,12 +39,12 @@ use axum::response::Response;
 use serde::Deserialize;
 
 use super::dto::{
-    DedupDto, MigrationDetectDto, MigrationRunDto, TagMigrationBatchDto, TagMigrationDetectDto,
-    TagMigrationProgressDto,
+    CleanupDto, DedupDto, MigrationDetectDto, MigrationRunDto, TagMigrationBatchDto,
+    TagMigrationDetectDto, TagMigrationProgressDto,
 };
 use super::envelope;
 use super::ports::PortError;
-use super::{json_body_or_default, port_failure};
+use super::{UNAVAILABLE_MESSAGE, json_body_or_default, port_failure};
 use crate::server::AppState;
 
 /// The default batch window (`body?.batchSize || 5`).
@@ -72,9 +72,14 @@ struct RunBatchRequest {
 }
 
 /// Maps a maintenance port failure: an upstream business message is answered
-/// at HTTP 200 with `success:false`, everything else is the fixed 500 (D-9).
+/// at HTTP 200 with `success:false`, unavailable answers 501, everything else is the fixed 500 (D-9).
 fn maintenance_failure(endpoint: &'static str, error: PortError) -> Response {
     match error {
+        PortError::Unavailable => match endpoint {
+            "POST /api/cleanup" => envelope::not_implemented(CLEANUP_UNAVAILABLE),
+            "POST /api/deduplicate" => envelope::not_implemented(DEDUPLICATE_UNAVAILABLE),
+            _ => envelope::not_implemented(UNAVAILABLE_MESSAGE),
+        },
         PortError::Invalid(message) => envelope::business_error(&message),
         other => port_failure(endpoint, other),
     }
@@ -226,13 +231,12 @@ pub async fn run_tag_migration_batch(State(state): State<Arc<AppState>>, body: B
     }
 }
 
-/// `POST /api/cleanup` — the documented 501 stub (D-15).
-///
-/// The service does not exist in this build; the endpoint and its seam stay
-/// registered so the contract is stable. This handler must be replaced when
-/// `MaintenancePort::cleanup` gains an implementation.
-pub async fn cleanup() -> Response {
-    envelope::not_implemented(CLEANUP_UNAVAILABLE)
+/// `POST /api/cleanup` — upstream `handleRunCleanup`.
+pub async fn cleanup(State(state): State<Arc<AppState>>) -> Response {
+    match state.api.maintenance.cleanup().await {
+        Ok(report) => envelope::ok(&CleanupDto::from(report)),
+        Err(error) => maintenance_failure("POST /api/cleanup", error),
+    }
 }
 
 /// `POST /api/deduplicate` — upstream `handleRunDeduplication`.

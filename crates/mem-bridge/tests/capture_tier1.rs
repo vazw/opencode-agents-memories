@@ -60,6 +60,7 @@ fn input(capture_id: &str, session_id: &str) -> CaptureSummaryInput {
         memory_type: "bug".to_string(),
         tags: vec!["auth".to_string(), "bug-fix".to_string()],
         prompt_id: Some("prompt-7".to_string()),
+        source_prompt_created_at: None,
     }
 }
 
@@ -94,6 +95,7 @@ async fn test_capture_tier1_row_has_session_id_metadata_query_and_replay_is_idem
         embedder: Arc::new(FakeEmbedder::with_vector(vec![
             1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         ])),
+        prompt_stamps: Arc::new(mem_bridge::capture::AbsentPromptStampSource),
     };
 
     let outcome = write_capture_summary(
@@ -209,6 +211,7 @@ async fn test_capture_tier1_write_tolerates_own_consolidation_lock() {
         embedder: Arc::new(FakeEmbedder::with_vector(vec![
             0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         ])),
+        prompt_stamps: Arc::new(mem_bridge::capture::AbsentPromptStampSource),
     };
 
     // The engine's own consolidation holds the lock for its whole run —
@@ -296,6 +299,7 @@ async fn test_capture_metadata_json_survives_quotes_in_session_id() {
     let deps = mem_bridge::capture::CaptureWriterDeps {
         shards: shards.clone(),
         embedder: Arc::new(FakeEmbedder::with_vector(common::unit_vector(3))),
+        prompt_stamps: Arc::new(mem_bridge::capture::AbsentPromptStampSource),
     };
     let scope =
         mem_bridge::project_scope::apply_resolved_scope("/srv/proj", TAG, HASH).expect("scope");
@@ -413,6 +417,7 @@ async fn test_capture_drain_persists_provider_type_and_extension_fields() {
         Arc::new(DefaultTier1Writer::new(CaptureWriterDeps {
             shards: shards.clone(),
             embedder: embedder.clone(),
+            prompt_stamps: Arc::new(mem_bridge::capture::AbsentPromptStampSource),
         })),
         embedder.clone(),
         Some(Arc::new(FixedSummarizer {
@@ -515,6 +520,7 @@ fn rotation_deps(shards: &Arc<ShardManager>) -> mem_bridge::capture::CaptureWrit
     mem_bridge::capture::CaptureWriterDeps {
         shards: shards.clone(),
         embedder: Arc::new(FakeEmbedder::with_vector(vec![1.0, 0.0])),
+        prompt_stamps: Arc::new(mem_bridge::capture::AbsentPromptStampSource),
     }
 }
 
@@ -702,6 +708,7 @@ async fn test_a_tier1_write_keeps_both_count_authorities_exact() {
         embedder: Arc::new(FakeEmbedder::with_vector(vec![
             1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         ])),
+        prompt_stamps: Arc::new(mem_bridge::capture::AbsentPromptStampSource),
     };
     let scope = mem_bridge::project_scope::ResolvedProjectScope {
         project_id: "/project/count-authority".to_string(),

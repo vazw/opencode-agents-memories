@@ -199,6 +199,7 @@ async fn seed_memory(rig: &Rig, path: &Path) {
         project_path: Some(path.to_string_lossy().to_string()),
         project_name: None,
         git_repo_url: None,
+        source_prompt_created_at: None,
     };
     insert_vector(db.as_ref(), &insert)
         .await

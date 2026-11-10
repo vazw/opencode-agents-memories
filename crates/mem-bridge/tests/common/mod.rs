@@ -431,6 +431,7 @@ pub async fn build_fixture_runtime_with_chat_capture(
             mem_bridge::capture::CaptureWriterDeps {
                 shards: shards.clone(),
                 embedder: embedder.clone(),
+                prompt_stamps: Arc::new(mem_bridge::capture::AbsentPromptStampSource),
             },
         )),
         embedder.clone(),
@@ -619,6 +620,7 @@ pub async fn build_wire_fixture_gated(
             mem_bridge::capture::CaptureWriterDeps {
                 shards: shards.clone(),
                 embedder: embedder.clone(),
+                prompt_stamps: Arc::new(mem_bridge::capture::AbsentPromptStampSource),
             },
         )),
         embedder.clone(),
@@ -739,6 +741,7 @@ pub fn new_insert(id: &str, content: &str, container_tag: &str) -> MemoryInsert 
         project_path: None,
         project_name: None,
         git_repo_url: None,
+        source_prompt_created_at: None,
     }
 }
 

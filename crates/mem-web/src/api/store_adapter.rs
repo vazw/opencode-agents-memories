@@ -248,6 +248,7 @@ fn memory_insert(memory: NewMemory) -> MemoryInsert {
         project_path: memory.project_path,
         project_name: memory.project_name,
         git_repo_url: memory.git_repo_url,
+        source_prompt_created_at: None,
     }
 }
 
@@ -1539,6 +1540,7 @@ impl FactStore for ProductionFacts {
             project_path: memory.project_path,
             project_name: memory.project_name,
             git_repo_url: memory.git_repo_url,
+            source_prompt_created_at: None,
         };
         let lock_hash = hash.clone();
         let arg_hash = hash.clone();

@@ -776,6 +776,7 @@ impl MigrationService {
                 project_path: memory.text("project_path").filter(|path| !path.is_empty()),
                 project_name: memory.text("project_name").filter(|name| !name.is_empty()),
                 git_repo_url: memory.text("git_repo_url").filter(|url| !url.is_empty()),
+                source_prompt_created_at: None,
             };
             statements.push(insert_vector_statement(&record)?);
             if memory.i64("is_pinned").unwrap_or(0) == 1 {

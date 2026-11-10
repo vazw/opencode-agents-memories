@@ -91,6 +91,7 @@ async fn seed_capture_summary(
     let deps = mem_bridge::capture::CaptureWriterDeps {
         shards: shards.clone(),
         embedder: Arc::new(FakeEmbedder::with_vector(common::unit_vector(1))),
+        prompt_stamps: Arc::new(mem_bridge::capture::AbsentPromptStampSource),
     };
     let scope =
         mem_bridge::project_scope::apply_resolved_scope("/srv/proj", TAG, HASH).expect("scope");
@@ -104,6 +105,7 @@ async fn seed_capture_summary(
             memory_type: "bug".to_string(),
             tags: vec![],
             prompt_id: Some("p-1".to_string()),
+            source_prompt_created_at: None,
         },
     )
     .await
@@ -529,6 +531,7 @@ async fn test_inject_read_tag_equals_promotion_container_tag() {
     let deps = mem_bridge::capture::CaptureWriterDeps {
         shards: shards.clone(),
         embedder: Arc::new(FakeEmbedder::with_vector(common::unit_vector(1))),
+        prompt_stamps: Arc::new(mem_bridge::capture::AbsentPromptStampSource),
     };
     let matching =
         mem_bridge::project_scope::apply_resolved_scope("/srv/proj", TAG, HASH).expect("scope");
@@ -560,6 +563,7 @@ async fn test_inject_read_tag_equals_promotion_container_tag() {
                 memory_type: "memory".to_string(),
                 tags: vec![],
                 prompt_id: None,
+                source_prompt_created_at: None,
             },
         )
         .await
@@ -766,6 +770,7 @@ async fn test_inject_skips_malformed_metadata_row() {
             project_path: None,
             project_name: None,
             git_repo_url: None,
+            source_prompt_created_at: None,
         },
     )
     .await

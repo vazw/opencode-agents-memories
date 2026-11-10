@@ -657,24 +657,24 @@ async fn test_maintenance_endpoints_answer_their_documented_envelopes() {
 }
 
 #[tokio::test]
-async fn test_cleanup_answers_501_until_the_service_lands() {
+async fn test_cleanup_answers_501_when_the_port_is_unavailable() {
     let (backend, router) = router_with_fakes();
 
     let response = api_request(router, "POST", "/api/cleanup", Some("test-token"), None).await;
     assert_eq!(
         response.status,
         501,
-        "/api/cleanup is the documented stub: {}",
+        "/api/cleanup degrades when its port is unavailable: {}",
         response.body_string()
     );
     assert_eq!(
         response.body_string(),
         r#"{"success":false,"error":"cleanup is not available in this build"}"#
     );
-    assert!(
-        backend.calls().is_empty(),
-        "/api/cleanup must not touch a port: {:?}",
-        backend.calls()
+    assert_eq!(
+        backend.calls(),
+        vec!["cleanup".to_string()],
+        "the handler reaches the port; the 501 is the Unavailable arm (not a stub)"
     );
 }
 

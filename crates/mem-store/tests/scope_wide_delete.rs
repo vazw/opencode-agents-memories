@@ -15,8 +15,11 @@ mod common;
 
 use std::path::Path;
 
-use mem_store::db::query_one;
+use mem_store::db::{Value, query_one};
 use mem_store::error::StoreError;
+use mem_store::schema_migrations::{
+    MigrationOptions, apply_schema_migrations, memory_shard_migrations,
+};
 use mem_store::scope::Scope;
 use mem_store::shard_facts;
 use mem_store::shard_manager::{ShardInfo, ShardManager};
@@ -53,6 +56,7 @@ fn seed_record(id: &str, container_tag: &str) -> MemoryInsert {
         project_path: None,
         project_name: None,
         git_repo_url: None,
+        source_prompt_created_at: None,
     }
 }
 
@@ -523,34 +527,66 @@ async fn test_delete_memory_in_scope_rejects_an_invalid_scope_hash_without_delet
 async fn test_delete_memory_in_scope_repairs_a_v3_stamped_shard_without_shard_stats() {
     let config = common::test_store_config("scope-delete-v3-lying-stamp", 2, 1000);
     let (_config, _connections, manager) = common::real_components(config).await;
-    let shard = manager
-        .create_shard(Scope::Project, HASH, 0)
-        .await
-        .expect("create the shard");
-    insert_into_shard(
-        &manager,
-        &shard.db_path,
-        &seed_record("dup-id", TAG_SHARD_0),
+    let path = manager
+        .get_shard_path(Scope::Project, HASH, 0)
+        .expect("shard path");
+    let db = manager.open_shard(&path).await.expect("open shard");
+    let through_v2: Vec<_> = memory_shard_migrations(2)
+        .into_iter()
+        .filter(|m| m.version <= 2)
+        .collect();
+    apply_schema_migrations(
+        db.as_ref(),
+        &through_v2,
+        &MigrationOptions {
+            db_path: None,
+            label: "v2-fixture",
+            max_known: 2,
+        },
+        None,
     )
-    .await;
+    .await
+    .expect("apply v1..v2");
+    db.execute(
+        "INSERT OR REPLACE INTO shard_metadata (key, value) VALUES ('embedding_dimensions', ?1)",
+        vec![Value::Text("2".to_string())],
+    )
+    .await
+    .expect("dimensions metadata");
+    db.execute(
+        "INSERT OR REPLACE INTO shard_metadata (key, value) VALUES ('embedding_model', ?1)",
+        vec![Value::Text("test-model".to_string())],
+    )
+    .await
+    .expect("model metadata");
+    let vector = mem_store::vector::vector_to_text(&[1.0f32, 0.0]).expect("vector");
+    db.execute(
+        "INSERT INTO memories (id, content, vector, container_tag, created_at, updated_at)
+         VALUES (?1, ?2, vector32(?3), ?4, 1, 1)",
+        vec![
+            Value::Text("dup-id".to_string()),
+            Value::Text("row dup-id".to_string()),
+            Value::Text(vector),
+            Value::Text(TAG_SHARD_0.to_string()),
+        ],
+    )
+    .await
+    .expect("seed row");
+    db.execute(&sql::set_user_version_sql(3), Vec::new())
+        .await
+        .expect("stamp v3");
+    drop(db);
+
+    let shard = manager
+        .register_existing_shard(Scope::Project, HASH, 0, &path, 0, true)
+        .await
+        .expect("register shard");
+
     assert!(
         copy_exists(&manager, &shard.db_path, "dup-id").await,
         "the fixture really seeds the row the delete must remove"
     );
 
-    // The live damage state: the table is gone while the header still claims
-    // v3, so the runner has nothing pending and creates nothing.
-    let db = manager
-        .open_shard(&shard.db_path)
-        .await
-        .expect("open shard");
-    db.execute("DROP TABLE shard_stats", Vec::new())
-        .await
-        .expect("drop the v3 table");
-    db.execute(&sql::set_user_version_sql(3), Vec::new())
-        .await
-        .expect("stamp v3");
-    drop(db);
     let db = manager
         .open_shard(&shard.db_path)
         .await
@@ -612,36 +648,72 @@ async fn test_delete_memory_in_scope_repairs_a_v3_stamped_shard_without_shard_st
 async fn test_delete_memory_in_scope_migrates_a_v2_stamped_shard_before_the_counted_delete() {
     let config = common::test_store_config("scope-delete-v2-stamped", 2, 1000);
     let (_config, _connections, manager) = common::real_components(config).await;
-    let shard = manager
-        .create_shard(Scope::Project, HASH, 0)
-        .await
-        .expect("create the shard");
-    insert_into_shard(
-        &manager,
-        &shard.db_path,
-        &seed_record("dup-id", TAG_SHARD_0),
+    let path = manager
+        .get_shard_path(Scope::Project, HASH, 0)
+        .expect("shard path");
+    let db = manager.open_shard(&path).await.expect("open shard");
+    let through_v2: Vec<_> = memory_shard_migrations(2)
+        .into_iter()
+        .filter(|m| m.version <= 2)
+        .collect();
+    apply_schema_migrations(
+        db.as_ref(),
+        &through_v2,
+        &MigrationOptions {
+            db_path: None,
+            label: "v2-fixture",
+            max_known: 2,
+        },
+        None,
     )
-    .await;
-    insert_into_shard(
-        &manager,
-        &shard.db_path,
-        &seed_record("neighbour", TAG_SHARD_0),
+    .await
+    .expect("apply v1..v2");
+    db.execute(
+        "INSERT OR REPLACE INTO shard_metadata (key, value) VALUES ('embedding_dimensions', ?1)",
+        vec![Value::Text("2".to_string())],
     )
-    .await;
-
-    // The W2 `test_a_v3_shaped_file_stamped_v2_converges` shape: the table is
-    // gone but the file still claims v2, so only a migrating touch creates it.
-    let db = manager
-        .open_shard(&shard.db_path)
-        .await
-        .expect("open shard");
-    db.execute("DROP TABLE shard_stats", Vec::new())
-        .await
-        .expect("drop the v3 table");
+    .await
+    .expect("dimensions metadata");
+    db.execute(
+        "INSERT OR REPLACE INTO shard_metadata (key, value) VALUES ('embedding_model', ?1)",
+        vec![Value::Text("test-model".to_string())],
+    )
+    .await
+    .expect("model metadata");
+    let vector = mem_store::vector::vector_to_text(&[1.0f32, 0.0]).expect("vector");
+    db.execute(
+        "INSERT INTO memories (id, content, vector, container_tag, created_at, updated_at)
+         VALUES (?1, ?2, vector32(?3), ?4, 1, 1)",
+        vec![
+            Value::Text("dup-id".to_string()),
+            Value::Text("row dup-id".to_string()),
+            Value::Text(vector.clone()),
+            Value::Text(TAG_SHARD_0.to_string()),
+        ],
+    )
+    .await
+    .expect("seed row 1");
+    db.execute(
+        "INSERT INTO memories (id, content, vector, container_tag, created_at, updated_at)
+         VALUES (?1, ?2, vector32(?3), ?4, 1, 1)",
+        vec![
+            Value::Text("neighbour".to_string()),
+            Value::Text("row neighbour".to_string()),
+            Value::Text(vector),
+            Value::Text(TAG_SHARD_0.to_string()),
+        ],
+    )
+    .await
+    .expect("seed row 2");
     db.execute(&sql::set_user_version_sql(2), Vec::new())
         .await
         .expect("stamp v2");
     drop(db);
+
+    let shard = manager
+        .register_existing_shard(Scope::Project, HASH, 0, &path, 0, true)
+        .await
+        .expect("register shard");
 
     let copies = manager
         .delete_memory_in_scope(Scope::Project, HASH, "dup-id")
@@ -672,5 +744,5 @@ async fn test_delete_memory_in_scope_migrates_a_v2_stamped_shard_before_the_coun
         .expect("version probe")
         .and_then(|row| row.i64("user_version"))
         .unwrap_or(0);
-    assert_eq!(version, 3, "the file converged to v3");
+    assert_eq!(version, 4, "the file converged to v4");
 }

@@ -9,8 +9,8 @@
 //!    can never add the FK) still loses its changelog snapshots, because the
 //!    explicit two-table delete is the contract, not the declared cascade.
 //!
-//! `delete_old_prompts` (retention pruning) stays untouched in this wave: its
-//! deferral to issue 39 is pinned by the third test.
+//! `delete_expired_prompts` joins retention pruning to profile invalidation
+//! (issue 39, 47.1-B2′).
 
 mod common;
 
@@ -272,13 +272,11 @@ async fn test_migrated_root_profile_is_erased_by_the_prompt_path() {
     assert_eq!(count_rows(&store, "user_profile_changelogs").await, 0);
 }
 
-/// Retention pruning is deliberately deferred to **issue 39**, which must cite
-/// 47.1-B2′ and decide whether pruning joins the invalidation. This is the one
-/// assertion that stops the deferral reversing silently: `delete_old_prompts`
-/// removes prompts and leaves the profile (and its changelogs) intact — even
-/// with an eraser wired into the manager.
+/// Issue 39 joins retention pruning to profile invalidation (47.1-B2′).
+/// `delete_expired_prompts` removes prompts and invalidates profiles whose
+/// watermark says they could have been derived from the pruned batch.
 #[tokio::test]
-async fn test_delete_old_prompts_does_not_erase_the_profile() {
+async fn test_retention_batch_erase_joins_profile_invalidation() {
     let root = seeded_root();
     let config = common::store_config(root.clone());
     let store = Arc::new(ProfileStore::new(
@@ -291,7 +289,7 @@ async fn test_delete_old_prompts_does_not_erase_the_profile() {
         .save_prompt("session-48", "message-48", "/probe", "old prompt")
         .await
         .expect("seed the prompt");
-    let profile_id = store
+    let _profile_id = store
         .create_profile(USER_ID, "Migrated", "migrated", USER_ID, &profile_data(), 1)
         .await
         .expect("seed the profile");
@@ -299,7 +297,7 @@ async fn test_delete_old_prompts_does_not_erase_the_profile() {
     let eraser: Arc<dyn ProfileEraser> = store.clone();
     let manager = manager.with_eraser(eraser);
     let removed = manager
-        .delete_old_prompts(now_millis() + 1_000)
+        .delete_expired_prompts(now_millis() + 1_000)
         .await
         .expect("prune the old prompts");
 
@@ -314,13 +312,96 @@ async fn test_delete_old_prompts_does_not_erase_the_profile() {
     );
     assert_eq!(
         count_rows(&store, "user_profiles").await,
+        0,
+        "pruning joins profile invalidation: the profile is erased"
+    );
+    assert_eq!(
+        count_rows(&store, "user_profile_changelogs").await,
+        0,
+        "pruning joins profile invalidation: the changelog snapshots are erased"
+    );
+    assert_eq!(
+        store
+            .get_active_profile(USER_ID)
+            .await
+            .expect("read the profile"),
+        None,
+        "no profile survives after batch invalidation"
+    );
+}
+
+/// Retention pruning spares profiles whose `last_analyzed_at` is strictly older
+/// than the pruned prompt's creation timestamp (the prompt could not have
+/// contributed to the profile).
+#[tokio::test]
+async fn test_retention_prune_spares_profile_when_prompt_postdates_watermark() {
+    let root = seeded_root();
+    let config = common::store_config(root.clone());
+    let store = Arc::new(ProfileStore::new(
+        root.clone(),
+        config.clone(),
+        ProfileConfig::default(),
+    ));
+    let manager = UserPromptManager::new(root.clone(), config, 3);
+    let profile_id = store
+        .create_profile(USER_ID, "Migrated", "migrated", USER_ID, &profile_data(), 1)
+        .await
+        .expect("seed the profile");
+
+    let prompt_id = manager
+        .save_prompt(
+            "session-48",
+            "message-48",
+            "/probe",
+            "post-watermark prompt",
+        )
+        .await
+        .expect("seed the prompt");
+    let prompt = manager
+        .get_prompt_by_id(&prompt_id)
+        .await
+        .expect("read prompt")
+        .expect("prompt exists");
+
+    // Set profile's watermark strictly before the prompt's created_at (positive value).
+    let past_watermark = prompt.created_at - 10_000;
+    assert!(past_watermark > 0);
+    let db = store.ready().await.expect("profile store ready");
+    db.execute(
+        "UPDATE user_profiles SET last_analyzed_at = ? WHERE id = ?",
+        vec![
+            Value::Integer(past_watermark),
+            Value::Text(profile_id.clone()),
+        ],
+    )
+    .await
+    .expect("update watermark to past");
+
+    let eraser: Arc<dyn ProfileEraser> = store.clone();
+    let manager = manager.with_eraser(eraser);
+    let removed = manager
+        .delete_expired_prompts(prompt.created_at + 1_000)
+        .await
+        .expect("prune expired prompt");
+
+    assert_eq!(removed, 1, "the pruning path removed the prompt");
+    assert!(
+        manager
+            .get_prompt_by_id(&prompt_id)
+            .await
+            .expect("read the prompt")
+            .is_none(),
+        "the prompt is gone"
+    );
+    assert_eq!(
+        count_rows(&store, "user_profiles").await,
         1,
-        "pruning does not erase the profile (deferred to issue 39)"
+        "profile postdating watermark is spared"
     );
     assert_eq!(
         count_rows(&store, "user_profile_changelogs").await,
         1,
-        "pruning does not erase the changelog snapshots"
+        "changelogs are spared"
     );
     assert_eq!(
         store
@@ -329,6 +410,51 @@ async fn test_delete_old_prompts_does_not_erase_the_profile() {
             .expect("read the profile")
             .map(|profile| profile.id),
         Some(profile_id),
-        "the seeded profile is still the active one"
+        "the spared profile is still the active one"
+    );
+}
+
+struct FailingEraser;
+
+impl ProfileEraser for FailingEraser {
+    fn erase_derived_from<'a>(
+        &'a self,
+        _prompt_created_at: i64,
+    ) -> mem_store::db::BoxFuture<
+        'a,
+        Result<mem_profile::erasure::EraseReport, mem_profile::error::ProfileError>,
+    > {
+        Box::pin(async {
+            Err(mem_profile::error::ProfileError::ErasureFailed {
+                prompt_id: "injected".to_string(),
+                message: "injected batch erase failure".to_string(),
+            })
+        })
+    }
+}
+
+/// E2 ordering: profile invalidation happens before prompt delete; if the erase
+/// fails, `delete_expired_prompts` aborts and leaves the prompts alive (fail toward privacy).
+#[tokio::test]
+async fn test_retention_batch_erase_failure_leaves_prompts_alive() {
+    let root = seeded_root();
+    let config = common::store_config(root.clone());
+    let manager = UserPromptManager::new(root.clone(), config, 3);
+    let prompt_id = manager
+        .save_prompt("session-48", "message-48", "/probe", "failing erase prompt")
+        .await
+        .expect("seed the prompt");
+
+    let manager = manager.with_eraser(Arc::new(FailingEraser));
+    let outcome = manager.delete_expired_prompts(now_millis() + 1_000).await;
+    assert!(outcome.is_err(), "batch erase failure aborts before delete");
+
+    assert!(
+        manager
+            .get_prompt_by_id(&prompt_id)
+            .await
+            .expect("read prompt")
+            .is_some(),
+        "prompt survives when batch erase fails"
     );
 }

@@ -104,6 +104,7 @@ async fn fixture(prefix: &str) -> (Fixture, ShardInfo) {
             project_path: Some(format!("/project/{index}")),
             project_name: None,
             git_repo_url: None,
+            source_prompt_created_at: None,
         };
         let statement = insert_vector_statement(&record).expect("statement builds");
         db.execute(&statement.sql, statement.params)
@@ -480,6 +481,7 @@ async fn identity_rig(
             project_path: None,
             project_name: None,
             git_repo_url: None,
+            source_prompt_created_at: None,
         };
         let statement = insert_vector_statement(&record).expect("statement builds");
         db.execute(&statement.sql, statement.params)
@@ -893,8 +895,8 @@ async fn test_the_staged_rebuild_writes_the_fingerprint_in_the_vector_batch() {
         .collect();
     assert_eq!(
         staged.len(),
-        5,
-        "a fresh staged file: v1 + v2 + v3 + metadata + vector batches"
+        6,
+        "a fresh staged file: v1 + v2 + v3 + v4 + metadata + vector batches"
     );
 
     let claiming: Vec<&common::RecordedBatch> = staged
@@ -1035,6 +1037,7 @@ async fn test_reembed_preserves_session_id_without_metadata_fallback() {
             project_path: None,
             project_name: None,
             git_repo_url: None,
+            source_prompt_created_at: None,
         },
         MemoryInsert {
             id: "mem_case_b".to_string(),
@@ -1054,6 +1057,7 @@ async fn test_reembed_preserves_session_id_without_metadata_fallback() {
             project_path: None,
             project_name: None,
             git_repo_url: None,
+            source_prompt_created_at: None,
         },
         MemoryInsert {
             id: "mem_case_c".to_string(),
@@ -1073,6 +1077,7 @@ async fn test_reembed_preserves_session_id_without_metadata_fallback() {
             project_path: None,
             project_name: None,
             git_repo_url: None,
+            source_prompt_created_at: None,
         },
     ];
 

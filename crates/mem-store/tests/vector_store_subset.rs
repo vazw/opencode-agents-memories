@@ -63,6 +63,7 @@ fn record(id: &str, created: i64, with_tags: bool, project_path: Option<&str>) -
         project_path: project_path.map(|p| p.to_string()),
         project_name: Some("AggregateProject".to_string()),
         git_repo_url: None,
+        source_prompt_created_at: None,
     }
 }
 

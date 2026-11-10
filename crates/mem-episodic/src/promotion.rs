@@ -411,6 +411,7 @@ impl PermanentMemorySink for ShardPermanentMemorySink {
                                 project_path: None,
                                 project_name: None,
                                 git_repo_url: None,
+                                source_prompt_created_at: None,
                             };
                             // The unique-violation fallback below is the second
                             // line of defence behind the seam, and it works ONLY

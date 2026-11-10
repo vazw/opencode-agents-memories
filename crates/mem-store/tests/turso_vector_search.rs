@@ -58,6 +58,7 @@ fn record(id: &str, content: &str, vector: &[f32], container_tag: &str) -> Memor
         project_path: None,
         project_name: None,
         git_repo_url: None,
+        source_prompt_created_at: None,
     }
 }
 

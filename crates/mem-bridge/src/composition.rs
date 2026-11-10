@@ -33,6 +33,29 @@ use crate::capture::{CaptureService, CaptureWriterDeps, DefaultTier1Writer};
 use crate::compaction::CompactionPolicy;
 use crate::inject::InjectService;
 
+/// Production prompt stamp source wrapping `UserPromptManager` (issue 39).
+pub struct ProductionPromptStampSource {
+    prompts: Arc<UserPromptManager>,
+}
+
+impl ProductionPromptStampSource {
+    pub fn new(prompts: Arc<UserPromptManager>) -> Self {
+        Self { prompts }
+    }
+}
+
+impl crate::capture::PromptStampSource for ProductionPromptStampSource {
+    fn prompt_created_at<'a>(
+        &'a self,
+        prompt_id: &'a str,
+    ) -> mem_embed::embedder::BoxFuture<'a, Result<Option<i64>, mem_profile::error::ProfileError>>
+    {
+        let prompts = self.prompts.clone();
+        let prompt_id = prompt_id.to_string();
+        Box::pin(async move { prompts.get_prompt_created_at(&prompt_id).await })
+    }
+}
+
 /// The composed runtime (shared with [`EngineRuntime`]).
 pub struct ComposedRuntime {
     pub capture: Arc<CaptureService>,
@@ -267,6 +290,7 @@ pub async fn build_composed_runtime(
         Arc::new(DefaultTier1Writer::new(CaptureWriterDeps {
             shards: shards.clone(),
             embedder: embedder.clone(),
+            prompt_stamps: Arc::new(ProductionPromptStampSource::new(prompts.clone())),
         })),
         embedder.clone(),
         summarizer,
