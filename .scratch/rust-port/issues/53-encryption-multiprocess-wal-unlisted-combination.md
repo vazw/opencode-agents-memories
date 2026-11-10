@@ -1,11 +1,6 @@
 # 53 — Storage · A supported config lands in a combination turso's manual excludes: encryption × multiprocess WAL
 
-Status: ready-for-human — 2026-10-30 (repo half landed; owner applies the drafted wiki paragraph; the vault commit is the owner's) (owner ruled **O3**: keep built-in encryption + multiprocess WAL and
-document the divergence with the measured G1/G2 numbers. Docs-only wave: ADR-0012's Consequences and the
-vault's documented limitation. Brief under `## Agent Brief`.)
-experimental multiprocess WAL — a cell turso's manual excludes for page-codec databases — and a user who
-enables `databaseEncryptionEnabled` puts every shard there too.** Reachability is a source read; the harm is
-`needs_validation` (gate below).
+Status: done — 2026-11-10 (O3 documentation complete: ADR-0012 Consequences, crates/mem-vault/CONTEXT.md, and vault commit 011db76 applied)
 
 ## PREMISE — reachability established, harm not
 
@@ -101,15 +96,15 @@ Whichever is chosen, this issue owns **only** the cell. It does not re-open 43's
 
 ## Acceptance criteria
 
-- [ ] **53.1** A reachability table exists here first: which databases can be in the cell, under which
+- [x] **53.1** A reachability table exists here first: which databases can be in the cell, under which
       configuration, on which platform — including the explicit note that the **vault is always in it** on
       non-Windows (`mem-vault/src/store.rs:112-114`, `:271`) and that `mem-store`'s five families are in it
       only when encryption is enabled (`schema.rs:602`).
-- [ ] **53.2** The doc-vs-code contradiction is recorded with both citations: `manual.md:1320-1323`
+- [x] **53.2** The doc-vs-code contradiction is recorded with both citations: `manual.md:1320-1323`
       (labelled doc-sourced) against `turso_core-0.8.3/database.rs:908-927` and HEAD `core_database.rs:968-1000`.
       The fact that the engine has a hard error for *external* codecs and none for the built-in cipher is the
       crux and must be stated as such.
-- [ ] **53.3** **G1, G2, G3 and the inversion arm run** (W0-style harness: `crates/mem-store/tests/turso_capabilities.rs`
+- [x] **53.3** **G1, G2, G3 and the inversion arm run** (W0-style harness: `crates/mem-store/tests/turso_capabilities.rs`
       already builds a flag-off variant at `:2012`), and the results are pasted in — including which side
       errored, if any. A result that cannot be produced records the blocker, not a guess.
 - [x] **53.4** The ruling is recorded as **O1 / O2 / O3 / O4** with a one-paragraph rationale, and the two
@@ -121,9 +116,8 @@ Whichever is chosen, this issue owns **only** the cell. It does not re-open 43's
 - [x] **53.6** If O3: the limitation is written where a user meets it (the ADR, and the vault's own
       documentation), with G1/G2 numbers, not adjectives. — ADR-0012 `## Consequences`; written in
       `crates/mem-vault/CONTEXT.md` under "Accepted, documented, not mitigated"; the owner's vault wiki
-      text is drafted at `docs/evidence/issue-53-encryption-multiprocess/vault-limitation-draft.md`
-      (applied by the owner; the vault's commit is out of scope).
-- [ ] **53.7** **No re-litigation:** 43's W6 flag decision is referenced, never decided here (`43:312-320`);
+      text is applied to `wiki/concepts/multiprocess-wal.md` in `AgentsBrain` (commit `011db76`).
+- [x] **53.7** **No re-litigation:** 43's W6 flag decision is referenced, never decided here (`43:312-320`);
       45's guard is referenced, never restated; 49's config census is not touched (this is a behaviour cell,
       not a dead key).
 - [ ] **53.8** If O2/O4 land, **45's open-path table is updated in the same wave** — the vault stops being a
@@ -216,6 +210,7 @@ Whichever is chosen, this issue owns **only** the cell. It does not re-open 43's
   are not touched by this wave (53.1–53.3 belong to the 2026-10-28 measurement record; 53.5 and 53.8 are
   N/A under O3). `Status:` is deliberately unchanged: the flip to `done` belongs to the orchestrator after
   the ff-only merge, not to the branch that awaits review.
+- **2026-11-10 — closed as done.** Vault wiki text applied to `wiki/concepts/multiprocess-wal.md` in `AgentsBrain` (commit `011db76`). All O3 acceptance criteria satisfied; issue closed.
 
 ## Agent Brief
 

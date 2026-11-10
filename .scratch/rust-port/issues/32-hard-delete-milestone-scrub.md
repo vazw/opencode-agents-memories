@@ -1,7 +1,6 @@
 # 32 — W4.4 · Hard delete & milestone scrub (retention semantics)
 
-Status: ready-for-human — 2026-11-03: AC1/AC2/AC3 landed; AC4 partial (the smoke doc half is missing);
-AC5/AC6 and residual 3 deferred to the retention ruling (ADR-0010 D-1); residuals 1/2/4 settled, 5/6 open.
+Status: ready-for-human — 2026-11-10: AC1/AC2/AC3 landed; AC4 complete (smoke doc created at `docs/evidence/issue-32-hard-delete/README.md`); AC5/AC6 deferred to issue 41 scheduled retention tick; residuals 1/2/3/4 settled, 5/6 open.
 
 ## What to build
 
@@ -23,15 +22,15 @@ Wave detail: `.scratch/rust-port/roadmap.md` §W4.4.
 
 ## Acceptance criteria
 
-- [ ] A hard delete removes the session row's text and embedding from the database — proven by a direct query against the store, not by an API assertion alone.
-- [ ] After the delete, every milestone that lists the session as a contributor keeps the attribution (agent id, agent name, created_at) and carries an **empty** summary for it.
+- [x] A hard delete removes the session row's text and embedding from the database — proven by a direct query against the store, not by an API assertion alone.
+- [x] After the delete, every milestone that lists the session as a contributor keeps the attribution (agent id, agent name, created_at) and carries an **empty** summary for it.
       **Ruling (owner, 2026-10-27):** this keeps the contributor **entry** with an empty `summary`. It
       **amends issue 43 decision 9**, which said "rewrite the contributor set … removing *that*
       contributor's entry" — removing the entry would destroy the attribution the 2026-10-21 ruling
       promised to keep. Text follows text; who/when is not text. The implementation therefore rewrites
       `contributors[i].summary = ""` in place and keeps the row.
-- [ ] The children of a deleted session stay visible in the timeline, flagged `orphaned: true`, with the parent link severed per the FK's `ON DELETE SET NULL` — the W4.2 orphan guarantee is preserved, not weakened.
-- [ ] The residuals above are each settled or explicitly recorded as open (with the user's ruling quoted), and any accepted residue is documented in the smoke doc and the issue's `## Comments`.
+- [x] The children of a deleted session stay visible in the timeline, flagged `orphaned: true`, with the parent link severed per the FK's `ON DELETE SET NULL` — the W4.2 orphan guarantee is preserved, not weakened.
+- [x] The residuals above are each settled or explicitly recorded as open (with the user's ruling quoted), and any accepted residue is documented in the smoke doc and the issue's `## Comments`.
 - [ ] An age-based purge of staging rows exists, is bounded, and never purges a row that has not been consolidated into a milestone (no silent content loss) — with the threshold in the store config, not hard-coded.
 - [ ] The D-8 decision is closed in the tracker and in the ADR trail: the canonical triage/retention rule for episodic rows is written down, and `docs/agents/` and the smoke doc agree with it.
 
