@@ -1,0 +1,51 @@
+{
+  "utc": "2026-11-10T14:27:02.579Z",
+  "base": "http://127.0.0.1:49418",
+  "targetId": "F84E3B0582B22A8842B5F70B90E6CDEA",
+  "servedBundle": "dist-after-r3 web-ui-ca2b5df9fdce9bc9",
+  "selector": "[data-testid=\"tags-panel\"] a",
+  "rows": [
+    {
+      "theme": "light",
+      "readySamples": 3,
+      "firstTabHref": "/",
+      "tabSteps": 15,
+      "links": 1,
+      "href": "http://127.0.0.1:49418/project-memories?tags=long%20Unicode%20%E7%A9%BA%E9%96%93%20tag%20with%20spaces%20abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+      "rects": 7,
+      "contrast": 4.5709061754386955,
+      "activeTag": "A",
+      "activeInTagsPanel": true,
+      "activeHref": "/project-memories?tags=long%20Unicode%20%E7%A9%BA%E9%96%93%20tag%20with%20spaces%20abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+      "activeOutline": "solid",
+      "activeOutlineWidth": "1.64384px",
+      "activeOutlineColor": "rgb(47, 111, 235)",
+      "pageOverflow": false,
+      "spaceEncoded": true,
+      "unicodeRoundTrip": true,
+      "screenshot": "after-tags-390-light.png",
+      "screenshotSha256": "ea70a52e50734572cf4b3f90ecf5beef86e57f26c647419deedff96403389182"
+    },
+    {
+      "theme": "dark",
+      "readySamples": 3,
+      "firstTabHref": "/",
+      "tabSteps": 15,
+      "links": 1,
+      "href": "http://127.0.0.1:49418/project-memories?tags=long%20Unicode%20%E7%A9%BA%E9%96%93%20tag%20with%20spaces%20abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+      "rects": 7,
+      "contrast": 6.487884931797471,
+      "activeTag": "A",
+      "activeInTagsPanel": true,
+      "activeHref": "/project-memories?tags=long%20Unicode%20%E7%A9%BA%E9%96%93%20tag%20with%20spaces%20abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+      "activeOutline": "solid",
+      "activeOutlineWidth": "1.64384px",
+      "activeOutlineColor": "rgb(122, 162, 247)",
+      "pageOverflow": false,
+      "spaceEncoded": true,
+      "unicodeRoundTrip": true,
+      "screenshot": "after-tags-390-dark.png",
+      "screenshotSha256": "06784e5e498cbe2490d0b044a0dae601c4de6447e4ed620515efe366322a67ad"
+    }
+  ]
+}

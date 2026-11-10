@@ -1,0 +1,124 @@
+{
+  "utc": "2026-11-10T14:21:22.855Z",
+  "base": "http://127.0.0.1:49418",
+  "targetId": "F84E3B0582B22A8842B5F70B90E6CDEA",
+  "servedBundle": "dist-after-r3 web-ui-ca2b5df9fdce9bc9",
+  "rows": [
+    {
+      "theme": "light",
+      "width": 1280,
+      "readySamples": 9,
+      "download": {
+        "left": 308.7970886230469,
+        "right": 439.3279113769531,
+        "top": 181.6695098876953,
+        "bottom": 213.30050086975098,
+        "width": 130.53082275390625,
+        "height": 31.630990982055664
+      },
+      "label": {
+        "left": 308.7970886230469,
+        "right": 385.7234573364258,
+        "top": 230.11129760742188,
+        "bottom": 247.3715705871582,
+        "width": 76.9263687133789,
+        "height": 17.260272979736328
+      },
+      "hGap": -130.53082275390625,
+      "vGap": 16.8107967376709,
+      "marginBottom": "16px",
+      "display": "block",
+      "pageOverflow": false,
+      "requests": 3,
+      "screenshot": "after-export-1280-light.png",
+      "screenshotSha256": "06ff44841a6f4469c517a7cc9f248c99aaa883b453e80ee9895468e749669d65"
+    },
+    {
+      "theme": "light",
+      "width": 390,
+      "readySamples": 9,
+      "download": {
+        "left": 48.801368713378906,
+        "right": 179.33219146728516,
+        "top": 519.310791015625,
+        "bottom": 550.9417819976807,
+        "width": 130.53082275390625,
+        "height": 31.630990982055664
+      },
+      "label": {
+        "left": 48.801368713378906,
+        "right": 125.72773742675781,
+        "top": 567.7525634765625,
+        "bottom": 585.0128364562988,
+        "width": 76.9263687133789,
+        "height": 17.260272979736328
+      },
+      "hGap": -130.53082275390625,
+      "vGap": 16.810781478881836,
+      "marginBottom": "16px",
+      "display": "block",
+      "pageOverflow": false,
+      "requests": 3,
+      "screenshot": "after-export-390-light.png",
+      "screenshotSha256": "64b510b46eb85e9a437ecb355badce6b948ef81c9a1305c45fa14245ebaaf752"
+    },
+    {
+      "theme": "dark",
+      "width": 1280,
+      "readySamples": 9,
+      "download": {
+        "left": 308.7970886230469,
+        "right": 439.3279113769531,
+        "top": 181.6695098876953,
+        "bottom": 213.30050086975098,
+        "width": 130.53082275390625,
+        "height": 31.630990982055664
+      },
+      "label": {
+        "left": 308.7970886230469,
+        "right": 385.7234573364258,
+        "top": 230.11129760742188,
+        "bottom": 247.3715705871582,
+        "width": 76.9263687133789,
+        "height": 17.260272979736328
+      },
+      "hGap": -130.53082275390625,
+      "vGap": 16.8107967376709,
+      "marginBottom": "16px",
+      "display": "block",
+      "pageOverflow": false,
+      "requests": 3,
+      "screenshot": "after-export-1280-dark.png",
+      "screenshotSha256": "2008754d19b418d167006099e7a766702c944f567548f823acffaeefd22dccb9"
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "readySamples": 9,
+      "download": {
+        "left": 48.801368713378906,
+        "right": 179.33219146728516,
+        "top": 519.310791015625,
+        "bottom": 550.9417819976807,
+        "width": 130.53082275390625,
+        "height": 31.630990982055664
+      },
+      "label": {
+        "left": 48.801368713378906,
+        "right": 125.72773742675781,
+        "top": 567.7525634765625,
+        "bottom": 585.0128364562988,
+        "width": 76.9263687133789,
+        "height": 17.260272979736328
+      },
+      "hGap": -130.53082275390625,
+      "vGap": 16.810781478881836,
+      "marginBottom": "16px",
+      "display": "block",
+      "pageOverflow": false,
+      "requests": 3,
+      "screenshot": "after-export-390-dark.png",
+      "screenshotSha256": "b4d303073dbac4d3d17a3123f79b8371989c893d61ac9da1f4c7d13e4c5f3a86"
+    }
+  ]
+}

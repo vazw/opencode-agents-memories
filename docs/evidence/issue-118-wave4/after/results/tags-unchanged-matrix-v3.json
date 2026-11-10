@@ -1,0 +1,13 @@
+{
+  "utc": "2026-11-10T11:27:19.722Z",
+  "page": "F84E3B0582B22A8842B5F70B90E6CDEA",
+  "base": "http://127.0.0.1:49418",
+  "scriptSha256": "a03f45639d3cdb10b5dbe85a52af41a04eb5262cd5e66aabd07f4e8c85c53da4",
+  "fixtureSha256": "517b3dca8a8f8c177cc36f4c8a0d0143e65b7deeb3f81a36d7e894bd6c3af89f",
+  "results": [
+    {
+      "name": "tags_unchanged_matrix",
+      "status": "PASS"
+    }
+  ]
+}

@@ -1,0 +1,559 @@
+{
+  "filtered": {
+    "rows": 0,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nSkills\nSkill Library\nNew skill",
+    "empty": false
+  },
+  "buttonTypes": [
+    {
+      "text": "Save skill",
+      "type": "button"
+    },
+    {
+      "text": "Cancel",
+      "type": "button"
+    }
+  ],
+  "saveError": {
+    "submits": [],
+    "requests": [
+      {
+        "path": "/api/skills",
+        "method": "GET"
+      },
+      {
+        "path": "/api/skills",
+        "method": "POST"
+      }
+    ],
+    "path": "/skill-library",
+    "values": [
+      "New synthetic skill",
+      "Synthetic description",
+      "Synthetic body",
+      "on",
+      "on"
+    ],
+    "errors": 0,
+    "labels": [
+      {
+        "id": "skill-content",
+        "labels": [
+          "Content"
+        ]
+      }
+    ]
+  },
+  "cancel": {
+    "submits": [],
+    "form": false,
+    "path": "/skill-library",
+    "requests": [
+      {
+        "path": "/api/skills",
+        "method": "GET"
+      },
+      {
+        "path": "/api/skills",
+        "method": "POST"
+      }
+    ]
+  },
+  "enter": {
+    "submits": [],
+    "path": "/skill-library",
+    "form": true,
+    "requests": [
+      {
+        "path": "/api/skills",
+        "method": "GET"
+      },
+      {
+        "path": "/api/skills",
+        "method": "POST"
+      }
+    ]
+  },
+  "profile": {
+    "selects": [
+      {
+        "native": "SELECT",
+        "id": "profile-identity-select",
+        "labels": [],
+        "options": 3
+      }
+    ],
+    "tabs": 0,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nProfile\nUser profile\n\nidentity: fixture-a\n\n— choose an identity —\nFixture A — 0 prompts\nFixture B — 0 prompts\nReload\nFixture A\nversion 2\nlast analyzed\nPreferences (2)\nUse concise output\nuncategorised\nKeep exact counts\nuncategorised\nPatterns (1)\nReview evidence\nuncategorised\nWorkflows (0)"
+  },
+  "import": [
+    {
+      "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nExport / Import\nExport / Import\nmemories: 0\nDownload exportImport JSON\nImport apply is not supported in the browser; use the server-side portability import.\nMalformed",
+      "labels": [
+        "Import JSON"
+      ],
+      "requests": [
+        {
+          "path": "/api/memories",
+          "method": "GET"
+        },
+        {
+          "path": "/api/tags",
+          "method": "GET"
+        },
+        {
+          "path": "/api/user-profile",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nExport / Import\nExport / Import\nmemories: 0\nDownload exportImport JSON\n0\nImport apply is not supported in the browser; use the server-side portability import.",
+      "labels": [
+        "Import JSON"
+      ],
+      "requests": [
+        {
+          "path": "/api/memories",
+          "method": "GET"
+        },
+        {
+          "path": "/api/tags",
+          "method": "GET"
+        },
+        {
+          "path": "/api/user-profile",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nExport / Import\nExport / Import\nmemories: 0\nDownload exportImport JSON\nImport apply is not supported in the browser; use the server-side portability import.\nUnrecognized",
+      "labels": [
+        "Import JSON"
+      ],
+      "requests": [
+        {
+          "path": "/api/memories",
+          "method": "GET"
+        },
+        {
+          "path": "/api/tags",
+          "method": "GET"
+        },
+        {
+          "path": "/api/user-profile",
+          "method": "GET"
+        }
+      ]
+    }
+  ],
+  "stats": {
+    "progress": 0,
+    "bars": [
+      {
+        "style": "width: 0.0%",
+        "name": null,
+        "text": ""
+      },
+      {
+        "style": "width: 28.6%",
+        "name": null,
+        "text": ""
+      },
+      {
+        "style": "width: 100.0%",
+        "name": null,
+        "text": ""
+      },
+      {
+        "style": "width: 14.3%",
+        "name": null,
+        "text": ""
+      }
+    ],
+    "regions": [],
+    "tables": [
+      {
+        "rows": 2,
+        "width": 1102
+      },
+      {
+        "rows": 41,
+        "width": 1102
+      }
+    ],
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nStats\nStats\nReload\nTOTAL MEMORIES\n\n7\n\nuser 0 · project 3\n\nACTIVE SHARDS\n\n1\n\n40 shards total\n\nPROFILE\n\nProfile unavailable\n\nGENERATED\n\n2026-11-01T12:00:00Z\n\nSnapshot of this answer\n\nDaily activity (14 days)\nDATE\tCAPTURES\tSKIPPED\tPROFILE\tCOMPACTION\tERRORS\n2026-11-01\t\n0\nCaptures\n\t\n2\nSkipped\n\t\n7\nProfile\n\t\n1\nCompaction\n\t\n2\nShards\nSCOPE\tFILE\tINDEX\tSTATUS\tMEMORIES / VECTORS\tDATES\tDUPLICATE TAGS\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-00.db\n\npresent\n\n\t0\tactive\t40 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-01.db\n\nmissing\n\n\t1\tinactive\t39 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-02.db\n\npresent\n\nSynthetic shard error\n\n\t2\tinactive\t38 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-03.db\n\nmissing\n\n\t3\tinactive\t37 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-04.db\n\npresent\n\n\t4\tinactive\t36 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-05.db\n\nmissing\n\n\t5\tinactive\t35 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-06.db\n\npresent\n\n\t6\tinactive\t34 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-07.db\n\nmissing\n\n\t7\tinactive\t33 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-08.db\n\npresent\n\n\t8\tinactive\t32 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-09.db\n\nmissing\n\n\t9\tinactive\t31 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-10.db\n\npresent\n\n\t10\tinactive\t30 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-11.db\n\nmissing\n\n\t11\tinactive\t29 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-12.db\n\npresent\n\n\t12\tinactive\t28 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-13.db\n\nmissing\n\n\t13\tinactive\t27 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-14.db\n\npresent\n\n\t14\tinactive\t26 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-15.db\n\nmissing\n\n\t15\tinactive\t25 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-16.db\n\npresent\n\n\t16\tinactive\t24 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-17.db\n\nmissing\n\n\t17\tinactive\t23 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-18.db\n\npresent\n\n\t18\tinactive\t22 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-19.db\n\nmissing\n\n\t19\tinactive\t21 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-20.db\n\npresent\n\n\t20\tinactive\t20 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-21.db\n\nmissing\n\n\t21\tinactive\t19 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-22.db\n\npresent\n\n\t22\tinactive\t18 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-23.db\n\nmissing\n\n\t23\tinactive\t17 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-24.db\n\npresent\n\n\t24\tinactive\t16 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-25.db\n\nmissing\n\n\t25\tinactive\t15 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-26.db\n\npresent\n\n\t26\tinactive\t14 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-27.db\n\nmissing\n\n\t27\tinactive\t13 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-28.db\n\npresent\n\n\t28\tinactive\t12 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-29.db\n\nmissing\n\n\t29\tinactive\t11 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-30.db\n\npresent\n\n\t30\tinactive\t10 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-31.db\n\nmissing\n\n\t31\tinactive\t9 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-32.db\n\npresent\n\n\t32\tinactive\t8 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-33.db\n\nmissing\n\n\t33\tinactive\t7 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-34.db\n\npresent\n\n\t34\tinactive\t6 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-35.db\n\nmissing\n\n\t35\tinactive\t5 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-36.db\n\npresent\n\n\t36\tinactive\t4 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-37.db\n\nmissing\n\n\t37\tinactive\t3 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-38.db\n\npresent\n\n\t38\tinactive\t2 / 2\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-39.db\n\nmissing\n\n\t39\tinactive\t1 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0"
+  },
+  "lastShard": {
+    "exists": true,
+    "rect": {
+      "x": 308.7970886230469,
+      "y": 736.06591796875,
+      "width": 1102.37158203125,
+      "height": 52.011985778808594,
+      "top": 736.06591796875,
+      "right": 1411.1686706542969,
+      "bottom": 788.0779037475586,
+      "left": 308.7970886230469
+    },
+    "viewport": 833
+  },
+  "zero": {
+    "progress": 0,
+    "bars": [
+      "width: 0.0%",
+      "width: 0.0%",
+      "width: 0.0%",
+      "width: 0.0%"
+    ],
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nStats\nStats\nReload\nTOTAL MEMORIES\n\n7\n\nuser 0 · project 3\n\nACTIVE SHARDS\n\n1\n\n40 shards total\n\nPROFILE\n\nProfile unavailable\n\nGENERATED\n\n2026-11-01T12:00:00Z\n\nSnapshot of this answer\n\nDaily activity (14 days)\nDATE\tCAPTURES\tSKIPPED\tPROFILE\tCOMPACTION\tERRORS\n2026-11-02\t\n0\nCaptures\n\t\n0\nSkipped\n\t\n0\nProfile\n\t\n0\nCompaction\n\tno errors\nShards\nSCOPE\tFILE\tINDEX\tSTATUS\tMEMORIES / VECTORS\tDATES\tDUPLICATE TAGS\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-00.db\n\npresent\n\n\t0\tactive\t40 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-01.db\n\nmissing\n\n\t1\tinactive\t39 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-02.db\n\npresent\n\nSynthetic shard error\n\n\t2\tinactive\t38 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-03.db\n\nmissing\n\n\t3\tinactive\t37 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-04.db\n\npresent\n\n\t4\tinactive\t36 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-05.db\n\nmissing\n\n\t5\tinactive\t35 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-06.db\n\npresent\n\n\t6\tinactive\t34 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-07.db\n\nmissing\n\n\t7\tinactive\t33 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-08.db\n\npresent\n\n\t8\tinactive\t32 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-09.db\n\nmissing\n\n\t9\tinactive\t31 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-10.db\n\npresent\n\n\t10\tinactive\t30 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-11.db\n\nmissing\n\n\t11\tinactive\t29 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-12.db\n\npresent\n\n\t12\tinactive\t28 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-13.db\n\nmissing\n\n\t13\tinactive\t27 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-14.db\n\npresent\n\n\t14\tinactive\t26 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-15.db\n\nmissing\n\n\t15\tinactive\t25 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-16.db\n\npresent\n\n\t16\tinactive\t24 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-17.db\n\nmissing\n\n\t17\tinactive\t23 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-18.db\n\npresent\n\n\t18\tinactive\t22 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-19.db\n\nmissing\n\n\t19\tinactive\t21 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-20.db\n\npresent\n\n\t20\tinactive\t20 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-21.db\n\nmissing\n\n\t21\tinactive\t19 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-22.db\n\npresent\n\n\t22\tinactive\t18 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-23.db\n\nmissing\n\n\t23\tinactive\t17 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-24.db\n\npresent\n\n\t24\tinactive\t16 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-25.db\n\nmissing\n\n\t25\tinactive\t15 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-26.db\n\npresent\n\n\t26\tinactive\t14 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-27.db\n\nmissing\n\n\t27\tinactive\t13 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-28.db\n\npresent\n\n\t28\tinactive\t12 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-29.db\n\nmissing\n\n\t29\tinactive\t11 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-30.db\n\npresent\n\n\t30\tinactive\t10 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-31.db\n\nmissing\n\n\t31\tinactive\t9 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-32.db\n\npresent\n\n\t32\tinactive\t8 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-33.db\n\nmissing\n\n\t33\tinactive\t7 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-34.db\n\npresent\n\n\t34\tinactive\t6 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-35.db\n\nmissing\n\n\t35\tinactive\t5 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-36.db\n\npresent\n\n\t36\tinactive\t4 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-37.db\n\nmissing\n\n\t37\tinactive\t3 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-38.db\n\npresent\n\n\t38\tinactive\t2 / 2\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-39.db\n\nmissing\n\n\t39\tinactive\t1 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0"
+  },
+  "/sessions": {
+    "selects": [
+      {
+        "testid": "sessions-project-select",
+        "tag": "SELECT",
+        "labels": [
+          "Project"
+        ]
+      }
+    ],
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nSessions\nSession history\n\nSessions are project-scoped. Pick a project to list its timeline.\n\nProject\nfixture-project — 0 sessions · 0 milestones\nLoad timeline\nmalformed request or response body",
+    "requests": [
+      {
+        "path": "/api/projects",
+        "method": "GET"
+      },
+      {
+        "path": "/api/projects/fixture-project/sessions",
+        "method": "GET"
+      }
+    ]
+  },
+  "/agents": {
+    "selects": [
+      {
+        "testid": "agents-project-select",
+        "tag": "SELECT",
+        "labels": []
+      }
+    ],
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nAgents\nAgents\n\nWho contributed to this project's durable memory.\n\nfixture-project — 0 sessions · 0 milestones\nRefresh\nmalformed request or response body",
+    "requests": [
+      {
+        "path": "/api/projects",
+        "method": "GET"
+      },
+      {
+        "path": "/api/projects/fixture-project/milestones",
+        "method": "GET"
+      }
+    ]
+  },
+  "events": [
+    {
+      "method": "Log.entryAdded",
+      "params": {
+        "entry": {
+          "source": "other",
+          "level": "warning",
+          "text": "The `integrity` attribute is currently ignored for preload destinations that do not support subresource integrity. See https://crbug.com/981419 for more information",
+          "timestamp": 1794304919060.906,
+          "url": "http://127.0.0.1:49418/skill-library",
+          "lineNumber": 21
+        }
+      }
+    },
+    {
+      "method": "Log.entryAdded",
+      "params": {
+        "entry": {
+          "source": "other",
+          "level": "warning",
+          "text": "The `integrity` attribute is currently ignored for preload destinations that do not support subresource integrity. See https://crbug.com/981419 for more information",
+          "timestamp": 1794304941499.845,
+          "url": "http://127.0.0.1:49418/skill-library",
+          "lineNumber": 21
+        }
+      }
+    },
+    {
+      "method": "Runtime.exceptionThrown",
+      "params": {
+        "timestamp": 1794304943678.72,
+        "exceptionDetails": {
+          "exceptionId": 4,
+          "text": "Uncaught",
+          "lineNumber": 0,
+          "columnNumber": 778903,
+          "scriptId": "11",
+          "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+          "stackTrace": {
+            "callFrames": [
+              {
+                "functionName": "$func1020",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 778903
+              },
+              {
+                "functionName": "$func2746",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 984033
+              },
+              {
+                "functionName": "$func2748",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 984154
+              },
+              {
+                "functionName": "$func767",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 695395
+              },
+              {
+                "functionName": "$func5279",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 1085544
+              },
+              {
+                "functionName": "$func1882",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 907939
+              },
+              {
+                "functionName": "$func5098",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 1065546
+              },
+              {
+                "functionName": "$func3570",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 1024606
+              },
+              {
+                "functionName": "$wasm_bindgen_d10fb4165ef59909___convert__closures_____invoke___wasm_bindgen_d10fb4165ef59909___JsValue______true_",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 1052509
+              },
+              {
+                "functionName": "wasm_bindgen_d10fb4165ef59909___convert__closures_____invoke___wasm_bindgen_d10fb4165ef59909___JsValue______true_",
+                "scriptId": "643",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20.js",
+                "lineNumber": 1054,
+                "columnNumber": 9
+              },
+              {
+                "functionName": "real",
+                "scriptId": "643",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20.js",
+                "lineNumber": 1239,
+                "columnNumber": 19
+              },
+              {
+                "functionName": "__wbg_remove_9a5288388316028c",
+                "scriptId": "643",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20.js",
+                "lineNumber": 779,
+                "columnNumber": 17
+              },
+              {
+                "functionName": "$func5132",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 1069031
+              },
+              {
+                "functionName": "$func5315",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 1089874
+              },
+              {
+                "functionName": "$func2390",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 950343
+              },
+              {
+                "functionName": "$func955",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 759831
+              },
+              {
+                "functionName": "$func719",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 675170
+              },
+              {
+                "functionName": "$func535",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 551092
+              },
+              {
+                "functionName": "$func4514",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 1053831
+              },
+              {
+                "functionName": "$func849",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 725281
+              },
+              {
+                "functionName": "$func2058",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 924497
+              },
+              {
+                "functionName": "$wasm_bindgen_d10fb4165ef59909___convert__closures_____invoke___wasm_bindgen_d10fb4165ef59909___JsValue__core_f0fd674eaa06beef___result__Result_____wasm_bindgen_d10fb4165ef59909___JsError___true_",
+                "scriptId": "11",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+                "lineNumber": 0,
+                "columnNumber": 1010491
+              },
+              {
+                "functionName": "wasm_bindgen_d10fb4165ef59909___convert__closures_____invoke___wasm_bindgen_d10fb4165ef59909___JsValue__core_f0fd674eaa06beef___result__Result_____wasm_bindgen_d10fb4165ef59909___JsError___true_",
+                "scriptId": "643",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20.js",
+                "lineNumber": 1062,
+                "columnNumber": 21
+              },
+              {
+                "functionName": "real",
+                "scriptId": "643",
+                "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20.js",
+                "lineNumber": 1239,
+                "columnNumber": 19
+              }
+            ]
+          },
+          "exception": {
+            "type": "object",
+            "subtype": "error",
+            "className": "RuntimeError",
+            "description": "RuntimeError: unreachable\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[1020]:0xbe297\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[2746]:0xf03e1\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[2748]:0xf045a\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[767]:0xa9c63\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[5279]:0x109068\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[1882]:0xddaa3\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[5098]:0x10424a\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[3570]:0xfa25e\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[4510]:0x100f5d\n    at wasm_bindgen_d10fb4165ef59909___convert__closures_____invoke___wasm_bindgen_d10fb4165ef59909___JsValue______true_ (http://127.0.0.1:49418/web-ui-a96be87044449b20.js:1055:10)",
+            "objectId": "6156024653725805366.219.1",
+            "preview": {
+              "type": "object",
+              "subtype": "error",
+              "description": "RuntimeError: unreachable\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[1020]:0xbe297\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[2746]:0xf03e1\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[2748]:0xf045a\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[767]:0xa9c63\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[5279]:0x109068\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[1882]:0xddaa3\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[5098]:0x10424a\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[3570]:0xfa25e\n    at http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm:wasm-function[4510]:0x100f5d\n    at wasm_bindgen_d10fb4165ef59909___convert__closures_____invoke___wasm_bindgen_d10fb4165ef59909___JsValue______true_ (http://127.0.0.1:49418/web-ui-a96be87044449b20.js:1055:10)",
+              "overflow": false,
+              "properties": [
+                {
+                  "name": "stack",
+                  "type": "string",
+                  "value": "RuntimeError: unreachable\n    at http://127.0.0.1:…7.0.0.1:49418/web-ui-a96be87044449b20.js:1055:10)"
+                },
+                {
+                  "name": "message",
+                  "type": "string",
+                  "value": "unreachable"
+                }
+              ]
+            }
+          },
+          "executionContextId": 219
+        }
+      }
+    },
+    {
+      "method": "Log.entryAdded",
+      "params": {
+        "entry": {
+          "source": "other",
+          "level": "warning",
+          "text": "The `integrity` attribute is currently ignored for preload destinations that do not support subresource integrity. See https://crbug.com/981419 for more information",
+          "timestamp": 1794304943717.291,
+          "url": "http://127.0.0.1:49418/user-profile",
+          "lineNumber": 21
+        }
+      }
+    },
+    {
+      "method": "Log.entryAdded",
+      "params": {
+        "entry": {
+          "source": "other",
+          "level": "warning",
+          "text": "The `integrity` attribute is currently ignored for preload destinations that do not support subresource integrity. See https://crbug.com/981419 for more information",
+          "timestamp": 1794304944453.641,
+          "url": "http://127.0.0.1:49418/export-import",
+          "lineNumber": 21
+        }
+      }
+    },
+    {
+      "method": "Log.entryAdded",
+      "params": {
+        "entry": {
+          "source": "other",
+          "level": "warning",
+          "text": "The `integrity` attribute is currently ignored for preload destinations that do not support subresource integrity. See https://crbug.com/981419 for more information",
+          "timestamp": 1794304946013.461,
+          "url": "http://127.0.0.1:49418/stats",
+          "lineNumber": 21
+        }
+      }
+    },
+    {
+      "method": "Log.entryAdded",
+      "params": {
+        "entry": {
+          "source": "other",
+          "level": "warning",
+          "text": "The `integrity` attribute is currently ignored for preload destinations that do not support subresource integrity. See https://crbug.com/981419 for more information",
+          "timestamp": 1794304946963.371,
+          "url": "http://127.0.0.1:49418/sessions",
+          "lineNumber": 21
+        }
+      }
+    },
+    {
+      "method": "Log.entryAdded",
+      "params": {
+        "entry": {
+          "source": "other",
+          "level": "warning",
+          "text": "The `integrity` attribute is currently ignored for preload destinations that do not support subresource integrity. See https://crbug.com/981419 for more information",
+          "timestamp": 1794304947394.009,
+          "url": "http://127.0.0.1:49418/agents",
+          "lineNumber": 21
+        }
+      }
+    }
+  ]
+}

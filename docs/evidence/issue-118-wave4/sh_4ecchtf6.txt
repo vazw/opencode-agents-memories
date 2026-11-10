@@ -1,0 +1,19 @@
+   Compiling web-ui v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/web-ui)
+error[E0425]: cannot find function `home_summary` in module `web_ui::screens`
+  --> tests/screens.rs:38:33
+   |
+38 |     assert_eq!(web_ui::screens::home_summary(&stats), [
+   |                                 ^^^^^^^^^^^^ not found in `web_ui::screens`
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `web-ui` (test "screens") due to 1 previous error
+   Compiling web-ui v0.1.0 (/home/vaz/Code/Personal/Rust/opencode-agents-memory/web-ui)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.40s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running tests/screens.rs (target/wasm32-unknown-unknown/debug/deps/screens-977e1cc70d5caae7.wasm)
+running 1 test
+test test_home_summary_uses_payload_values_including_zero ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 20 filtered out; finished in 0.02s
+

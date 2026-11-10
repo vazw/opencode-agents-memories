@@ -1,0 +1,14 @@
+{
+  "utc": "2026-11-10T11:23:21.228Z",
+  "page": "F84E3B0582B22A8842B5F70B90E6CDEA",
+  "base": "http://127.0.0.1:49418",
+  "scriptSha256": "ada991ca069d418a89c521755aa22a3fbfddf83acca7c0c8ce5b74ee36bf3c06",
+  "fixtureSha256": "517b3dca8a8f8c177cc36f4c8a0d0143e65b7deeb3f81a36d7e894bd6c3af89f",
+  "results": [
+    {
+      "name": "tags_unchanged_matrix",
+      "status": "FAIL",
+      "error": "Error: {\"exceptionId\":18,\"text\":\"Uncaught\",\"lineNumber\":0,\"columnNumber\":26,\"scriptId\":\"1900\",\"exception\":{\"type\":\"object\",\"subtype\":\"error\",\"className\":\"SyntaxError\",\"description\":\"SyntaxError: missing ) after argument list\",\"objectId\":\"1106901320565984044.383.2\"}}\n    at evaluate (/home/vaz/Code/Personal/Rust/opencode-agents-memory/web-ui/scripts/test-wave4-cdp.cjs:324:165)\n    at async Object.tags_unchanged_matrix (/home/vaz/Code/Personal/Rust/opencode-agents-memory/web-ui/scripts/test-wave4-cdp.cjs:255:21)\n    at async /home/vaz/Code/Personal/Rust/opencode-agents-memory/web-ui/scripts/test-wave4-cdp.cjs:330:27"
+    }
+  ]
+}

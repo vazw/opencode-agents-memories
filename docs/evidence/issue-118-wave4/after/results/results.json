@@ -1,0 +1,257 @@
+{
+  "utc": "2026-11-10T14:19:57.629Z",
+  "page": "F84E3B0582B22A8842B5F70B90E6CDEA",
+  "base": "http://127.0.0.1:49418",
+  "scriptSha256": "923d0558f5a30f7d269f0db47bb9a2479cdc6932dde65b660c1085ba3c6d9515",
+  "fixtureSha256": "517b3dca8a8f8c177cc36f4c8a0d0143e65b7deeb3f81a36d7e894bd6c3af89f",
+  "results": [
+    {
+      "name": "home_independent_resources",
+      "status": "PASS"
+    },
+    {
+      "name": "profile_picker_label",
+      "status": "PASS"
+    },
+    {
+      "name": "skills_filtered_empty",
+      "status": "PASS"
+    },
+    {
+      "name": "stats_accessible_counters_and_shards",
+      "status": "PASS"
+    },
+    {
+      "name": "skills_form_save_non_submit",
+      "status": "PASS"
+    },
+    {
+      "name": "skills_form_cancel_non_submit",
+      "status": "PASS"
+    },
+    {
+      "name": "skills_form_enter_prevented",
+      "status": "PASS"
+    },
+    {
+      "name": "portability_existing_contract",
+      "status": "PASS"
+    },
+    {
+      "name": "stats_existing_content",
+      "status": "PASS"
+    },
+    {
+      "name": "tags_unchanged_matrix",
+      "status": "PASS"
+    },
+    {
+      "name": "native_select_and_route_regressions",
+      "status": "PASS"
+    },
+    {
+      "name": "matrix_ready_captures",
+      "status": "PASS",
+      "bundle": {
+        "index.html": "8fafebd2e8b49e313cc832b86a5f189e76fd1ef3dce54d7661f19f3788331b74",
+        "styles-590dfeed23cfe8d7.css": "523cce1f00075bac6639a0fdeecd85a3e4992714449871493c0304ff7e292d99",
+        "web-ui-ca2b5df9fdce9bc9.js": "bd0fe74d908dc76a1cae9ecd8f0de1b24931d158727da39688cb8279b14dc158",
+        "web-ui-ca2b5df9fdce9bc9_bg.wasm": "5d340c0fd788904aba95e23b5ca557fd1a136b42a09677ef4e85d1339938987c"
+      },
+      "captures": [
+        {
+          "route": "/",
+          "theme": "light",
+          "width": 1280,
+          "screenshot": "home-light-1280.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/",
+          "theme": "light",
+          "width": 390,
+          "screenshot": "home-light-390.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/",
+          "theme": "dark",
+          "width": 1280,
+          "screenshot": "home-dark-1280.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/",
+          "theme": "dark",
+          "width": 390,
+          "screenshot": "home-dark-390.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/user-profile",
+          "theme": "light",
+          "width": 1280,
+          "screenshot": "user-profile-light-1280.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/user-profile",
+          "theme": "light",
+          "width": 390,
+          "screenshot": "user-profile-light-390.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/user-profile",
+          "theme": "dark",
+          "width": 1280,
+          "screenshot": "user-profile-dark-1280.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/user-profile",
+          "theme": "dark",
+          "width": 390,
+          "screenshot": "user-profile-dark-390.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/tags",
+          "theme": "light",
+          "width": 1280,
+          "screenshot": "tags-light-1280.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/tags",
+          "theme": "light",
+          "width": 390,
+          "screenshot": "tags-light-390.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/tags",
+          "theme": "dark",
+          "width": 1280,
+          "screenshot": "tags-dark-1280.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/tags",
+          "theme": "dark",
+          "width": 390,
+          "screenshot": "tags-dark-390.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/export-import",
+          "theme": "light",
+          "width": 1280,
+          "screenshot": "export-import-light-1280.png",
+          "readySamples": 9,
+          "overflow": false
+        },
+        {
+          "route": "/export-import",
+          "theme": "light",
+          "width": 390,
+          "screenshot": "export-import-light-390.png",
+          "readySamples": 9,
+          "overflow": false
+        },
+        {
+          "route": "/export-import",
+          "theme": "dark",
+          "width": 1280,
+          "screenshot": "export-import-dark-1280.png",
+          "readySamples": 9,
+          "overflow": false
+        },
+        {
+          "route": "/export-import",
+          "theme": "dark",
+          "width": 390,
+          "screenshot": "export-import-dark-390.png",
+          "readySamples": 9,
+          "overflow": false
+        },
+        {
+          "route": "/skill-library",
+          "theme": "light",
+          "width": 1280,
+          "screenshot": "skill-library-light-1280.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/skill-library",
+          "theme": "light",
+          "width": 390,
+          "screenshot": "skill-library-light-390.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/skill-library",
+          "theme": "dark",
+          "width": 1280,
+          "screenshot": "skill-library-dark-1280.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/skill-library",
+          "theme": "dark",
+          "width": 390,
+          "screenshot": "skill-library-dark-390.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/stats",
+          "theme": "light",
+          "width": 1280,
+          "screenshot": "stats-light-1280.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/stats",
+          "theme": "light",
+          "width": 390,
+          "screenshot": "stats-light-390.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/stats",
+          "theme": "dark",
+          "width": 1280,
+          "screenshot": "stats-dark-1280.png",
+          "readySamples": 3,
+          "overflow": false
+        },
+        {
+          "route": "/stats",
+          "theme": "dark",
+          "width": 390,
+          "screenshot": "stats-dark-390.png",
+          "readySamples": 3,
+          "overflow": false
+        }
+      ]
+    }
+  ]
+}

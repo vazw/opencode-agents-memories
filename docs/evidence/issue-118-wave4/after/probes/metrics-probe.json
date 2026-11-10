@@ -1,0 +1,85 @@
+{
+  "utc": "2026-11-10T14:22:41.247Z",
+  "base": "http://127.0.0.1:49418",
+  "targetId": "F84E3B0582B22A8842B5F70B90E6CDEA",
+  "servedBundle": "dist-after-r3 web-ui-ca2b5df9fdce9bc9",
+  "homeNormal": {
+    "cardCount": 4,
+    "cards": [
+      {
+        "dt": "Total memories",
+        "dd": "7",
+        "text": "Total memories7",
+        "labelCount": 1
+      },
+      {
+        "dt": "User memories",
+        "dd": "0",
+        "text": "User memories0",
+        "labelCount": 1
+      },
+      {
+        "dt": "Project memories",
+        "dd": "3",
+        "text": "Project memories3",
+        "labelCount": 1
+      },
+      {
+        "dt": "Active shards",
+        "dd": "1",
+        "text": "Active shards1",
+        "labelCount": 1
+      }
+    ],
+    "labelCounts": [
+      1,
+      1,
+      1,
+      1
+    ],
+    "heading": {
+      "text": "OpenCode Memory Explorer",
+      "fontSize": "18.4px",
+      "marginTop": "0px",
+      "marginBottom": "15.272px"
+    },
+    "healthText": "Service status: ok"
+  },
+  "homeZero": {
+    "cardCount": 4,
+    "dd": [
+      "0",
+      "0",
+      "0",
+      "0"
+    ],
+    "labelCounts": [
+      1,
+      1,
+      1,
+      1
+    ],
+    "heading": [
+      "18.4px",
+      "0px"
+    ]
+  },
+  "sessions": {
+    "optionsLength": 1,
+    "value": "fixture-project",
+    "option0Text": "fixture-project — 1 sessions · 1 milestones",
+    "labelsLength": 1,
+    "sessionRowCount": 1,
+    "hasMalformed": false,
+    "rowText": "fixture-session-1Fixture AgentSynthetic session summary2024-11-01 12:00:00 UTCDelete"
+  },
+  "agents": {
+    "optionsLength": 1,
+    "value": "fixture-project",
+    "option0Text": "fixture-project — 1 sessions · 1 milestones",
+    "labelsLength": 0,
+    "agentsRowCount": 1,
+    "hasMalformed": false,
+    "rowText": "Fixture Agentfixture-agent12024-11-01 12:00:00 UTC"
+  }
+}

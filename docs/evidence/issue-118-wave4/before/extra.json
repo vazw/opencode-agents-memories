@@ -1,0 +1,88 @@
+{
+  "deleteStage": {
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nSkills\nSkill Library\nNew skill\nfixture-skill\nFixture skill\nSynthetic description\nENABLED\nEdit\nDelete\nDelete permanently? This cannot be undone.\n\nRemoved from the prompt history now. Memories learned from this prompt were kept and can be deleted separately. The session transcript still contains it until you purge the session.\n\nConfirm delete\nCancel",
+    "ids": [
+      "skill-library-panel",
+      "skill-search",
+      "skill-create",
+      "skill-row",
+      "skill-id",
+      "skill-name",
+      "skill-description",
+      "skill-updated",
+      "skill-enabled-badge",
+      "skill-edit",
+      "skill-delete",
+      "confirm-dialog",
+      "confirm-dialog-title",
+      "confirm-erasure-disclosure",
+      "confirm-dialog-actions",
+      "confirm-gate-confirm",
+      "confirm-gate-cancel"
+    ]
+  },
+  "action": {
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nSkills\nSkill Library\nNew skill\nfixture-skill\nFixture skill\nSynthetic description\nENABLED\nEdit\nDelete\nserver error 500: Synthetic failure",
+    "errors": 1
+  },
+  "tags": [
+    {
+      "theme": "light",
+      "href": "/project-memories?tags=long%20Unicode%20%E7%A9%BA%E9%96%93%20tag%20with%20spaces%20abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+      "text": "long Unicode 空間 tag with spaces abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+      "color": "rgb(47, 111, 235)",
+      "background": "rgb(255, 255, 255)",
+      "outline": "rgb(47, 111, 235) solid 1.64384px",
+      "focus": true,
+      "overflow": false
+    },
+    {
+      "theme": "dark",
+      "href": "/project-memories?tags=long%20Unicode%20%E7%A9%BA%E9%96%93%20tag%20with%20spaces%20abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+      "text": "long Unicode 空間 tag with spaces abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+      "color": "rgb(122, 162, 247)",
+      "background": "rgb(28, 32, 39)",
+      "outline": "rgb(122, 162, 247) solid 1.64384px",
+      "focus": true,
+      "overflow": false
+    }
+  ],
+  "assets": [
+    {
+      "url": "http://127.0.0.1:49418/styles-d39635bbdd6dd3ae.css",
+      "transferSize": 29298,
+      "decodedBodySize": 28998
+    },
+    {
+      "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20.js",
+      "transferSize": 61603,
+      "decodedBodySize": 61303
+    },
+    {
+      "url": "http://127.0.0.1:49418/web-ui-a96be87044449b20_bg.wasm",
+      "transferSize": 1247973,
+      "decodedBodySize": 1247673
+    }
+  ],
+  "label": {
+    "focused": true,
+    "id": "import-json"
+  },
+  "export": {
+    "blob": "{\"exportedAt\":\"20261110T100332Z\",\"kind\":\"opencode-mem-explorer-export\",\"memories\":[],\"profile\":{\"createdAt\":null,\"displayName\":\"Fixture A\",\"exists\":true,\"id\":null,\"lastAnalyzedAt\":null,\"message\":null,\"profileData\":{\"patterns\":[{\"category\":null,\"confidence\":null,\"description\":\"Review evidence\",\"frequency\":null,\"steps\":null}],\"preferences\":[{\"category\":null,\"confidence\":null,\"description\":\"Use concise output\",\"frequency\":null,\"steps\":null},{\"category\":null,\"confidence\":null,\"description\":\"Keep exact counts\",\"frequency\":null,\"steps\":null}],\"workflows\":[]},\"totalPromptsAnalyzed\":null,\"userEmail\":null,\"userId\":\"fixture-a\",\"userName\":null,\"version\":2},\"schemaVersion\":1,\"source\":{\"container\":\"all-visible\",\"route\":\"/export-import\"},\"tags\":{\"project\":[{\"displayName\":null,\"gitRepoUrl\":null,\"projectName\":\"Synthetic project\",\"projectPath\":null,\"tag\":\"project Unicode 空間 with spaces and a very long descriptive label abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\",\"userEmail\":null,\"userName\":null}],\"user\":[{\"displayName\":\"Fixture User\",\"gitRepoUrl\":null,\"projectName\":null,\"projectPath\":null,\"tag\":\"fixture-user\",\"userEmail\":null,\"userName\":null}]},\"truncated\":false}",
+    "requests": [
+      {
+        "path": "/api/memories",
+        "method": "GET"
+      },
+      {
+        "path": "/api/tags",
+        "method": "GET"
+      },
+      {
+        "path": "/api/user-profile",
+        "method": "GET"
+      }
+    ]
+  }
+}

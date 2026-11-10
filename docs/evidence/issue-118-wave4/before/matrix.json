@@ -1,0 +1,1978 @@
+[
+  {
+    "name": "home-light-1280",
+    "route": "/",
+    "theme": "light",
+    "width": 1280,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nHome\nOpenCode Memory Explorer\n\nBrowse the memories, prompts and skills stored for this project. Pick a screen from the navigation.",
+    "overflow": false,
+    "scrollWidth": 1280,
+    "testids": [
+      "home-panel"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [],
+    "requests": [],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": []
+  },
+  {
+    "name": "home-light-390",
+    "route": "/",
+    "theme": "light",
+    "width": 390,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nHome\nOpenCode Memory Explorer\n\nBrowse the memories, prompts and skills stored for this project. Pick a screen from the navigation.",
+    "overflow": false,
+    "scrollWidth": 390,
+    "testids": [
+      "home-panel"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [],
+    "requests": [],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": []
+  },
+  {
+    "name": "home-dark-1280",
+    "route": "/",
+    "theme": "dark",
+    "width": 1280,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nHome\nOpenCode Memory Explorer\n\nBrowse the memories, prompts and skills stored for this project. Pick a screen from the navigation.",
+    "overflow": false,
+    "scrollWidth": 1280,
+    "testids": [
+      "home-panel"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [],
+    "requests": [],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": []
+  },
+  {
+    "name": "home-dark-390",
+    "route": "/",
+    "theme": "dark",
+    "width": 390,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nHome\nOpenCode Memory Explorer\n\nBrowse the memories, prompts and skills stored for this project. Pick a screen from the navigation.",
+    "overflow": false,
+    "scrollWidth": 390,
+    "testids": [
+      "home-panel"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [],
+    "requests": [],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": []
+  },
+  {
+    "name": "user-profile-light-1280",
+    "route": "/user-profile",
+    "theme": "light",
+    "width": 1280,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nProfile\nUser profile\n\nidentity: fixture-a\n\n— choose an identity —\nFixture A — 0 prompts\nFixture B — 0 prompts\nReload\nFixture A\nversion 2\nlast analyzed\nPreferences (2)\nUse concise output\nuncategorised\nKeep exact counts\nuncategorised\nPatterns (1)\nReview evidence\nuncategorised\nWorkflows (0)",
+    "overflow": false,
+    "scrollWidth": 1280,
+    "testids": [
+      "profile-panel",
+      "profile-identity",
+      "profile-identity-select",
+      "profile-reload",
+      "profile-meta",
+      "profile-name",
+      "profile-version",
+      "profile-analyzed",
+      "profile-preferences",
+      "profile-item",
+      "profile-description",
+      "profile-category",
+      "profile-item",
+      "profile-description",
+      "profile-category",
+      "profile-patterns",
+      "profile-item",
+      "profile-description",
+      "profile-category",
+      "profile-workflows"
+    ],
+    "selects": [
+      {
+        "testid": "profile-identity-select",
+        "id": "profile-identity-select",
+        "labels": [],
+        "options": 3
+      }
+    ],
+    "progress": [],
+    "bars": [],
+    "requests": [
+      {
+        "path": "/api/user-profiles",
+        "method": "GET"
+      },
+      {
+        "path": "/api/user-profile",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": []
+  },
+  {
+    "name": "user-profile-light-390",
+    "route": "/user-profile",
+    "theme": "light",
+    "width": 390,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nProfile\nUser profile\n\nidentity: fixture-a\n\n— choose an identity —\nFixture A — 0 prompts\nFixture B — 0 prompts\nReload\nFixture A\nversion 2\nlast analyzed\nPreferences (2)\nUse concise output\nuncategorised\nKeep exact counts\nuncategorised\nPatterns (1)\nReview evidence\nuncategorised\nWorkflows (0)",
+    "overflow": false,
+    "scrollWidth": 376,
+    "testids": [
+      "profile-panel",
+      "profile-identity",
+      "profile-identity-select",
+      "profile-reload",
+      "profile-meta",
+      "profile-name",
+      "profile-version",
+      "profile-analyzed",
+      "profile-preferences",
+      "profile-item",
+      "profile-description",
+      "profile-category",
+      "profile-item",
+      "profile-description",
+      "profile-category",
+      "profile-patterns",
+      "profile-item",
+      "profile-description",
+      "profile-category",
+      "profile-workflows"
+    ],
+    "selects": [
+      {
+        "testid": "profile-identity-select",
+        "id": "profile-identity-select",
+        "labels": [],
+        "options": 3
+      }
+    ],
+    "progress": [],
+    "bars": [],
+    "requests": [
+      {
+        "path": "/api/user-profiles",
+        "method": "GET"
+      },
+      {
+        "path": "/api/user-profile",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": []
+  },
+  {
+    "name": "user-profile-dark-1280",
+    "route": "/user-profile",
+    "theme": "dark",
+    "width": 1280,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nProfile\nUser profile\n\nidentity: fixture-a\n\n— choose an identity —\nFixture A — 0 prompts\nFixture B — 0 prompts\nReload\nFixture A\nversion 2\nlast analyzed\nPreferences (2)\nUse concise output\nuncategorised\nKeep exact counts\nuncategorised\nPatterns (1)\nReview evidence\nuncategorised\nWorkflows (0)",
+    "overflow": false,
+    "scrollWidth": 1280,
+    "testids": [
+      "profile-panel",
+      "profile-identity",
+      "profile-identity-select",
+      "profile-reload",
+      "profile-meta",
+      "profile-name",
+      "profile-version",
+      "profile-analyzed",
+      "profile-preferences",
+      "profile-item",
+      "profile-description",
+      "profile-category",
+      "profile-item",
+      "profile-description",
+      "profile-category",
+      "profile-patterns",
+      "profile-item",
+      "profile-description",
+      "profile-category",
+      "profile-workflows"
+    ],
+    "selects": [
+      {
+        "testid": "profile-identity-select",
+        "id": "profile-identity-select",
+        "labels": [],
+        "options": 3
+      }
+    ],
+    "progress": [],
+    "bars": [],
+    "requests": [
+      {
+        "path": "/api/user-profiles",
+        "method": "GET"
+      },
+      {
+        "path": "/api/user-profile",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": []
+  },
+  {
+    "name": "user-profile-dark-390",
+    "route": "/user-profile",
+    "theme": "dark",
+    "width": 390,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nProfile\nUser profile\n\nidentity: fixture-a\n\n— choose an identity —\nFixture A — 0 prompts\nFixture B — 0 prompts\nReload\nFixture A\nversion 2\nlast analyzed\nPreferences (2)\nUse concise output\nuncategorised\nKeep exact counts\nuncategorised\nPatterns (1)\nReview evidence\nuncategorised\nWorkflows (0)",
+    "overflow": false,
+    "scrollWidth": 376,
+    "testids": [
+      "profile-panel",
+      "profile-identity",
+      "profile-identity-select",
+      "profile-reload",
+      "profile-meta",
+      "profile-name",
+      "profile-version",
+      "profile-analyzed",
+      "profile-preferences",
+      "profile-item",
+      "profile-description",
+      "profile-category",
+      "profile-item",
+      "profile-description",
+      "profile-category",
+      "profile-patterns",
+      "profile-item",
+      "profile-description",
+      "profile-category",
+      "profile-workflows"
+    ],
+    "selects": [
+      {
+        "testid": "profile-identity-select",
+        "id": "profile-identity-select",
+        "labels": [],
+        "options": 3
+      }
+    ],
+    "progress": [],
+    "bars": [],
+    "requests": [
+      {
+        "path": "/api/user-profiles",
+        "method": "GET"
+      },
+      {
+        "path": "/api/user-profile",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": []
+  },
+  {
+    "name": "tags-light-1280",
+    "route": "/tags",
+    "theme": "light",
+    "width": 1280,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nTags\nTags\nReload\nProject (1)\nSynthetic project\nproject Unicode 空間 with spaces and a very long descriptive label abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\nMemory tags (1 of 1)\nTag\n\t\nMemories\n\nlong Unicode 空間 tag with spaces abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\t7\nUser (1)\nFixture User\nfixture-user",
+    "overflow": false,
+    "scrollWidth": 1280,
+    "testids": [
+      "tags-panel",
+      "tags-reload",
+      "tag-group-project",
+      "tag-row",
+      "tag-label",
+      "tag-code",
+      "tag-group-memory",
+      "memory-tags-table",
+      "tag-group-user",
+      "tag-row",
+      "tag-label",
+      "tag-code"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [],
+    "requests": [
+      {
+        "path": "/api/tags",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      },
+      {
+        "text": "long Unicode 空間 tag with spaces abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+        "href": "/project-memories?tags=long%20Unicode%20%E7%A9%BA%E9%96%93%20tag%20with%20spaces%20abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
+      }
+    ],
+    "controls": []
+  },
+  {
+    "name": "tags-light-390",
+    "route": "/tags",
+    "theme": "light",
+    "width": 390,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nTags\nTags\nReload\nProject (1)\nSynthetic project\nproject Unicode 空間 with spaces and a very long descriptive label abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\nMemory tags (1 of 1)\nTag\n\t\nMemories\n\nlong Unicode 空間 tag with spaces abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\t7\nUser (1)\nFixture User\nfixture-user",
+    "overflow": false,
+    "scrollWidth": 376,
+    "testids": [
+      "tags-panel",
+      "tags-reload",
+      "tag-group-project",
+      "tag-row",
+      "tag-label",
+      "tag-code",
+      "tag-group-memory",
+      "memory-tags-table",
+      "tag-group-user",
+      "tag-row",
+      "tag-label",
+      "tag-code"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [],
+    "requests": [
+      {
+        "path": "/api/tags",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      },
+      {
+        "text": "long Unicode 空間 tag with spaces abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+        "href": "/project-memories?tags=long%20Unicode%20%E7%A9%BA%E9%96%93%20tag%20with%20spaces%20abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
+      }
+    ],
+    "controls": []
+  },
+  {
+    "name": "tags-dark-1280",
+    "route": "/tags",
+    "theme": "dark",
+    "width": 1280,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nTags\nTags\nReload\nProject (1)\nSynthetic project\nproject Unicode 空間 with spaces and a very long descriptive label abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\nMemory tags (1 of 1)\nTag\n\t\nMemories\n\nlong Unicode 空間 tag with spaces abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\t7\nUser (1)\nFixture User\nfixture-user",
+    "overflow": false,
+    "scrollWidth": 1280,
+    "testids": [
+      "tags-panel",
+      "tags-reload",
+      "tag-group-project",
+      "tag-row",
+      "tag-label",
+      "tag-code",
+      "tag-group-memory",
+      "memory-tags-table",
+      "tag-group-user",
+      "tag-row",
+      "tag-label",
+      "tag-code"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [],
+    "requests": [
+      {
+        "path": "/api/tags",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      },
+      {
+        "text": "long Unicode 空間 tag with spaces abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+        "href": "/project-memories?tags=long%20Unicode%20%E7%A9%BA%E9%96%93%20tag%20with%20spaces%20abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
+      }
+    ],
+    "controls": []
+  },
+  {
+    "name": "tags-dark-390",
+    "route": "/tags",
+    "theme": "dark",
+    "width": 390,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nTags\nTags\nReload\nProject (1)\nSynthetic project\nproject Unicode 空間 with spaces and a very long descriptive label abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\nMemory tags (1 of 1)\nTag\n\t\nMemories\n\nlong Unicode 空間 tag with spaces abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\t7\nUser (1)\nFixture User\nfixture-user",
+    "overflow": false,
+    "scrollWidth": 376,
+    "testids": [
+      "tags-panel",
+      "tags-reload",
+      "tag-group-project",
+      "tag-row",
+      "tag-label",
+      "tag-code",
+      "tag-group-memory",
+      "memory-tags-table",
+      "tag-group-user",
+      "tag-row",
+      "tag-label",
+      "tag-code"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [],
+    "requests": [
+      {
+        "path": "/api/tags",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      },
+      {
+        "text": "long Unicode 空間 tag with spaces abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+        "href": "/project-memories?tags=long%20Unicode%20%E7%A9%BA%E9%96%93%20tag%20with%20spaces%20abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
+      }
+    ],
+    "controls": []
+  },
+  {
+    "name": "export-import-light-1280",
+    "route": "/export-import",
+    "theme": "light",
+    "width": 1280,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nExport / Import\nExport / Import\nmemories: 0\nDownload exportImport JSON\nImport apply is not supported in the browser; use the server-side portability import.",
+    "overflow": false,
+    "scrollWidth": 1280,
+    "testids": [
+      "export-import-panel",
+      "export-preview",
+      "export-download",
+      "import-input",
+      "import-unsupported"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [],
+    "requests": [
+      {
+        "path": "/api/memories",
+        "method": "GET"
+      },
+      {
+        "path": "/api/tags",
+        "method": "GET"
+      },
+      {
+        "path": "/api/user-profile",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": [
+      {
+        "tag": "TEXTAREA",
+        "id": "import-json",
+        "labels": [
+          "Import JSON"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "export-import-light-390",
+    "route": "/export-import",
+    "theme": "light",
+    "width": 390,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nExport / Import\nExport / Import\nmemories: 0\nDownload exportImport JSON\nImport apply is not supported in the browser; use the server-side portability import.",
+    "overflow": false,
+    "scrollWidth": 390,
+    "testids": [
+      "export-import-panel",
+      "export-preview",
+      "export-download",
+      "import-input",
+      "import-unsupported"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [],
+    "requests": [
+      {
+        "path": "/api/memories",
+        "method": "GET"
+      },
+      {
+        "path": "/api/tags",
+        "method": "GET"
+      },
+      {
+        "path": "/api/user-profile",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": [
+      {
+        "tag": "TEXTAREA",
+        "id": "import-json",
+        "labels": [
+          "Import JSON"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "export-import-dark-1280",
+    "route": "/export-import",
+    "theme": "dark",
+    "width": 1280,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nExport / Import\nExport / Import\nmemories: 0\nDownload exportImport JSON\nImport apply is not supported in the browser; use the server-side portability import.",
+    "overflow": false,
+    "scrollWidth": 1280,
+    "testids": [
+      "export-import-panel",
+      "export-preview",
+      "export-download",
+      "import-input",
+      "import-unsupported"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [],
+    "requests": [
+      {
+        "path": "/api/memories",
+        "method": "GET"
+      },
+      {
+        "path": "/api/tags",
+        "method": "GET"
+      },
+      {
+        "path": "/api/user-profile",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": [
+      {
+        "tag": "TEXTAREA",
+        "id": "import-json",
+        "labels": [
+          "Import JSON"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "export-import-dark-390",
+    "route": "/export-import",
+    "theme": "dark",
+    "width": 390,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nExport / Import\nExport / Import\nmemories: 0\nDownload exportImport JSON\nImport apply is not supported in the browser; use the server-side portability import.",
+    "overflow": false,
+    "scrollWidth": 390,
+    "testids": [
+      "export-import-panel",
+      "export-preview",
+      "export-download",
+      "import-input",
+      "import-unsupported"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [],
+    "requests": [
+      {
+        "path": "/api/memories",
+        "method": "GET"
+      },
+      {
+        "path": "/api/tags",
+        "method": "GET"
+      },
+      {
+        "path": "/api/user-profile",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": [
+      {
+        "tag": "TEXTAREA",
+        "id": "import-json",
+        "labels": [
+          "Import JSON"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "skill-library-light-1280",
+    "route": "/skill-library",
+    "theme": "light",
+    "width": 1280,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nSkills\nSkill Library\nNew skill\nfixture-skill\nFixture skill\nSynthetic description\nENABLED\nEdit\nDelete",
+    "overflow": false,
+    "scrollWidth": 1280,
+    "testids": [
+      "skill-library-panel",
+      "skill-search",
+      "skill-create",
+      "skill-row",
+      "skill-id",
+      "skill-name",
+      "skill-description",
+      "skill-updated",
+      "skill-enabled-badge",
+      "skill-edit",
+      "skill-delete"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [],
+    "requests": [
+      {
+        "path": "/api/skills",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": [
+      {
+        "tag": "INPUT",
+        "id": "skill-search",
+        "labels": []
+      }
+    ]
+  },
+  {
+    "name": "skill-library-light-390",
+    "route": "/skill-library",
+    "theme": "light",
+    "width": 390,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nSkills\nSkill Library\nNew skill\nfixture-skill\nFixture skill\nSynthetic description\nENABLED\nEdit\nDelete",
+    "overflow": false,
+    "scrollWidth": 390,
+    "testids": [
+      "skill-library-panel",
+      "skill-search",
+      "skill-create",
+      "skill-row",
+      "skill-id",
+      "skill-name",
+      "skill-description",
+      "skill-updated",
+      "skill-enabled-badge",
+      "skill-edit",
+      "skill-delete"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [],
+    "requests": [
+      {
+        "path": "/api/skills",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": [
+      {
+        "tag": "INPUT",
+        "id": "skill-search",
+        "labels": []
+      }
+    ]
+  },
+  {
+    "name": "skill-library-dark-1280",
+    "route": "/skill-library",
+    "theme": "dark",
+    "width": 1280,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nSkills\nSkill Library\nNew skill\nfixture-skill\nFixture skill\nSynthetic description\nENABLED\nEdit\nDelete",
+    "overflow": false,
+    "scrollWidth": 1280,
+    "testids": [
+      "skill-library-panel",
+      "skill-search",
+      "skill-create",
+      "skill-row",
+      "skill-id",
+      "skill-name",
+      "skill-description",
+      "skill-updated",
+      "skill-enabled-badge",
+      "skill-edit",
+      "skill-delete"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [],
+    "requests": [
+      {
+        "path": "/api/skills",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": [
+      {
+        "tag": "INPUT",
+        "id": "skill-search",
+        "labels": []
+      }
+    ]
+  },
+  {
+    "name": "skill-library-dark-390",
+    "route": "/skill-library",
+    "theme": "dark",
+    "width": 390,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nSkills\nSkill Library\nNew skill\nfixture-skill\nFixture skill\nSynthetic description\nENABLED\nEdit\nDelete",
+    "overflow": false,
+    "scrollWidth": 390,
+    "testids": [
+      "skill-library-panel",
+      "skill-search",
+      "skill-create",
+      "skill-row",
+      "skill-id",
+      "skill-name",
+      "skill-description",
+      "skill-updated",
+      "skill-enabled-badge",
+      "skill-edit",
+      "skill-delete"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [],
+    "requests": [
+      {
+        "path": "/api/skills",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": [
+      {
+        "tag": "INPUT",
+        "id": "skill-search",
+        "labels": []
+      }
+    ]
+  },
+  {
+    "name": "stats-light-1280",
+    "route": "/stats",
+    "theme": "light",
+    "width": 1280,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nStats\nStats\nReload\nTOTAL MEMORIES\n\n7\n\nuser 0 · project 3\n\nACTIVE SHARDS\n\n1\n\n40 shards total\n\nPROFILE\n\nProfile unavailable\n\nGENERATED\n\n2026-11-01T12:00:00Z\n\nSnapshot of this answer\n\nDaily activity (14 days)\nDATE\tCAPTURES\tSKIPPED\tPROFILE\tCOMPACTION\tERRORS\n2026-11-01\t\n0\nCaptures\n\t\n2\nSkipped\n\t\n7\nProfile\n\t\n1\nCompaction\n\t\n2\nShards\nSCOPE\tFILE\tINDEX\tSTATUS\tMEMORIES / VECTORS\tDATES\tDUPLICATE TAGS\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-00.db\n\npresent\n\n\t0\tactive\t40 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-01.db\n\nmissing\n\n\t1\tinactive\t39 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-02.db\n\npresent\n\nSynthetic shard error\n\n\t2\tinactive\t38 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-03.db\n\nmissing\n\n\t3\tinactive\t37 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-04.db\n\npresent\n\n\t4\tinactive\t36 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-05.db\n\nmissing\n\n\t5\tinactive\t35 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-06.db\n\npresent\n\n\t6\tinactive\t34 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-07.db\n\nmissing\n\n\t7\tinactive\t33 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-08.db\n\npresent\n\n\t8\tinactive\t32 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-09.db\n\nmissing\n\n\t9\tinactive\t31 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-10.db\n\npresent\n\n\t10\tinactive\t30 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-11.db\n\nmissing\n\n\t11\tinactive\t29 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-12.db\n\npresent\n\n\t12\tinactive\t28 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-13.db\n\nmissing\n\n\t13\tinactive\t27 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-14.db\n\npresent\n\n\t14\tinactive\t26 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-15.db\n\nmissing\n\n\t15\tinactive\t25 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-16.db\n\npresent\n\n\t16\tinactive\t24 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-17.db\n\nmissing\n\n\t17\tinactive\t23 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-18.db\n\npresent\n\n\t18\tinactive\t22 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-19.db\n\nmissing\n\n\t19\tinactive\t21 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-20.db\n\npresent\n\n\t20\tinactive\t20 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-21.db\n\nmissing\n\n\t21\tinactive\t19 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-22.db\n\npresent\n\n\t22\tinactive\t18 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-23.db\n\nmissing\n\n\t23\tinactive\t17 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-24.db\n\npresent\n\n\t24\tinactive\t16 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-25.db\n\nmissing\n\n\t25\tinactive\t15 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-26.db\n\npresent\n\n\t26\tinactive\t14 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-27.db\n\nmissing\n\n\t27\tinactive\t13 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-28.db\n\npresent\n\n\t28\tinactive\t12 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-29.db\n\nmissing\n\n\t29\tinactive\t11 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-30.db\n\npresent\n\n\t30\tinactive\t10 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-31.db\n\nmissing\n\n\t31\tinactive\t9 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-32.db\n\npresent\n\n\t32\tinactive\t8 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-33.db\n\nmissing\n\n\t33\tinactive\t7 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-34.db\n\npresent\n\n\t34\tinactive\t6 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-35.db\n\nmissing\n\n\t35\tinactive\t5 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-36.db\n\npresent\n\n\t36\tinactive\t4 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-37.db\n\nmissing\n\n\t37\tinactive\t3 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-38.db\n\npresent\n\n\t38\tinactive\t2 / 2\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-39.db\n\nmissing\n\n\t39\tinactive\t1 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0",
+    "overflow": false,
+    "scrollWidth": 1266,
+    "testids": [
+      "stats-panel",
+      "stats-reload",
+      "stats-card-total",
+      "stats-card-shards",
+      "stats-card-profile",
+      "stats-card-generated",
+      "stats-daily-table",
+      "stats-shards-table"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [
+      {
+        "text": "",
+        "style": "width: 0.0%",
+        "role": null
+      },
+      {
+        "text": "",
+        "style": "width: 28.6%",
+        "role": null
+      },
+      {
+        "text": "",
+        "style": "width: 100.0%",
+        "role": null
+      },
+      {
+        "text": "",
+        "style": "width: 14.3%",
+        "role": null
+      }
+    ],
+    "requests": [
+      {
+        "path": "/api/stats",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": []
+  },
+  {
+    "name": "stats-light-390",
+    "route": "/stats",
+    "theme": "light",
+    "width": 390,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nStats\nStats\nReload\nTOTAL MEMORIES\n\n7\n\nuser 0 · project 3\n\nACTIVE SHARDS\n\n1\n\n40 shards total\n\nPROFILE\n\nProfile unavailable\n\nGENERATED\n\n2026-11-01T12:00:00Z\n\nSnapshot of this answer\n\nDaily activity (14 days)\nDATE\tCAPTURES\tSKIPPED\tPROFILE\tCOMPACTION\tERRORS\n2026-11-01\t\n0\nCaptures\n\t\n2\nSkipped\n\t\n7\nProfile\n\t\n1\nCompaction\n\t\n2\nShards\nSCOPE\tFILE\tINDEX\tSTATUS\tMEMORIES / VECTORS\tDATES\tDUPLICATE TAGS\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-00.db\n\npresent\n\n\t0\tactive\t40 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-01.db\n\nmissing\n\n\t1\tinactive\t39 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-02.db\n\npresent\n\nSynthetic shard error\n\n\t2\tinactive\t38 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-03.db\n\nmissing\n\n\t3\tinactive\t37 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-04.db\n\npresent\n\n\t4\tinactive\t36 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-05.db\n\nmissing\n\n\t5\tinactive\t35 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-06.db\n\npresent\n\n\t6\tinactive\t34 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-07.db\n\nmissing\n\n\t7\tinactive\t33 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-08.db\n\npresent\n\n\t8\tinactive\t32 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-09.db\n\nmissing\n\n\t9\tinactive\t31 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-10.db\n\npresent\n\n\t10\tinactive\t30 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-11.db\n\nmissing\n\n\t11\tinactive\t29 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-12.db\n\npresent\n\n\t12\tinactive\t28 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-13.db\n\nmissing\n\n\t13\tinactive\t27 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-14.db\n\npresent\n\n\t14\tinactive\t26 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-15.db\n\nmissing\n\n\t15\tinactive\t25 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-16.db\n\npresent\n\n\t16\tinactive\t24 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-17.db\n\nmissing\n\n\t17\tinactive\t23 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-18.db\n\npresent\n\n\t18\tinactive\t22 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-19.db\n\nmissing\n\n\t19\tinactive\t21 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-20.db\n\npresent\n\n\t20\tinactive\t20 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-21.db\n\nmissing\n\n\t21\tinactive\t19 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-22.db\n\npresent\n\n\t22\tinactive\t18 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-23.db\n\nmissing\n\n\t23\tinactive\t17 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-24.db\n\npresent\n\n\t24\tinactive\t16 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-25.db\n\nmissing\n\n\t25\tinactive\t15 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-26.db\n\npresent\n\n\t26\tinactive\t14 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-27.db\n\nmissing\n\n\t27\tinactive\t13 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-28.db\n\npresent\n\n\t28\tinactive\t12 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-29.db\n\nmissing\n\n\t29\tinactive\t11 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-30.db\n\npresent\n\n\t30\tinactive\t10 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-31.db\n\nmissing\n\n\t31\tinactive\t9 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-32.db\n\npresent\n\n\t32\tinactive\t8 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-33.db\n\nmissing\n\n\t33\tinactive\t7 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-34.db\n\npresent\n\n\t34\tinactive\t6 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-35.db\n\nmissing\n\n\t35\tinactive\t5 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-36.db\n\npresent\n\n\t36\tinactive\t4 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-37.db\n\nmissing\n\n\t37\tinactive\t3 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-38.db\n\npresent\n\n\t38\tinactive\t2 / 2\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-39.db\n\nmissing\n\n\t39\tinactive\t1 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0",
+    "overflow": true,
+    "scrollWidth": 676,
+    "testids": [
+      "stats-panel",
+      "stats-reload",
+      "stats-card-total",
+      "stats-card-shards",
+      "stats-card-profile",
+      "stats-card-generated",
+      "stats-daily-table",
+      "stats-shards-table"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [
+      {
+        "text": "",
+        "style": "width: 0.0%",
+        "role": null
+      },
+      {
+        "text": "",
+        "style": "width: 28.6%",
+        "role": null
+      },
+      {
+        "text": "",
+        "style": "width: 100.0%",
+        "role": null
+      },
+      {
+        "text": "",
+        "style": "width: 14.3%",
+        "role": null
+      }
+    ],
+    "requests": [
+      {
+        "path": "/api/stats",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": []
+  },
+  {
+    "name": "stats-dark-1280",
+    "route": "/stats",
+    "theme": "dark",
+    "width": 1280,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nStats\nStats\nReload\nTOTAL MEMORIES\n\n7\n\nuser 0 · project 3\n\nACTIVE SHARDS\n\n1\n\n40 shards total\n\nPROFILE\n\nProfile unavailable\n\nGENERATED\n\n2026-11-01T12:00:00Z\n\nSnapshot of this answer\n\nDaily activity (14 days)\nDATE\tCAPTURES\tSKIPPED\tPROFILE\tCOMPACTION\tERRORS\n2026-11-01\t\n0\nCaptures\n\t\n2\nSkipped\n\t\n7\nProfile\n\t\n1\nCompaction\n\t\n2\nShards\nSCOPE\tFILE\tINDEX\tSTATUS\tMEMORIES / VECTORS\tDATES\tDUPLICATE TAGS\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-00.db\n\npresent\n\n\t0\tactive\t40 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-01.db\n\nmissing\n\n\t1\tinactive\t39 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-02.db\n\npresent\n\nSynthetic shard error\n\n\t2\tinactive\t38 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-03.db\n\nmissing\n\n\t3\tinactive\t37 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-04.db\n\npresent\n\n\t4\tinactive\t36 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-05.db\n\nmissing\n\n\t5\tinactive\t35 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-06.db\n\npresent\n\n\t6\tinactive\t34 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-07.db\n\nmissing\n\n\t7\tinactive\t33 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-08.db\n\npresent\n\n\t8\tinactive\t32 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-09.db\n\nmissing\n\n\t9\tinactive\t31 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-10.db\n\npresent\n\n\t10\tinactive\t30 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-11.db\n\nmissing\n\n\t11\tinactive\t29 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-12.db\n\npresent\n\n\t12\tinactive\t28 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-13.db\n\nmissing\n\n\t13\tinactive\t27 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-14.db\n\npresent\n\n\t14\tinactive\t26 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-15.db\n\nmissing\n\n\t15\tinactive\t25 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-16.db\n\npresent\n\n\t16\tinactive\t24 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-17.db\n\nmissing\n\n\t17\tinactive\t23 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-18.db\n\npresent\n\n\t18\tinactive\t22 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-19.db\n\nmissing\n\n\t19\tinactive\t21 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-20.db\n\npresent\n\n\t20\tinactive\t20 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-21.db\n\nmissing\n\n\t21\tinactive\t19 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-22.db\n\npresent\n\n\t22\tinactive\t18 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-23.db\n\nmissing\n\n\t23\tinactive\t17 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-24.db\n\npresent\n\n\t24\tinactive\t16 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-25.db\n\nmissing\n\n\t25\tinactive\t15 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-26.db\n\npresent\n\n\t26\tinactive\t14 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-27.db\n\nmissing\n\n\t27\tinactive\t13 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-28.db\n\npresent\n\n\t28\tinactive\t12 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-29.db\n\nmissing\n\n\t29\tinactive\t11 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-30.db\n\npresent\n\n\t30\tinactive\t10 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-31.db\n\nmissing\n\n\t31\tinactive\t9 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-32.db\n\npresent\n\n\t32\tinactive\t8 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-33.db\n\nmissing\n\n\t33\tinactive\t7 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-34.db\n\npresent\n\n\t34\tinactive\t6 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-35.db\n\nmissing\n\n\t35\tinactive\t5 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-36.db\n\npresent\n\n\t36\tinactive\t4 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-37.db\n\nmissing\n\n\t37\tinactive\t3 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-38.db\n\npresent\n\n\t38\tinactive\t2 / 2\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-39.db\n\nmissing\n\n\t39\tinactive\t1 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0",
+    "overflow": false,
+    "scrollWidth": 1266,
+    "testids": [
+      "stats-panel",
+      "stats-reload",
+      "stats-card-total",
+      "stats-card-shards",
+      "stats-card-profile",
+      "stats-card-generated",
+      "stats-daily-table",
+      "stats-shards-table"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [
+      {
+        "text": "",
+        "style": "width: 0.0%",
+        "role": null
+      },
+      {
+        "text": "",
+        "style": "width: 28.6%",
+        "role": null
+      },
+      {
+        "text": "",
+        "style": "width: 100.0%",
+        "role": null
+      },
+      {
+        "text": "",
+        "style": "width: 14.3%",
+        "role": null
+      }
+    ],
+    "requests": [
+      {
+        "path": "/api/stats",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": []
+  },
+  {
+    "name": "stats-dark-390",
+    "route": "/stats",
+    "theme": "dark",
+    "width": 390,
+    "readySamples": 3,
+    "text": "OpenCode Memory Explorer\nHome\nMemories\nTags\nProfile\nSettings\nExport / Import\nSkills\nSessions\nAgents\nStats\nStats\nStats\nReload\nTOTAL MEMORIES\n\n7\n\nuser 0 · project 3\n\nACTIVE SHARDS\n\n1\n\n40 shards total\n\nPROFILE\n\nProfile unavailable\n\nGENERATED\n\n2026-11-01T12:00:00Z\n\nSnapshot of this answer\n\nDaily activity (14 days)\nDATE\tCAPTURES\tSKIPPED\tPROFILE\tCOMPACTION\tERRORS\n2026-11-01\t\n0\nCaptures\n\t\n2\nSkipped\n\t\n7\nProfile\n\t\n1\nCompaction\n\t\n2\nShards\nSCOPE\tFILE\tINDEX\tSTATUS\tMEMORIES / VECTORS\tDATES\tDUPLICATE TAGS\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-00.db\n\npresent\n\n\t0\tactive\t40 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-01.db\n\nmissing\n\n\t1\tinactive\t39 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-02.db\n\npresent\n\nSynthetic shard error\n\n\t2\tinactive\t38 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-03.db\n\nmissing\n\n\t3\tinactive\t37 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-04.db\n\npresent\n\n\t4\tinactive\t36 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-05.db\n\nmissing\n\n\t5\tinactive\t35 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-06.db\n\npresent\n\n\t6\tinactive\t34 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-07.db\n\nmissing\n\n\t7\tinactive\t33 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-08.db\n\npresent\n\n\t8\tinactive\t32 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-09.db\n\nmissing\n\n\t9\tinactive\t31 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-10.db\n\npresent\n\n\t10\tinactive\t30 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-11.db\n\nmissing\n\n\t11\tinactive\t29 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-12.db\n\npresent\n\n\t12\tinactive\t28 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-13.db\n\nmissing\n\n\t13\tinactive\t27 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-14.db\n\npresent\n\n\t14\tinactive\t26 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-15.db\n\nmissing\n\n\t15\tinactive\t25 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-16.db\n\npresent\n\n\t16\tinactive\t24 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-17.db\n\nmissing\n\n\t17\tinactive\t23 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-18.db\n\npresent\n\n\t18\tinactive\t22 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-19.db\n\nmissing\n\n\t19\tinactive\t21 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-20.db\n\npresent\n\n\t20\tinactive\t20 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-21.db\n\nmissing\n\n\t21\tinactive\t19 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-22.db\n\npresent\n\n\t22\tinactive\t18 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-23.db\n\nmissing\n\n\t23\tinactive\t17 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-24.db\n\npresent\n\n\t24\tinactive\t16 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-25.db\n\nmissing\n\n\t25\tinactive\t15 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-26.db\n\npresent\n\n\t26\tinactive\t14 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-27.db\n\nmissing\n\n\t27\tinactive\t13 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-28.db\n\npresent\n\n\t28\tinactive\t12 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-29.db\n\nmissing\n\n\t29\tinactive\t11 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-30.db\n\npresent\n\n\t30\tinactive\t10 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-31.db\n\nmissing\n\n\t31\tinactive\t9 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-32.db\n\npresent\n\n\t32\tinactive\t8 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-33.db\n\nmissing\n\n\t33\tinactive\t7 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-34.db\n\npresent\n\n\t34\tinactive\t6 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-35.db\n\nmissing\n\n\t35\tinactive\t5 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-36.db\n\npresent\n\n\t36\tinactive\t4 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-37.db\n\nmissing\n\n\t37\tinactive\t3 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-38.db\n\npresent\n\n\t38\tinactive\t2 / 2\t\n\noldest: —\n\nnewest: —\n\n\t0\n\n\nproject\n\nfixture\n\n\t\n\nfixture-shard-39.db\n\nmissing\n\n\t39\tinactive\t1 / 2\n\ncount mismatch\n\n\t\n\noldest: —\n\nnewest: —\n\n\t0",
+    "overflow": true,
+    "scrollWidth": 676,
+    "testids": [
+      "stats-panel",
+      "stats-reload",
+      "stats-card-total",
+      "stats-card-shards",
+      "stats-card-profile",
+      "stats-card-generated",
+      "stats-daily-table",
+      "stats-shards-table"
+    ],
+    "selects": [],
+    "progress": [],
+    "bars": [
+      {
+        "text": "",
+        "style": "width: 0.0%",
+        "role": null
+      },
+      {
+        "text": "",
+        "style": "width: 28.6%",
+        "role": null
+      },
+      {
+        "text": "",
+        "style": "width: 100.0%",
+        "role": null
+      },
+      {
+        "text": "",
+        "style": "width: 14.3%",
+        "role": null
+      }
+    ],
+    "requests": [
+      {
+        "path": "/api/stats",
+        "method": "GET"
+      }
+    ],
+    "links": [
+      {
+        "text": "Home",
+        "href": "/"
+      },
+      {
+        "text": "Memories",
+        "href": "/project-memories"
+      },
+      {
+        "text": "Tags",
+        "href": "/tags"
+      },
+      {
+        "text": "Profile",
+        "href": "/user-profile"
+      },
+      {
+        "text": "Settings",
+        "href": "/settings"
+      },
+      {
+        "text": "Export / Import",
+        "href": "/export-import"
+      },
+      {
+        "text": "Skills",
+        "href": "/skill-library"
+      },
+      {
+        "text": "Sessions",
+        "href": "/sessions"
+      },
+      {
+        "text": "Agents",
+        "href": "/agents"
+      },
+      {
+        "text": "Stats",
+        "href": "/stats"
+      }
+    ],
+    "controls": []
+  }
+]

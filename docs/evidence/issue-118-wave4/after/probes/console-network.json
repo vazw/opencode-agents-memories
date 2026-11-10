@@ -1,0 +1,62 @@
+{
+  "utc": "2026-11-10T14:22:38.872Z",
+  "base": "http://127.0.0.1:49418",
+  "targetId": "F84E3B0582B22A8842B5F70B90E6CDEA",
+  "servedBundle": "dist-after-r3 web-ui-ca2b5df9fdce9bc9",
+  "summary": {
+    "exceptionsTotal": 0,
+    "consoleTotal": 0,
+    "failedTotal": 0,
+    "badResponsesTotal": 0
+  },
+  "routes": [
+    {
+      "route": "/",
+      "readySamples": 3,
+      "exceptions": [],
+      "console": [],
+      "failed": [],
+      "badResponses": []
+    },
+    {
+      "route": "/user-profile",
+      "readySamples": 3,
+      "exceptions": [],
+      "console": [],
+      "failed": [],
+      "badResponses": []
+    },
+    {
+      "route": "/tags",
+      "readySamples": 3,
+      "exceptions": [],
+      "console": [],
+      "failed": [],
+      "badResponses": []
+    },
+    {
+      "route": "/export-import",
+      "readySamples": 9,
+      "exceptions": [],
+      "console": [],
+      "failed": [],
+      "badResponses": []
+    },
+    {
+      "route": "/skill-library",
+      "readySamples": 3,
+      "exceptions": [],
+      "console": [],
+      "failed": [],
+      "badResponses": []
+    },
+    {
+      "route": "/stats",
+      "readySamples": 3,
+      "exceptions": [],
+      "console": [],
+      "failed": [],
+      "badResponses": []
+    }
+  ]
+}
