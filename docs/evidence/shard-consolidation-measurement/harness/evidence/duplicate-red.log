@@ -1,0 +1,21 @@
+   Compiling shard-measurement v0.1.0 (/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.31s
+     Running tests/measurement.rs (.tmp/scratch/shard-measurement/target/debug/deps/measurement-0d84c2dc9156648d)
+
+running 1 test
+
+thread 'test_identical_ids_collapse_only_after_association_normalization' (3588) panicked at tests/measurement.rs:64:5:
+assertion `left == right` failed: collapse all three occurrences only after association mapping
+  left: 5
+ right: 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test test_identical_ids_collapse_only_after_association_normalization ... FAILED
+
+failures:
+
+failures:
+    test_identical_ids_collapse_only_after_association_normalization
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--test measurement`

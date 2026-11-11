@@ -1,0 +1,5 @@
+review-5 R1 rework clippy gate; tree 2026-11-11T06:30:46Z
+cmd: cargo clippy --offline --locked --all-targets -- -D warnings (pinned scratch target)
+    Checking shard-measurement v0.1.0 (/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.39s
+EXITCODE:0

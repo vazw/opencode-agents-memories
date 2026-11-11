@@ -1,0 +1,248 @@
+{
+  "status": "complete",
+  "ruling": "INCONCLUSIVE",
+  "phase_c": "blocked",
+  "fetch_exit": 0,
+  "offline_metadata_exit": 0,
+  "locked_turso_version": "0.8.3",
+  "lock_sha256": "5f57daf973586cc12fd62f5d58118ff3165378b791f7e1459455170e51f2e88a",
+  "suite_exit": 0,
+  "tests_passed": 10,
+  "clippy_exit": 0,
+  "raw_copy_evidence": ".tmp/scratch/shard-measurement/runs/raw-copy-2952/raw-copy.json",
+  "raw_copy_duration_ms": 115,
+  "schema_columns": [
+    "id",
+    "content",
+    "vector",
+    "tags_vector",
+    "container_tag",
+    "tags",
+    "type",
+    "created_at",
+    "updated_at",
+    "metadata",
+    "display_name",
+    "user_name",
+    "user_email",
+    "project_path",
+    "project_name",
+    "git_repo_url",
+    "is_pinned",
+    "session_id",
+    "source_prompt_created_at"
+  ],
+  "unknowns": [
+    "production: ai-sessions schema (never opened by this wave)",
+    "production: auxiliary completeness beyond the synthetic fixtures",
+    "production: power-loss / filesystem atomicity for interrupted restore (process-kill harness only)",
+    "not_exercised: skills-manager/list-get-create",
+    "not_exercised: mem-episodic/inbox-store-direct-sql",
+    "not_exercised: mem-bridge/capture-promotion-real-callers",
+    "not_exercised: connection/close-drain-stale-cloned-handle",
+    "not_exercised: power-loss-durability"
+  ],
+  "limits": [
+    "S08 executed and APPROVED (review-4): byte-idempotent owned-child restore, custody discipline, stale-lock removal; process-kill recovery only",
+    "S09 executed: exercised public operation/scope/delete-guard seams measured (12 completed / 2 refused / 1 blocked); 5 traced admission paths remain not_exercised in this dependency manifest, keeping draft-B coverage inconclusive",
+    "facts/vault presence refusal is a synthetic sentinel guard, not production support",
+    "duplicate plan is a typed preflight through dedicated Case variants; no production write path exercised"
+  ],
+  "rework": {
+    "blueprint": "d90461a51f51",
+    "prescription": "debug-1 items 1-4",
+    "s03": {
+      "mutant": "guard: both pre-guard existence clauses removed (empty root reaches create_dir)",
+      "mutant_red_exit": 101,
+      "mutant_red_payload": "left 'File exists (os error 17)' right root path",
+      "pristine_green_exit": 0,
+      "note": "mutant v1 (root.exists()-only deletion) measured GREEN: equivalent mutant, symlink_metadata().is_ok() subsumes exists(); dead-clause deletion is unkillable by construction"
+    },
+    "s04": {
+      "red_exit": 101,
+      "red_payload": "Observation.schema Null vs measured 19-column array",
+      "green_exit": 0,
+      "resolution": "Observation.schema/duration_ms/limitations/artifact_paths populated from the persisted artifact"
+    },
+    "s05": {
+      "red_exit": 101,
+      "red_payload": "E0599 ExactDuplicates/DivergentIds missing",
+      "green_exit": 0,
+      "resolution": "Case::ExactDuplicates/DivergentIds through run_case; inputs built from raw typed_rows with old1-/old2- association variants; plan 3 unique ids, 5 occurrences; duplicates.json and divergent.json persisted and carried inside Observation"
+    },
+    "s07": {
+      "routed_test_red_exit": 101,
+      "routed_test_red_payload": "Engine(case not wired)",
+      "remap_mutant_red_exit": 101,
+      "remap_mutant_red_payload": "Engine(persisted mismatch agent_sessions)",
+      "pristine_green_exit": 0,
+      "resolution": "run_case(Case::CrossDb) routes auxiliary_fixture + verify_persisted reopen oracle (typed per-table compare, no-residual bindings, shards scope/db_path) + refusal cases with system sha256sum closed-root manifests (4 sentinels, unknown encoding, divergent aux key)"
+    },
+    "suite_exit": 0,
+    "suite_tests": 8,
+    "clippy_exit": 0,
+    "rustfmt_check_exit": 0,
+    "immutable_baseline": "PASS"
+  },
+  "s08": {
+    "test": "test_interrupted_cross_db_restore_matches_baseline_and_is_idempotent",
+    "phases": [
+      "shard-before-registry",
+      "aux-one-before-two"
+    ],
+    "red_exit": 101,
+    "red_observable": "restore #1 must leave exactly the baseline file set (zero extra tuple files)",
+    "green_exit": 0,
+    "mutant_leave_new_wal_exit": 101,
+    "mutant_leave_new_wal_observable": "restored bytes must equal the immutable baseline hashes before any reopen",
+    "mutant_retain_dead_pid_lock_exit": 101,
+    "mutant_retain_dead_pid_lock_observable": "restore #1 must leave exactly the baseline file set (zero extra tuple files)",
+    "suite_exit": 0,
+    "suite_tests": 9,
+    "clippy_exit": 0,
+    "rustfmt_check_exit": 0,
+    "interruption_delta": {
+      "shard-before-registry": [
+        "shard.db-wal",
+        ".engine.lock appeared"
+      ],
+      "aux-one-before-two": [
+        "shard.db-wal",
+        "registry.db-wal",
+        "aux-one.db-wal",
+        ".engine.lock appeared"
+      ]
+    },
+    "restore_idempotent": true,
+    "reopened_typed_oracle_equal": true,
+    "integrity_check": "ok per fixture DB",
+    "evidence": "evidence/restore.json",
+    "logs": [
+      "s08-red.log",
+      "s08-green.log",
+      "s08-mutant1-leavewal.log",
+      "s08-mutant2-retainslock.log",
+      "s08-final-gates.log",
+      "s08-suite.log"
+    ],
+    "limitations": [
+      "process-kill recovery only; no power-loss or filesystem atomicity claim",
+      "byte equality after Turso reopen not required (reopening may rewrite sidecars)",
+      "synthetic registry/aux-one/aux-two fixtures only"
+    ],
+    "pristine_snapshot_superseded": "evidence/s08-pristine.sha256 was a pre-rustfmt point-in-time snapshot; review-4 independent re-runs supersede it; final tree hashes recorded in this file as s10.final_tree_sha256",
+    "custody_kill_ms_note": "custody_ms/kill_ms are sub-millisecond and truncate to 0/1 under as_millis; cosmetic. S09 timings are recorded in microseconds"
+  },
+  "s09": {
+    "test": "test_existing_barriers_report_observed_coverage",
+    "red_exit": 101,
+    "red_observable": "hardcoded all-blocked ledger fails the persisted-artifact truthfulness gate (second-acquire-while-held expected refused)",
+    "green_exit": 0,
+    "mutant_unknown_paths_blocked_exit": 101,
+    "mutant_unknown_paths_blocked_observable": "negative-oracle gate: a path absent from the ledger must classify unknown, never blocked",
+    "measured_outcomes": {
+      "completed": 12,
+      "refused": 2,
+      "blocked": 1,
+      "not_exercised": 5
+    },
+    "key_observations": {
+      "operation_lock_second_acquire": "refused with MigrationLocked(pid=self) while held; acquire completes after release",
+      "migration_assert": "refused while an operation lock is live; ok after release",
+      "scope_barrier": "admitted holder latched per (scope,hash); same-scope contender stayed queued (1001269us measured against a 23us uncontended same-key control); distinct scope completed while held; queued contender drained only after release",
+      "stale_handle": "dead-PID .turso-operation.lock reclaimed by read_live_lock unlink; acquire completes after reclaim",
+      "delete_guard": "ExclusiveRoot::current present while custody held, absent after custody AND proof token dropped (ExclusiveRoot holds a strong Arc<EngineLock>)",
+      "auxiliary_rw": "completed while scope lock held, while operation lock held, and after release \u2014 barriers are scoped, not root-wide"
+    },
+    "not_exercised": [
+      "skills-manager/list-get-create",
+      "mem-episodic/inbox-store-direct-sql",
+      "mem-bridge/capture-promotion-real-callers",
+      "connection/close-drain-stale-cloned-handle",
+      "power-loss-durability"
+    ],
+    "evidence": "evidence/admission.json",
+    "logs": [
+      "s09-red.log",
+      "s09-green.log",
+      "s09-mutant-unknown-blocked.log",
+      "s09-final-gates.log",
+      "s09-clippy-final.log",
+      "s09-green-after-fix.log",
+      "s09-m3-callsite-after-fix.log",
+      "s09-m3-after-fix.log",
+      "s09-m1-after-fix.log",
+      "s09-m2-after-fix.log",
+      "s09-rework-clippy.log",
+      "s09-pristine-check.log",
+      "s10-suite-after-fix.log",
+      "s10-settlement.log"
+    ],
+    "green_log": "evidence/s09-green-after-fix.log",
+    "scope_poll_evidence": {
+      "window": "S09_SCOPE_POLL = 1s, shared by the negative poll and the positive control",
+      "negative_poll_us": 1001269,
+      "positive_control_us": 23,
+      "channel_state": "try_recv() == Empty (queued, sender alive) asserted while the holder is latched",
+      "mutants": {
+        "callsite_window_0s": {
+          "exit": 101,
+          "observable": "negative poll returned after 1.081608ms; a degenerate window proves nothing",
+          "log": "evidence/s09-m3-callsite-after-fix.log"
+        },
+        "constant_window_0s": {
+          "exit": 101,
+          "observable": "persisted gate: the persisted negative poll must show the wait on the live contender, got 1081us",
+          "log": "evidence/s09-m3-after-fix.log"
+        },
+        "latch_without_release": {
+          "exit": 101,
+          "observable": "same-scope contender must not complete while the holder is latched",
+          "log": "evidence/s09-m1-after-fix.log"
+        },
+        "refused_to_completed": {
+          "exit": 101,
+          "observable": "assertion `left == right` failed: hardcoded all-blocked/all-completed ledgers cannot pass (left \"completed\" / right \"refused\")",
+          "log": "evidence/s09-m2-after-fix.log"
+        }
+      },
+      "note": "the relative lower bound (window/2) scales with a mutated constant; the absolute 500000us persisted gate kills the constant mutant, the live lower bound kills the call-site mutant"
+    },
+    "pristine_snapshot_superseded": "evidence/s09-pristine.sha256 first captured 2026-11-11T06:05:49Z, before the final rustfmt write pass (src/lib.rs 06:06:10Z) and the three bool_assert_comparison fixes (tests/measurement.rs 06:06:29Z); superseded values tests a745c97da91f5994217a695a27c9cbc75977c67e73be9f153f4ddc1362716e4a / lib fe6033033b4eda55c5a4b76fe96bcc8224b58c18e317ea4a3752f78f2a5cf227; regenerated after the final edit, three files, verified by check-settlement.py"
+  },
+  "ruling_basis": "A prerequisites measured PASS (S04 lossless raw copy, S08 interrupted restore); B existing-barrier sufficiency UNPROVEN (5 traced admission paths not_exercised, no measured bypass); no A-specific failure, so no B win; both-feasible is not an automatic A win. Policy recommendation only: prefer draft A for the later design/syseng gate because future downtime is accepted by recorded user policy. Phase C remains blocked.",
+  "rustfmt_check_exit": 0,
+  "final_tree_sha256": {
+    "src/lib.rs": "e755acc52402ba44f4f4dfa0ff5d03882737f6b0a3d62ce33ab9eb2ebf66ae78",
+    "src/main.rs": "75f3d9360c70e1475234901a39a113947123abceef22d479adff1c7c39d5fb7d",
+    "tests/measurement.rs": "951c9a926afee347bcf6714cb84248e77b164885d8f235ca156dc5753bed154f"
+  },
+  "s10": {
+    "final_serial_suite_exit": 0,
+    "final_serial_suite_tests": 10,
+    "report": "../../drafts/20261111-shard-measurement-report.md",
+    "ab_settlement": "INCONCLUSIVE with policy recommendation A",
+    "settlement_check": "evidence/s10-settlement.log (literal EXITCODE recorded in the log)",
+    "pristine_manifest": "evidence/s09-pristine.sha256 (three files, post-format)"
+  },
+  "rework_5": {
+    "blueprint": "d90461a51f51",
+    "prescription": "debug-2 items 1-5 (review-5 R1/R2/R3, R4/R5)",
+    "r1": {
+      "constant": "S09_SCOPE_POLL = 1s",
+      "live_assertions": "poll.is_err(); try_recv() == Empty; poll_elapsed >= S09_SCOPE_POLL/2",
+      "positive_control": "uncontended same key user:scope-a completed in 23us inside the same window",
+      "persisted_gate": "scope_same_scope_negative_poll_us >= 500000",
+      "mutants": {
+        "callsite_window_0s": 101,
+        "constant_window_0s": 101,
+        "latch_without_release": 101,
+        "refused_to_completed": 101
+      }
+    },
+    "r2": "top-level restore_executed/online_admission_executed deleted; unknowns regenerated with production:/not_exercised: prefixes from admission.json; settlement machine-gated by evidence/check-settlement.py",
+    "r3": "evidence/s09-pristine.sha256 regenerated after the final source edit, three files, sha256sum -c exit 0",
+    "r4": "S09/S10 gate logs re-captured with literal EXITCODE:<n>",
+    "r5": "S09 ledger row carries the authorization/release note; S10 history de-duplicated"
+  }
+}

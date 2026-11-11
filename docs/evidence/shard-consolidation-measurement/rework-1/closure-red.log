@@ -1,0 +1,83 @@
+[DEBUG-closure] divergent-12955: files=18 unmapped=5 ['target-schema.json', 'target.db', 'target.db-wal', 'work/target.db', 'work/target.db-wal']
+[DEBUG-closure] divergent-4807: files=18 unmapped=5 ['target-schema.json', 'target.db', 'target.db-wal', 'work/target.db', 'work/target.db-wal']
+[DEBUG-closure] divergent-5210: files=18 unmapped=5 ['target-schema.json', 'target.db', 'target.db-wal', 'work/target.db', 'work/target.db-wal']
+[DEBUG-closure] duplicates-12955: files=18 unmapped=5 ['target-schema.json', 'target.db', 'target.db-wal', 'work/target.db', 'work/target.db-wal']
+[DEBUG-closure] duplicates-4564: files=18 unmapped=5 ['target-schema.json', 'target.db', 'target.db-wal', 'work/target.db', 'work/target.db-wal']
+[DEBUG-closure] raw-copy-12955: files=18 unmapped=5 ['target-schema.json', 'target.db', 'target.db-wal', 'work/target.db', 'work/target.db-wal']
+[DEBUG-closure] raw-copy-2952: files=18 unmapped=5 ['target-schema.json', 'target.db', 'target.db-wal', 'work/target.db', 'work/target.db-wal']
+[DEBUG-closure] independently enumerated files=126 errors=70
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/divergent-12955/target-schema.json: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/divergent-12955/target-schema.json
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/divergent-12955/target.db: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/divergent-12955/target.db
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/divergent-12955/target.db-wal: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/divergent-12955/target.db-wal
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/divergent-12955/work/target.db: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/divergent-12955/work/target.db
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/divergent-12955/work/target.db-wal: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/divergent-12955/work/target.db-wal
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/divergent-4807/target-schema.json: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/divergent-4807/target-schema.json
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/divergent-4807/target.db: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/divergent-4807/target.db
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/divergent-4807/target.db-wal: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/divergent-4807/target.db-wal
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/divergent-4807/work/target.db: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/divergent-4807/work/target.db
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/divergent-4807/work/target.db-wal: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/divergent-4807/work/target.db-wal
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/divergent-5210/target-schema.json: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/divergent-5210/target-schema.json
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/divergent-5210/target.db: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/divergent-5210/target.db
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/divergent-5210/target.db-wal: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/divergent-5210/target.db-wal
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/divergent-5210/work/target.db: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/divergent-5210/work/target.db
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/divergent-5210/work/target.db-wal: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/divergent-5210/work/target.db-wal
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/duplicates-12955/target-schema.json: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/duplicates-12955/target-schema.json
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/duplicates-12955/target.db: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/duplicates-12955/target.db
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/duplicates-12955/target.db-wal: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/duplicates-12955/target.db-wal
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/duplicates-12955/work/target.db: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/duplicates-12955/work/target.db
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/duplicates-12955/work/target.db-wal: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/duplicates-12955/work/target.db-wal
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/duplicates-4564/target-schema.json: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/duplicates-4564/target-schema.json
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/duplicates-4564/target.db: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/duplicates-4564/target.db
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/duplicates-4564/target.db-wal: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/duplicates-4564/target.db-wal
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/duplicates-4564/work/target.db: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/duplicates-4564/work/target.db
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/duplicates-4564/work/target.db-wal: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/duplicates-4564/work/target.db-wal
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/raw-copy-12955/target-schema.json: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/raw-copy-12955/target-schema.json
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/raw-copy-12955/target.db: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/raw-copy-12955/target.db
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/raw-copy-12955/target.db-wal: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/raw-copy-12955/target.db-wal
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/raw-copy-12955/work/target.db: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/raw-copy-12955/work/target.db
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/raw-copy-12955/work/target.db-wal: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/raw-copy-12955/work/target.db-wal
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/raw-copy-2952/target-schema.json: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/raw-copy-2952/target-schema.json
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/raw-copy-2952/target.db: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/raw-copy-2952/target.db
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/raw-copy-2952/target.db-wal: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/raw-copy-2952/target.db-wal
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/raw-copy-2952/work/target.db: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/raw-copy-2952/work/target.db
+EXCLUDED RUN FILE .tmp/scratch/shard-measurement/runs/raw-copy-2952/work/target.db-wal: excluded contextual predecessor/tool/build reference; not part of measurement evidence closure
+UNMAPPED .tmp/scratch/shard-measurement/runs/raw-copy-2952/work/target.db-wal
+Traceback (most recent call last):
+  File "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/debug-archive-closure/check-named-runs.py", line 50, in <module>
+    assert not errors, f'named-run closure failed: {len(errors)} errors'
+           ^^^^^^^^^^
+AssertionError: named-run closure failed: 70 errors

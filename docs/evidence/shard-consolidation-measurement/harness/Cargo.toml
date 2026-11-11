@@ -1,0 +1,13 @@
+[workspace]
+
+[package]
+name = "shard-measurement"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+turso = "=0.8.3"
+tokio = { version = "=1.53.3", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+serde_json = "=1.0.154"
+mem-store = { path = "../../../crates/mem-store" }
+mem-core = { path = "../../../crates/mem-core" }

@@ -1,0 +1,8 @@
+[DEBUG-closure] divergent-12955: files=18 unmapped=0 []
+[DEBUG-closure] divergent-4807: files=18 unmapped=0 []
+[DEBUG-closure] divergent-5210: files=18 unmapped=0 []
+[DEBUG-closure] duplicates-12955: files=18 unmapped=0 []
+[DEBUG-closure] duplicates-4564: files=18 unmapped=0 []
+[DEBUG-closure] raw-copy-12955: files=18 unmapped=0 []
+[DEBUG-closure] raw-copy-2952: files=18 unmapped=0 []
+[DEBUG-closure] independently enumerated files=126 errors=0

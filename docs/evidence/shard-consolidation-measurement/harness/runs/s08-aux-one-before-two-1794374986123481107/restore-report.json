@@ -1,0 +1,134 @@
+{
+  "baseline": {
+    "excluded_locks": [
+      "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s08-aux-one-before-two-1794374986123481107/.engine.lock"
+    ],
+    "manifest": [
+      {
+        "len": 106,
+        "path": "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s08-aux-one-before-two-1794374986123481107/.wal-mode",
+        "sha256": "6b8e964e94ec8f0509307ac906ef4537beff1ad9768f94b288530303ffe8aaa3"
+      },
+      {
+        "len": 4096,
+        "path": "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s08-aux-one-before-two-1794374986123481107/aux-one.db",
+        "sha256": "2bcfad6941602bb75efb40a0f81a310d59075336378cf4cf9bc0bb0522629134"
+      },
+      {
+        "len": 12392,
+        "path": "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s08-aux-one-before-two-1794374986123481107/aux-one.db-wal",
+        "sha256": "63c55704dee2f3411556894c0d6ffff7bad7ba37ccb6220b6f85e6b572e22bc9"
+      },
+      {
+        "len": 4096,
+        "path": "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s08-aux-one-before-two-1794374986123481107/aux-two.db",
+        "sha256": "2bcfad6941602bb75efb40a0f81a310d59075336378cf4cf9bc0bb0522629134"
+      },
+      {
+        "len": 12392,
+        "path": "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s08-aux-one-before-two-1794374986123481107/aux-two.db-wal",
+        "sha256": "5fe8e30d1b224863321a4156a13af1bf7fe9d1c2febe52e8ca81806e7b0e2798"
+      },
+      {
+        "len": 31,
+        "path": "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s08-aux-one-before-two-1794374986123481107/owned-child-fixture",
+        "sha256": "7c23bd703338ff0186fffe567d79ac3db7c5546afed1fd094a602e101662aa01"
+      },
+      {
+        "len": 4096,
+        "path": "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s08-aux-one-before-two-1794374986123481107/registry.db",
+        "sha256": "2bcfad6941602bb75efb40a0f81a310d59075336378cf4cf9bc0bb0522629134"
+      },
+      {
+        "len": 12392,
+        "path": "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s08-aux-one-before-two-1794374986123481107/registry.db-wal",
+        "sha256": "efdb06cc9976160935883f1b4c8fa9f392f384eaaf3aa6b6809f1ee75ec6c8c6"
+      },
+      {
+        "len": 4096,
+        "path": "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s08-aux-one-before-two-1794374986123481107/shard.db",
+        "sha256": "2bcfad6941602bb75efb40a0f81a310d59075336378cf4cf9bc0bb0522629134"
+      },
+      {
+        "len": 74192,
+        "path": "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s08-aux-one-before-two-1794374986123481107/shard.db-wal",
+        "sha256": "853312e69677bad41709df8b5893ae793a21b10807334146b64656b539199aa2"
+      }
+    ],
+    "typed_oracle": {
+      "aux-one.db": {
+        "fixture": [
+          "[{\"integer\":1},{\"text\":\"baseline\"}]"
+        ]
+      },
+      "aux-two.db": {
+        "fixture": [
+          "[{\"integer\":1},{\"text\":\"baseline\"}]"
+        ]
+      },
+      "registry.db": {
+        "fixture": [
+          "[{\"integer\":1},{\"text\":\"baseline\"}]"
+        ]
+      },
+      "shard.db": {
+        "memories": [],
+        "shard_metadata": [],
+        "shard_stats": []
+      }
+    }
+  },
+  "custody_ms": 0,
+  "interrupt_delta": {
+    "appeared": [
+      "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s08-aux-one-before-two-1794374986123481107/.engine.lock"
+    ],
+    "changed": [
+      "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s08-aux-one-before-two-1794374986123481107/aux-one.db-wal",
+      "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s08-aux-one-before-two-1794374986123481107/registry.db-wal",
+      "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s08-aux-one-before-two-1794374986123481107/shard.db-wal"
+    ],
+    "missing": []
+  },
+  "kill_ms": 0,
+  "limitations": [
+    "process-kill recovery only; no power-loss or filesystem atomicity claim",
+    "byte equality after Turso reopen is not required: reopening may rewrite sidecars",
+    "auxiliary coverage limited to synthetic registry/aux-one/aux-two fixtures"
+  ],
+  "marker": "SHARD-MEASUREMENT-PHASE aux-one-before-two",
+  "marker_ms": 20,
+  "oracle_ms": 19,
+  "phase": "aux-one-before-two",
+  "reacquire_ms": 1,
+  "recovered_typed_oracle": {
+    "aux-one.db": {
+      "fixture": [
+        "[{\"integer\":1},{\"text\":\"baseline\"}]"
+      ]
+    },
+    "aux-two.db": {
+      "fixture": [
+        "[{\"integer\":1},{\"text\":\"baseline\"}]"
+      ]
+    },
+    "registry.db": {
+      "fixture": [
+        "[{\"integer\":1},{\"text\":\"baseline\"}]"
+      ]
+    },
+    "shard.db": {
+      "memories": [],
+      "shard_metadata": [],
+      "shard_stats": []
+    }
+  },
+  "reopen_verify_ms": 33,
+  "restore1_hash_match": true,
+  "restore1_ms": 2,
+  "restore1_set_match": true,
+  "restore2_idempotent": true,
+  "restore2_ms": 1,
+  "root": "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s08-aux-one-before-two-1794374986123481107",
+  "snapshot_ms": 10
+}

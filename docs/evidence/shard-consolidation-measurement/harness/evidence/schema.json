@@ -1,0 +1,2984 @@
+{
+  "runs/raw-copy-2952/source1-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/raw-copy-2952/source2-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/raw-copy-2952/target-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/duplicates-4564/source1-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/duplicates-4564/source2-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/duplicates-4564/target-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/divergent-4807/source1-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/divergent-4807/source2-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/divergent-4807/target-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/divergent-5210/source1-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/divergent-5210/source2-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/divergent-5210/target-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/divergent-12955/source1-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/divergent-12955/source2-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/divergent-12955/target-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/duplicates-12955/source1-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/duplicates-12955/source2-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/duplicates-12955/target-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/raw-copy-12955/source1-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/raw-copy-12955/source2-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ],
+  "runs/raw-copy-12955/target-schema.json": [
+    {
+      "name": {
+        "text": "idx_container_tag"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_container_tag ON memories (container_tag)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_created_at"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_created_at ON memories (created_at DESC)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_is_pinned"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_is_pinned ON memories (is_pinned)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_session_id"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_session_id ON memories (session_id)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "idx_type"
+      },
+      "sql": {
+        "text": "CREATE INDEX IF NOT EXISTS idx_type ON memories (type)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_memories_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "sqlite_autoindex_shard_metadata_1"
+      },
+      "sql": {
+        "null": true
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "index"
+      }
+    },
+    {
+      "name": {
+        "text": "memories"
+      },
+      "sql": {
+        "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(3) NOT NULL, tags_vector F32_BLOB(3), container_tag TEXT NOT NULL, tags TEXT, type TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT, display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT, project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0, session_id TEXT, source_prompt_created_at INTEGER)"
+      },
+      "tbl_name": {
+        "text": "memories"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_metadata"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_metadata (\"key\" TEXT PRIMARY KEY, value TEXT NOT NULL)"
+      },
+      "tbl_name": {
+        "text": "shard_metadata"
+      },
+      "type": {
+        "text": "table"
+      }
+    },
+    {
+      "name": {
+        "text": "shard_stats"
+      },
+      "sql": {
+        "text": "CREATE TABLE shard_stats (id INTEGER PRIMARY KEY CHECK (id = 1), vector_count INTEGER NOT NULL CHECK (vector_count >= 0))"
+      },
+      "tbl_name": {
+        "text": "shard_stats"
+      },
+      "type": {
+        "text": "table"
+      }
+    }
+  ]
+}

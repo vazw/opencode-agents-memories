@@ -1,0 +1,179 @@
+crates/mem-skills/src/schema.rs:10://! port applies the same idempotent `CREATE TABLE IF NOT EXISTS` statements
+crates/mem-skills/src/schema.rs:32:pub const SKILLS_TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS skills (\n  \
+crates/mem-skills/src/schema.rs:52:pub fn skills_table_ddl() -> Vec<String> {
+crates/mem-skills/src/schema.rs:103:pub fn is_valid_skill_id(id: &str) -> bool {
+crates/mem-store/src/episodic_sql.rs:18:pub fn agent_sessions_ddl(dims: u32) -> String {
+crates/mem-store/src/episodic_sql.rs:20:        "CREATE TABLE IF NOT EXISTS agent_sessions (\n\
+crates/mem-store/src/episodic_sql.rs:50:    "ALTER TABLE agent_sessions ADD COLUMN deleted_at INTEGER",
+crates/mem-store/src/episodic_sql.rs:51:    "ALTER TABLE agent_sessions ADD COLUMN orphaned INTEGER NOT NULL DEFAULT 0",
+crates/mem-store/src/episodic_sql.rs:65:pub fn episodic_milestones_ddl(dims: u32) -> String {
+crates/mem-store/src/episodic_sql.rs:67:        "CREATE TABLE IF NOT EXISTS episodic_milestones (\n\
+crates/mem-store/src/episodic_sql.rs:104:    ["ALTER TABLE agent_sessions ADD COLUMN agent_role TEXT NOT NULL DEFAULT 'main'"];
+crates/mem-store/src/episodic_sql.rs:113:    ["ALTER TABLE capture_inbox ADD COLUMN not_before INTEGER"];
+crates/mem-store/src/episodic_sql.rs:120:pub const RAW_CONTEXT_DDL: &str = "CREATE TABLE IF NOT EXISTS episodic_raw_context (\n\
+crates/mem-store/src/episodic_sql.rs:133:pub const SEGMENTS_DDL: &str = "CREATE TABLE IF NOT EXISTS episodic_segments (\n\
+crates/mem-store/src/episodic_sql.rs:204:pub const EPISODIC_V4_ALTERS: [&str; 1] = ["ALTER TABLE agent_sessions ADD COLUMN capture_id TEXT"];
+crates/mem-store/src/episodic_sql.rs:209:pub const CAPTURE_INBOX_DDL: &str = "CREATE TABLE IF NOT EXISTS capture_inbox (\n\
+crates/mem-store/src/episodic_sql.rs:378:pub fn timeline_sessions_sql(predicates: TimelinePredicates) -> String {
+crates/mem-store/src/episodic_sql.rs:403:pub fn semantic_timeline_sessions_sql(predicates: TimelinePredicates) -> String {
+crates/mem-store/src/episodic_sql.rs:524:pub fn eligible_sessions_for_agent_sql() -> String {
+crates/mem-profile/src/prompt.rs:24:    MigrationOptions, USER_PROMPTS_MAX_KNOWN, apply_user_prompts_schema,
+crates/mem-profile/src/prompt.rs:86:    pub fn new(storage_path: PathBuf, store_config: StoreConfig, max_retries: u32) -> Self {
+crates/mem-profile/src/prompt.rs:96:    pub fn with_factory(
+crates/mem-profile/src/prompt.rs:124:    pub fn with_eraser(mut self, eraser: Arc<dyn ProfileEraser>) -> Self {
+crates/mem-profile/src/prompt.rs:130:    pub fn max_retries(&self) -> u32 {
+crates/mem-profile/src/prompt.rs:134:    pub fn storage_path(&self) -> &Path {
+crates/mem-profile/src/prompt.rs:138:    pub fn db_path(&self) -> &Path {
+crates/mem-profile/src/prompt.rs:144:    pub fn reset(&mut self) {
+crates/mem-profile/src/prompt.rs:150:    pub fn rebind(&mut self, storage_path: PathBuf, store_config: StoreConfig) {
+crates/mem-profile/src/prompt.rs:164:    pub async fn ready(&self) -> Result<DbHandle, ProfileError> {
+crates/mem-profile/src/prompt.rs:180:            max_known: USER_PROMPTS_MAX_KNOWN,
+crates/mem-profile/src/prompt.rs:215:    pub async fn save_prompt(
+crates/mem-profile/src/prompt.rs:307:    pub async fn set_prompt_model(
+crates/mem-profile/src/prompt.rs:350:    pub async fn delete_prompt(&self, prompt_id: &str) -> Result<PromptDeletion, ProfileError> {
+crates/mem-profile/src/prompt.rs:391:    pub async fn mark_as_captured(&self, prompt_id: &str) -> Result<(), ProfileError> {
+crates/mem-profile/src/prompt.rs:402:    pub async fn claim_prompt(&self, prompt_id: &str) -> Result<bool, ProfileError> {
+crates/mem-profile/src/prompt.rs:415:    pub async fn record_failed_attempt(&self, prompt_id: &str) -> Result<(), ProfileError> {
+crates/mem-profile/src/prompt.rs:426:    pub async fn release_claim(&self, prompt_id: &str) -> Result<bool, ProfileError> {
+crates/mem-profile/src/prompt.rs:438:    pub async fn mark_multiple_as_captured(
+crates/mem-profile/src/prompt.rs:453:    pub async fn link_memory_to_prompt(
+crates/mem-profile/src/prompt.rs:471:    pub async fn vacuum(&self) -> Result<(), ProfileError> {
+crates/mem-profile/src/prompt.rs:478:    pub async fn expired_prompt_facts(
+crates/mem-profile/src/prompt.rs:504:    pub async fn delete_expired_prompts(&self, cutoff_time: i64) -> Result<u64, ProfileError> {
+crates/mem-profile/src/prompt.rs:533:    pub async fn clear_links(&self, memory_ids: &[String]) -> Result<u64, ProfileError> {
+crates/mem-profile/src/prompt.rs:552:    pub async fn get_last_uncaptured_prompt(
+crates/mem-profile/src/prompt.rs:575:    pub async fn get_uncaptured_prompts_for_session(
+crates/mem-profile/src/prompt.rs:597:    pub async fn count_uncaptured_prompts(&self) -> Result<i64, ProfileError> {
+crates/mem-profile/src/prompt.rs:609:    pub async fn get_uncaptured_prompts(
+crates/mem-profile/src/prompt.rs:632:    pub async fn get_prompt_created_at(
+crates/mem-profile/src/prompt.rs:647:    pub async fn get_prompt_by_id(
+crates/mem-profile/src/prompt.rs:662:    pub async fn get_prompts_by_ids(
+crates/mem-profile/src/prompt.rs:677:    pub async fn count_unanalyzed_for_user_learning(&self) -> Result<i64, ProfileError> {
+crates/mem-profile/src/prompt.rs:689:    pub async fn get_prompts_for_user_learning(
+crates/mem-profile/src/prompt.rs:707:    pub async fn mark_multiple_as_user_learning_captured(
+crates/mem-profile/src/prompt.rs:725:    pub async fn get_captured_prompts(
+crates/mem-profile/src/prompt.rs:752:    pub async fn search_prompts(
+crates/mem-profile/src/prompt.rs:773:    pub async fn update_project_path(
+crates/mem-store/src/connection.rs:97:    pub fn new(
+crates/mem-store/src/connection.rs:117:    pub fn model_facts_cache(&self) -> &crate::shard_facts::ModelFactsCache {
+crates/mem-store/src/connection.rs:134:    pub async fn get_connection(&self, db_path: &Path) -> Result<DbHandle, StoreError> {
+crates/mem-store/src/connection.rs:271:    pub async fn close_connection(&self, db_path: &Path) -> Result<(), StoreError> {
+crates/mem-store/src/connection.rs:350:    pub async fn close_all(&self) -> Result<(), StoreError> {
+crates/mem-store/src/connection.rs:456:    pub fn has_open_connection(&self, db_path: &Path) -> Result<bool, StoreError> {
+crates/mem-store/src/connection.rs:475:    pub fn exclusive_root(&self) -> Option<crate::delete_guard::ExclusiveRoot> {
+crates/mem-store/src/engine_lock.rs:96:    pub fn path(&self) -> PathBuf {
+crates/mem-store/src/engine_lock.rs:102:    pub fn storage_root(&self) -> &Path {
+crates/mem-store/src/engine_lock.rs:114:    pub fn release(&self) {
+crates/mem-store/src/engine_lock.rs:258:pub fn acquire_engine_lock(
+crates/mem-store/src/engine_lock.rs:297:pub fn status_line(reason: &str, pid: u32) -> String {
+crates/mem-store/src/engine_lock.rs:314:pub fn write_status_file(storage_path: &Path, reason: &str, pid: u32) -> Result<(), StoreError> {
+crates/mem-store/src/operation_lock.rs:105:pub fn read_live_lock(
+crates/mem-store/src/operation_lock.rs:144:pub fn assert_no_turso_migration_in_progress(
+crates/mem-store/src/operation_lock.rs:169:    pub fn release(&self) {
+crates/mem-store/src/operation_lock.rs:188:pub fn acquire_turso_operation_lock(
+crates/mem-store/src/operation_lock.rs:249:pub fn acquire_legacy_migration_lock(storage_path: &Path, probe: &dyn ProcessProbe) -> bool {
+crates/mem-store/src/operation_lock.rs:291:    pub fn release(&self) {
+crates/mem-store/src/operation_lock.rs:321:pub fn acquire_legacy_migration_lock_with_retry(
+crates/mem-store/src/shard_path_migration.rs:69:pub fn swap_state_path(storage_path: &Path) -> PathBuf {
+crates/mem-store/src/shard_path_migration.rs:76:pub fn assert_recovery_path_inside_storage(
+crates/mem-store/src/shard_path_migration.rs:318:pub async fn recover_interrupted_swap(
+crates/mem-store/src/shard_path_migration.rs:451:    pub fn detail(&self) -> String {
+crates/mem-store/src/shard_path_migration.rs:498:    pub fn message(&self) -> String {
+crates/mem-store/src/shard_path_migration.rs:557:    pub fn new(
+crates/mem-store/src/shard_path_migration.rs:580:    pub async fn migrate(
+crates/mem-store/src/sql.rs:12:pub fn shard_metadata_ddl() -> &'static str {
+crates/mem-store/src/sql.rs:14:            CREATE TABLE IF NOT EXISTS shard_metadata (
+crates/mem-store/src/sql.rs:23:          CREATE TABLE IF NOT EXISTS shards (
+crates/mem-store/src/sql.rs:44:          CREATE TABLE IF NOT EXISTS user_prompts (
+crates/mem-store/src/sql.rs:61:pub fn memories_ddl(dims: u32) -> String {
+crates/mem-store/src/sql.rs:64:            CREATE TABLE IF NOT EXISTS memories (
+crates/mem-store/src/sql.rs:89:pub fn memories_indexes() -> [&'static str; 4] {
+crates/mem-store/src/sql.rs:102:pub const MEMORY_SHARD_V2_ALTER: &str = r#"ALTER TABLE memories ADD COLUMN session_id TEXT"#;
+crates/mem-store/src/sql.rs:118:pub fn memory_shard_v2_statements() -> [&'static str; 3] {
+crates/mem-store/src/sql.rs:137:pub fn user_prompts_indexes() -> [&'static str; 6] {
+crates/mem-store/src/sql.rs:143:          CREATE TABLE IF NOT EXISTS user_profiles (
+crates/mem-store/src/sql.rs:160:          CREATE TABLE IF NOT EXISTS user_profile_changelogs (
+crates/mem-store/src/sql.rs:182:pub fn user_profiles_indexes() -> [&'static str; 4] {
+crates/mem-store/src/sql.rs:300:pub fn hydrate_candidates_sql(id_count: usize, filtered: bool) -> String {
+crates/mem-store/src/sql.rs:531:pub fn set_user_version_sql(version: i64) -> String {
+crates/mem-store/src/sql.rs:550:pub fn is_read_query(sql: &str) -> bool {
+crates/mem-store/src/shard_manager.rs:180:pub fn get_shard_path(
+crates/mem-store/src/shard_manager.rs:203:    pub fn new(
+crates/mem-store/src/shard_manager.rs:224:    pub fn config(&self) -> &StoreConfig {
+crates/mem-store/src/shard_manager.rs:229:    pub fn embedding_identity(&self) -> Option<&mem_core::embedding::EmbeddingIdentity> {
+crates/mem-store/src/shard_manager.rs:234:    pub fn process_probe(&self) -> Arc<dyn ProcessProbe> {
+crates/mem-store/src/shard_manager.rs:260:    pub async fn with_scope_write_lock<'a, T, F>(
+crates/mem-store/src/shard_manager.rs:292:    pub async fn open_shard(&self, full_path: &Path) -> Result<DbHandle, StoreError> {
+crates/mem-store/src/shard_manager.rs:297:    pub fn model_facts_cache(&self) -> &crate::shard_facts::ModelFactsCache {
+crates/mem-store/src/shard_manager.rs:303:    pub fn invalidate_model_facts(&self, db_path: &Path) -> Result<(), StoreError> {
+crates/mem-store/src/shard_manager.rs:308:    pub async fn model_facts(
+crates/mem-store/src/shard_manager.rs:318:    pub fn reset(&self) -> Result<(), StoreError> {
+crates/mem-store/src/shard_manager.rs:337:    pub fn get_shard_path(
+crates/mem-store/src/shard_manager.rs:347:    pub fn shard_path(
+crates/mem-store/src/shard_manager.rs:375:    pub fn resolve_stored_path(&self, stored_path: &str, scope: &str) -> PathBuf {
+crates/mem-store/src/shard_manager.rs:535:                max_known: crate::schema_migrations::METADATA_MAX_KNOWN,
+crates/mem-store/src/shard_manager.rs:545:    pub async fn get_active_shard(
+crates/mem-store/src/shard_manager.rs:564:    pub async fn get_all_shards(
+crates/mem-store/src/shard_manager.rs:612:    pub async fn find_memory_in_scope(
+crates/mem-store/src/shard_manager.rs:700:    pub async fn delete_memory_in_scope(
+crates/mem-store/src/shard_manager.rs:764:    pub async fn create_shard(
+crates/mem-store/src/shard_manager.rs:882:    pub async fn rotate_shard(
+crates/mem-store/src/shard_manager.rs:1043:    pub async fn register_existing_shard(
+crates/mem-store/src/shard_manager.rs:1119:    pub async fn init_shard_db(
+crates/mem-store/src/shard_manager.rs:1152:    pub async fn ensure_shard_schema(
+crates/mem-store/src/shard_manager.rs:1271:    pub async fn get_write_shard(
+crates/mem-store/src/shard_manager.rs:1292:    pub async fn get_write_shard_allowing_own_lock(
+crates/mem-store/src/shard_manager.rs:1449:    pub async fn mark_shard_read_only(&self, shard_id: i64) -> Result<(), StoreError> {
+crates/mem-store/src/shard_manager.rs:1455:    pub async fn set_vector_count(&self, shard_id: i64, count: u64) -> Result<(), StoreError> {
+crates/mem-store/src/shard_manager.rs:1473:    pub async fn adopt_stored_count(&self, db: &dyn Db, shard_id: i64) -> Result<u64, StoreError> {
+crates/mem-store/src/shard_manager.rs:1480:    pub async fn get_shard_by_id(&self, shard_id: i64) -> Result<Option<ShardInfo>, StoreError> {
+crates/mem-store/src/shard_manager.rs:1493:    pub async fn get_shard_by_path(&self, db_path: &Path) -> Result<Option<ShardInfo>, StoreError> {
+crates/mem-store/src/shard_manager.rs:1514:    pub async fn delete_shard(&self, shard_id: i64) -> Result<(), StoreError> {
+crates/mem-store/src/shard_manager.rs:1549:    pub async fn archive_shard(
+crates/mem-store/src/shard_manager.rs:1625:    pub async fn reassign_shard_scope(
+crates/mem-store/src/shard_manager.rs:1682:    pub async fn run_retention_sweep(
+crates/mem-store/src/db.rs:34:    pub fn is_null(&self) -> bool {
+crates/mem-store/src/db.rs:38:    pub fn as_text(&self) -> Option<&str> {
+crates/mem-store/src/db.rs:45:    pub fn as_i64(&self) -> Option<i64> {
+crates/mem-store/src/db.rs:52:    pub fn as_f64(&self) -> Option<f64> {
+crates/mem-store/src/db.rs:124:    pub fn new(columns: Arc<Vec<String>>, values: Vec<Value>) -> Self {
+crates/mem-store/src/db.rs:128:    pub fn column_names(&self) -> &[String] {
+crates/mem-store/src/db.rs:132:    pub fn get(&self, column: &str) -> Option<&Value> {
+crates/mem-store/src/db.rs:139:    pub fn text(&self, column: &str) -> Option<String> {
+crates/mem-store/src/db.rs:144:    pub fn i64(&self, column: &str) -> Option<i64> {
+crates/mem-store/src/db.rs:152:    pub fn f64(&self, column: &str) -> Option<f64> {
+crates/mem-store/src/db.rs:160:    pub fn is_null(&self, column: &str) -> bool {
+crates/mem-store/src/db.rs:173:    pub fn new(sql: impl Into<String>, params: Vec<Value>) -> Self {
+crates/mem-store/src/db.rs:219:pub async fn query_one(
+crates/mem-store/src/db.rs:281:    pub fn for_config(config: &StoreConfig, platform: Platform) -> Self {
+crates/mem-store/src/db.rs:305:    pub fn for_sweep(config: &StoreConfig, platform: Platform) -> Self {
+crates/mem-store/src/db.rs:333:    pub fn allow_unguarded_open(&self) -> bool {
+crates/mem-store/src/db.rs:346:pub fn resolve_database_encryption(
+crates/mem-store/src/db.rs:379:pub fn turso_connect_factory() -> TursoConnectFactory {
+crates/mem-store/src/db.rs:641:pub fn assert_path_inside_storage(storage_root: &Path, db_path: &Path) -> Result<(), StoreError> {
+crates/mem-store/src/db.rs:730:pub fn is_multi_process_lock_error(message: &str) -> bool {
+crates/mem-store/src/db.rs:738:pub fn wrap_turso_open_error(
+crates/mem-store/src/db.rs:896:                "CREATE TABLE guard_rows (id INTEGER PRIMARY KEY, v TEXT)",
+crates/mem-store/src/schema_migrations.rs:63:pub const METADATA_MAX_KNOWN: i64 = 2;
+crates/mem-store/src/schema_migrations.rs:67:/// [`EPISODIC_MAX_KNOWN`]` = 8` records.
+crates/mem-store/src/schema_migrations.rs:68:pub const USER_PROMPTS_MAX_KNOWN: i64 = 3;
+crates/mem-store/src/schema_migrations.rs:71:pub const USER_PROFILES_MAX_KNOWN: i64 = 2;
+crates/mem-store/src/schema_migrations.rs:73:pub const MEMORY_SHARD_MAX_KNOWN: i64 = 4;
+crates/mem-store/src/schema_migrations.rs:77:pub const EPISODIC_MAX_KNOWN: i64 = 8;
+crates/mem-store/src/schema_migrations.rs:82:/// time. No column changes, no row rewrite — `CREATE TABLE IF NOT EXISTS`
+crates/mem-store/src/schema_migrations.rs:84:pub const SWEEP_STATE_DDL: &str = "CREATE TABLE IF NOT EXISTS sweep_state (tier TEXT PRIMARY KEY, last_swept_unix_ms INTEGER NOT NULL)";
+crates/mem-store/src/schema_migrations.rs:150:    pub async fn restore(
+crates/mem-store/src/schema_migrations.rs:182:pub async fn apply_schema_migrations(
+crates/mem-store/src/schema_migrations.rs:296:pub fn memory_shard_migrations(dimensions: u32) -> Vec<SchemaMigration> {
+crates/mem-store/src/schema_migrations.rs:347:pub fn metadata_db_migrations() -> Vec<SchemaMigration> {
+crates/mem-store/src/schema_migrations.rs:372:pub fn user_prompts_migrations() -> Vec<SchemaMigration> {
+crates/mem-store/src/schema_migrations.rs:387:pub fn user_profiles_migrations() -> Vec<SchemaMigration> {
+crates/mem-store/src/schema_migrations.rs:414:pub fn episodic_migrations(dimensions: u32) -> Vec<SchemaMigration> {
+crates/mem-store/src/schema_migrations.rs:514:pub fn episodic_v6_migration(_dimensions: u32) -> SchemaMigration {
+crates/mem-store/src/schema_migrations.rs:543:pub fn episodic_v8_migration() -> SchemaMigration {
+crates/mem-store/src/schema_migrations.rs:601:pub async fn apply_episodic_schema(
+crates/mem-store/src/schema_migrations.rs:715:    // The v8 leg (issue 43 W6c): the sweep stamp's table. `CREATE TABLE IF NOT
+crates/mem-store/src/schema_migrations.rs:744:/// - **Precondition:** `options.max_known` is [`USER_PROMPTS_MAX_KNOWN`], this
+crates/mem-store/src/schema_migrations.rs:760:pub async fn apply_user_prompts_schema(
+crates/mem-store/src/schema_migrations.rs:794:    // `CREATE TABLE IF NOT EXISTS` plus one pragma; no backup (the v2 shape,
+crates/mem-store/src/schema_migrations.rs:818:pub fn user_prompts_v3_migration() -> SchemaMigration {

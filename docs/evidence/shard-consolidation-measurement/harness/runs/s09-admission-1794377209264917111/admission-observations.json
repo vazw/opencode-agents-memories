@@ -1,0 +1,102 @@
+{
+  "case_root": "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s09-admission-1794377209264917111",
+  "limitations": [
+    "observations cover only the public operation/scope/delete-guard seams reachable from this dependency manifest",
+    "unexercised traced admission paths keep draft-B coverage inconclusive; Busy counts alone prove nothing",
+    "the scope barrier serializes opted-in callers; an unbarred writer would bypass it by construction"
+  ],
+  "not_exercised": [
+    {
+      "path": "skills-manager/list-get-create",
+      "reason": "source-map: no shared scope/operation barrier at those methods; manager crate not in this immutable dependency manifest"
+    },
+    {
+      "path": "mem-episodic/inbox-store-direct-sql",
+      "reason": "source-map: direct ready/execute traced, no shared barrier; crate not in dependency manifest"
+    },
+    {
+      "path": "mem-bridge/capture-promotion-real-callers",
+      "reason": "source-map: same-manager scope lock traced READ-only; crate not in dependency manifest"
+    },
+    {
+      "path": "connection/close-drain-stale-cloned-handle",
+      "reason": "source-map: manager close removes ownership but cannot revoke cloned Arc handles; no public close seam reachable from this manifest"
+    },
+    {
+      "path": "power-loss-durability",
+      "reason": "process-kill harness cannot establish power-loss semantics"
+    }
+  ],
+  "paths": {
+    "auxiliary/read-write-after-release": {
+      "detail": "read-back all-released",
+      "status": "completed"
+    },
+    "auxiliary/read-write-while-operation-held": {
+      "detail": "read-back operation-lock-held",
+      "status": "completed"
+    },
+    "delete-guard/registry-after-release": {
+      "detail": "ExclusiveRoot::current after release: false",
+      "status": "completed"
+    },
+    "delete-guard/registry-while-custody": {
+      "detail": "ExclusiveRoot::current while custody held: true",
+      "status": "completed"
+    },
+    "operation-lock/acquire-after-release": {
+      "detail": "acquire after release: None",
+      "status": "completed"
+    },
+    "operation-lock/live-lock-read-held": {
+      "detail": "read_live_lock while held: Some(362)",
+      "status": "completed"
+    },
+    "operation-lock/migration-assert-held": {
+      "detail": "migration assert while held: Some(\"Database migration is in progress (synthetic-measurement) in process 362; writes are temporarily blocked\")",
+      "status": "refused"
+    },
+    "operation-lock/migration-assert-released": {
+      "detail": "migration assert after release",
+      "status": "completed"
+    },
+    "operation-lock/second-acquire-while-held": {
+      "detail": "second acquire outcome: Some(\"Database migration is in progress (synthetic-measurement) in process 362; writes are temporarily blocked\")",
+      "status": "refused"
+    },
+    "operation-lock/stale-dead-pid-acquire-after-reclaim": {
+      "detail": "acquire after reclaim: None",
+      "status": "completed"
+    },
+    "operation-lock/stale-dead-pid-reclaim": {
+      "detail": "read_live_lock over a dead-pid lock: None; lock file unlinked by the stale read: true",
+      "status": "completed"
+    },
+    "scope-lock/different-scope-while-held": {
+      "detail": "distinct scope project:scope-b completed while the holder was latched",
+      "status": "completed"
+    },
+    "scope-lock/drain-after-release": {
+      "detail": "queued same-scope contender completed only after the holder released (in-flight drain)",
+      "status": "completed"
+    },
+    "scope-lock/holder-admitted-latch": {
+      "detail": "holder entered the per-(scope,hash) async mutex and latched",
+      "status": "completed"
+    },
+    "scope-lock/same-scope-while-held": {
+      "detail": "contender on scope user:scope-a did not complete within the bounded 1s negative poll while the holder was latched",
+      "status": "blocked"
+    }
+  },
+  "timings_us": {
+    "aux_write_after_release_us": 7125,
+    "aux_write_while_operation_held_us": 9261,
+    "aux_write_while_scope_held_us": 30056,
+    "contender_blocked_poll_1s": true,
+    "drained_status": "completed",
+    "latch_epoch_us": 1794377209283873,
+    "other_scope_completed_while_held": true
+  },
+  "unknown_path_behavior": "a path absent from the ledger classifies as unknown, never as blocked"
+}

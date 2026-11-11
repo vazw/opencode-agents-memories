@@ -1,0 +1,19 @@
+   Compiling shard-measurement v0.1.0 (/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.39s
+     Running tests/measurement.rs (.tmp/scratch/shard-measurement/target/debug/deps/measurement-0d84c2dc9156648d)
+
+running 1 test
+
+thread 'test_raw_blob_and_all_columns_roundtrip' (1946) panicked at tests/measurement.rs:33:5:
+missing typed/blob/cosine oracle evidence
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test test_raw_blob_and_all_columns_roundtrip ... FAILED
+
+failures:
+
+failures:
+    test_raw_blob_and_all_columns_roundtrip
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--test measurement`

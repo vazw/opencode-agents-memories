@@ -1,0 +1,68 @@
+Diff in /home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/src/lib.rs:163:
+ }
+ 
+ pub use mem_store::db::{ConnectFactory, ConnectOptions, DbHandle, Value};
+[31m-pub use mem_store::engine_lock::{acquire_engine_lock, EngineLockOutcome};
+(B[m[32m+pub use mem_store::engine_lock::{EngineLockOutcome, acquire_engine_lock};
+(B[m pub use mem_store::platform::SystemProcessProbe;
+ use mem_store::schema_migrations::{
+     MEMORY_SHARD_MAX_KNOWN, MigrationOptions, apply_schema_migrations, memory_shard_migrations,
+Diff in /home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/tests/measurement.rs:1:
+ use shard_measurement::{
+[31m-    acquire_engine_lock, open, Case, EngineLockOutcome, MeasurementError, RUNS, run_case,
+(B[m[31m-    SystemProcessProbe, Value,
+(B[m[32m+    Case, EngineLockOutcome, MeasurementError, RUNS, SystemProcessProbe, Value,
+(B[m[32m+    acquire_engine_lock, open, run_case,
+(B[m };
+ use std::path::{Path, PathBuf};
+ 
+Diff in /home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/tests/measurement.rs:790:
+     let started = std::time::Instant::now();
+     let baseline_oracle = runtime.block_on(s08_typed_oracle(&root));
+     let oracle_ms = started.elapsed().as_millis() as u64;
+[31m-    let fixture_rows = baseline_oracle["registry.db"]["fixture"].as_array().unwrap();
+(B[m[32m+    let fixture_rows = baseline_oracle["registry.db"]["fixture"]
+(B[m[32m+        .as_array()
+(B[m[32m+        .unwrap();
+(B[m     assert_eq!(fixture_rows.len(), 1, "baseline fixture row must be read");
+     assert!(
+         fixture_rows[0].as_str().unwrap().contains("baseline"),
+Diff in /home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/tests/measurement.rs:908:
+     }
+     let touched = |suffix: &str| changed.iter().any(|path| path.ends_with(suffix));
+     assert!(
+[31m-        appeared
+(B[m[31m-            .iter()
+(B[m[31m-            .any(|path| path.ends_with(".engine.lock")),
+(B[m[32m+        appeared.iter().any(|path| path.ends_with(".engine.lock")),
+(B[m         "interrupted child must have held custody when killed"
+     );
+[31m-    assert!(missing.is_empty(), "the child never deletes baseline tuples");
+(B[m[32m+    assert!(
+(B[m[32m+        missing.is_empty(),
+(B[m[32m+        "the child never deletes baseline tuples"
+(B[m[32m+    );
+(B[m     match phase {
+         "shard-before-registry" => {
+             assert!(
+Diff in /home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/tests/measurement.rs:992:
+ 
+     // 11. Reacquire fresh legitimate custody, never the killed child's lock.
+     let started = std::time::Instant::now();
+[31m-    let reacquired = match acquire_engine_lock(&root, std::sync::Arc::new(SystemProcessProbe)).unwrap()
+(B[m[31m-    {
+(B[m[31m-        EngineLockOutcome::Acquired(lock) => lock,
+(B[m[31m-        EngineLockOutcome::Lost { holder_pid } => {
+(B[m[31m-            panic!("reacquire refused by live holder pid {holder_pid}")
+(B[m[31m-        }
+(B[m[31m-    };
+(B[m[32m+    let reacquired =
+(B[m[32m+        match acquire_engine_lock(&root, std::sync::Arc::new(SystemProcessProbe)).unwrap() {
+(B[m[32m+            EngineLockOutcome::Acquired(lock) => lock,
+(B[m[32m+            EngineLockOutcome::Lost { holder_pid } => {
+(B[m[32m+                panic!("reacquire refused by live holder pid {holder_pid}")
+(B[m[32m+            }
+(B[m[32m+        };
+(B[m     let reacquire_ms = started.elapsed().as_millis() as u64;
+     assert!(
+         root.join(".engine.lock").exists(),

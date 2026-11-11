@@ -1,0 +1,9 @@
+   Compiling shard-measurement v0.1.0 (/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.47s
+     Running tests/measurement.rs (.tmp/scratch/shard-measurement/target/debug/deps/measurement-f0f6f4fdca52ac21)
+
+running 1 test
+test test_dedicated_case_experiments_persist_observations ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.23s
+

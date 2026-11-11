@@ -1,0 +1,13 @@
+     Locking 338 packages to highest Rust 1.99.1 compatible versions
+      Adding icu_collections v2.3.0 (available: v2.4.0)
+      Adding icu_locale_fallback v2.3.0 (available: v2.4.0)
+      Adding icu_locale_fallback_data v2.3.0 (available: v2.4.0)
+      Adding icu_normalizer v2.3.0 (available: v2.4.0)
+      Adding icu_normalizer_data v2.3.0 (available: v2.4.0)
+      Adding icu_properties v2.3.0 (available: v2.4.0)
+      Adding icu_properties_data v2.3.0 (available: v2.4.0)
+      Adding tokio v1.53.3 (available: v1.54.1)
+error: failed to download `antithesis_sdk v0.3.0`
+
+Caused by:
+  attempting to make an HTTP request, but --offline was specified

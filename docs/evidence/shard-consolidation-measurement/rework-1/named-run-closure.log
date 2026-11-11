@@ -1,0 +1,9 @@
+closure: divergent-12955: original_files=18
+closure: divergent-4807: original_files=18
+closure: divergent-5210: original_files=18
+closure: duplicates-12955: original_files=18
+closure: duplicates-4564: original_files=18
+closure: raw-copy-12955: original_files=18
+closure: raw-copy-2952: original_files=18
+named-run closure: PASS; independently enumerated files=126; runs=7
+EXITCODE:0

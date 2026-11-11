@@ -1,0 +1,18 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running tests/measurement.rs (.tmp/scratch/shard-measurement/target/debug/deps/measurement-0d84c2dc9156648d)
+
+running 1 test
+
+thread 'test_any_nonassociation_difference_aborts_without_writes' (4808) panicked at tests/measurement.rs:116:9:
+content mismatch must abort all preflight
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test test_any_nonassociation_difference_aborts_without_writes ... FAILED
+
+failures:
+
+failures:
+    test_any_nonassociation_difference_aborts_without_writes
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.14s
+
+error: test failed, to rerun pass `--test measurement`

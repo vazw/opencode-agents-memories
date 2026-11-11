@@ -1,0 +1,21 @@
+   Compiling shard-measurement v0.1.0 (/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.87s
+     Running tests/measurement.rs (.tmp/scratch/shard-measurement/target/debug/deps/measurement-f0f6f4fdca52ac21)
+
+running 1 test
+
+thread 'test_raw_blob_and_all_columns_roundtrip' (12388) panicked at tests/measurement.rs:69:5:
+assertion `left == right` failed: Observation.schema must be populated from the measured artifact, not zero-valued
+  left: Null
+ right: Array [String("id"), String("content"), String("vector"), String("tags_vector"), String("container_tag"), String("tags"), String("type"), String("created_at"), String("updated_at"), String("metadata"), String("display_name"), String("user_name"), String("user_email"), String("project_path"), String("project_name"), String("git_repo_url"), String("is_pinned"), String("session_id"), String("source_prompt_created_at")]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test test_raw_blob_and_all_columns_roundtrip ... FAILED
+
+failures:
+
+failures:
+    test_raw_blob_and_all_columns_roundtrip
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.12s
+
+error: test failed, to rerun pass `--test measurement`

@@ -1,0 +1,11 @@
+M3 pre-fix re-run (scratch copy .tmp/scratch/review5-m3, from_secs(1)->from_secs(0) at tests/measurement.rs:1508)
+tree under test (pre-R1 edit): 2026-11-11T06:30:00Z
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.19s
+     Running tests/measurement.rs (.tmp/scratch/review5-m3/target/debug/deps/measurement-f0f6f4fdca52ac21)
+
+running 1 test
+test test_existing_barriers_report_observed_coverage ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.04s
+
+EXITCODE:0

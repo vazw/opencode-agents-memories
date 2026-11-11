@@ -1,0 +1,19 @@
+   Compiling shard-measurement v0.1.0 (/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework5-mutants)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.25s
+     Running tests/measurement.rs (.tmp/scratch/rework5-mutants/target/debug/deps/measurement-f0f6f4fdca52ac21)
+
+running 1 test
+
+thread 'test_existing_barriers_report_observed_coverage' (16889) panicked at tests/measurement.rs:1699:5:
+the persisted negative poll must show the wait on the live contender, got 1100us
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test test_existing_barriers_report_observed_coverage ... FAILED
+
+failures:
+
+failures:
+    test_existing_barriers_report_observed_coverage
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `--test measurement`

@@ -1,0 +1,11 @@
+R3a: post-format three-file pristine manifest regeneration; tree 2026-11-11T06:32:31Z
+cmd: sha256sum src/lib.rs src/main.rs tests/measurement.rs > evidence/s09-pristine.sha256
+manifest:
+e755acc52402ba44f4f4dfa0ff5d03882737f6b0a3d62ce33ab9eb2ebf66ae78  src/lib.rs
+75f3d9360c70e1475234901a39a113947123abceef22d479adff1c7c39d5fb7d  src/main.rs
+951c9a926afee347bcf6714cb84248e77b164885d8f235ca156dc5753bed154f  tests/measurement.rs
+cmd: sha256sum -c evidence/s09-pristine.sha256
+src/lib.rs: OK
+src/main.rs: OK
+tests/measurement.rs: OK
+EXITCODE:0

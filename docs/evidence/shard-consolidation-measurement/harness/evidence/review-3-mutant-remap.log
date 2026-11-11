@@ -1,0 +1,22 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling shard-measurement v0.1.0 (/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-review3-remap)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.52s
+     Running tests/measurement.rs (.tmp/scratch/shard-rework-target-remap/debug/deps/measurement-f0f6f4fdca52ac21)
+
+running 1 test
+
+thread 'test_cross_db_run_case_reopens_and_verifies_persisted_state' (9800) panicked at tests/measurement.rs:524:46:
+called `Result::unwrap()` on an `Err` value: Engine("persisted mismatch agent_sessions")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test test_cross_db_run_case_reopens_and_verifies_persisted_state ... FAILED
+
+failures:
+
+failures:
+    test_cross_db_run_case_reopens_and_verifies_persisted_state
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.15s
+
+error: test failed, to rerun pass `--test measurement`

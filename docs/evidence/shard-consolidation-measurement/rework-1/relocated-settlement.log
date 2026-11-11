@@ -1,0 +1,12 @@
+check 1 [PASS] s08/s09 green and no top-level *_executed field — s08=0 s09=0 unexpected=[]
+check 2 [PASS] every unknowns[] entry carries production:/not_exercised: — unscoped=[]
+check 3 [PASS] not_exercised unknowns == admission.phases.not_exercised[].path — claimed=['connection/close-drain-stale-cloned-handle', 'mem-bridge/capture-promotion-real-callers', 'mem-episodic/inbox-store-direct-sql', 'power-loss-durability', 'skills-manager/list-get-create'] actual=['connection/close-drain-stale-cloned-handle', 'mem-bridge/capture-promotion-real-callers', 'mem-episodic/inbox-store-direct-sql', 'power-loss-durability', 'skills-manager/list-get-create']
+check 3 [PASS] results.s09.measured_outcomes == admission.status_counts — results={'completed': 12, 'refused': 2, 'blocked': 1, 'not_exercised': 5} admission={'completed': 12, 'refused': 2, 'blocked': 1, 'not_exercised': 5}
+check 4 [PASS] final_tree_sha256 equals live sha256 of the three source files — claimed={'src/lib.rs': 'e755acc52402ba44f4f4dfa0ff5d03882737f6b0a3d62ce33ab9eb2ebf66ae78', 'src/main.rs': '75f3d9360c70e1475234901a39a113947123abceef22d479adff1c7c39d5fb7d', 'tests/measurement.rs': '951c9a926afee347bcf6714cb84248e77b164885d8f235ca156dc5753bed154f'} live={'src/lib.rs': 'e755acc52402ba44f4f4dfa0ff5d03882737f6b0a3d62ce33ab9eb2ebf66ae78', 'src/main.rs': '75f3d9360c70e1475234901a39a113947123abceef22d479adff1c7c39d5fb7d', 'tests/measurement.rs': '951c9a926afee347bcf6714cb84248e77b164885d8f235ca156dc5753bed154f'}
+check 5 [PASS] sha256sum -c evidence/s09-pristine.sha256 exit 0 — exit=0 output=src/lib.rs: OK
+src/main.rs: OK
+tests/measurement.rs: OK
+check 5 [PASS] pristine manifest mapping == final_tree_sha256 — manifest={'src/lib.rs': 'e755acc52402ba44f4f4dfa0ff5d03882737f6b0a3d62ce33ab9eb2ebf66ae78', 'src/main.rs': '75f3d9360c70e1475234901a39a113947123abceef22d479adff1c7c39d5fb7d', 'tests/measurement.rs': '951c9a926afee347bcf6714cb84248e77b164885d8f235ca156dc5753bed154f'} claimed={'src/lib.rs': 'e755acc52402ba44f4f4dfa0ff5d03882737f6b0a3d62ce33ab9eb2ebf66ae78', 'src/main.rs': '75f3d9360c70e1475234901a39a113947123abceef22d479adff1c7c39d5fb7d', 'tests/measurement.rs': '951c9a926afee347bcf6714cb84248e77b164885d8f235ca156dc5753bed154f'}
+check 6 [PASS] every limits[] entry starting "S0x executed" has green_exit == 0 — limits=['S08 executed and APPROVED (review-4)', 'S09 executed'] unbacked=[]
+settlement: PASS
+EXITCODE:0

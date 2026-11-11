@@ -1,0 +1,20 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running tests/measurement.rs (.tmp/scratch/shard-rework-target-guard/debug/deps/measurement-f0f6f4fdca52ac21)
+
+running 1 test
+
+thread 'test_refuses_outside_or_symlink_root' (10149) panicked at tests/measurement.rs:49:5:
+assertion `left == right` failed: existing empty root must be refused by the existing-root guard, not by create_dir
+  left: "File exists (os error 17)"
+ right: "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/empty-existing-10148"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test test_refuses_outside_or_symlink_root ... FAILED
+
+failures:
+
+failures:
+    test_refuses_outside_or_symlink_root
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--test measurement`

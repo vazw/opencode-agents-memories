@@ -1,0 +1,15 @@
+   Compiling shard-measurement v0.1.0 (/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement)
+error[E0599]: no variant, associated function, or constant named `ExactDuplicates` found for enum `Case` in the current scope
+   --> tests/measurement.rs:484:30
+    |
+484 |     let dup = run_case(Case::ExactDuplicates, &dup_root).unwrap();
+    |                              ^^^^^^^^^^^^^^^ variant, associated function, or constant not found in `Case`
+
+error[E0599]: no variant, associated function, or constant named `DivergentIds` found for enum `Case` in the current scope
+   --> tests/measurement.rs:507:30
+    |
+507 |     let div = run_case(Case::DivergentIds, &div_root).unwrap();
+    |                              ^^^^^^^^^^^^ variant, associated function, or constant not found in `Case`
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `shard-measurement` (test "measurement") due to 2 previous errors

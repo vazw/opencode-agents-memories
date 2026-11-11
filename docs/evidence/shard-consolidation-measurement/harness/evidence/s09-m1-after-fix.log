@@ -1,0 +1,31 @@
+M1-after-fix: s09_latched_op returns without awaiting release (scratch copy /home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework5-mutants); tree 2026-11-11T06:32:08Z
+cmd: cargo test --offline --locked --test measurement test_existing_barriers_report_observed_coverage -- --exact --nocapture
+   Compiling shard-measurement v0.1.0 (/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework5-mutants)
+warning: unused variable: `release`
+    --> tests/measurement.rs:1139:5
+     |
+1139 |     release: tokio::sync::oneshot::Receiver<()>,
+     |     ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_release`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `shard-measurement` (test "measurement") generated 1 warning (run `cargo fix --test "measurement" -p shard-measurement` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.34s
+     Running tests/measurement.rs (.tmp/scratch/rework5-mutants/target/debug/deps/measurement-f0f6f4fdca52ac21)
+
+running 1 test
+
+thread 'test_existing_barriers_report_observed_coverage' (9416) panicked at tests/measurement.rs:1513:9:
+same-scope contender must not complete while the holder is latched
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test test_existing_barriers_report_observed_coverage ... FAILED
+
+failures:
+
+failures:
+    test_existing_barriers_report_observed_coverage
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `--test measurement`
+EXITCODE:101

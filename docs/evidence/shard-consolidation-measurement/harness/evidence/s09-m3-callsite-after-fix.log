@@ -1,0 +1,22 @@
+M3a-after-fix: poll window literal 0s at the call site (constant S09_SCOPE_POLL untouched, scratch copy /home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework5-mutants); tree 2026-11-11T06:32:02Z
+cmd: cargo test --offline --locked --test measurement test_existing_barriers_report_observed_coverage -- --exact --nocapture
+   Compiling shard-measurement v0.1.0 (/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework5-mutants)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.99s
+     Running tests/measurement.rs (.tmp/scratch/rework5-mutants/target/debug/deps/measurement-f0f6f4fdca52ac21)
+
+running 1 test
+
+thread 'test_existing_barriers_report_observed_coverage' (9101) panicked at tests/measurement.rs:1529:9:
+negative poll returned after 1.081608ms; a degenerate window proves nothing
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test test_existing_barriers_report_observed_coverage ... FAILED
+
+failures:
+
+failures:
+    test_existing_barriers_report_observed_coverage
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `--test measurement`
+EXITCODE:101

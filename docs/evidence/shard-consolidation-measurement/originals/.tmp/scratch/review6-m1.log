@@ -1,0 +1,19 @@
+   Compiling shard-measurement v0.1.0 (/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/rework5-mutants)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.23s
+     Running tests/measurement.rs (.tmp/scratch/rework5-mutants/target/debug/deps/measurement-f0f6f4fdca52ac21)
+
+running 1 test
+
+thread 'test_existing_barriers_report_observed_coverage' (17177) panicked at tests/measurement.rs:1514:9:
+same-scope contender must not complete while the holder is latched
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test test_existing_barriers_report_observed_coverage ... FAILED
+
+failures:
+
+failures:
+    test_existing_barriers_report_observed_coverage
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `--test measurement`

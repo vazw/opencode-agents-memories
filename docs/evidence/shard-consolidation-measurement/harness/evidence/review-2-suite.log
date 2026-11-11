@@ -1,0 +1,13 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running tests/measurement.rs (.tmp/scratch/shard-measurement/target/debug/deps/measurement-f0f6f4fdca52ac21)
+
+running 6 tests
+test test_any_nonassociation_difference_aborts_without_writes ... ok
+test test_cross_db_mapping_preserves_payload_and_rejects_unknowns ... ok
+test test_identical_ids_collapse_only_after_association_normalization ... ok
+test test_owned_child_refuses_outside_root ... ok
+test test_raw_blob_and_all_columns_roundtrip ... ok
+test test_refuses_outside_or_symlink_root ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
+

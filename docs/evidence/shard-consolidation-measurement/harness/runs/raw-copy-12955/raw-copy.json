@@ -1,0 +1,573 @@
+{
+  "after": {
+    "distances": [
+      [
+        0.15147189406613815,
+        0.6000000294327552
+      ],
+      [
+        0.7000000001922222,
+        0.15147189406613815
+      ]
+    ],
+    "row_count": 3,
+    "typed_rows": [
+      [
+        {
+          "text": "null-tags"
+        },
+        {
+          "text": "mixed <private>secret</private> /home/vaz/old"
+        },
+        {
+          "blob": [
+            0,
+            0,
+            0,
+            64,
+            0,
+            0,
+            128,
+            63,
+            0,
+            0,
+            0,
+            0
+          ],
+          "len": 12
+        },
+        {
+          "null": true
+        },
+        {
+          "text": "target-container_tag"
+        },
+        {
+          "text": "target-tags-sentinel"
+        },
+        {
+          "text": "target-type-sentinel"
+        },
+        {
+          "integer": 111
+        },
+        {
+          "integer": 222
+        },
+        {
+          "text": "{\"historical\":\"/home/vaz/old\",\"sessionID\":\"old-session\"}"
+        },
+        {
+          "text": "target-display_name"
+        },
+        {
+          "text": "target-user_name-sentinel"
+        },
+        {
+          "text": "target-user_email-sentinel"
+        },
+        {
+          "text": "target-project_path"
+        },
+        {
+          "text": "target-project_name"
+        },
+        {
+          "text": "target-git_repo_url"
+        },
+        {
+          "integer": 1
+        },
+        {
+          "text": "target-session_id-sentinel"
+        },
+        {
+          "integer": 333
+        }
+      ],
+      [
+        {
+          "text": "v1"
+        },
+        {
+          "text": "mixed <private>secret</private> /home/vaz/old"
+        },
+        {
+          "blob": [
+            0,
+            0,
+            0,
+            64,
+            0,
+            0,
+            128,
+            63,
+            0,
+            0,
+            0,
+            0
+          ],
+          "len": 12
+        },
+        {
+          "blob": [
+            0,
+            0,
+            128,
+            63,
+            0,
+            0,
+            64,
+            64,
+            0,
+            0,
+            0,
+            0
+          ],
+          "len": 12
+        },
+        {
+          "text": "target-container_tag"
+        },
+        {
+          "text": "source1-tags-sentinel"
+        },
+        {
+          "text": "source1-type-sentinel"
+        },
+        {
+          "integer": 111
+        },
+        {
+          "integer": 222
+        },
+        {
+          "text": "{\"historical\":\"/home/vaz/old\",\"sessionID\":\"old-session\"}"
+        },
+        {
+          "text": "target-display_name"
+        },
+        {
+          "text": "source1-user_name-sentinel"
+        },
+        {
+          "text": "source1-user_email-sentinel"
+        },
+        {
+          "text": "target-project_path"
+        },
+        {
+          "text": "target-project_name"
+        },
+        {
+          "text": "target-git_repo_url"
+        },
+        {
+          "integer": 1
+        },
+        {
+          "text": "source1-session_id-sentinel"
+        },
+        {
+          "integer": 333
+        }
+      ],
+      [
+        {
+          "text": "v2"
+        },
+        {
+          "text": "<private>only /home/vaz/old</private>"
+        },
+        {
+          "blob": [
+            0,
+            0,
+            128,
+            63,
+            0,
+            0,
+            64,
+            64,
+            0,
+            0,
+            0,
+            0
+          ],
+          "len": 12
+        },
+        {
+          "blob": [
+            0,
+            0,
+            0,
+            64,
+            0,
+            0,
+            128,
+            63,
+            0,
+            0,
+            0,
+            0
+          ],
+          "len": 12
+        },
+        {
+          "text": "target-container_tag"
+        },
+        {
+          "text": "source2-tags-sentinel"
+        },
+        {
+          "text": "source2-type-sentinel"
+        },
+        {
+          "integer": 111
+        },
+        {
+          "integer": 222
+        },
+        {
+          "text": "{\"historical\":\"/home/vaz/old\",\"sessionID\":\"old-session\"}"
+        },
+        {
+          "text": "target-display_name"
+        },
+        {
+          "text": "source2-user_name-sentinel"
+        },
+        {
+          "text": "source2-user_email-sentinel"
+        },
+        {
+          "text": "target-project_path"
+        },
+        {
+          "text": "target-project_name"
+        },
+        {
+          "text": "target-git_repo_url"
+        },
+        {
+          "integer": 1
+        },
+        {
+          "text": "source2-session_id-sentinel"
+        },
+        {
+          "integer": 333
+        }
+      ]
+    ]
+  },
+  "before": {
+    "distances": [
+      [
+        0.15147189406613815,
+        0.6000000294327552
+      ],
+      [
+        0.7000000001922222,
+        0.15147189406613815
+      ]
+    ],
+    "row_count": 3,
+    "typed_rows": [
+      [
+        {
+          "text": "null-tags"
+        },
+        {
+          "text": "mixed <private>secret</private> /home/vaz/old"
+        },
+        {
+          "blob": [
+            0,
+            0,
+            0,
+            64,
+            0,
+            0,
+            128,
+            63,
+            0,
+            0,
+            0,
+            0
+          ],
+          "len": 12
+        },
+        {
+          "null": true
+        },
+        {
+          "text": "target-container_tag"
+        },
+        {
+          "text": "target-tags-sentinel"
+        },
+        {
+          "text": "target-type-sentinel"
+        },
+        {
+          "integer": 111
+        },
+        {
+          "integer": 222
+        },
+        {
+          "text": "{\"historical\":\"/home/vaz/old\",\"sessionID\":\"old-session\"}"
+        },
+        {
+          "text": "target-display_name"
+        },
+        {
+          "text": "target-user_name-sentinel"
+        },
+        {
+          "text": "target-user_email-sentinel"
+        },
+        {
+          "text": "target-project_path"
+        },
+        {
+          "text": "target-project_name"
+        },
+        {
+          "text": "target-git_repo_url"
+        },
+        {
+          "integer": 1
+        },
+        {
+          "text": "target-session_id-sentinel"
+        },
+        {
+          "integer": 333
+        }
+      ],
+      [
+        {
+          "text": "v1"
+        },
+        {
+          "text": "mixed <private>secret</private> /home/vaz/old"
+        },
+        {
+          "blob": [
+            0,
+            0,
+            0,
+            64,
+            0,
+            0,
+            128,
+            63,
+            0,
+            0,
+            0,
+            0
+          ],
+          "len": 12
+        },
+        {
+          "blob": [
+            0,
+            0,
+            128,
+            63,
+            0,
+            0,
+            64,
+            64,
+            0,
+            0,
+            0,
+            0
+          ],
+          "len": 12
+        },
+        {
+          "text": "target-container_tag"
+        },
+        {
+          "text": "source1-tags-sentinel"
+        },
+        {
+          "text": "source1-type-sentinel"
+        },
+        {
+          "integer": 111
+        },
+        {
+          "integer": 222
+        },
+        {
+          "text": "{\"historical\":\"/home/vaz/old\",\"sessionID\":\"old-session\"}"
+        },
+        {
+          "text": "target-display_name"
+        },
+        {
+          "text": "source1-user_name-sentinel"
+        },
+        {
+          "text": "source1-user_email-sentinel"
+        },
+        {
+          "text": "target-project_path"
+        },
+        {
+          "text": "target-project_name"
+        },
+        {
+          "text": "target-git_repo_url"
+        },
+        {
+          "integer": 1
+        },
+        {
+          "text": "source1-session_id-sentinel"
+        },
+        {
+          "integer": 333
+        }
+      ],
+      [
+        {
+          "text": "v2"
+        },
+        {
+          "text": "<private>only /home/vaz/old</private>"
+        },
+        {
+          "blob": [
+            0,
+            0,
+            128,
+            63,
+            0,
+            0,
+            64,
+            64,
+            0,
+            0,
+            0,
+            0
+          ],
+          "len": 12
+        },
+        {
+          "blob": [
+            0,
+            0,
+            0,
+            64,
+            0,
+            0,
+            128,
+            63,
+            0,
+            0,
+            0,
+            0
+          ],
+          "len": 12
+        },
+        {
+          "text": "target-container_tag"
+        },
+        {
+          "text": "source2-tags-sentinel"
+        },
+        {
+          "text": "source2-type-sentinel"
+        },
+        {
+          "integer": 111
+        },
+        {
+          "integer": 222
+        },
+        {
+          "text": "{\"historical\":\"/home/vaz/old\",\"sessionID\":\"old-session\"}"
+        },
+        {
+          "text": "target-display_name"
+        },
+        {
+          "text": "source2-user_name-sentinel"
+        },
+        {
+          "text": "source2-user_email-sentinel"
+        },
+        {
+          "text": "target-project_path"
+        },
+        {
+          "text": "target-project_name"
+        },
+        {
+          "text": "target-git_repo_url"
+        },
+        {
+          "integer": 1
+        },
+        {
+          "text": "source2-session_id-sentinel"
+        },
+        {
+          "integer": 333
+        }
+      ]
+    ]
+  },
+  "duration_ms": 121,
+  "limitations": [
+    "synthetic rows only; no power-loss proof"
+  ],
+  "negative_controls_rejected": 4,
+  "oracle_columns": [
+    "id",
+    "content",
+    "vector",
+    "tags_vector",
+    "container_tag",
+    "tags",
+    "type",
+    "created_at",
+    "updated_at",
+    "metadata",
+    "display_name",
+    "user_name",
+    "user_email",
+    "project_path",
+    "project_name",
+    "git_repo_url",
+    "is_pinned",
+    "session_id",
+    "source_prompt_created_at"
+  ],
+  "schema_columns": [
+    "id",
+    "content",
+    "vector",
+    "tags_vector",
+    "container_tag",
+    "tags",
+    "type",
+    "created_at",
+    "updated_at",
+    "metadata",
+    "display_name",
+    "user_name",
+    "user_email",
+    "project_path",
+    "project_name",
+    "git_repo_url",
+    "is_pinned",
+    "session_id",
+    "source_prompt_created_at"
+  ]
+}

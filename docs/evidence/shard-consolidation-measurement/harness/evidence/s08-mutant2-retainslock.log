@@ -1,0 +1,20 @@
+   Compiling shard-measurement v0.1.0 (/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.02s
+     Running tests/measurement.rs (.tmp/scratch/shard-measurement/target/debug/deps/measurement-f0f6f4fdca52ac21)
+
+running 1 test
+
+thread 'test_interrupted_cross_db_restore_matches_baseline_and_is_idempotent' (24044) panicked at tests/measurement.rs:967:5:
+restore #1 must leave exactly the baseline file set (zero extra tuple files)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test test_interrupted_cross_db_restore_matches_baseline_and_is_idempotent ... FAILED
+
+failures:
+
+failures:
+    test_interrupted_cross_db_restore_matches_baseline_and_is_idempotent
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.15s
+
+error: test failed, to rerun pass `--test measurement`
+EXIT:101

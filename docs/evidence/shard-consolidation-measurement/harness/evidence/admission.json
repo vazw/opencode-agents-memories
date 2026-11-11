@@ -1,0 +1,160 @@
+{
+  "measurement": "S09 admission observation over existing public barriers (blueprint step 9)",
+  "test": "test_existing_barriers_report_observed_coverage",
+  "red": {
+    "exit": 101,
+    "observable": "hardcoded all-blocked ledger fails truthfulness gate at operation-lock/second-acquire-while-held",
+    "log": "evidence/s09-red.log"
+  },
+  "green": {
+    "exit": 0,
+    "result": "1 passed (1.04s)",
+    "log": "evidence/s09-green-after-fix.log"
+  },
+  "mutant_unknown_paths_blocked": {
+    "exit": 101,
+    "observable": "negative-oracle gate: fabricated path must classify unknown",
+    "log": "evidence/s09-mutant-unknown-blocked.log"
+  },
+  "suite": {
+    "exit": 0,
+    "result": "10 passed; 0 failed (2.72s)",
+    "log": "evidence/s10-suite-after-fix.log"
+  },
+  "clippy": {
+    "exit": 0,
+    "log": "evidence/s09-rework-clippy.log"
+  },
+  "status_counts": {
+    "completed": 12,
+    "refused": 2,
+    "blocked": 1,
+    "not_exercised": 5
+  },
+  "observation_source": ".tmp/scratch/shard-measurement/runs/s09-admission-1794378746376652797/admission-observations.json",
+  "phases": {
+    "case_root": "/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement/runs/s09-admission-1794378746376652797",
+    "limitations": [
+      "observations cover only the public operation/scope/delete-guard seams reachable from this dependency manifest",
+      "unexercised traced admission paths keep draft-B coverage inconclusive; Busy counts alone prove nothing",
+      "the scope barrier serializes opted-in callers; an unbarred writer would bypass it by construction"
+    ],
+    "not_exercised": [
+      {
+        "path": "skills-manager/list-get-create",
+        "reason": "source-map: no shared scope/operation barrier at those methods; manager crate not in this immutable dependency manifest"
+      },
+      {
+        "path": "mem-episodic/inbox-store-direct-sql",
+        "reason": "source-map: direct ready/execute traced, no shared barrier; crate not in dependency manifest"
+      },
+      {
+        "path": "mem-bridge/capture-promotion-real-callers",
+        "reason": "source-map: same-manager scope lock traced READ-only; crate not in dependency manifest"
+      },
+      {
+        "path": "connection/close-drain-stale-cloned-handle",
+        "reason": "source-map: manager close removes ownership but cannot revoke cloned Arc handles; no public close seam reachable from this manifest"
+      },
+      {
+        "path": "power-loss-durability",
+        "reason": "process-kill harness cannot establish power-loss semantics"
+      }
+    ],
+    "paths": {
+      "auxiliary/read-write-after-release": {
+        "detail": "read-back all-released",
+        "status": "completed"
+      },
+      "auxiliary/read-write-while-operation-held": {
+        "detail": "read-back operation-lock-held",
+        "status": "completed"
+      },
+      "delete-guard/registry-after-release": {
+        "detail": "ExclusiveRoot::current after release: false",
+        "status": "completed"
+      },
+      "delete-guard/registry-while-custody": {
+        "detail": "ExclusiveRoot::current while custody held: true",
+        "status": "completed"
+      },
+      "operation-lock/acquire-after-release": {
+        "detail": "acquire after release: None",
+        "status": "completed"
+      },
+      "operation-lock/live-lock-read-held": {
+        "detail": "read_live_lock while held: Some(9867)",
+        "status": "completed"
+      },
+      "operation-lock/migration-assert-held": {
+        "detail": "migration assert while held: Some(\"Database migration is in progress (synthetic-measurement) in process 9867; writes are temporarily blocked\")",
+        "status": "refused"
+      },
+      "operation-lock/migration-assert-released": {
+        "detail": "migration assert after release",
+        "status": "completed"
+      },
+      "operation-lock/second-acquire-while-held": {
+        "detail": "second acquire outcome: Some(\"Database migration is in progress (synthetic-measurement) in process 9867; writes are temporarily blocked\")",
+        "status": "refused"
+      },
+      "operation-lock/stale-dead-pid-acquire-after-reclaim": {
+        "detail": "acquire after reclaim: None",
+        "status": "completed"
+      },
+      "operation-lock/stale-dead-pid-reclaim": {
+        "detail": "read_live_lock over a dead-pid lock: None; lock file unlinked by the stale read: true",
+        "status": "completed"
+      },
+      "scope-lock/different-scope-while-held": {
+        "detail": "distinct scope project:scope-b completed while the holder was latched",
+        "status": "completed"
+      },
+      "scope-lock/drain-after-release": {
+        "detail": "queued same-scope contender completed only after the holder released (in-flight drain)",
+        "status": "completed"
+      },
+      "scope-lock/holder-admitted-latch": {
+        "detail": "holder entered the per-(scope,hash) async mutex and latched",
+        "status": "completed"
+      },
+      "scope-lock/same-scope-while-held": {
+        "detail": "contender on scope user:scope-a did not complete within the bounded 1s negative poll while the holder was latched",
+        "status": "blocked"
+      }
+    },
+    "timings_us": {
+      "aux_write_after_release_us": 7103,
+      "aux_write_while_operation_held_us": 12496,
+      "aux_write_while_scope_held_us": 7810,
+      "drained_status": "completed",
+      "latch_epoch_us": 1794378746403606,
+      "other_scope_completed_while_held": true,
+      "scope_positive_control_us": 23,
+      "scope_same_scope_negative_poll_us": 1001269
+    },
+    "unknown_path_behavior": "a path absent from the ledger classifies as unknown, never as blocked"
+  },
+  "m3_scope_poll_after_fix": {
+    "callsite_window_0s": {
+      "exit": 101,
+      "observable": "negative poll returned after 1.081608ms; a degenerate window proves nothing",
+      "log": "evidence/s09-m3-callsite-after-fix.log"
+    },
+    "constant_window_0s": {
+      "exit": 101,
+      "observable": "persisted gate: the persisted negative poll must show the wait on the live contender, got 1081us",
+      "log": "evidence/s09-m3-after-fix.log"
+    },
+    "latch_without_release": {
+      "exit": 101,
+      "observable": "same-scope contender must not complete while the holder is latched",
+      "log": "evidence/s09-m1-after-fix.log"
+    },
+    "refused_to_completed": {
+      "exit": 101,
+      "observable": "assertion `left == right` failed: hardcoded all-blocked/all-completed ledgers cannot pass (left \"completed\" / right \"refused\")",
+      "log": "evidence/s09-m2-after-fix.log"
+    }
+  }
+}

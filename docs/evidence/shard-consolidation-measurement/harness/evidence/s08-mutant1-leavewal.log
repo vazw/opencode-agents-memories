@@ -1,0 +1,20 @@
+   Compiling shard-measurement v0.1.0 (/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/scratch/shard-measurement)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.07s
+     Running tests/measurement.rs (.tmp/scratch/shard-measurement/target/debug/deps/measurement-f0f6f4fdca52ac21)
+
+running 1 test
+
+thread 'test_interrupted_cross_db_restore_matches_baseline_and_is_idempotent' (23622) panicked at tests/measurement.rs:974:5:
+restored bytes must equal the immutable baseline hashes before any reopen
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test test_interrupted_cross_db_restore_matches_baseline_and_is_idempotent ... FAILED
+
+failures:
+
+failures:
+    test_interrupted_cross_db_restore_matches_baseline_and_is_idempotent
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.12s
+
+error: test failed, to rerun pass `--test measurement`
+EXIT:101
