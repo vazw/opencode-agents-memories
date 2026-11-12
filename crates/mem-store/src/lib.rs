@@ -21,6 +21,7 @@ pub mod episodic_sql;
 pub mod error;
 pub mod legacy_migrator;
 pub mod lifecycle;
+pub mod maintenance_reservation;
 pub mod migration_service;
 pub mod open_guard;
 pub mod operation_lock;

@@ -28,7 +28,7 @@
 import pkg from "../package.json" with { type: "json" };
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { accessSync, appendFile, constants, existsSync, mkdir, mkdirSync, writeFileSync } from "node:fs";
+import { accessSync, appendFile, constants, existsSync, mkdir, statSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -525,7 +525,13 @@ function failEngineBatch(state, batch, err) {
 function writeStatusFile(state, reason) {
   try {
     const root = state.root;
-    mkdirSync(root, { recursive: true });
+    // Never CREATE the storage root (ADR-0033 / F23): during a consolidation
+    // window custody owns this path exclusively, and an unconditional
+    // mkdirSync here turns a wrapper respawn into an empty root that the
+    // install rename must then refuse. The report is written only into an
+    // EXISTING directory; a missing root degrades without a report file.
+    const rootStat = statSync(root, { throwIfNoEntry: false });
+    if (rootStat === undefined || !rootStat.isDirectory()) return;
     const ts = new Date().toISOString();
     let line = "degraded: " + reason + " (pid=" + process.pid + ", ts=" + ts + ")";
     if (line.length > 200) line = line.slice(0, 200);

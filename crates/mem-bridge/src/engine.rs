@@ -1507,7 +1507,18 @@ pub async fn run_in_runtime(
     shutdown_signal: Pin<Box<dyn Future<Output = ()> + Send>>,
     portability: Option<Box<dyn crate::tools::portability::PortabilityFactory>>,
 ) -> Result<i32, String> {
-    // The exclusive lifetime lock FIRST: a loser never opens the DB.
+    // The maintenance reservation fence (ADR-0033) FIRST: a held reservation
+    // refuses startup BEFORE the exclusive lifetime lock, hence before
+    // `acquire_engine_lock`'s `create_dir_all` — a refused engine creates
+    // nothing and touches nothing (rev-11 §E.2 / §H.1). The check is
+    // three-way: absent → proceed, holder-is-me → proceed, anything else
+    // (including a corrupt or 0-byte body) → exit 76.
+    if mem_store::maintenance_reservation::check(&config.storage_root)
+        == mem_store::maintenance_reservation::ReservationVerdict::Held
+    {
+        mem_store::maintenance_reservation::refuse_held_exit("engine", &config.storage_root);
+    }
+    // The exclusive lifetime lock: a loser never opens the DB.
     let probe: Arc<dyn mem_store::platform::ProcessProbe> =
         Arc::new(mem_store::platform::SystemProcessProbe);
     // `acquire_outcome` consumes the probe; the host provider needs its own

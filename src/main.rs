@@ -51,6 +51,7 @@ use mem_web::api::store_adapter::{
     production_skill_port,
 };
 use opencode_agents_memory::portability_backend::ProductionPortabilityFactory;
+use opencode_agents_memory::shard_consolidation;
 use opencode_agents_memory::web_dist::{self, ResolvedDist};
 
 /// The workspace crates in composition order — printed by
@@ -91,7 +92,8 @@ const USAGE: &str = "\
 usage: opencode-agents-memory [--mode=<mode>] [--storage-root <path>] [options]
 
 Modes (--mode=<mode>): stdio (default), standalone, print-crates,
-  purge-session, reembed-scope, reap-shards, sweep. hang-on-shutdown is accepted
+  purge-session, reembed-scope, reap-shards, sweep, consolidate-shards.
+  hang-on-shutdown is accepted
   only when OPENCODE_MEM_HANG_ON_SHUTDOWN is set; mcp-stdio and mcp-http are
   recognised and refused with exit 78.
 
@@ -107,6 +109,8 @@ Options:
   --scope <tag>           reembed-scope: container tag to re-embed
   --apply                 reap-shards: perform the reap (dry run otherwise);
                           sweep: required (the sweep mutates)
+  --plan <path>           consolidate-shards: the private plan JSON
+  --dry-run               consolidate-shards: answer the plan report, write nothing
   -h, --help              print this help and exit
   --version               print the version and exit
 ";
@@ -298,6 +302,16 @@ struct ParsedArgs {
     agent: Option<String>,
     confirm: Option<String>,
     scope: Option<String>,
+    /// The private consolidation plan path (`consolidate-shards`).
+    plan: Option<String>,
+    /// `--dry-run`: answer the plan report without writing (rev-11 Step 4).
+    dry_run: bool,
+    /// The absolute custody directory (`consolidate-snapshot` / `-verify-snapshot`).
+    custody: Option<String>,
+    /// The absolute staged tree path (`consolidate-install`, test seam).
+    staged: Option<String>,
+    /// The rehearsal scratch dir (`consolidate-shards`, harness-side C3 assert).
+    rehearsal: Option<String>,
     /// The bare `--apply` confirmation (reap-shards only).
     apply: bool,
     /// `--apply=<value>` was seen: a usage error in reap mode.
@@ -333,6 +347,11 @@ fn parse_args<I: Iterator<Item = (String, Option<String>)>>(args: I) -> ParsedAr
             "--agent" | "agent" => parsed.agent = inline,
             "--confirm" | "confirm" => parsed.confirm = inline,
             "--scope" | "scope" => parsed.scope = inline,
+            "--plan" | "plan" => parsed.plan = inline,
+            "--custody" | "custody" => parsed.custody = inline,
+            "--staged" | "staged" => parsed.staged = inline,
+            "--rehearsal" | "rehearsal" => parsed.rehearsal = inline,
+            "--dry-run" => parsed.dry_run = true,
             "--apply" => match inline {
                 None => parsed.apply = true,
                 Some(_) => parsed.apply_inline = true,
@@ -341,6 +360,18 @@ fn parse_args<I: Iterator<Item = (String, Option<String>)>>(args: I) -> ParsedAr
         }
     }
     parsed
+}
+
+/// The maintenance-reservation fence for the four CLI writer modes
+/// (ADR-0033): a Held verdict refuses the writer with exit 76 BEFORE its
+/// first store open, so no writer can touch a root a consolidation window
+/// owns. `HeldBySelf` (the consolidator process itself) passes through.
+fn refuse_if_reservation_held(operation: &str, storage_root: &Path) {
+    if mem_store::maintenance_reservation::check(storage_root)
+        == mem_store::maintenance_reservation::ReservationVerdict::Held
+    {
+        mem_store::maintenance_reservation::refuse_held_exit(operation, storage_root);
+    }
 }
 
 /// The iterator/path: positional pairs (`--mode stdio`) become `Some` inline
@@ -377,7 +408,11 @@ fn main() {
                 || arg == "--session"
                 || arg == "--agent"
                 || arg == "--confirm"
-                || arg == "--scope")
+                || arg == "--scope"
+                || arg == "--plan"
+                || arg == "--custody"
+                || arg == "--staged"
+                || arg == "--rehearsal")
         {
             let value = raw.get(index + 1).cloned();
             let has_value = value.is_some();
@@ -514,6 +549,17 @@ fn main() {
     let mut reap_request: Option<mem_bridge::reap::ReapRequest> = None;
     // The sweep request, built at parse time. `None` for every other mode.
     let mut sweep_request: Option<mem_bridge::sweep::SweepRequest> = None;
+    // The consolidation plan path, built at parse time. `None` for every
+    // other mode. `--dry-run` is the only apply-less form this build has.
+    let mut consolidation_plan: Option<std::path::PathBuf> = None;
+    // The snapshot/verify request: (is_snapshot, custody dir). `None` otherwise.
+    let mut custody_request: Option<(bool, PathBuf)> = None;
+    let mut journal_request: Option<PathBuf> = None;
+    let mut rollback_request: Option<(bool, PathBuf)> = None;
+    let mut install_request: Option<(bool, PathBuf, Option<PathBuf>)> = None;
+    let mut staged_verify_request: Option<(PathBuf, PathBuf)> = None;
+    let args_dry_run = args.dry_run;
+    let args_rehearsal = args.rehearsal.clone();
     if let Some(mode) = args.mode.clone() {
         let mode = mode.trim().to_owned();
         if mode == "print-crates" {
@@ -553,6 +599,92 @@ fn main() {
             // The sweep mutates, so `--apply` is mandatory; the runner answers
             // 64 (not a dry run) when it is absent.
             sweep_request = Some(mem_bridge::sweep::SweepRequest { apply: args.apply });
+        } else if mode == "consolidate-rollback" || mode == "consolidate-verify" {
+            // Step 8: rollback and settlement are custody-scoped.
+            match args.custody.as_deref() {
+                Some(path) if std::path::Path::new(path).is_absolute() => {
+                    rollback_request = Some((mode == "consolidate-rollback", PathBuf::from(path)));
+                }
+                _ => {
+                    eprintln!("{mode}: --custody <absolute-dir> is required");
+                    std::process::exit(64);
+                }
+            }
+        } else if mode == "consolidate-install" || mode == "consolidate-recover" {
+            // Step 7 (L4/L5, §H.1): install and recovery are custody-scoped.
+            match (args.custody.as_deref(), args.staged.as_deref()) {
+                (Some(custody), staged)
+                    if std::path::Path::new(custody).is_absolute()
+                        && (mode == "consolidate-recover" || staged.is_some()) =>
+                {
+                    install_request = Some((
+                        mode == "consolidate-install",
+                        PathBuf::from(custody),
+                        staged.map(PathBuf::from),
+                    ));
+                }
+                _ => {
+                    eprintln!("{mode}: --custody <absolute-dir> is required");
+                    std::process::exit(64);
+                }
+            }
+        } else if mode == "consolidate-staged-verify" {
+            // R2: the staged-verify writer is the install's licence. Both paths
+            // are required and absolute (never derived from the root).
+            match (args.custody.as_deref(), args.staged.as_deref()) {
+                (Some(custody), Some(staged))
+                    if std::path::Path::new(custody).is_absolute()
+                        && std::path::Path::new(staged).is_absolute() =>
+                {
+                    staged_verify_request = Some((PathBuf::from(custody), PathBuf::from(staged)));
+                }
+                _ => {
+                    eprintln!(
+                        "{mode}: --custody <absolute-dir> and --staged <absolute-dir> are required"
+                    );
+                    std::process::exit(64);
+                }
+            }
+        } else if mode == "consolidate-journal" {
+            // Step 7 (L2/L3): the journal write is custody-scoped like the
+            // snapshot modes and never derives the custody dir from the root.
+            match args.custody.as_deref() {
+                Some(path) if std::path::Path::new(path).is_absolute() => {
+                    journal_request = Some(PathBuf::from(path));
+                }
+                _ => {
+                    eprintln!("{mode}: --custody <absolute-dir> is required");
+                    std::process::exit(64);
+                }
+            }
+        } else if mode == "consolidate-snapshot" || mode == "consolidate-verify-snapshot" {
+            // Step 6 custody: the absolute custody dir is required (the snapshot
+            // and verifier never derive it from the live root).
+            match args.custody.as_deref() {
+                Some(path) if std::path::Path::new(path).is_absolute() => {
+                    custody_request = Some((mode == "consolidate-snapshot", PathBuf::from(path)));
+                }
+                _ => {
+                    eprintln!("{mode}: --custody <absolute-dir> is required");
+                    std::process::exit(64);
+                }
+            }
+        } else if mode == "consolidate-shards" {
+            // The plan is required and absolute (parent Step 4 pin): a relative
+            // or absent plan would resolve against the wrong tree.
+            match args.plan.as_deref() {
+                Some(path) if std::path::Path::new(path).is_absolute() => {
+                    consolidation_plan = Some(std::path::PathBuf::from(path));
+                }
+                Some(_) => {
+                    eprintln!("consolidate-shards: --plan must be an absolute path");
+                    std::process::exit(64);
+                }
+                None => {
+                    eprintln!("consolidate-shards: --plan <absolute-json> is required");
+                    std::process::exit(64);
+                }
+            }
         } else {
             match LaunchMode::parse(&mode) {
                 Ok(parsed) => {
@@ -603,7 +735,74 @@ fn main() {
     // the HostConfig value (`--storage-root` → `OPENCODE_MEM_STORAGE_ROOT` →
     // `$HOME/.opencode-mem/data`); the JSONC `storagePath` is not the engine
     // root and is never consulted here.
+    if let Some((rollback, custody)) = rollback_request {
+        refuse_if_reservation_held("consolidate-rollback", &config.storage_root);
+        std::process::exit(if rollback {
+            shard_consolidation::run_rollback(&config.storage_root, &custody)
+        } else {
+            shard_consolidation::run_verify(&config.storage_root, &custody)
+        });
+    }
+
+    if let Some((custody, staged)) = staged_verify_request {
+        refuse_if_reservation_held("consolidate-staged-verify", &config.storage_root);
+        std::process::exit(shard_consolidation::run_staged_verify(
+            &config.storage_root,
+            &custody,
+            &staged,
+        ));
+    }
+
+    if let Some((install, custody, staged)) = install_request {
+        refuse_if_reservation_held("consolidate-install", &config.storage_root);
+        std::process::exit(if install {
+            shard_consolidation::run_install(
+                &config.storage_root,
+                &custody,
+                staged.as_deref().unwrap_or(Path::new("")),
+            )
+        } else {
+            shard_consolidation::run_recover(&custody)
+        });
+    }
+
+    if let Some(custody) = journal_request {
+        refuse_if_reservation_held("consolidate-journal", &config.storage_root);
+        std::process::exit(shard_consolidation::run_journal_write(&custody, "Prepared"));
+    }
+
+    if let Some((snapshot, custody)) = custody_request {
+        // The snapshot reads the root but never opens a store; the reservation
+        // gate still applies so no snapshot races a consolidation window.
+        refuse_if_reservation_held("consolidate-snapshot", &config.storage_root);
+        std::process::exit(if snapshot {
+            shard_consolidation::run_snapshot(&config.storage_root, &custody)
+        } else {
+            shard_consolidation::run_verify_snapshot(&custody)
+        });
+    }
+
+    if let Some(plan) = consolidation_plan {
+        // C3 (opsec carry-forward): a rehearsal run must target its own scratch
+        // tree. Checked BEFORE the reservation gate, so a mis-aimed harness is
+        // refused without touching or creating anything under the live root.
+        if let Some(scratch) = args_rehearsal.as_deref() {
+            shard_consolidation::rehearsal_scratch_assert(
+                std::path::Path::new(scratch),
+                &config.storage_root,
+            );
+        }
+        refuse_if_reservation_held("consolidate-shards", &config.storage_root);
+        std::process::exit(shard_consolidation::run_plan(
+            &plan,
+            &config.storage_root,
+            &core_config,
+            args_dry_run,
+        ));
+    }
+
     if let Some(request) = purge_request {
+        refuse_if_reservation_held("purge-session", &config.storage_root);
         std::process::exit(mem_bridge::purge::run(
             &core_config,
             &config.storage_root,
@@ -614,6 +813,7 @@ fn main() {
     // W3 — the re-embed dispatch also sits BEFORE the engine runtime: never
     // start the stdio loop, the web server or the engine lock in this mode.
     if let Some(container_tag) = reembed_tag {
+        refuse_if_reservation_held("reembed-scope", &config.storage_root);
         std::process::exit(mem_bridge::reembed::run(
             &core_config,
             &config.storage_root,
@@ -625,6 +825,7 @@ fn main() {
     // the log sink: never start the stdio loop, the web server or an engine
     // runtime in this mode.
     if let Some(request) = reap_request {
+        refuse_if_reservation_held("reap-shards", &config.storage_root);
         std::process::exit(mem_bridge::reap::run(
             &core_config,
             &config.storage_root,
@@ -636,6 +837,7 @@ fn main() {
     // takes the engine lock itself, so starting the engine here would make it
     // refuse with 75 against its own process.
     if let Some(request) = sweep_request {
+        refuse_if_reservation_held("sweep", &config.storage_root);
         std::process::exit(mem_bridge::sweep::run(
             &core_config,
             &config.storage_root,

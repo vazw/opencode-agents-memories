@@ -13,3 +13,4 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 libc = { workspace = true }
+getrandom = { workspace = true }
