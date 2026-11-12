@@ -71,3 +71,38 @@ than trusted from this measurement.
 A live store whose `e266` shard holds a non-NULL `deleted_at` at consolidation
 time. The census above is a snapshot; the defensive refusal is what keeps the
 conclusion safe if the store moves.
+
+## Addendum — index sets (added 2026-11-12 after the rev-12 gate)
+
+The Result section above is one fact short: the ladder also pins an **index**
+set, and `e266` carries one extra index. Measured on the same sidecar-complete
+copies:
+
+```sh
+sqlite3 "file:project_<hash>_shard_0.db?mode=ro" \
+  "select name from sqlite_master where type='index' and name not like 'sqlite_autoindex%' order by name;"
+```
+
+| shard set | indexes |
+|---|---|
+| the other 33 | `idx_container_tag, idx_created_at, idx_is_pinned, idx_session_id, idx_type` (5) |
+| `e266c5689d45bee3` | the same 5 **plus** `idx_deleted_at` (6) |
+
+`e266`'s sixth index is `CREATE INDEX IF NOT EXISTS idx_deleted_at ON memories
+(deleted_at)` — non-partial, on the vestigial column.
+
+Rung/table cross-check on the same copies:
+
+```sh
+sqlite3 "file:$D?mode=ro" "select count(*) from sqlite_master where name='shard_stats';"
+# user_version 2 -> 0 (12 shards);  user_version 3 -> 1 (22 shards)
+```
+
+So `shard_stats` tracks the rung exactly, and `e266` is the only shard whose
+index set deviates.
+
+**Consequence for the ladder entry:** a predicate over columns alone would
+ACCEPT `e266` (it never inspects indexes) and would also accept a shard whose
+`idx_deleted_at` is missing or partial. The entry therefore needs an
+exact-set index predicate as new census code — compared on (name, table,
+indexed column list, partial-ness), not name alone.
