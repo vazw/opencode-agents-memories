@@ -797,6 +797,7 @@ fn main() {
             &plan,
             &config.storage_root,
             &core_config,
+            args.custody.as_deref().map(std::path::Path::new),
             args_dry_run,
         ));
     }

@@ -65,6 +65,7 @@ mem-store = { workspace = true }
 mem-skills = { workspace = true }
 mem-portability = { workspace = true }
 mem-web = { workspace = true }
+libc = { workspace = true }
 
 # Dev/test profile tuning (owner directive, 2026-10-26). Debug info is the bulk
 # of what makes linking this workspace RAM-hungry, and `cargo test` inherits

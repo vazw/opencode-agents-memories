@@ -11,6 +11,7 @@
 //! each candidate shard read-only (rev-11 §F), and the dry-run path performs no
 //! mutation at all — the tree digest is unchanged before and after.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -176,20 +177,33 @@ struct PreflightSource {
     columns: BTreeSet<String>,
 }
 
-/// Entry point for `--mode=consolidate-shards --plan <json> [--dry-run]`.
+/// Entry point for `--mode=consolidate-shards --plan <json> [--custody <abs-dir>] [--dry-run]`.
 ///
 /// Returns the process exit code; a refusal has already been emitted on
 /// stderr by the time this returns.
+///
+/// Apply is a CUSTODY-REQUIRED mode (§C.5 rev 13): the auxiliary sidecar is a
+/// custody artifact and `apply_plan` cannot derive the custody dir
+/// (`staged_path` puts the staged tree beside the parent). Every dry run stays
+/// custody-FREE, so the measured zero-write property is untouched.
 pub fn run_plan(
     plan_path: &Path,
     storage_root: &Path,
     config: &mem_core::config::Config,
+    custody: Option<&Path>,
     dry_run: bool,
 ) -> i32 {
     let outcome = if dry_run {
         plan_and_preflight(plan_path, storage_root, &config.container_tag_prefix)
     } else {
-        apply_plan(plan_path, storage_root, config)
+        match custody {
+            Some(path) if path.is_absolute() => apply_plan(plan_path, storage_root, config, path),
+            _ => Err(Refusal::new(
+                EXIT_PLAN_INVALID,
+                "consolidation.custody_required",
+                "apply requires --custody <absolute-dir>",
+            )),
+        }
     };
     match outcome {
         Ok(report) => {
@@ -674,6 +688,13 @@ fn canonical(path: &Path) -> PathBuf {
 // ---------------------------------------------------------------------------
 
 fn census_shard(path: &Path) -> Result<Census, Refusal> {
+    let unsupported = |detail: String| {
+        Refusal::new(
+            EXIT_UNSUPPORTED_SHAPE,
+            "consolidation.shard_shape_unsupported",
+            detail,
+        )
+    };
     let handle = open_read_only(path)?;
     let user_version =
         block_on(async { query_one(handle.as_ref(), "PRAGMA user_version", Vec::new()).await })
@@ -688,53 +709,90 @@ fn census_shard(path: &Path) -> Result<Census, Refusal> {
             .unwrap_or(0);
     let rows =
         block_on(handle.query("PRAGMA table_info(memories)", Vec::new())).map_err(|error| {
-            Refusal::new(
-                EXIT_UNSUPPORTED_SHAPE,
-                "consolidation.shard_shape_unsupported",
-                format!("{} has no readable memories table: {error}", path.display()),
-            )
+            unsupported(format!(
+                "{} has no readable memories table: {error}",
+                path.display()
+            ))
         })?;
     let columns: Vec<String> = rows.iter().filter_map(|row| row.text("name")).collect();
     let tables = block_on(handle.query(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'shard_metadata'",
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
         Vec::new(),
     ))
     .map_err(|error| {
-        Refusal::new(
-            EXIT_UNSUPPORTED_SHAPE,
-            "consolidation.shard_shape_unsupported",
-            format!("{} has no readable sqlite_master: {error}", path.display()),
-        )
+        unsupported(format!(
+            "{} has no readable sqlite_master: {error}",
+            path.display()
+        ))
     })?;
-    let expected = ladder_columns(user_version).ok_or_else(|| {
-        Refusal::new(
-            EXIT_UNSUPPORTED_SHAPE,
-            "consolidation.shard_shape_unsupported",
-            format!(
-                "{} is user_version {user_version}, outside the pinned 1..=4 ladder",
-                path.display()
-            ),
-        )
+    let table_names: Vec<String> = tables.iter().filter_map(|row| row.text("name")).collect();
+    let actual_tables: BTreeSet<&str> = table_names.iter().map(String::as_str).collect();
+    // The accepted shape is keyed on BOTH `user_version == 3` and the presence
+    // of the vestigial column; a v2 or v4 shard carrying it still refuses.
+    let deleted_at = columns.iter().any(|name| name == "deleted_at");
+    let expected = ladder_columns(user_version, deleted_at).ok_or_else(|| {
+        unsupported(format!(
+            "{} is user_version {user_version}, outside the pinned 1..=4 ladder",
+            path.display()
+        ))
     })?;
     let actual: BTreeSet<&str> = columns.iter().map(String::as_str).collect();
     if actual != expected {
         let unexpected: Vec<&&str> = actual.difference(&expected).collect();
         let missing: Vec<&&str> = expected.difference(&actual).collect();
-        return Err(Refusal::new(
-            EXIT_UNSUPPORTED_SHAPE,
-            "consolidation.shard_shape_unsupported",
-            format!(
-                "{} has a memories shape outside the ladder (unexpected: {unexpected:?}; missing: {missing:?})",
-                path.display()
-            ),
-        ));
+        return Err(unsupported(format!(
+            "{} has a memories shape outside the ladder (unexpected: {unexpected:?}; missing: {missing:?})",
+            path.display()
+        )));
     }
-    if tables.is_empty() {
-        return Err(Refusal::new(
-            EXIT_UNSUPPORTED_SHAPE,
-            "consolidation.shard_shape_unsupported",
-            format!("{} has no shard_metadata table", path.display()),
-        ));
+    let expected_tables = ladder_tables(user_version);
+    if actual_tables != expected_tables {
+        let unexpected: Vec<&&str> = actual_tables.difference(&expected_tables).collect();
+        let missing: Vec<&&str> = expected_tables.difference(&actual_tables).collect();
+        return Err(unsupported(format!(
+            "{} has a table set outside the pinned ladder (unexpected: {unexpected:?}; missing: {missing:?})",
+            path.display()
+        )));
+    }
+    let accepted = user_version == 3 && deleted_at;
+    let expected_indexes = ladder_indexes(user_version, accepted);
+    let actual_indexes = census_indexes(&handle, path)?;
+    if actual_indexes != expected_indexes {
+        let unexpected: Vec<&IndexShape> = actual_indexes.difference(&expected_indexes).collect();
+        let missing: Vec<&IndexShape> = expected_indexes.difference(&actual_indexes).collect();
+        return Err(unsupported(format!(
+            "{} has an index set outside the pinned ladder (unexpected: {unexpected:?}; missing: {missing:?})",
+            path.display()
+        )));
+    }
+    // §A.1 seam (i): the all-NULL property is enforced by code, never trusted
+    // from the census snapshot. Only the accepted shape can carry the column, so
+    // the predicate is conditional by construction.
+    if accepted {
+        let non_null = block_on(query_one(
+            handle.as_ref(),
+            "SELECT COUNT(*) AS non_null FROM memories WHERE deleted_at IS NOT NULL",
+            Vec::new(),
+        ))
+        .map_err(|error| {
+            unsupported(format!(
+                "{} cannot count its non-NULL deleted_at rows: {error}",
+                path.display()
+            ))
+        })?
+        .and_then(|row| row.i64("non_null"))
+        .ok_or_else(|| {
+            unsupported(format!(
+                "{} cannot read its non-NULL deleted_at count",
+                path.display()
+            ))
+        })?;
+        if non_null != 0 {
+            return Err(unsupported(format!(
+                "{} holds {non_null} memories rows with a non-NULL deleted_at; the accepted v3+deleted_at shape is all-NULL",
+                path.display()
+            )));
+        }
     }
     Ok(Census {
         user_version,
@@ -742,19 +800,180 @@ fn census_shard(path: &Path) -> Result<Census, Refusal> {
     })
 }
 
-/// The exact `memories` column set per ladder version: v1 17, v2/v3 18
-/// (`session_id`), v4 19 (`source_prompt_created_at`).
-fn ladder_columns(version: i64) -> Option<BTreeSet<&'static str>> {
+/// One explicit index, compared on the pinned 5-tuple: name, table, indexed
+/// column list in key order (each with its sort direction) and partial-ness.
+/// A name-only comparison would accept a partial or mis-targeted index under a
+/// ladder name, and without sort order a DESC↔ASC swap would pass.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct IndexShape {
+    name: String,
+    table: String,
+    columns: Vec<(String, bool)>,
+    partial: bool,
+}
+
+/// The exact `memories` index set per rung: v1 carries the four
+/// `MEMORIES_INDEXES`, v2+ adds `idx_session_id`, and the accepted shape adds
+/// the non-partial ascending `idx_deleted_at`.
+const LADDER_INDEXES: [(&str, &str, bool); 5] = [
+    ("idx_container_tag", "container_tag", false),
+    ("idx_type", "type", false),
+    ("idx_created_at", "created_at", true),
+    ("idx_is_pinned", "is_pinned", false),
+    ("idx_session_id", "session_id", false),
+];
+
+fn ladder_indexes(version: i64, accepted: bool) -> BTreeSet<IndexShape> {
+    let mut expected: BTreeSet<IndexShape> = LADDER_INDEXES
+        .iter()
+        .take(if version == 1 { 4 } else { 5 })
+        .map(|(name, column, descending)| IndexShape {
+            name: (*name).to_string(),
+            table: "memories".to_string(),
+            columns: vec![((*column).to_string(), *descending)],
+            partial: false,
+        })
+        .collect();
+    if accepted {
+        expected.insert(IndexShape {
+            name: "idx_deleted_at".to_string(),
+            table: "memories".to_string(),
+            columns: vec![("deleted_at".to_string(), false)],
+            partial: false,
+        });
+    }
+    expected
+}
+
+/// The exact table set per rung (`sqlite_%` internals excluded): v1/v2 carry
+/// `shard_metadata`, v3/v4 and the accepted shape add `shard_stats`. An unknown
+/// table is a refusal — the merge rebuilds each planned shard from `memories`
+/// rows only, so accepting one would drop its rows silently.
+fn ladder_tables(version: i64) -> BTreeSet<&'static str> {
+    let mut tables: BTreeSet<&'static str> = ["memories", "shard_metadata"].into_iter().collect();
+    if version >= 3 {
+        tables.insert("shard_stats");
+    }
+    tables
+}
+
+/// Every explicit index in the shard, read from the catalog so an index on ANY
+/// table is seen (a `memories`-scoped scan would accept a seventh index on
+/// `shard_metadata`). `sqlite_autoindex%` entries are excluded: they are
+/// PRIMARY KEY/UNIQUE artifacts, not ladder indexes.
+fn census_indexes(handle: &DbHandle, path: &Path) -> Result<BTreeSet<IndexShape>, Refusal> {
+    let unsupported = |detail: String| {
+        Refusal::new(
+            EXIT_UNSUPPORTED_SHAPE,
+            "consolidation.shard_shape_unsupported",
+            detail,
+        )
+    };
+    let listed = block_on(handle.query(
+        "SELECT name, tbl_name FROM sqlite_master \
+         WHERE type = 'index' AND name NOT LIKE 'sqlite_autoindex%'",
+        Vec::new(),
+    ))
+    .map_err(|error| {
+        unsupported(format!(
+            "{} has no readable index catalog: {error}",
+            path.display()
+        ))
+    })?;
+    let mut partials: BTreeMap<String, BTreeMap<String, bool>> = BTreeMap::new();
+    let mut shapes = BTreeSet::new();
+    for row in &listed {
+        let (Some(name), Some(table)) = (row.text("name"), row.text("tbl_name")) else {
+            return Err(unsupported(format!(
+                "{} lists an index without a name or table",
+                path.display()
+            )));
+        };
+        if !partials.contains_key(&table) {
+            let rows = block_on(handle.query(
+                &format!("PRAGMA index_list('{}')", sql_string(&table)),
+                Vec::new(),
+            ))
+            .map_err(|error| {
+                unsupported(format!(
+                    "{} cannot list the indexes of {table}: {error}",
+                    path.display()
+                ))
+            })?;
+            let map: BTreeMap<String, bool> = rows
+                .iter()
+                .filter_map(|row| Some((row.text("name")?, row.i64("partial")? != 0)))
+                .collect();
+            partials.insert(table.clone(), map);
+        }
+        let partial = partials
+            .get(&table)
+            .and_then(|by_name| by_name.get(&name))
+            .copied();
+        let Some(partial) = partial else {
+            return Err(unsupported(format!(
+                "{} lists index {name} but PRAGMA index_list({table}) does not",
+                path.display()
+            )));
+        };
+        let xinfo = block_on(handle.query(
+            &format!("PRAGMA index_xinfo('{}')", sql_string(&name)),
+            Vec::new(),
+        ))
+        .map_err(|error| {
+            unsupported(format!(
+                "{} cannot read the columns of index {name}: {error}",
+                path.display()
+            ))
+        })?;
+        let mut keyed: Vec<(i64, String, bool)> = xinfo
+            .iter()
+            .filter(|row| row.i64("key") == Some(1))
+            .filter_map(|row| Some((row.i64("seqno")?, row.text("name")?, row.i64("desc")? != 0)))
+            .collect();
+        keyed.sort_by_key(|(seqno, _, _)| *seqno);
+        let columns = keyed
+            .into_iter()
+            .map(|(_, column, descending)| (column, descending))
+            .collect();
+        shapes.insert(IndexShape {
+            name,
+            table,
+            columns,
+            partial,
+        });
+    }
+    Ok(shapes)
+}
+
+/// SQL string-literal quoting for the pragma arguments (names come from the
+/// shard's own catalog).
+fn sql_string(value: &str) -> String {
+    value.replace('\'', "''")
+}
+
+/// The exact `memories` column set per ladder version: v1 17, v2 18
+/// (`session_id`), v3 18, v4 19 (`source_prompt_created_at`). The accepted
+/// "v3 + vestigial `deleted_at`" shape is its OWN arm — folding it into `2 | 3`
+/// would accept it on a v2 shard.
+fn ladder_columns(version: i64, deleted_at: bool) -> Option<BTreeSet<&'static str>> {
     let mut columns: BTreeSet<&'static str> = MEMORIES_V1.into_iter().collect();
     match version {
         1 => Some(columns),
-        2 | 3 => {
+        2 => {
             columns.insert("session_id");
             Some(columns)
         }
-        4 => {
+        3 if deleted_at => {
             columns.insert("session_id");
-            columns.insert("source_prompt_created_at");
+            columns.insert("deleted_at");
+            Some(columns)
+        }
+        3 | 4 => {
+            columns.insert("session_id");
+            if version == 4 {
+                columns.insert("source_prompt_created_at");
+            }
             Some(columns)
         }
         _ => None,
@@ -847,6 +1066,7 @@ fn apply_plan(
     plan_path: &Path,
     storage_root: &Path,
     config: &mem_core::config::Config,
+    custody: &Path,
 ) -> Result<String, Refusal> {
     if config.max_vectors_per_shard == 0 {
         return Err(Refusal::new(
@@ -857,6 +1077,13 @@ fn apply_plan(
     }
     let plan = load_plan(plan_path)?;
     let preflight = preflight(&plan, storage_root, &config.container_tag_prefix)?;
+    // §C.5 rev 13: the audit sidecar is written immediately after `preflight`
+    // returns and BEFORE `merge_groups`/`build_staged_tree`/`write_auxiliary`,
+    // so no mutation precedes the record. A re-apply over an installed window
+    // is refused first: the sidecar describes the PRE-install read of S, and
+    // rewriting it from the installed tree would destroy the audit trail.
+    refuse_installed_window(custody)?;
+    write_aux_sidecar(custody, &aux_sidecar_bytes(&preflight.aux))?;
     let mut store_config = mem_store::config::from_core(config);
     store_config.storage_path = storage_root.to_path_buf();
     let expected = expected_embedding(config)?;
@@ -982,6 +1209,13 @@ struct SourceRows {
 
 fn read_source(path: &Path) -> Result<SourceRows, Refusal> {
     let handle = open_read_only(path)?;
+    // §A.1 seam (ii): `SELECT *` is retained on purpose — an explicit column
+    // list built from `ladder_columns(3)` would make `row.get("deleted_at")` a
+    // silent no-op. The row-level refusal runs on the FETCHED row and BEFORE
+    // the `MEMORIES_V4` projection: after the projection the column is absent
+    // and a non-NULL row would be silently dropped (fail-open resurrection).
+    // The predicate is conditional on the column existing — the ladder shards
+    // carry no `deleted_at`.
     let rows = block_on(handle.query("SELECT * FROM memories", Vec::new())).map_err(|error| {
         Refusal::new(
             EXIT_UNSUPPORTED_SHAPE,
@@ -989,9 +1223,21 @@ fn read_source(path: &Path) -> Result<SourceRows, Refusal> {
             format!("{} cannot be read: {error}", path.display()),
         )
     })?;
-    let typed = rows
-        .iter()
-        .map(|row| {
+    let mut typed: Vec<BTreeMap<String, DbValue>> = Vec::with_capacity(rows.len());
+    for row in &rows {
+        if let Some(value) = row.get("deleted_at")
+            && !value.is_null()
+        {
+            return Err(Refusal::new(
+                EXIT_UNSUPPORTED_SHAPE,
+                "consolidation.shard_shape_unsupported",
+                format!(
+                    "{} holds a memories row with a non-NULL deleted_at; the accepted v3+deleted_at shape is all-NULL",
+                    path.display()
+                ),
+            ));
+        }
+        typed.push(
             MEMORIES_V4
                 .iter()
                 .map(|name| {
@@ -1000,9 +1246,9 @@ fn read_source(path: &Path) -> Result<SourceRows, Refusal> {
                         row.get(name).cloned().unwrap_or(DbValue::Null),
                     )
                 })
-                .collect()
-        })
-        .collect();
+                .collect(),
+        );
+    }
     let metadata = block_on(handle.query("SELECT key, value FROM shard_metadata", Vec::new()))
         .map_err(|error| {
             Refusal::new(
@@ -1362,7 +1608,9 @@ const REFUSED_TIERS: [(&str, &str); 3] = [
 struct AuxTable {
     table: &'static str,
     remap: Option<&'static str>,
-    /// Whether a value outside the closure refuses (paths) or passes (tags).
+    /// The strict PATH domain (`true`): a value outside the closure is
+    /// swap-and-carried. The tag domain (`false`): an unmapped tag passes
+    /// unchanged, as it always has.
     strict: bool,
     keys: &'static [&'static [&'static str]],
     columns: &'static [&'static str],
@@ -1547,16 +1795,67 @@ struct AuxDomain {
     target_paths: BTreeSet<String>,
 }
 
+/// The three-state outcome of one auxiliary cell's decision (§C.5 rev 13).
+///
+/// Branch (a) is `Mapped` — a MAPPING rewrite, never a carry record; a literal
+/// `Some`-means-carry reading would emit the divergent group's own discarded
+/// row plus every other mapped rewrite and break the production 16/99 census by
+/// construction. Branch (c) is `Carried`, tagged ALWAYS — including a swap that
+/// changed nothing — because the ten no-op carries are indistinguishable from
+/// branch (b) in the counter. `None` is branch (b) plus the identity-mapping
+/// no-op: the cell is unchanged and no record exists.
+enum Remap {
+    Mapped(DbValue),
+    Carried { original: DbValue, carried: DbValue },
+}
+
+/// A branch-(c) decision's captured pair: the value the source held and the
+/// exact bytes the staged cell receives. Captured AT the decision, never
+/// recomputed — `original` dies with `remap_cell`.
+#[derive(Debug, Clone)]
+struct AuxCarryTag {
+    original: DbValue,
+    carried: DbValue,
+}
+
+/// One `kind: "carry"` record: a distinct `(db, table, column, original)` tuple
+/// with at least one STAGED SURVIVOR carrier (§C.5 rev 13, opsec C4/C16).
+#[derive(Debug, Clone)]
+struct AuxCarry {
+    column: &'static str,
+    original: DbValue,
+    carried: DbValue,
+    rows: usize,
+}
+
+/// One `kind: "divergent"` record: the collapsed key, the kept row and EVERY
+/// recorded loser — both as the POST-remap rows exactly as the staged table
+/// holds them.
+#[derive(Debug, Clone)]
+struct AuxDivergence {
+    key_set: Vec<&'static str>,
+    key: Vec<(&'static str, DbValue)>,
+    kept: BTreeMap<String, DbValue>,
+    discarded: Vec<BTreeMap<String, DbValue>>,
+}
+
 /// One table's decided rewrite: every surviving row (typed cells intact) and
-/// how many rows were remapped or collapsed.
+/// how many rows were remapped, collapsed or discarded, plus the captured
+/// records the sidecar renders.
 #[derive(Debug, Clone)]
 struct AuxRewrite {
     db: &'static str,
     table: &'static str,
     columns: Vec<String>,
+    /// The pinned column order (`AuxTable::columns`) the canonical
+    /// serialization and the sidecar's rows use.
+    pinned: &'static [&'static str],
     rows: Vec<BTreeMap<String, DbValue>>,
     remapped: usize,
     collapsed: usize,
+    discarded: usize,
+    divergences: Vec<AuxDivergence>,
+    carries: Vec<AuxCarry>,
 }
 
 /// The closure refusal set (§C.5) and the decided per-table rewrites, all
@@ -1831,32 +2130,92 @@ fn read_aux_table(
         .collect();
 
     let mut remapped = 0;
-    for row in &mut typed {
+    let mut tags: Vec<Option<AuxCarryTag>> = vec![None; typed.len()];
+    for (index, row) in typed.iter_mut().enumerate() {
         let Some(column) = table.remap else {
             continue;
         };
         let Some(current) = row.get(column).cloned() else {
             continue;
         };
-        if let Some(next) = remap_cell(&current, domain, table.strict, path, table, column)? {
-            row.insert(column.to_string(), DbValue::Text(next));
-            remapped += 1;
+        match remap_cell(&current, domain, table.strict, path, table, column)? {
+            None => {}
+            Some(Remap::Mapped(value)) => {
+                row.insert(column.to_string(), value);
+                remapped += 1;
+            }
+            Some(Remap::Carried { original, carried }) => {
+                // `remapped` counts REAL byte changes only, so the write-path
+                // skip stays keyed on a change while a no-op carry still gets
+                // its record (§C.5 rev 13).
+                if carried != original {
+                    row.insert(column.to_string(), carried.clone());
+                    remapped += 1;
+                }
+                tags[index] = Some(AuxCarryTag { original, carried });
+            }
         }
     }
-    let (rows, collapsed) = collapse_aux_rows(typed, table, path)?;
+    let outcome = collapse_aux_rows(typed, table, path)?;
+    let carries = carry_records(table, &outcome.survivors, &tags);
     Ok(AuxRewrite {
         db: db_name,
         table: table.table,
         columns,
-        rows,
+        pinned: table.columns,
+        rows: outcome.rows,
         remapped,
-        collapsed,
+        collapsed: outcome.collapsed,
+        discarded: outcome.discarded,
+        divergences: outcome.divergences,
+        carries,
     })
 }
 
-/// Rule B.5: rewrite IFF the value equals exactly one mapped source string.
-/// A target-equal value passes; anything else refuses (strict) or passes as-is
-/// (a skill's global tag), and a non-text cell is an unsupported encoding.
+/// §C.5 rev 13 (opsec C4/C16): one record per distinct `(column, original)`
+/// tuple WITH at least one staged survivor carrier. `survivors` indexes the
+/// PRE-collapse tag vector (gate-6 MOD 1d), so a loser's carrier is never
+/// counted, two distinct originals sharing one `carried` produce two records,
+/// and a zero-carrier tuple emits nothing.
+fn carry_records(
+    table: &AuxTable,
+    survivors: &[usize],
+    tags: &[Option<AuxCarryTag>],
+) -> Vec<AuxCarry> {
+    let Some(column) = table.remap else {
+        return Vec::new();
+    };
+    let mut by_original: BTreeMap<String, AuxCarry> = BTreeMap::new();
+    for index in survivors {
+        let Some(Some(tag)) = tags.get(*index) else {
+            continue;
+        };
+        let key = match &tag.original {
+            DbValue::Text(text) => text.clone(),
+            other => format!("{other:?}"),
+        };
+        match by_original.get_mut(&key) {
+            Some(record) => record.rows += 1,
+            None => {
+                by_original.insert(
+                    key,
+                    AuxCarry {
+                        column,
+                        original: tag.original.clone(),
+                        carried: tag.carried.clone(),
+                        rows: 1,
+                    },
+                );
+            }
+        }
+    }
+    by_original.into_values().collect()
+}
+
+/// Rule B.5 + §C.5 rev 13: three outcomes, evaluated in this order — a mapped
+/// source host path rewrites (`Mapped`), a mapped target (or an identity
+/// mapping) passes unchanged (`None`), and anything else is SWAP-AND-CARRIED
+/// (`Carried`), never refused. A non-text cell is an unsupported encoding.
 fn remap_cell(
     value: &DbValue,
     domain: &AuxDomain,
@@ -1864,26 +2223,26 @@ fn remap_cell(
     path: &Path,
     table: &AuxTable,
     column: &str,
-) -> Result<Option<String>, Refusal> {
+) -> Result<Option<Remap>, Refusal> {
     match value {
         DbValue::Null => Ok(None),
         DbValue::Text(current) => {
             let mapping = if strict { &domain.paths } else { &domain.tags };
             if let Some(target) = mapping.get(current) {
-                return Ok((target != current).then(|| target.clone()));
+                // The identity-mapping no-op: a hit that rewrites nothing.
+                return if target == current {
+                    Ok(None)
+                } else {
+                    Ok(Some(Remap::Mapped(DbValue::Text(target.clone()))))
+                };
             }
             if !strict || domain.target_paths.contains(current) {
                 return Ok(None);
             }
-            Err(Refusal::new(
-                EXIT_IDENTITY_REFUSAL,
-                "consolidation.identity_outside_closure",
-                format!(
-                    "{} {}.{column} holds {current:?}, which is not exactly one mapped source",
-                    path.display(),
-                    table.table
-                ),
-            ))
+            Ok(Some(Remap::Carried {
+                original: DbValue::Text(current.clone()),
+                carried: DbValue::Text(swap_host_root(current)),
+            }))
         }
         other => Err(Refusal::new(
             EXIT_UNSUPPORTED_SHAPE,
@@ -1897,39 +2256,186 @@ fn remap_cell(
     }
 }
 
-/// §C.2/§C.3: every UNIQUE/PK is re-evaluated after the remap — exact full-row
-/// equality collapses with occurrence provenance, divergence aborts (71).
+/// §B.4's pinned swap applied to an auxiliary cell: the exact host root, or a
+/// LEADING `OLD_HOST_ROOT/` prefix. A `/home/vaz` component further along the
+/// string is content and stays — a mid-path replacement is never authorised.
+fn swap_host_root(value: &str) -> String {
+    if value == OLD_HOST_ROOT {
+        return NEW_HOST_ROOT.to_string();
+    }
+    match value
+        .strip_prefix(OLD_HOST_ROOT)
+        .and_then(|rest| rest.strip_prefix('/'))
+    {
+        Some(rest) => format!("{NEW_HOST_ROOT}/{rest}"),
+        None => value.to_string(),
+    }
+}
+
+/// What one table's collapse decided (§C.2/§C.5 rev 13).
+struct CollapseOutcome {
+    rows: Vec<BTreeMap<String, DbValue>>,
+    collapsed: usize,
+    discarded: usize,
+    divergences: Vec<AuxDivergence>,
+    /// Survivor positions in the PRE-collapse row vector — the tag vector's
+    /// index domain, never post-collapse ordinals.
+    survivors: Vec<usize>,
+}
+
+/// §C.2/§C.3: every UNIQUE/PK is re-evaluated after the remap. Exact full-row
+/// equality collapses with occurrence provenance in EVERY pass; a divergent
+/// group keeps exactly ONE row (keep-newer) and records every loser.
 fn collapse_aux_rows(
     rows: Vec<BTreeMap<String, DbValue>>,
     table: &AuxTable,
     path: &Path,
-) -> Result<(Vec<BTreeMap<String, DbValue>>, usize), Refusal> {
-    let Some(primary) = table.keys.first() else {
-        return Ok((rows, 0));
-    };
-    let mut kept: Vec<BTreeMap<String, DbValue>> = Vec::with_capacity(rows.len());
-    let mut seen: BTreeMap<String, usize> = BTreeMap::new();
+) -> Result<CollapseOutcome, Refusal> {
+    if table.keys.is_empty() {
+        let survivors = (0..rows.len()).collect();
+        return Ok(CollapseOutcome {
+            rows,
+            collapsed: 0,
+            discarded: 0,
+            divergences: Vec::new(),
+            survivors,
+        });
+    }
+    let mut kept: Vec<usize> = (0..rows.len()).collect();
     let mut collapsed = 0;
-    for row in rows {
-        let key = aux_key(&row, primary);
-        match seen.get(&key) {
-            None => {
-                seen.insert(key, kept.len());
-                kept.push(row);
+    let mut discarded = 0;
+    let mut divergences = Vec::new();
+    for keys in table.keys {
+        let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for index in &kept {
+            groups
+                .entry(aux_key(&rows[*index], keys))
+                .or_default()
+                .push(*index);
+        }
+        let mut survivors = Vec::with_capacity(groups.len());
+        for group in groups.into_values() {
+            // The equality branch runs in EVERY pass: a byte-identical
+            // duplicate collapses and is NEVER recorded as a loser.
+            if group.len() == 1 {
+                survivors.push(group[0]);
+                continue;
             }
-            Some(&position) if kept[position] == row => collapsed += 1,
-            Some(_) => return Err(auxiliary_divergent(table, path, primary)),
+            if group.iter().all(|index| rows[*index] == rows[group[0]]) {
+                collapsed += group.len() - 1;
+                survivors.push(group[0]);
+                continue;
+            }
+            check_created_at(&rows, &group, table, path, keys)?;
+            let mut best = group[0];
+            for index in &group[1..] {
+                if keep_newer(&rows[*index], &rows[best], table) == Ordering::Greater {
+                    best = *index;
+                }
+            }
+            let mut losers = Vec::new();
+            for index in &group {
+                if *index == best {
+                    continue;
+                }
+                if rows[*index] == rows[best] {
+                    collapsed += 1;
+                } else {
+                    losers.push(*index);
+                }
+            }
+            if !losers.is_empty() {
+                discarded += losers.len();
+                divergences.push(AuxDivergence {
+                    key_set: keys.to_vec(),
+                    key: keys
+                        .iter()
+                        .map(|name| {
+                            (
+                                *name,
+                                rows[best].get(*name).cloned().unwrap_or(DbValue::Null),
+                            )
+                        })
+                        .collect(),
+                    kept: rows[best].clone(),
+                    discarded: losers.iter().map(|index| rows[*index].clone()).collect(),
+                });
+            }
+            survivors.push(best);
+        }
+        kept = survivors;
+    }
+    Ok(CollapseOutcome {
+        rows: kept.iter().map(|index| rows[*index].clone()).collect(),
+        collapsed,
+        discarded,
+        divergences,
+        survivors: kept,
+    })
+}
+
+/// §C.5 rev 13 (gate-1 M5): a divergent group whose table HAS `created_at` and
+/// holds ANY non-Integer value there refuses 71 BEFORE any comparison, so NULL
+/// and NaN never reach an ordering.
+fn check_created_at(
+    rows: &[BTreeMap<String, DbValue>],
+    group: &[usize],
+    table: &AuxTable,
+    path: &Path,
+    keys: &[&str],
+) -> Result<(), Refusal> {
+    if !table.columns.contains(&"created_at") {
+        return Ok(());
+    }
+    for index in group {
+        if !matches!(rows[*index].get("created_at"), Some(DbValue::Integer(_))) {
+            return Err(Refusal::new(
+                EXIT_DIVERGENT_ROWS,
+                "consolidation.auxiliary_rows_divergent",
+                format!(
+                    "{} {} holds a divergent group for {keys:?} whose created_at is not an integer; newer is undecidable",
+                    path.display(),
+                    table.table
+                ),
+            ));
         }
     }
-    for keys in &table.keys[1..] {
-        let mut seen: BTreeMap<String, usize> = BTreeMap::new();
-        for (position, row) in kept.iter().enumerate() {
-            if seen.insert(aux_key(row, keys), position).is_some() {
-                return Err(auxiliary_divergent(table, path, keys));
-            }
-        }
+    Ok(())
+}
+
+/// The TOTAL keep-newer order: greatest `created_at` as an Integer, then the
+/// lexicographically greatest text `id`, then the greatest canonical row
+/// serialization — which decides the tables with neither column and any
+/// residual tie.
+fn keep_newer(
+    candidate: &BTreeMap<String, DbValue>,
+    current: &BTreeMap<String, DbValue>,
+    table: &AuxTable,
+) -> Ordering {
+    if table.columns.contains(&"created_at")
+        && let (Some(DbValue::Integer(left)), Some(DbValue::Integer(right))) =
+            (candidate.get("created_at"), current.get("created_at"))
+        && left != right
+    {
+        return left.cmp(right);
     }
-    Ok((kept, collapsed))
+    if table.columns.contains(&"id")
+        && let (Some(DbValue::Text(left)), Some(DbValue::Text(right))) =
+            (candidate.get("id"), current.get("id"))
+        && left != right
+    {
+        return left.cmp(right);
+    }
+    canonical_row(candidate, table.columns).cmp(&canonical_row(current, table.columns))
+}
+
+/// Every cell in the PINNED column order, `{:?}`-rendered, compared as bytes.
+fn canonical_row(row: &BTreeMap<String, DbValue>, columns: &[&str]) -> String {
+    let mut out = String::new();
+    for column in columns {
+        out.push_str(&format!("{:?}\u{1}", row.get(*column)));
+    }
+    out
 }
 
 fn aux_key(row: &BTreeMap<String, DbValue>, keys: &[&str]) -> String {
@@ -1940,18 +2446,6 @@ fn aux_key(row: &BTreeMap<String, DbValue>, keys: &[&str]) -> String {
     key
 }
 
-fn auxiliary_divergent(table: &AuxTable, path: &Path, keys: &[&str]) -> Refusal {
-    Refusal::new(
-        EXIT_DIVERGENT_ROWS,
-        "consolidation.auxiliary_rows_divergent",
-        format!(
-            "{} {} holds divergent rows for the identity {keys:?}; the whole plan aborts",
-            path.display(),
-            table.table
-        ),
-    )
-}
-
 /// Writes the decided rewrites into the STAGED copies (never S): the whole
 /// table is replaced by its survivors, typed cells intact.
 fn write_auxiliary(
@@ -1960,7 +2454,11 @@ fn write_auxiliary(
     rewrites: &[AuxRewrite],
 ) -> Result<(), Refusal> {
     for rewrite in rewrites {
-        if rewrite.remapped == 0 && rewrite.collapsed == 0 {
+        // §C.5 rev 13 (gate-2 C8): a divergent group whose survivor already
+        // holds the target string needs no table rewrite, so the discard count
+        // joins the predicate — the old two-term skip would leave the loser in
+        // the staged table.
+        if rewrite.remapped == 0 && rewrite.collapsed == 0 && rewrite.discarded == 0 {
             continue;
         }
         let path = staged.join(rewrite.db);
@@ -2015,6 +2513,106 @@ fn render_aux(aux: &[AuxRewrite]) -> Value {
         }));
     }
     json!(by_db)
+}
+
+/// §C.5 rev 13: the sidecar's JSONL body. `kind` first, one record per line —
+/// `divergent` lines (the kept row and EVERY recorded loser, POST-remap
+/// exactly as the staged table holds them) then `carry` lines (one per
+/// distinct original with at least one surviving carrier). Deterministic: two
+/// applies over the same snapshot produce byte-identical bytes.
+fn aux_sidecar_bytes(aux: &[AuxRewrite]) -> Vec<u8> {
+    let mut out = String::new();
+    for rewrite in aux {
+        for divergence in &rewrite.divergences {
+            out.push_str(&format!(
+                "{{\"kind\":\"divergent\",\"db\":{},\"table\":{},\"key_set\":{},\"key\":{},\"kept\":{},\"discarded\":[{}],\"reason\":\"keep-newer\"}}\n",
+                cell_json(&DbValue::Text(rewrite.db.to_string())),
+                cell_json(&DbValue::Text(rewrite.table.to_string())),
+                json_array(divergence.key_set.iter().map(|name| DbValue::Text(name.to_string()))),
+                // §C.5 rev 13: `key` is "the collapsed key's cells" — the
+                // `key_set` members ONLY. Rendering it over the full pinned
+                // column list would emit a null for every non-key cell, and
+                // reviewer check (2) reads `key` as a predicate (`"id":null`
+                // would become `id IS NULL` against a table where `id` is
+                // never null). `kept`/`discarded` stay full rows by spec.
+                json_object(
+                    &divergence.key_set,
+                    &divergence
+                        .key
+                        .iter()
+                        .map(|(name, value)| ((*name).to_string(), value.clone()))
+                        .collect(),
+                ),
+                row_json(&divergence.kept, rewrite.pinned),
+                divergence
+                    .discarded
+                    .iter()
+                    .map(|row| row_json(row, rewrite.pinned))
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ));
+        }
+        for carry in &rewrite.carries {
+            out.push_str(&format!(
+                "{{\"kind\":\"carry\",\"db\":{},\"table\":{},\"column\":{},\"original\":{},\"carried\":{},\"rows\":{}}}\n",
+                cell_json(&DbValue::Text(rewrite.db.to_string())),
+                cell_json(&DbValue::Text(rewrite.table.to_string())),
+                cell_json(&DbValue::Text(carry.column.to_string())),
+                cell_json(&carry.original),
+                cell_json(&carry.carried),
+                carry.rows,
+            ));
+        }
+    }
+    out.into_bytes()
+}
+
+/// One cell, verbatim for text/integer/real/null; a blob is `{"sha256","len"}`
+/// — the bytes are never lost (this design never mutates the source snapshot),
+/// so the digest is the checkable handle on them.
+fn cell_json(value: &DbValue) -> String {
+    match value {
+        DbValue::Null => "null".to_string(),
+        DbValue::Integer(number) => number.to_string(),
+        // A REAL can only reach a sidecar outside `created_at` (a non-Integer
+        // `created_at` in a divergent group refuses 71 first). ponytail: a
+        // non-finite REAL renders as `null` (serde_json has no NaN literal);
+        // no pinned aux column is REAL, so add a typed encoding only if one
+        // ever becomes one.
+        DbValue::Real(number) => Value::from(*number).to_string(),
+        DbValue::Text(text) => Value::String(text.clone()).to_string(),
+        DbValue::Blob(bytes) => format!(
+            "{{\"sha256\":\"{}\",\"len\":{}}}",
+            sha256_hex(bytes),
+            bytes.len()
+        ),
+    }
+}
+
+/// A JSON array of cells (the divergent record's `key_set`).
+fn json_array(values: impl Iterator<Item = DbValue>) -> String {
+    let cells: Vec<String> = values.map(|value| cell_json(&value)).collect();
+    format!("[{}]", cells.join(","))
+}
+
+/// One full row as a JSON object in the PINNED column order.
+fn row_json(row: &BTreeMap<String, DbValue>, columns: &[&str]) -> String {
+    json_object(columns, row)
+}
+
+/// `{column: cell}` in the pinned order; a cell the row lacks is `null`.
+fn json_object(columns: &[&str], row: &BTreeMap<String, DbValue>) -> String {
+    let cells: Vec<String> = columns
+        .iter()
+        .map(|column| {
+            format!(
+                "{}:{}",
+                Value::String((*column).to_string()),
+                cell_json(row.get(*column).unwrap_or(&DbValue::Null))
+            )
+        })
+        .collect();
+    format!("{{{}}}", cells.join(","))
 }
 
 fn render_report(preflight: &Preflight, dry_run: bool) -> String {
@@ -2536,24 +3134,15 @@ fn verify_snapshot(custody: &Path) -> Result<(), Refusal> {
 /// The single journal filename inside the custody dir (rev-11 OQ3 pin).
 pub const JOURNAL_FILE: &str = "journal.json";
 
-/// Entry point for `--mode=consolidate-journal --custody <abs-dir>`. Appends
-/// one PHASE record with L3 write-ahead: `<journal>.tmp` created exclusively
-/// at mode 0600 (set at creation, never widened later), written, fsynced,
-/// renamed over the journal, custody dir fsynced.
-pub fn run_journal_write(custody: &Path, phase: &str) -> i32 {
-    match journal_write(custody, phase) {
-        Ok(()) => 0,
-        Err(refusal) => emit_refusal(&refusal),
-    }
-}
+/// The rev-13 auxiliary audit sidecar (custody artifact, never inside S):
+/// one JSON object per line, `kind` first.
+pub const AUX_SIDECAR: &str = "journal.json.aux-divergent";
 
-fn journal_write(custody: &Path, phase: &str) -> Result<(), Refusal> {
-    journal_write_record(custody, &json!({ "phase": phase }))
-}
-
-fn journal_write_record(custody: &Path, record: &Value) -> Result<(), Refusal> {
-    use std::io::Write;
-    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+/// EV-M, then L2's directory creation: `recovery/` 0700 (EEXIST tolerated) and
+/// the custody dir 0700 when absent. Shared by the journal and the sidecar
+/// writers — both are custody artifacts created before any mutation.
+fn ensure_custody(custody: &Path) -> Result<(), Refusal> {
+    use std::os::unix::fs::DirBuilderExt;
     let io = |detail: String| Refusal::new(EXIT_STORE_OR_IO, "consolidation.journal_io", detail);
     // EV-M (blueprint :125, rev-11 §H.1): the custody-mode preflight runs before
     // EVERY first journal write, not only install/recover. An absent custody dir
@@ -2574,6 +3163,116 @@ fn journal_write_record(custody: &Path, record: &Value) -> Result<(), Refusal> {
             .create(custody)
             .map_err(|error| io(format!("custody dir: {error}")))?;
     }
+    Ok(())
+}
+
+/// §C.5 rev 13: writes `<custody>/journal.json.aux-divergent` through the §L
+/// L2/L3 form — fixed `.tmp` sibling (`O_CREAT|O_TRUNC|O_NOFOLLOW`, 0600) →
+/// `fsync(tmp)` → PLAIN atomic rename over → `fsync(custody)`. No NOREPLACE: a
+/// resume must replace its own prior sidecar. An EXISTING sidecar is compared
+/// BYTE-FOR-BYTE with the freshly computed bytes first — equal continues (the
+/// replace writes the same bytes), different refuses 77.
+fn write_aux_sidecar(custody: &Path, bytes: &[u8]) -> Result<(), Refusal> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let io = |detail: String| Refusal::new(EXIT_STORE_OR_IO, "consolidation.journal_io", detail);
+    ensure_custody(custody)?;
+    let path = custody.join(AUX_SIDECAR);
+    if path.exists() {
+        let existing = std::fs::read(&path)
+            .map_err(|error| io(format!("read {}: {error}", path.display())))?;
+        if existing != bytes {
+            return Err(Refusal::new(
+                EXIT_CUSTODY_REFUSAL,
+                "consolidation.auxiliary_sidecar_mismatch",
+                format!(
+                    "{} holds {} bytes that differ from this run's {}; the record would no longer describe the tree it audits",
+                    path.display(),
+                    existing.len(),
+                    bytes.len()
+                ),
+            ));
+        }
+    }
+    let tmp = custody.join(format!("{AUX_SIDECAR}.tmp"));
+    // Exclusive mode at creation, never widened; O_NOFOLLOW so a planted
+    // symlink is an error, not a write outside the custody dir.
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&tmp)
+        .map_err(|error| io(format!("create {}: {error}", tmp.display())))?;
+    file.write_all(bytes)
+        .map_err(|error| io(format!("write {}: {error}", tmp.display())))?;
+    file.sync_all()
+        .map_err(|error| io(format!("fsync {}: {error}", tmp.display())))?;
+    drop(file);
+    std::fs::rename(&tmp, &path)
+        .map_err(|error| io(format!("rename into {}: {error}", path.display())))?;
+    std::fs::File::open(custody)
+        .and_then(|dir| dir.sync_all())
+        .map_err(|error| io(format!("fsync custody: {error}")))
+}
+
+/// The journal's EFFECTIVE phase: the last record that carries a `phase`
+/// field, skipping bookkeeping records (`Retaken`, `TailDiscarded`).
+fn effective_phase(custody: &Path) -> Result<Option<String>, Refusal> {
+    let journal = custody.join(JOURNAL_FILE);
+    if !journal.exists() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&journal)
+        .map_err(|error| custody_refusal(format!("journal read: {error}")))?;
+    for line in text.lines().rev().filter(|line| !line.trim().is_empty()) {
+        let record: Value = serde_json::from_str(line)
+            .map_err(|error| custody_refusal(format!("journal unparseable: {error}")))?;
+        if let Some(phase) = record.get("phase").and_then(Value::as_str) {
+            return Ok(Some(phase.to_string()));
+        }
+    }
+    Ok(None)
+}
+
+/// §C.5 rev 13: a re-apply over a window whose journal reached
+/// `InstalledUnverified` or `Verified` is REFUSED 77 — the sidecar is not
+/// hashed into any manifest, so this is what stops a re-apply from silently
+/// rewriting the audit record from the installed tree. In-design an in-flight
+/// re-apply exits 76 (reservation held); this 77 is the out-of-design-release
+/// defence.
+fn refuse_installed_window(custody: &Path) -> Result<(), Refusal> {
+    match effective_phase(custody)?.as_deref() {
+        Some(PHASE_INSTALLED_UNVERIFIED) | Some(PHASE_VERIFIED) => Err(Refusal::new(
+            EXIT_CUSTODY_REFUSAL,
+            "consolidation.window_not_applyable",
+            "the journal already records an installed window; the audit record is never rewritten",
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Entry point for `--mode=consolidate-journal --custody <abs-dir>`. Appends
+/// one PHASE record with L3 write-ahead: `<journal>.tmp` created exclusively
+/// at mode 0600 (set at creation, never widened later), written, fsynced,
+/// renamed over the journal, custody dir fsynced.
+pub fn run_journal_write(custody: &Path, phase: &str) -> i32 {
+    match journal_write(custody, phase) {
+        Ok(()) => 0,
+        Err(refusal) => emit_refusal(&refusal),
+    }
+}
+
+fn journal_write(custody: &Path, phase: &str) -> Result<(), Refusal> {
+    journal_write_record(custody, &json!({ "phase": phase }))
+}
+
+fn journal_write_record(custody: &Path, record: &Value) -> Result<(), Refusal> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let io = |detail: String| Refusal::new(EXIT_STORE_OR_IO, "consolidation.journal_io", detail);
+    ensure_custody(custody)?;
     // The journal carries its whole history: append one chained line and
     // rewrite the file through the tmp + rename (L3). seq and prev_hash link
     // each line to the one before it.
@@ -2627,6 +3326,12 @@ fn journal_write_record(custody: &Path, record: &Value) -> Result<(), Refusal> {
 // Step 7 — install (L4/L5) and recovery (§H.1, EV-M). Row 15.
 // ---------------------------------------------------------------------------
 
+/// The journal-phase string for a prepared window: the auxiliary sidecar MAY
+/// be absent there, and that absence is NOT a 77.
+const PHASE_PREPARED: &str = "Prepared";
+/// The journal-phase string after the snapshot is verified: still before
+/// `preflight` returns, so the sidecar MAY be absent.
+const PHASE_SNAPSHOT_VERIFIED: &str = "SnapshotVerified";
 /// The journal-phase string for a durable install intent (§L L5 licence).
 const PHASE_INSTALLING: &str = "Installing";
 /// The journal-phase string after L5 completes.
@@ -2669,6 +3374,32 @@ fn ev_m_preflight(custody: &Path) -> Result<(), Refusal> {
         if mode != 0o600 {
             return Err(custody_refusal(format!(
                 "journal mode {mode:o} is not 0600 (EV-M)"
+            )));
+        }
+    }
+    // §C.5 rev 13: the auxiliary sidecar joins the enumerated artifact list,
+    // but its presence is mandatory only from `StagedVerified` onward — it is
+    // written after `preflight` returns, so a journal still at `Prepared` or
+    // `SnapshotVerified` may legitimately have none. The phase read is LENIENT
+    // here: a corrupt journal is the recover path's own failure to archive, not
+    // an EV-M mode refusal.
+    if let Some(phase) = effective_phase(custody).ok().flatten()
+        && phase != PHASE_PREPARED
+        && phase != PHASE_SNAPSHOT_VERIFIED
+    {
+        let sidecar = custody.join(AUX_SIDECAR);
+        let mode = std::fs::metadata(&sidecar)
+            .map_err(|error| {
+                custody_refusal(format!(
+                    "aux sidecar {AUX_SIDECAR} unreadable at phase {phase}: {error} (EV-M)"
+                ))
+            })?
+            .permissions()
+            .mode()
+            & 0o7777;
+        if mode != 0o600 {
+            return Err(custody_refusal(format!(
+                "aux sidecar mode {mode:o} is not 0600 at phase {phase} (EV-M)"
             )));
         }
     }
@@ -3331,5 +4062,103 @@ mod mode_table_format_tests {
             "unknown kind refuses"
         );
         assert!(parse_mode_table("nope f .\n").is_err(), "bad octal refuses");
+    }
+}
+
+#[cfg(test)]
+mod shard_shape_tests {
+    use super::{EXIT_UNSUPPORTED_SHAPE, block_on, read_source};
+    use mem_store::db::{ConnectFactory, ConnectOptions, TursoConnectFactory};
+    use std::path::Path;
+
+    /// The accepted shape's DDL — v3's 18 names plus the nullable `deleted_at`,
+    /// the six indexes, `shard_metadata` (with the embedding identity rows a
+    /// populated shard carries) and `shard_stats` — and ONE row whose
+    /// `deleted_at` the caller pins. This is the minimum `read_source` needs to
+    /// reach its `SELECT *` row loop.
+    fn shape_statements(deleted_at: &str) -> Vec<String> {
+        let mut statements: Vec<String> = vec![
+            mem_store::sql::memories_ddl(2),
+            mem_store::sql::shard_metadata_ddl().to_string(),
+        ];
+        statements.extend(
+            mem_store::sql::MEMORIES_INDEXES
+                .iter()
+                .map(|sql| sql.to_string()),
+        );
+        statements.push(mem_store::sql::MEMORY_SHARD_V2_ALTER.to_string());
+        statements.push(mem_store::sql::MEMORY_SHARD_V2_INDEX.to_string());
+        statements.push(mem_store::shard_facts::SHARD_STATS_DDL.to_string());
+        statements.push("ALTER TABLE memories ADD COLUMN deleted_at INTEGER".to_string());
+        statements.push("CREATE INDEX idx_deleted_at ON memories(deleted_at)".to_string());
+        statements.push(
+            "INSERT INTO shard_metadata (key, value) VALUES \
+             ('embedding_dimensions', '2'), ('embedding_model', 'test-model')"
+                .to_string(),
+        );
+        statements.push(format!(
+            "INSERT INTO memories (id, content, vector, container_tag, created_at, updated_at, \
+             deleted_at) VALUES ('carried-row', 'content', vector32('[0.1, 0.2]'), \
+             'opencode_project_fixture', 1700000000000, 1700000000000, {deleted_at})"
+        ));
+        statements.push("PRAGMA user_version = 3".to_string());
+        statements
+    }
+
+    fn build_shard(path: &Path, deleted_at: &str) {
+        let handle =
+            block_on(TursoConnectFactory.connect(path.to_path_buf(), ConnectOptions::default()))
+                .expect("create the fixture shard");
+        for sql in shape_statements(deleted_at) {
+            block_on(handle.execute(&sql, Vec::new()))
+                .unwrap_or_else(|error| panic!("fixture DDL failed ({sql}): {error}"));
+        }
+    }
+
+    /// §A.1 (h) — the ONLY fixture that reaches seam (ii). `read_source` must
+    /// refuse a FETCHED row carrying a non-NULL `deleted_at` BEFORE the
+    /// `MEMORIES_V4` projection (after it the column is absent forever and the
+    /// row is silently dropped), and must carry its all-NULL counterpart with no
+    /// `deleted_at` key in the typed row. Both shards carry `shard_metadata`
+    /// rows, so the refusal cannot come from a missing identity table.
+    #[test]
+    fn test_read_source_refuses_non_null_deleted_at() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or(0);
+        let dir =
+            std::env::temp_dir().join(format!("shard-read-source-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("fixture dir");
+
+        let refused = dir.join("refused.db");
+        build_shard(&refused, "1700000000001");
+        let refusal = match read_source(&refused) {
+            Ok(_) => panic!("a non-NULL deleted_at must refuse"),
+            Err(refusal) => refusal,
+        };
+        assert_eq!(refusal.code, EXIT_UNSUPPORTED_SHAPE);
+        assert_eq!(refusal.event, "consolidation.shard_shape_unsupported");
+        assert!(
+            refusal.message.contains("non-NULL deleted_at"),
+            "distinct message: {}",
+            refusal.message
+        );
+
+        let carried = dir.join("carried.db");
+        build_shard(&carried, "NULL");
+        let source = read_source(&carried).expect("an all-NULL deleted_at carries");
+        assert_eq!(source.rows.len(), 1, "the row is carried");
+        assert!(
+            !source.rows[0].contains_key("deleted_at"),
+            "the typed row is projected onto MEMORIES_V4 and holds no deleted_at key"
+        );
+        assert_eq!(
+            source.identity.get("embedding_model").map(String::as_str),
+            Some("test-model"),
+            "the shard_metadata identity is read beside the rows"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

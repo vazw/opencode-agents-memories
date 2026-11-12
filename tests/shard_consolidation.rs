@@ -415,7 +415,16 @@ fn write_plan(dir: &Path, root: &Path, mapping: Vec<serde_json::Value>) -> PathB
 
 /// Runs one `consolidate-shards` invocation on the REAL binary with a scratch
 /// HOME, returning (exit code, stdout, stderr).
-fn run_consolidate(root: &Path, plan: &Path, dry_run: bool) -> (Option<i32>, String, String) {
+///
+/// `custody` is the rev-13 APPLY requirement (§C.5): the auxiliary sidecar is a
+/// custody artifact. Every dry run stays custody-FREE, so `run_dry_run` passes
+/// `None` and a dry run can never be made custody-dependent by accident.
+fn run_consolidate(
+    root: &Path,
+    plan: &Path,
+    dry_run: bool,
+    custody: Option<&Path>,
+) -> (Option<i32>, String, String) {
     let home = root.parent().unwrap_or(root).join("home");
     std::fs::create_dir_all(&home).expect("scratch home");
     if !home.join(".config/opencode/opencode-mem.jsonc").exists() {
@@ -430,6 +439,8 @@ fn run_consolidate(root: &Path, plan: &Path, dry_run: bool) -> (Option<i32>, Str
         .stdin(Stdio::null());
     if dry_run {
         command.arg("--dry-run");
+    } else if let Some(custody) = custody {
+        command.arg(format!("--custody={}", custody.display()));
     }
     let output = command.output().expect("consolidate child runs");
     (
@@ -439,9 +450,16 @@ fn run_consolidate(root: &Path, plan: &Path, dry_run: bool) -> (Option<i32>, Str
     )
 }
 
+/// The fixture custody dir an APPLY must be given (§C.5 rev 13). Deliberately
+/// not created here: the consolidator creates it at 0700, and a pre-existing
+/// dir at any other mode is an EV-M 77.
+fn fixture_custody(parent: &Path) -> PathBuf {
+    parent.join("recovery").join("consolidation-fixture")
+}
+
 /// Runs `--mode=consolidate-shards --plan <plan> --dry-run`.
 fn run_dry_run(root: &Path, plan: &Path) -> (Option<i32>, String, String) {
-    run_consolidate(root, plan, true)
+    run_consolidate(root, plan, true, None)
 }
 
 fn tree_digest(root: &Path) -> BTreeMap<String, String> {
@@ -619,7 +637,8 @@ fn test_plan_requires_exact_identity_set() {
 
     // The same file reaches the staged tree byte-identically: carried, never
     // rewritten, never dropped (a mutant that skips it loses unrelated data).
-    let (code, _stdout, stderr) = run_consolidate(&root, &plan, false);
+    let (code, _stdout, stderr) =
+        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
     assert_eq!(
         code,
         Some(0),
@@ -912,6 +931,164 @@ fn test_identity_collision_refuses_before_write() {
     let _ = std::fs::remove_dir_all(&parent);
 }
 
+// ---------------------------------------------------------------------------
+// §A.1 memory-shard ladder fixtures (rev-12): ONE base shape, TEN CLI subcases
+// ---------------------------------------------------------------------------
+
+/// The `deleted_at` column and its non-partial index — the accepted shape's one
+/// deviation from the v3 rung.
+const DELETED_AT_COLUMN: &str = "ALTER TABLE memories ADD COLUMN deleted_at INTEGER";
+const DELETED_AT_INDEX: &str = "CREATE INDEX idx_deleted_at ON memories(deleted_at)";
+
+/// The production ladder DDL for one rung, from the shipped constants (never a
+/// hand-copied schema): v1 17 columns, v2 + `session_id`, v3 + `shard_stats`,
+/// v4 + `source_prompt_created_at`, each with its own rung's exact index set.
+fn ladder_statements(version: i64) -> Vec<String> {
+    let mut statements = vec![
+        mem_store::sql::memories_ddl(2),
+        mem_store::sql::shard_metadata_ddl().to_string(),
+    ];
+    statements.extend(
+        mem_store::sql::MEMORIES_INDEXES
+            .iter()
+            .map(|sql| sql.to_string()),
+    );
+    if version >= 2 {
+        statements.push(mem_store::sql::MEMORY_SHARD_V2_ALTER.to_string());
+        statements.push(mem_store::sql::MEMORY_SHARD_V2_INDEX.to_string());
+    }
+    if version >= 3 {
+        statements.push(mem_store::shard_facts::SHARD_STATS_DDL.to_string());
+    }
+    if version >= 4 {
+        statements.push(mem_store::shard_retention_sql::RETENTION_STAMP_ALTER.to_string());
+    }
+    statements.push(format!("PRAGMA user_version = {version}"));
+    statements
+}
+
+/// The §A.1 base shape, defined ONCE: v3's 18 `memories` names + nullable
+/// `deleted_at INTEGER`, `shard_metadata` + `shard_stats`, the exact SIX
+/// indexes, and the embedding identity rows a populated shard carries.
+fn accepted_shape_statements() -> Vec<String> {
+    let mut statements = ladder_statements(3);
+    statements.insert(statements.len() - 1, DELETED_AT_COLUMN.to_string());
+    statements.insert(statements.len() - 1, DELETED_AT_INDEX.to_string());
+    statements.push(
+        "INSERT INTO shard_metadata (key, value) VALUES \
+         ('embedding_dimensions', '2'), ('embedding_model', 'test-model')"
+            .to_string(),
+    );
+    statements
+}
+
+/// One row of the base shape, every NOT NULL column filled, `deleted_at` NULL.
+fn accepted_shape_row(id: &str) -> String {
+    format!(
+        "INSERT INTO memories (id, content, vector, container_tag, created_at, updated_at, deleted_at) \
+         VALUES ('{id}', 'content {id}', vector32('[0.1, 0.2]'), 'opencode_project_aaaaaaaaaaaaaaaa', \
+         1700000000000, 1700000000000, NULL)"
+    )
+}
+
+/// The same row with a non-NULL `deleted_at` (subcase (a)).
+fn deleted_at_set_row(id: &str) -> String {
+    accepted_shape_row(id).replace("1700000000000, NULL)", "1700000000000, 1700000000001)")
+}
+
+/// Replaces the seeded v4 shard with a hand-built shape: the statements in
+/// order (DDL, then rows). Every subcase pins its OWN shape this way.
+fn build_shape(root: &Path, hash: &str, statements: &[String]) {
+    let shard = root
+        .join("projects")
+        .join(format!("project_{hash}_shard_0.db"));
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(PathBuf::from(format!("{}{suffix}", shard.display())));
+    }
+    let config = fixture_config(root);
+    run_async(async {
+        let options = ConnectOptions::for_config(&config, Platform::current());
+        let handle = TursoConnectFactory
+            .connect(shard.clone(), options)
+            .await
+            .expect("create the pinned-shape shard");
+        for sql in statements {
+            handle
+                .execute(sql, Vec::new())
+                .await
+                .unwrap_or_else(|error| panic!("fixture DDL failed ({sql}): {error}"));
+        }
+    });
+}
+
+/// The ACCEPT sibling of [`shape_case`]: a dry-run over the mutated fixture
+/// exits 0 and writes nothing.
+fn shape_accept_dry(case: &str, mutate: impl FnOnce(&Path, &Path)) {
+    const HASH: &str = "aaaaaaaaaaaaaaaa";
+
+    let parent = unique_temp_dir(&format!("plan-census-{case}"));
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    {
+        let fx = fixture(&root);
+        fx.seed(HASH, &format!("row-{case}"));
+    }
+    mutate(&root, &parent);
+
+    let identity = "path:/fixture/a";
+    let rows = vec![valid_row(&root, HASH, identity, identity, false)];
+    let plan = write_plan(&parent.join("plans"), &root, rows);
+    let before = tree_digest(&root);
+    let (code, _stdout, stderr) = run_dry_run(&root, &plan);
+    assert_eq!(
+        code,
+        Some(0),
+        "{case}: the accepted shape preflights clean; stderr: {stderr}"
+    );
+    assert_eq!(
+        before,
+        tree_digest(&root),
+        "{case}: an accepted dry-run mutates nothing"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// The applied ACCEPT sibling of [`shape_case`]: the plan merges clean, and the
+/// staged destination's `(ids, memories columns)` come back for the row-carry
+/// and projection assertions.
+fn shape_accept_applied(
+    case: &str,
+    mutate: impl FnOnce(&Path, &Path),
+) -> (Vec<String>, Vec<String>) {
+    const HASH: &str = "aaaaaaaaaaaaaaaa";
+
+    let parent = unique_temp_dir(&format!("plan-census-{case}"));
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    {
+        let fx = fixture(&root);
+        fx.seed(HASH, &format!("row-{case}"));
+    }
+    mutate(&root, &parent);
+
+    let identity = "path:/fixture/a";
+    let rows = vec![valid_row(&root, HASH, identity, identity, false)];
+    let plan = write_plan(&parent.join("plans"), &root, rows);
+    let (code, _stdout, stderr) =
+        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
+    assert_eq!(
+        code,
+        Some(0),
+        "{case}: the accepted shape merges clean; stderr: {stderr}"
+    );
+    let staged = staged_root(&parent);
+    let destination = staged_shard(&staged, &identity_hash(identity), 0);
+    let destination_ids = ids(&read_rows(&destination));
+    let destination_columns = shard_columns(&destination);
+    let _ = std::fs::remove_dir_all(&parent);
+    (destination_ids, destination_columns)
+}
+
 /// One refused-shape case: a valid plan over a fixture root that `mutate`
 /// perturbs, refusing 65 with its own message and writing nothing.
 fn shape_case(case: &str, needle: &str, mutate: impl FnOnce(&Path, &Path)) {
@@ -948,43 +1125,126 @@ fn shape_case(case: &str, needle: &str, mutate: impl FnOnce(&Path, &Path)) {
 fn test_unknown_schema_encoding_and_tiers_refuse() {
     const HASH: &str = "aaaaaaaaaaaaaaaa";
 
-    // The measured e266 shape: v3, 19 columns, `deleted_at` present,
-    // `source_prompt_created_at` absent — outside the §A ladder.
-    shape_case(
-        "ladder",
-        "consolidation.shard_shape_unsupported",
-        |root, _| {
-            let shard = root
-                .join("projects")
-                .join(format!("project_{HASH}_shard_0.db"));
-            std::fs::remove_file(&shard).expect("drop the ladder shard");
-            let config = fixture_config(root);
-            run_async(async {
-                let options = ConnectOptions::for_config(&config, Platform::current());
-                let handle = TursoConnectFactory
-                    .connect(shard.clone(), options)
-                    .await
-                    .expect("create the off-ladder shard");
-                handle
-                    .execute(
-                        "CREATE TABLE memories (
-                       id TEXT PRIMARY KEY, content TEXT NOT NULL, vector F32_BLOB(2) NOT NULL,
-                       tags_vector F32_BLOB(2), container_tag TEXT NOT NULL, tags TEXT, type TEXT,
-                       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, metadata TEXT,
-                       display_name TEXT, user_name TEXT, user_email TEXT, project_path TEXT,
-                       project_name TEXT, git_repo_url TEXT, is_pinned INTEGER DEFAULT 0,
-                       session_id TEXT, deleted_at INTEGER)",
-                        Vec::new(),
-                    )
-                    .await
-                    .expect("off-ladder memories DDL");
-                handle
-                    .execute("PRAGMA user_version = 3", Vec::new())
-                    .await
-                    .expect("stamp v3");
-            });
-        },
+    // §A.1 (e) ACCEPT — the BASE SHAPE defined ONCE above (`accepted_shape_statements`):
+    // v3's 18 names + nullable `deleted_at`, `shard_metadata` + `shard_stats`,
+    // the exact SIX indexes, one all-NULL row. This IS the re-pointed `ladder`
+    // subcase: it applies clean, the destination carries the all-NULL row, and
+    // its `memories` never receives a `deleted_at` column.
+    let (destination_ids, destination_columns) = shape_accept_applied("ladder", |root, _| {
+        let mut statements = accepted_shape_statements();
+        statements.push(accepted_shape_row("shape-row"));
+        build_shape(root, HASH, &statements);
+    });
+    assert_eq!(
+        destination_ids,
+        vec!["shape-row".to_string()],
+        "the all-NULL row is carried onto the destination"
     );
+    assert!(
+        !destination_columns.iter().any(|name| name == "deleted_at"),
+        "the destination never receives the vestigial column: {destination_columns:?}"
+    );
+
+    // §A.1 (a) REFUSE — the base shape plus one row with a NON-NULL
+    // `deleted_at` (the all-NULL property is enforced by code, never trusted).
+    shape_case("deleted-at-set", "non-NULL deleted_at", |root, _| {
+        let mut statements = accepted_shape_statements();
+        statements.push(deleted_at_set_row("shape-row"));
+        build_shape(root, HASH, &statements);
+    });
+
+    // §A.1 (b) REFUSE — the base shape with `idx_deleted_at` DROPPED: only the
+    // index predicate can see this (a column-only census passes (a) and (e)).
+    shape_case("deleted-at-no-index", "index set outside", |root, _| {
+        let mut statements = accepted_shape_statements();
+        statements.retain(|sql| sql.as_str() != DELETED_AT_INDEX);
+        statements.push(accepted_shape_row("shape-row"));
+        build_shape(root, HASH, &statements);
+    });
+
+    // §A.1 (c) REFUSE — a SEVENTH index on a NON-`memories` table: a
+    // `pragma_index_list('memories')`-scoped predicate sees 6 == 6 here.
+    shape_case("seventh-index", "index set outside", |root, _| {
+        let mut statements = accepted_shape_statements();
+        statements.push("CREATE INDEX idx_extra ON shard_metadata(key)".to_string());
+        statements.push(accepted_shape_row("shape-row"));
+        build_shape(root, HASH, &statements);
+    });
+
+    // §A.1 (d1) REFUSE — a RUNG-CORRECT **v2** shard carrying `deleted_at`:
+    // 18 names + `deleted_at` (19), `{memories, shard_metadata}`, the five
+    // ladder indexes and NO `idx_deleted_at`. Rung-correct on purpose: the
+    // column NAME SET is then the only possible refuser, so folding the shape
+    // into the shared `2 | 3` ladder arm cannot survive this fixture.
+    shape_case("deleted-at-v2", "memories shape outside", |root, _| {
+        let mut statements = ladder_statements(2);
+        statements.insert(statements.len() - 1, DELETED_AT_COLUMN.to_string());
+        build_shape(root, HASH, &statements);
+    });
+
+    // §A.1 (d2) REFUSE — a RUNG-CORRECT **v4** shard carrying `deleted_at`
+    // (20 names, three tables, the five ladder indexes).
+    shape_case("deleted-at-v4", "memories shape outside", |root, _| {
+        let mut statements = ladder_statements(4);
+        statements.insert(statements.len() - 1, DELETED_AT_COLUMN.to_string());
+        build_shape(root, HASH, &statements);
+    });
+
+    // §A.1 (f) ACCEPT — a plain v1 shard: 17 names, `{memories, shard_metadata}`,
+    // the FOUR v1 indexes. Kills a five-for-all index rule (v1 has no
+    // `session_id` column and cannot carry `idx_session_id`).
+    shape_accept_dry("ladder-v1", |root, _| {
+        let mut statements = ladder_statements(1);
+        statements.push(
+            "INSERT INTO memories (id, content, vector, container_tag, created_at, updated_at) \
+             VALUES ('shape-row', 'content', vector32('[0.1, 0.2]'), \
+             'opencode_project_aaaaaaaaaaaaaaaa', 1700000000000, 1700000000000)"
+                .to_string(),
+        );
+        build_shape(root, HASH, &statements);
+    });
+
+    // §A.1 (g) REFUSE — the base shape with ONE ladder index (`idx_type`)
+    // dropped: kills a "no extras + `idx_deleted_at` present" mutant.
+    shape_case("ladder-index-dropped", "index set outside", |root, _| {
+        let mut statements = accepted_shape_statements();
+        statements.retain(|sql| sql.as_str() != mem_store::sql::MEMORIES_INDEXES[1]);
+        statements.push(accepted_shape_row("shape-row"));
+        build_shape(root, HASH, &statements);
+    });
+
+    // §A.1 (i) REFUSE — name-set vs column COUNT: 19 columns, `deleted_at`
+    // present, the exact six indexes, both extra tables present, all rows NULL,
+    // but one ladder column (`metadata`) replaced by `rogue` at the SAME count.
+    shape_case("rogue-column", "memories shape outside", |root, _| {
+        let mut statements = accepted_shape_statements();
+        let base = statements
+            .iter()
+            .position(|sql| sql.contains("CREATE TABLE IF NOT EXISTS memories"))
+            .expect("the memories DDL is part of the base shape");
+        statements[base] = statements[base].replace("metadata TEXT", "rogue INTEGER");
+        statements.push(accepted_shape_row("shape-row"));
+        build_shape(root, HASH, &statements);
+    });
+
+    // §A.1 (j1) REFUSE — table-set SUPERSET: the accepted shape plus one EXTRA
+    // table carrying a row (the census used to refuse only on `tables.is_empty()`).
+    shape_case("extra-table", "table set outside", |root, _| {
+        let mut statements = accepted_shape_statements();
+        statements.push("CREATE TABLE extra_notes (id TEXT PRIMARY KEY)".to_string());
+        statements.push("INSERT INTO extra_notes (id) VALUES ('orphan-row')".to_string());
+        statements.push(accepted_shape_row("shape-row"));
+        build_shape(root, HASH, &statements);
+    });
+
+    // §A.1 (j2) REFUSE — table-set SUBSET: the base shape with `shard_stats`
+    // DROPPED (the v3 rung requires it).
+    shape_case("missing-shard-stats", "table set outside", |root, _| {
+        let mut statements = accepted_shape_statements();
+        statements.retain(|sql| sql.as_str() != mem_store::shard_facts::SHARD_STATS_DDL);
+        statements.push(accepted_shape_row("shape-row"));
+        build_shape(root, HASH, &statements);
+    });
 
     shape_case(
         "unknown-table",
@@ -1191,6 +1451,25 @@ fn cell<'a>(cells: &'a BTreeMap<String, Value>, name: &str) -> &'a Value {
     cells
         .get(name)
         .unwrap_or_else(|| panic!("the row has no {name} cell"))
+}
+
+/// `memories` column names of one shard, read-only.
+fn shard_columns(shard: &Path) -> Vec<String> {
+    run_async(async {
+        let mut options = ConnectOptions::default();
+        options.read_only = true;
+        let handle = TursoConnectFactory
+            .connect(shard.to_path_buf(), options)
+            .await
+            .expect("open the destination shard");
+        handle
+            .query("PRAGMA table_info(memories)", Vec::new())
+            .await
+            .expect("destination columns")
+            .iter()
+            .filter_map(|row| row.text("name"))
+            .collect()
+    })
 }
 
 fn text_cell<'a>(cells: &'a BTreeMap<String, Value>, name: &str) -> &'a str {
@@ -1412,7 +1691,8 @@ fn test_full_typed_raw_merge_preserves_history() {
         ),
     ];
     let plan = write_plan(&parent.join("plans"), &root, rows);
-    let (code, stdout, stderr) = run_consolidate(&root, &plan, false);
+    let (code, stdout, stderr) =
+        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
     assert_eq!(code, Some(0), "the merge applies clean; stderr: {stderr}");
     let report = report_json(&stdout, &stderr);
     assert_eq!(report["dry_run"], false);
@@ -1563,7 +1843,8 @@ fn test_exact_duplicates_account_occurrences() {
         ),
     ];
     let plan = write_plan(&parent.join("plans"), &root, rows);
-    let (code, stdout, stderr) = run_consolidate(&root, &plan, false);
+    let (code, stdout, stderr) =
+        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
     assert_eq!(code, Some(0), "duplicates collapse clean; stderr: {stderr}");
     let report = report_json(&stdout, &stderr);
     let groups = report["groups"].as_array().expect("groups array");
@@ -1638,7 +1919,8 @@ fn test_divergent_ids_abort_whole_plan() {
         Vec::new(),
     );
     let before = tree_digest(&root);
-    let (code, _stdout, stderr) = run_consolidate(&root, &plan, false);
+    let (code, _stdout, stderr) =
+        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
     assert_refusal(code, 71, &stderr, "consolidation.rows_divergent");
     assert_eq!(before, tree_digest(&root), "an aborted plan writes nothing");
     assert!(
@@ -1668,7 +1950,8 @@ fn test_divergent_ids_abort_whole_plan() {
         Vec::new(),
     );
     let before = tree_digest(&root);
-    let (code, _stdout, stderr) = run_consolidate(&root, &plan, false);
+    let (code, _stdout, stderr) =
+        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
     assert_refusal(code, 71, &stderr, "consolidation.rows_divergent");
     assert_eq!(before, tree_digest(&root), "an aborted plan writes nothing");
     let _ = std::fs::remove_dir_all(&parent);
@@ -1733,7 +2016,8 @@ fn test_embedding_identity_mismatch_refuses() {
         Vec::new(),
     );
     let before = tree_digest(&root);
-    let (code, _stdout, stderr) = run_consolidate(&root, &plan, false);
+    let (code, _stdout, stderr) =
+        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
     assert_refusal(code, 73, &stderr, "consolidation.embedding_mismatch");
     assert_eq!(
         before,
@@ -1759,7 +2043,8 @@ fn test_embedding_identity_mismatch_refuses() {
         Vec::new(),
     );
     let before = tree_digest(&root);
-    let (code, _stdout, stderr) = run_consolidate(&root, &plan, false);
+    let (code, _stdout, stderr) =
+        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
     assert_refusal(code, 73, &stderr, "consolidation.embedding_mismatch");
     assert_eq!(
         before,
@@ -1835,7 +2120,8 @@ fn test_capacity_and_registry_counts() {
         ),
     ];
     let plan = write_plan(&parent.join("plans"), &root, rows);
-    let (code, stdout, stderr) = run_consolidate(&root, &plan, false);
+    let (code, stdout, stderr) =
+        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
     assert_eq!(
         code,
         Some(0),
@@ -1893,7 +2179,8 @@ fn test_capacity_and_registry_counts() {
     )];
     let plan = write_plan(&parent.join("plans"), &root, rows);
     let before = tree_digest(&root);
-    let (code, _stdout, stderr) = run_consolidate(&root, &plan, false);
+    let (code, _stdout, stderr) =
+        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
     assert_refusal(code, 64, &stderr, "consolidation.capacity_unusable");
     assert_eq!(before, tree_digest(&root), "the refusal writes nothing");
     let _ = std::fs::remove_dir_all(&parent);
@@ -1932,7 +2219,8 @@ fn test_foreign_writer_and_reservation_block_startup() {
     std::fs::write(parent.join(RESERVATION_FILE), body.to_string()).expect("write reservation");
 
     let before = tree_digest(&root);
-    let (code, _stdout, stderr) = run_consolidate(&root, &plan, false);
+    let (code, _stdout, stderr) =
+        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
     assert_eq!(
         code,
         Some(mem_store::maintenance_reservation::RESERVATION_HELD),
@@ -2020,6 +2308,22 @@ fn aux_rows(db: &Path, table: &str, order_by: &str) -> Vec<BTreeMap<String, Valu
     })
 }
 
+/// The rev-13 auxiliary audit sidecar's records, in file order. Its absence is
+/// a failure here: an apply always writes it, empty only when neither kind
+/// exists.
+fn aux_sidecar_lines(custody: &Path) -> Vec<serde_json::Value> {
+    let path = custody.join("journal.json.aux-divergent");
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            serde_json::from_str(line)
+                .unwrap_or_else(|error| panic!("sidecar line {line:?}: {error}"))
+        })
+        .collect()
+}
+
 /// One auxiliary table's report entry.
 fn aux_entry<'a>(report: &'a serde_json::Value, db: &str, table: &str) -> &'a serde_json::Value {
     report["auxiliary"][db]
@@ -2032,7 +2336,10 @@ fn aux_entry<'a>(report: &'a serde_json::Value, db: &str, table: &str) -> &'a se
 
 /// The persisted auxiliary closure: five episodic tables, prompts and skills
 /// remapped by whole-string equality, profiles/coordination byte-verbatim.
-/// C1 fold: a subpath and a `/home/vaz2` root are NOT in the closure (exit 72).
+/// Rev 13: a cell outside the closure is SWAP-AND-CARRIED, never refused — a
+/// LEADING `/home/vaz/` prefix is rewritten, a `/home/vaz2` sibling and a
+/// MID-PATH `/home/vaz` component are carried unchanged, and each is recorded
+/// as one `carry` line in the custody sidecar.
 #[test]
 fn test_auxiliary_persisted_closure() {
     const SOURCE_A: &str = "4444444444444444";
@@ -2207,7 +2514,8 @@ fn test_auxiliary_persisted_closure() {
         valid_row(&root, SOURCE_B, source_b_identity, target_identity, false),
     ];
     let plan = write_plan(&parent.join("plans"), &root, rows);
-    let (code, stdout, stderr) = run_consolidate(&root, &plan, false);
+    let (code, stdout, stderr) =
+        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
     assert_eq!(
         code,
         Some(0),
@@ -2316,12 +2624,21 @@ fn test_auxiliary_persisted_closure() {
         "the coordination DB carries byte-verbatim"
     );
 
-    // C1 fold: whole-string equality ONLY. A subpath of a mapped source and a
-    // `/home/vaz2` root are both outside the closure and refuse 72 before any
-    // write; carrying them verbatim (or rewriting by prefix) is the mutant.
-    for (case, outside) in [
-        ("subpath", "/home/vaz/Code/thing/sub"),
-        ("sibling", "/home/vaz2/Code/thing"),
+    // Rev 13: the branch decision is taken on the ORIGINAL value, and a value
+    // outside the closure is SWAP-AND-CARRIED, never refused. Three cases, each
+    // the only input that separates the pinned rule from a mutant: a LEADING
+    // prefix is swapped; a `/home/vaz2` sibling is not a `/home/vaz` component;
+    // and a `/home/vaz` further along the string is CONTENT and stays. All
+    // three run on the APPLY path, because "exit 0" alone is satisfied by a
+    // mutant that drops the row or carries it unswapped.
+    for (case, outside, staged_value) in [
+        (
+            "subpath",
+            "/home/vaz/Code/thing/sub",
+            "/home/opencode/Code/thing/sub",
+        ),
+        ("sibling", "/home/vaz2/Code/thing", "/home/vaz2/Code/thing"),
+        ("mid-path", "/tmp/x/home/vaz/y", "/tmp/x/home/vaz/y"),
     ] {
         let parent = unique_temp_dir(&format!("aux-outside-{case}"));
         let root = parent.join("data");
@@ -2349,13 +2666,119 @@ fn test_auxiliary_persisted_closure() {
             false,
         )];
         let plan = write_plan(&parent.join("plans"), &root, rows);
+        let custody = fixture_custody(&parent);
         let before = tree_digest(&root);
-        let (code, _stdout, stderr) = run_dry_run(&root, &plan);
-        assert_refusal(code, 72, &stderr, "consolidation.identity_outside_closure");
+        let (code, _stdout, stderr) = run_consolidate(&root, &plan, false, Some(&custody));
+        assert_eq!(
+            code,
+            Some(0),
+            "{case}: a carried cell never refuses; stderr: {stderr}"
+        );
         assert_eq!(
             before,
             tree_digest(&root),
-            "{case}: a refused closure mutates nothing"
+            "{case}: the apply mutates no S byte"
+        );
+        let staged = staged_root(&parent);
+        let raw = aux_rows(
+            &staged.join("episodic.db"),
+            "episodic_raw_context",
+            "session_id",
+        );
+        assert_eq!(raw.len(), 1, "{case}: the carried row is never dropped");
+        assert_eq!(
+            text_cell(&raw[0], "project_id"),
+            staged_value,
+            "{case}: the staged cell is the swap of the ORIGINAL value"
+        );
+        let lines = aux_sidecar_lines(&custody);
+        assert_eq!(lines.len(), 1, "{case}: exactly one carry line: {lines:?}");
+        assert_eq!(lines[0]["kind"], "carry");
+        assert_eq!(lines[0]["db"], "episodic.db");
+        assert_eq!(lines[0]["table"], "episodic_raw_context");
+        assert_eq!(lines[0]["column"], "project_id");
+        assert_eq!(lines[0]["original"], outside);
+        assert_eq!(lines[0]["carried"], staged_value);
+        assert_eq!(lines[0]["rows"], 1);
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    // Rev 13, branch (a) beside branch (c) IN THE SAME TABLE: a cell that equals
+    // a mapped source EXACTLY is a MAPPING rewrite (`Mapped`) and records
+    // NOTHING; a cell outside the closure is `Carried` and is ALWAYS recorded.
+    // A `Some`-means-carry reading tags both, so the oracle is the SIDECAR's
+    // carry-line set — the staged row alone cannot tell the two branches apart.
+    {
+        let parent = unique_temp_dir("aux-mapped-vs-carried");
+        let root = parent.join("data");
+        std::fs::create_dir_all(&root).expect("fixture root");
+        {
+            let fx = fixture(&root);
+            fx.seed_row(
+                SOURCE_A,
+                &record("row-a", &format!("opencode_project_{SOURCE_A}")),
+            );
+        }
+        seed_episodic(&root);
+        for value in ["/home/vaz/Code/thing", "/home/vaz/Code/thing/sub"] {
+            fixture_exec(
+                &root,
+                &root.join("episodic.db"),
+                "INSERT INTO episodic_raw_context (project_id, session_id, agent_id, raw_context,
+                   byte_len, captured_at) VALUES (?1, 's1', 'main', 'raw', 3, 1)",
+                vec![Value::Text(value.to_string())],
+            );
+        }
+        let rows = vec![valid_row(
+            &root,
+            SOURCE_A,
+            source_a_identity,
+            target_identity,
+            false,
+        )];
+        let plan = write_plan(&parent.join("plans"), &root, rows);
+        let custody = fixture_custody(&parent);
+        let (code, _stdout, stderr) = run_consolidate(&root, &plan, false, Some(&custody));
+        assert_eq!(
+            code,
+            Some(0),
+            "branch (a) and branch (c) both apply clean; {stderr}"
+        );
+        let staged = staged_root(&parent);
+        let raw = aux_rows(
+            &staged.join("episodic.db"),
+            "episodic_raw_context",
+            "project_id",
+        );
+        assert_eq!(raw.len(), 2, "neither row is dropped");
+        assert_eq!(
+            text_cell(&raw[0], "project_id"),
+            "/home/opencode/Code/thing",
+            "branch (a) rewrites the exact mapped source to its target"
+        );
+        assert_eq!(
+            text_cell(&raw[1], "project_id"),
+            "/home/opencode/Code/thing/sub",
+            "branch (c) carries the swapped subpath"
+        );
+        let lines = aux_sidecar_lines(&custody);
+        let carries: Vec<&serde_json::Value> = lines
+            .iter()
+            .filter(|line| line["kind"] == "carry")
+            .collect();
+        assert_eq!(
+            carries.len(),
+            1,
+            "a Mapped cell contributes NO carry line (Some-means-carry mutant): {lines:?}"
+        );
+        assert_eq!(carries[0]["original"], "/home/vaz/Code/thing/sub");
+        assert_eq!(carries[0]["carried"], "/home/opencode/Code/thing/sub");
+        assert_eq!(carries[0]["rows"], 1);
+        assert!(
+            !lines
+                .iter()
+                .any(|line| line["original"] == "/home/vaz/Code/thing"),
+            "branch (a) is a mapping rewrite, never a carry record: {lines:?}"
         );
         let _ = std::fs::remove_dir_all(&parent);
     }
@@ -2394,7 +2817,8 @@ fn test_auxiliary_persisted_closure() {
             false,
         )];
         let plan = write_plan(&parent.join("plans"), &root, rows);
-        let (code, _stdout, stderr) = run_consolidate(&root, &plan, false);
+        let (code, _stdout, stderr) =
+            run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
         assert_eq!(
             code,
             Some(0),
@@ -2414,15 +2838,268 @@ fn test_auxiliary_persisted_closure() {
     let _ = std::fs::remove_dir_all(&parent);
 }
 
-/// Two sources remapping onto ONE episodic compound key with unequal payloads
-/// abort the whole plan (71) before any write.
+/// Two or more auxiliary rows collapsing onto ONE identity key with divergent
+/// payloads resolve KEEP-NEWER — never 71 — and every loser is recorded (§C.5
+/// rev 13). Discriminators: the byte-LESSER row is the NEWER one, so tiers (1)
+/// and (3) disagree and a serialization-only mutant dies; the three-row group
+/// records TWO losers (`discarded` is an array, not a single row); a group
+/// whose ONLY rewrite trigger is the discard term must still rewrite the staged
+/// table (the old two-term skip leaves the loser behind); and a non-`Integer`
+/// `created_at` in a divergent group still refuses 71 before any comparison.
 #[test]
 fn test_auxiliary_collision_aborts() {
     const SOURCE_A: &str = "4444444444444444";
     const SOURCE_B: &str = "5555555555555555";
+    const SOURCE_C: &str = "7777777777777777";
     let target_identity = "path:/home/opencode/Code/thing";
+    let source_a_identity = "path:/home/vaz/Code/thing";
+    let source_b_identity = "path:/fixture/marker-root";
+    let source_c_identity = "path:/fixture/third-root";
+    let target = "/home/opencode/Code/thing";
 
+    // (1) keep-newer with TWO recorded losers. Three rows, three DIFFERENT
+    // pre-remap project_ids (so the fixture's PK/UNIQUE hold), ONE compound key
+    // after the remap. `created_at` descends while the canonical serialization
+    // ascends, so only tier (1) keeps `seg one`.
     let parent = unique_temp_dir("aux-collision");
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    {
+        let fx = fixture(&root);
+        for (hash, name) in [
+            (SOURCE_A, "row-a"),
+            (SOURCE_B, "row-b"),
+            (SOURCE_C, "row-c"),
+        ] {
+            fx.seed_row(hash, &record(name, &format!("opencode_project_{hash}")));
+        }
+    }
+    seed_episodic(&root);
+    for (identity, raw, created) in [
+        (source_a_identity, "seg one", 30_i64),
+        (source_b_identity, "seg two", 20_i64),
+        (source_c_identity, "seg three", 10_i64),
+    ] {
+        fixture_exec(
+            &root,
+            &root.join("episodic.db"),
+            "INSERT INTO episodic_segments (project_id, session_id, agent_id, segment_index,
+               raw_content, byte_offset, byte_len, created_at)
+             VALUES (?1, 's2', 'main', 0, ?2, 0, ?3, ?4)",
+            vec![
+                Value::Text(identity[5..].to_string()),
+                Value::Text(raw.to_string()),
+                Value::Integer(raw.len() as i64),
+                Value::Integer(created),
+            ],
+        );
+    }
+    let rows = vec![
+        valid_row(&root, SOURCE_A, source_a_identity, target_identity, false),
+        valid_row(&root, SOURCE_B, source_b_identity, target_identity, false),
+        valid_row(&root, SOURCE_C, source_c_identity, target_identity, false),
+    ];
+    let plan = write_plan(&parent.join("plans"), &root, rows);
+    let custody = fixture_custody(&parent);
+    let before = tree_digest(&root);
+    let (code, _stdout, stderr) = run_consolidate(&root, &plan, false, Some(&custody));
+    assert_eq!(
+        code,
+        Some(0),
+        "rev 13 resolves a divergent auxiliary group instead of aborting; {stderr}"
+    );
+    assert_eq!(before, tree_digest(&root), "the apply mutates no S byte");
+
+    let staged = staged_root(&parent);
+    let segments = aux_rows(
+        &staged.join("episodic.db"),
+        "episodic_segments",
+        "segment_index",
+    );
+    assert_eq!(segments.len(), 1, "one row survives the three-row group");
+    assert_eq!(text_cell(&segments[0], "project_id"), target);
+    assert_eq!(
+        text_cell(&segments[0], "raw_content"),
+        "seg one",
+        "keep-newer picks the greatest created_at, not the greatest bytes"
+    );
+    assert_eq!(cell(&segments[0], "created_at").as_i64(), Some(30));
+
+    let lines = aux_sidecar_lines(&custody);
+    let divergent: Vec<&serde_json::Value> = lines
+        .iter()
+        .filter(|line| line["kind"] == "divergent")
+        .collect();
+    assert_eq!(
+        divergent.len(),
+        1,
+        "one divergent line per collapsed key: {lines:?}"
+    );
+    let line = divergent[0];
+    assert_eq!(line["db"], "episodic.db");
+    assert_eq!(line["table"], "episodic_segments");
+    assert_eq!(line["reason"], "keep-newer");
+    assert_eq!(
+        line["key_set"],
+        serde_json::json!(["project_id", "session_id", "agent_id", "segment_index"])
+    );
+    assert_eq!(line["key"]["project_id"], target);
+    assert_eq!(line["kept"]["raw_content"], "seg one");
+    let discarded = line["discarded"]
+        .as_array()
+        .expect("`discarded` is an ARRAY of every loser");
+    assert_eq!(discarded.len(), 2, "the three-row group records TWO losers");
+    let mut recorded: Vec<&str> = discarded
+        .iter()
+        .map(|row| row["raw_content"].as_str().expect("discarded raw_content"))
+        .collect();
+    recorded.sort_unstable();
+    assert_eq!(recorded, vec!["seg three", "seg two"]);
+    assert_eq!(
+        before,
+        tree_digest(&root),
+        "a resolved collision still mutates no S byte"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+
+    // (2) a group whose ONLY rewrite trigger is the discard term: two
+    // `agent_sessions` rows already holding the TARGET project_id
+    // (`remapped == 0`), not byte-equal (`collapsed == 0`), colliding in pass 2
+    // on `(project_id, session_id, agent_id)`. The old two-term skip leaves the
+    // loser in the staged table, so the STAGED ROW SET is the assertion.
+    //
+    // The fixture's table omits `UNIQUE (project_id, session_id, agent_id)`: a
+    // duplicate triple is unreachable while that constraint holds, and SQLite
+    // cannot drop a UNIQUE constraint, so this row set is the legacy
+    // pre-constraint shape the collapse exists to resolve. Every column is the
+    // pinned one; only the constraint is absent.
+    let parent = unique_temp_dir("aux-discard-only");
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    {
+        let fx = fixture(&root);
+        fx.seed_row(
+            SOURCE_A,
+            &record("row-a", &format!("opencode_project_{SOURCE_A}")),
+        );
+    }
+    let episodic = root.join("episodic.db");
+    fixture_exec(
+        &root,
+        &episodic,
+        "CREATE TABLE agent_sessions (
+           id TEXT PRIMARY KEY, project_id TEXT NOT NULL, session_id TEXT NOT NULL,
+           agent_id TEXT NOT NULL, parent_session_id TEXT, summary TEXT NOT NULL,
+           metadata TEXT NOT NULL, embedding F32_BLOB(2) NOT NULL, created_at INTEGER NOT NULL,
+           updated_at INTEGER NOT NULL, deleted_at INTEGER, orphaned INTEGER NOT NULL DEFAULT 0,
+           capture_id TEXT, agent_role TEXT NOT NULL DEFAULT 'main')",
+        Vec::new(),
+    );
+    for (id, created) in [("as-old", 10_i64), ("as-new", 20_i64)] {
+        fixture_exec(
+            &root,
+            &episodic,
+            "INSERT INTO agent_sessions (id, project_id, session_id, agent_id, summary, metadata,
+               embedding, created_at, updated_at, deleted_at, orphaned)
+             VALUES (?1, ?2, 's3', 'main', ?1, '{}', vector32('[0.5,-1.5]'), ?3, 1, NULL, 0)",
+            vec![
+                Value::Text(id.to_string()),
+                Value::Text(target.to_string()),
+                Value::Integer(created),
+            ],
+        );
+    }
+    let rows = vec![valid_row(
+        &root,
+        SOURCE_A,
+        source_a_identity,
+        target_identity,
+        false,
+    )];
+    let plan = write_plan(&parent.join("plans"), &root, rows);
+    let custody = fixture_custody(&parent);
+    let (code, _stdout, stderr) = run_consolidate(&root, &plan, false, Some(&custody));
+    assert_eq!(code, Some(0), "the discard-only group resolves; {stderr}");
+    let staged = staged_root(&parent);
+    let sessions = aux_rows(&staged.join("episodic.db"), "agent_sessions", "id");
+    assert_eq!(
+        ids(&sessions),
+        vec!["as-new".to_string()],
+        "the discard term alone must trigger the staged rewrite (old-skip mutant)"
+    );
+    let lines = aux_sidecar_lines(&custody);
+    let line = lines
+        .iter()
+        .find(|line| line["table"] == "agent_sessions")
+        .unwrap_or_else(|| panic!("a divergent line for agent_sessions: {lines:?}"));
+    assert_eq!(line["kept"]["id"], "as-new");
+    assert_eq!(line["discarded"][0]["id"], "as-old");
+
+    // Rev 13's other pinned refusals, hosted here because this is the one place
+    // a valid apply fixture and a REAL custody dir already coexist:
+    // (2a) a DIFFERING, NON-EMPTY sidecar at a resume → 77 mismatch;
+    // (2b) a journal at InstalledUnverified AND at Verified → 77
+    //      window_not_applyable (deleting that guard would silently rewrite the
+    //      audit record from the installed tree);
+    // (2c) apply without `--custody` → 64 custody_required.
+    // Each asserts the EVENT NAME: 77 is shared by every custody refusal.
+    use std::os::unix::fs::PermissionsExt;
+    let sidecar = custody.join("journal.json.aux-divergent");
+    let planted = b"{\"kind\":\"carry\",\"db\":\"sentinel\",\"table\":\"t\",\"column\":\"c\",\"original\":\"o\",\"carried\":\"o\",\"rows\":1}\n";
+    std::fs::write(&sidecar, planted).expect("plant a differing sidecar");
+    std::fs::set_permissions(&sidecar, std::fs::Permissions::from_mode(0o600))
+        .expect("sidecar mode");
+    let before = tree_digest(&root);
+    let (code, _stdout, stderr) = run_consolidate(&root, &plan, false, Some(&custody));
+    assert_refusal(
+        code,
+        77,
+        &stderr,
+        "consolidation.auxiliary_sidecar_mismatch",
+    );
+    assert_eq!(
+        before,
+        tree_digest(&root),
+        "a sidecar mismatch mutates no S byte"
+    );
+    assert_eq!(
+        std::fs::read(&sidecar).expect("sidecar bytes"),
+        planted,
+        "the existing audit record is never rewritten"
+    );
+
+    let journal = custody.join("journal.json");
+    for phase in ["InstalledUnverified", "Verified"] {
+        std::fs::write(
+            &journal,
+            format!(
+                "{{\"phase\":\"{phase}\",\"seq\":1,\"prev_hash\":\"\",\"record_hash\":\"aa\"}}\n"
+            ),
+        )
+        .expect("journal");
+        std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o600))
+            .expect("journal mode");
+        let (code, _stdout, stderr) = run_consolidate(&root, &plan, false, Some(&custody));
+        assert_refusal(code, 77, &stderr, "consolidation.window_not_applyable");
+        assert_eq!(
+            before,
+            tree_digest(&root),
+            "{phase}: a refused re-apply mutates no S byte"
+        );
+        assert_eq!(
+            std::fs::read(&sidecar).expect("sidecar bytes"),
+            planted,
+            "{phase}: the audit record is never rewritten"
+        );
+    }
+
+    let (code, _stdout, stderr) = run_consolidate(&root, &plan, false, None);
+    assert_refusal(code, 64, &stderr, "consolidation.custody_required");
+    let _ = std::fs::remove_dir_all(&parent);
+
+    // (3) a non-`Integer` `created_at` in a divergent group refuses 71 BEFORE
+    // any comparison, so NULL/NaN never reach an ordering (§C.5, gate-1 M5).
+    let parent = unique_temp_dir("aux-created-at");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
     {
@@ -2437,47 +3114,134 @@ fn test_auxiliary_collision_aborts() {
         );
     }
     seed_episodic(&root);
-    for (identity, raw) in [
-        ("/home/vaz/Code/thing", "seg one"),
-        ("/fixture/marker-root", "seg two"),
+    for (identity, raw, created) in [
+        (source_a_identity, "seg one", Value::Integer(1)),
+        (
+            source_b_identity,
+            "seg two",
+            Value::Text("soon".to_string()),
+        ),
     ] {
         fixture_exec(
             &root,
             &root.join("episodic.db"),
             "INSERT INTO episodic_segments (project_id, session_id, agent_id, segment_index,
                raw_content, byte_offset, byte_len, created_at)
-             VALUES (?1, 's2', 'main', 0, ?2, 0, ?3, 4)",
+             VALUES (?1, 's2', 'main', 0, ?2, 0, ?3, ?4)",
             vec![
-                Value::Text(identity.to_string()),
+                Value::Text(identity[5..].to_string()),
                 Value::Text(raw.to_string()),
                 Value::Integer(raw.len() as i64),
+                created,
             ],
         );
     }
     let rows = vec![
-        valid_row(
-            &root,
-            SOURCE_A,
-            "path:/home/vaz/Code/thing",
-            target_identity,
-            false,
-        ),
-        valid_row(
-            &root,
-            SOURCE_B,
-            "path:/fixture/marker-root",
-            target_identity,
-            false,
-        ),
+        valid_row(&root, SOURCE_A, source_a_identity, target_identity, false),
+        valid_row(&root, SOURCE_B, source_b_identity, target_identity, false),
     ];
     let plan = write_plan(&parent.join("plans"), &root, rows);
     let before = tree_digest(&root);
-    let (code, _stdout, stderr) = run_consolidate(&root, &plan, false);
+    let (code, _stdout, stderr) =
+        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
     assert_refusal(code, 71, &stderr, "consolidation.auxiliary_rows_divergent");
     assert_eq!(
         before,
         tree_digest(&root),
-        "the aborted plan writes nothing at all"
+        "the refused plan writes nothing at all"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+
+    // (4) a DIVERGENT LOSER that carries a TAGGED cell: the loser's
+    // `(column, original)` emits NO carry line and the survivor's `rows` counts
+    // SURVIVORS only (gate-6 MOD 1d). `user_prompts` is the table whose key set
+    // (`["id"]`) does not contain the remapped column, and its legacy shape (no
+    // `id` PRIMARY KEY) is what lets one id appear twice — the exact row set the
+    // collapse exists to resolve. Both rows are branch (c), so a count taken
+    // over every tag index rather than the survivor set emits TWO carry lines.
+    let parent = unique_temp_dir("aux-discarded-carrier");
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    {
+        let fx = fixture(&root);
+        fx.seed_row(
+            SOURCE_A,
+            &record("row-a", &format!("opencode_project_{SOURCE_A}")),
+        );
+    }
+    let prompts = root.join("user-prompts.db");
+    fixture_exec(
+        &root,
+        &prompts,
+        "CREATE TABLE user_prompts (
+           id TEXT, session_id TEXT NOT NULL, message_id TEXT NOT NULL,
+           project_path TEXT, content TEXT NOT NULL, created_at INTEGER NOT NULL,
+           captured INTEGER DEFAULT 0, user_learning_captured BOOLEAN DEFAULT 0,
+           linked_memory_id TEXT, capture_attempts INTEGER DEFAULT 0,
+           provider_id TEXT, model_id TEXT)",
+        Vec::new(),
+    );
+    for (project, content, created) in [
+        ("/home/vaz/Code/thing/sub", "older", 10_i64),
+        ("/tmp/elsewhere", "newer", 20_i64),
+    ] {
+        fixture_exec(
+            &root,
+            &prompts,
+            "INSERT INTO user_prompts (id, session_id, message_id, project_path, content,
+               created_at) VALUES ('p-dup', 's9', 'm1', ?1, ?2, ?3)",
+            vec![
+                Value::Text(project.to_string()),
+                Value::Text(content.to_string()),
+                Value::Integer(created),
+            ],
+        );
+    }
+    let rows = vec![valid_row(
+        &root,
+        SOURCE_A,
+        source_a_identity,
+        target_identity,
+        false,
+    )];
+    let plan = write_plan(&parent.join("plans"), &root, rows);
+    let custody = fixture_custody(&parent);
+    let (code, _stdout, stderr) = run_consolidate(&root, &plan, false, Some(&custody));
+    assert_eq!(code, Some(0), "the discarded carrier resolves; {stderr}");
+    let staged = staged_root(&parent);
+    let kept = aux_rows(&staged.join("user-prompts.db"), "user_prompts", "id");
+    assert_eq!(kept.len(), 1, "one prompt survives the id collision");
+    assert_eq!(
+        text_cell(&kept[0], "project_path"),
+        "/tmp/elsewhere",
+        "keep-newer keeps the greater created_at"
+    );
+    let lines = aux_sidecar_lines(&custody);
+    let carries: Vec<&serde_json::Value> = lines
+        .iter()
+        .filter(|line| line["kind"] == "carry")
+        .collect();
+    assert_eq!(
+        carries.len(),
+        1,
+        "the LOSER's carrier is never counted (all-tags mutant): {lines:?}"
+    );
+    assert_eq!(carries[0]["original"], "/tmp/elsewhere");
+    assert_eq!(carries[0]["rows"], 1, "rows counts survivors only");
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line["original"] == "/home/vaz/Code/thing/sub"),
+        "a discarded row's carrier emits no carry line: {lines:?}"
+    );
+    let divergent: Vec<&serde_json::Value> = lines
+        .iter()
+        .filter(|line| line["kind"] == "divergent")
+        .collect();
+    assert_eq!(divergent.len(), 1, "one divergent line: {lines:?}");
+    assert_eq!(
+        divergent[0]["discarded"][0]["project_path"], "/home/opencode/Code/thing/sub",
+        "the discarded row is recorded POST-remap, with its carried cell"
     );
     let _ = std::fs::remove_dir_all(&parent);
 }
@@ -2907,6 +3671,18 @@ fn install_fixture(parent: &Path) -> (PathBuf, PathBuf) {
     (live, staged)
 }
 
+/// EV-M (rev 13) makes the auxiliary sidecar mandatory from `StagedVerified`
+/// onward. These custody fixtures never run an apply, so they must plant the
+/// artifact a real window already holds; an empty body is the correct one for
+/// a fixture with no auxiliary records.
+fn write_fixture_aux_sidecar(custody: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let path = custody.join("journal.json.aux-divergent");
+    std::fs::write(&path, b"").expect("write the fixture aux sidecar");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+        .expect("chmod the fixture aux sidecar");
+}
+
 /// The last non-empty record of a custody journal.
 fn last_journal_record(custody: &Path) -> serde_json::Value {
     let text = std::fs::read_to_string(custody.join("journal.json")).expect("journal readable");
@@ -3016,6 +3792,7 @@ fn test_install_crash_boundaries_recover() {
         Some(0),
         "the staged tree is verified before the install; {staged_err}"
     );
+    write_fixture_aux_sidecar(&custody);
     let (code, stderr) = run_install_step(&custody, &live, &staged, "after-l4");
     assert_eq!(
         code, None,
@@ -3268,6 +4045,9 @@ fn recover_with_journal(name: &str, bytes: &[u8]) -> (Option<i32>, String, PathB
         std::os::unix::fs::PermissionsExt::from_mode(0o600),
     )
     .expect("journal 0600");
+    // A real window past `SnapshotVerified` already holds the rev-13 sidecar;
+    // plant it so EV-M's presence rule never masks the check under test.
+    write_fixture_aux_sidecar(&custody);
     let (code, stderr) = run_recover(&custody);
     (code, stderr, parent)
 }
@@ -3462,6 +4242,7 @@ fn test_restore_is_whole_root_and_idempotent() {
         Some(0),
         "the staged tree verifies before the install; {verify_err}"
     );
+    write_fixture_aux_sidecar(&custody);
     let (installed, install_err) = run_install_mode(&custody, &root, &staged);
     assert_eq!(
         installed,
@@ -3616,6 +4397,7 @@ fn test_restore_is_whole_root_and_idempotent() {
         Some(0),
         "the crash fixture verifies; {verify_err}"
     );
+    write_fixture_aux_sidecar(&crash_custody);
     let (installed, install_err) = run_install_mode(&crash_custody, &crash_root, &crash_staged);
     assert_eq!(
         installed,
@@ -3690,6 +4472,7 @@ fn test_verified_repeat_apply_is_noop() {
         Some(0),
         "the staged tree verifies before the install; {verify_err}"
     );
+    write_fixture_aux_sidecar(&custody);
     let settled = Command::new(env!("CARGO_BIN_EXE_opencode-agents-memory"))
         .arg(format!("--storage-root={}", root.display()))
         .arg("--mode=consolidate-install")
