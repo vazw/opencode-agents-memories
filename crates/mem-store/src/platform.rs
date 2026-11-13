@@ -188,6 +188,157 @@ pub fn process_start_time(pid: u32) -> Option<u64> {
     read_proc_start_time(pid)
 }
 
+/// True when the argv element byte-equals the ASCII argument `arg` (no NUL
+/// inside, caller-trusted ASCII).
+fn arg_is(element: &[u8], arg: &str) -> bool {
+    let expected = arg.as_bytes();
+    element.len() == expected.len() && element.iter().zip(expected.iter()).all(|(a, b)| a == b)
+}
+
+/// True when two byte strings are equal.
+fn bytes_eq(left: &[u8], right: &[u8]) -> bool {
+    left.len() == right.len() && left.iter().zip(right.iter()).all(|(a, b)| a == b)
+}
+
+/// The NUL-split argv elements of a `/proc/<pid>/cmdline` payload: one element
+/// per argument, the single empty slice after the terminating `\0` dropped.
+fn split_cmdline_bytes(bytes: &[u8]) -> Vec<&[u8]> {
+    let mut elements: Vec<&[u8]> = Vec::new();
+    let mut start = 0usize;
+    for (index, &byte) in bytes.iter().enumerate() {
+        if byte == 0 {
+            elements.push(&bytes[start..index]);
+            start = index + 1;
+        }
+    }
+    if start < bytes.len() {
+        elements.push(&bytes[start..]);
+    }
+    if elements.last().is_some_and(|last| last.is_empty()) {
+        elements.pop();
+    }
+    elements
+}
+
+/// F7 / F13 / F22a — the pure argv-pair parser behind
+/// [`is_expected_live_engine`]: does this cmdline name the expected pre-quiesce
+/// engine?
+///
+/// Contract: the NUL-split argv must hold EXACTLY ONE storage-root occurrence
+/// in the two-element split form `["--storage-root", <val>]`, where `<val>` is
+/// byte-equal to the custodian's lexical root or the canonical root (no `./`,
+/// `..`, doubled slash, or trailing slash), and at most ONE mode element in one
+/// of the forms `["--mode", m]`, `"--mode=<m>"`, `"mode=<m>"` with
+/// `m ∈ {"stdio", "standalone"}`. Inline storage-root forms (`--storage-root=<v>`),
+/// bare / valueless / duplicate / mis-valued occurrences, or a non-`{stdio,
+/// standalone}` mode make the verdict `false`.
+#[must_use]
+pub fn parse_expected_engine_cmdline(
+    cmdline_bytes: &[u8],
+    lexical_root: &str,
+    canonical_root: &str,
+) -> bool {
+    let elements = split_cmdline_bytes(cmdline_bytes);
+    let lexical = lexical_root.as_bytes();
+    let canonical = canonical_root.as_bytes();
+    let mut storage_root_seen = false;
+    let mut storage_root_invalid = false;
+    let mut mode_count = 0usize;
+    let mut mode_invalid = false;
+    let mut index = 0usize;
+    while index < elements.len() {
+        let element: &[u8] = elements[index];
+        if arg_is(element, "--storage-root") || arg_is(element, "storage-root") {
+            let value = elements.get(index + 1).copied().unwrap_or(&[]);
+            let value_is_lexical = value.len() == lexical.len()
+                && value.iter().zip(lexical.iter()).all(|(a, b)| a == b);
+            let value_is_canonical = value.len() == canonical.len()
+                && value.iter().zip(canonical.iter()).all(|(a, b)| a == b);
+            if !(value_is_lexical || value_is_canonical) {
+                storage_root_invalid = true;
+            }
+            if storage_root_seen {
+                storage_root_invalid = true;
+            }
+            storage_root_seen = true;
+            index += 2;
+            continue;
+        }
+        if element.starts_with(b"--storage-root=") || element.starts_with(b"storage-root=") {
+            storage_root_invalid = true;
+            index += 1;
+            continue;
+        }
+        if arg_is(element, "--mode")
+            || arg_is(element, "mode")
+            || (element.len() > 7 && element.starts_with(b"--mode="))
+            || (element.len() > 5 && element.starts_with(b"mode="))
+        {
+            let inline = element.contains(&b'=');
+            let value: &[u8] =
+                if inline && let Some(eq) = element.iter().position(|byte| *byte == b'=') {
+                    &element[eq + 1..]
+                } else {
+                    elements.get(index + 1).copied().unwrap_or(&[])
+                };
+            if !bytes_eq(value, &b"stdio"[..]) && !bytes_eq(value, &b"standalone"[..]) {
+                mode_invalid = true;
+            }
+            mode_count += 1;
+            if mode_count > 1 {
+                mode_invalid = true;
+            }
+            index += if inline { 1 } else { 2 };
+            continue;
+        }
+        index += 1;
+    }
+    storage_root_seen && !storage_root_invalid && !mode_invalid && mode_count <= 1
+}
+
+/// F7 / F13 / F22a — the live-engine identity check: the recorded start-time
+/// token must still hold across the `/proc/<pid>/stat` → cmdline → `/proc/<pid>/stat`
+/// window, and the cmdline must pass [`parse_expected_engine_cmdline`].
+#[cfg(target_os = "linux")]
+#[must_use]
+pub fn is_expected_live_engine(
+    pid: u32,
+    recorded_start_time: u64,
+    lexical_root: &Path,
+    canonical_root: &Path,
+) -> bool {
+    let before = read_proc_start_time(pid);
+    let bytes = match std::fs::read(Path::new("/proc").join(pid.to_string()).join("cmdline")) {
+        Ok(bytes) => bytes,
+        Err(_) => return false,
+    };
+    if before != Some(recorded_start_time) {
+        return false;
+    }
+    let after = read_proc_start_time(pid);
+    if after != Some(recorded_start_time) {
+        return false;
+    }
+    parse_expected_engine_cmdline(
+        &bytes,
+        &lexical_root.to_string_lossy(),
+        &canonical_root.to_string_lossy(),
+    )
+}
+
+/// Off-Linux nothing about a holder is verifiable, so no pid can ever be the
+/// expected engine (fail closed).
+#[cfg(not(target_os = "linux"))]
+#[must_use]
+pub fn is_expected_live_engine(
+    _pid: u32,
+    _recorded_start_time: u64,
+    _lexical_root: &Path,
+    _canonical_root: &Path,
+) -> bool {
+    false
+}
+
 /// Gathers what this host can see about `pid` for [`decide_liveness`].
 #[cfg(target_os = "linux")]
 #[must_use]

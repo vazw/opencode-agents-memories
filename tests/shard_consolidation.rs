@@ -50,6 +50,7 @@ fn spawn_engine_stdio(root: &Path, log_file: &Path) -> Child {
         .arg("--mode=stdio")
         .env("OPENCODE_MEM_LOG_FILE", log_file)
         .stdin(Stdio::piped())
+        .envs(window_env(root).map(|nonce| ("OPENCODE_MEM_MAINTENANCE_NONCE", nonce)))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -115,6 +116,7 @@ fn assert_reservation_refusal_line(stderr: &str, root_basename: &str, operation:
 /// `acquire` creates the body at mode 0600.
 #[test]
 fn test_reservation_checked_before_directory_creation() {
+    let _serial = serial_guard();
     // Case 1 — parseable foreign holder (live pid: this test process).
     let parent = unique_temp_dir("reservation-fence");
     let root = parent.join("data");
@@ -176,7 +178,7 @@ fn test_reservation_checked_before_directory_creation() {
     let parent = unique_temp_dir("reservation-mode");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("storage root for acquire");
-    let acquired = mem_store::maintenance_reservation::acquire(&root).expect("acquire");
+    let acquired = mem_store::maintenance_reservation::acquire(&root, &root).expect("acquire");
     assert_eq!(
         acquired.path(),
         parent.join(RESERVATION_FILE),
@@ -236,6 +238,7 @@ fn test_reservation_checked_before_directory_creation() {
         .arg(format!("--storage-root={}", root.display()))
         .arg("--mode=reap-shards")
         .stdin(Stdio::null())
+        .envs(window_env(&root).map(|nonce| ("OPENCODE_MEM_MAINTENANCE_NONCE", nonce)))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -413,12 +416,58 @@ fn write_plan(dir: &Path, root: &Path, mapping: Vec<serde_json::Value>) -> PathB
     path
 }
 
+/// Process-wide serializer for this binary. `ActiveWriter` (§E.2) judges every
+/// same-uid process's open descriptors under a root, so a sibling test's live
+/// `W` child or engine under another fixture tree answers as a holder. Each
+/// test takes this guard for its whole body, so windows never overlap.
+fn serial_guard() -> std::sync::MutexGuard<'static, ()> {
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    SERIAL.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
 /// Runs one `consolidate-shards` invocation on the REAL binary with a scratch
 /// HOME, returning (exit code, stdout, stderr).
 ///
 /// `custody` is the rev-13 APPLY requirement (§C.5): the auxiliary sidecar is a
 /// custody artifact. Every dry run stays custody-FREE, so `run_dry_run` passes
 /// `None` and a dry run can never be made custody-dependent by accident.
+/// Acquires a real maintenance reservation for `root` through the production
+/// `acquire` path and returns its nonce. Every `W` child spawned for this root
+/// must carry the nonce as `OPENCODE_MEM_MAINTENANCE_NONCE`; without it the
+/// window is `Absent` and refuses 77 (§E.5 FS-3). The acquiring test process is
+/// live, so `release_gated` would refuse; the file is removed with the fixture
+/// root's `find -delete` teardown instead.
+fn acquire_window(root: &Path) -> String {
+    let acquired = mem_store::maintenance_reservation::acquire(root, root)
+        .expect("fixture acquires the maintenance reservation");
+    let nonce = acquired.body().nonce.clone();
+    window_registry()
+        .lock()
+        .expect("window registry lock")
+        .insert(root.to_path_buf(), nonce.clone());
+    nonce
+}
+
+/// Root → nonce for every reservation this test binary acquired. Each `W`
+/// spawn reads its own root's nonce through `window_env`.
+fn window_registry() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, String>> {
+    static REGISTRY: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<PathBuf, String>>,
+    > = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// The `OPENCODE_MEM_MAINTENANCE_NONCE` a `W` child for `root` must carry.
+/// Empty when no reservation was acquired for `root`, so an unreserved spawn
+/// still reaches `Absent` and refuses 77.
+fn window_env(root: &Path) -> Option<String> {
+    window_registry()
+        .lock()
+        .expect("window registry lock")
+        .get(root)
+        .cloned()
+}
+
 fn run_consolidate(
     root: &Path,
     plan: &Path,
@@ -437,6 +486,9 @@ fn run_consolidate(
         .arg(format!("--plan={}", plan.display()))
         .env("HOME", &home)
         .stdin(Stdio::null());
+    if let Some(nonce) = window_env(root) {
+        command.env("OPENCODE_MEM_MAINTENANCE_NONCE", nonce);
+    }
     if dry_run {
         command.arg("--dry-run");
     } else if let Some(custody) = custody {
@@ -562,6 +614,7 @@ fn assert_refusal(code: Option<i32>, expected: i32, stderr: &str, needle: &str) 
 /// the count holds is accepted) and an opt-in that is never consulted.
 #[test]
 fn test_plan_requires_exact_identity_set() {
+    let _serial = serial_guard();
     const HASH_A: &str = "aaaaaaaaaaaaaaaa";
     const HASH_B: &str = "bbbbbbbbbbbbbbbb";
     const HASH_C: &str = "cccccccccccccccc";
@@ -635,27 +688,6 @@ fn test_plan_requires_exact_identity_set() {
         "the carried shard is not mutated"
     );
 
-    // The same file reaches the staged tree byte-identically: carried, never
-    // rewritten, never dropped (a mutant that skips it loses unrelated data).
-    let (code, _stdout, stderr) =
-        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
-    assert_eq!(
-        code,
-        Some(0),
-        "a carried shard never blocks apply; stderr: {stderr}"
-    );
-    let staged = staged_root(&parent);
-    assert_eq!(
-        std::fs::read(
-            staged
-                .join("projects")
-                .join(format!("project_{HASH_C}_shard_0.db"))
-        )
-        .expect("staged carried shard"),
-        carried_bytes,
-        "the carried shard is staged byte-identically"
-    );
-
     // Subcase A — one source replaced by an unrelated hash, count still three.
     let mut swapped = rows.clone();
     swapped[2] = valid_row(
@@ -701,6 +733,30 @@ fn test_plan_requires_exact_identity_set() {
         "the explicit opt-in admits the linked source; stderr: {stderr}"
     );
 
+    // The same file reaches the staged tree byte-identically: carried, never
+    // rewritten, never dropped (a mutant that skips it loses unrelated data).
+    // Acquired only here, after every dry-run subcase (O1: dry-run refuses 76 on Held).
+    acquire_window(&root);
+    let carried_plan = write_plan(&parent.join("plans-carried"), &root, claimed_only.clone());
+    let (code, _stdout, stderr) =
+        run_consolidate(&root, &carried_plan, false, Some(&fixture_custody(&parent)));
+    assert_eq!(
+        code,
+        Some(0),
+        "a carried shard never blocks apply; stderr: {stderr}"
+    );
+    let staged = staged_root(&parent);
+    assert_eq!(
+        std::fs::read(
+            staged
+                .join("projects")
+                .join(format!("project_{HASH_C}_shard_0.db"))
+        )
+        .expect("staged carried shard"),
+        carried_bytes,
+        "the carried shard is staged byte-identically"
+    );
+
     let _ = std::fs::remove_dir_all(&parent);
 }
 
@@ -709,6 +765,7 @@ fn test_plan_requires_exact_identity_set() {
 /// directory is created for it.
 #[test]
 fn test_missing_git_identity_never_falls_back() {
+    let _serial = serial_guard();
     const HASH_A: &str = "aaaaaaaaaaaaaaaa";
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -784,6 +841,7 @@ fn test_missing_git_identity_never_falls_back() {
 /// (`/home/vaz2` becomes `/home/opencode2`).
 #[test]
 fn test_special_opencode_target_and_boundary_mapping() {
+    let _serial = serial_guard();
     const SPECIAL: &str = "56c3912b7371f31b";
     const HASH_B: &str = "bbbbbbbbbbbbbbbb";
     const HASH_C: &str = "cccccccccccccccc";
@@ -857,6 +915,7 @@ fn test_special_opencode_target_and_boundary_mapping() {
 /// each refuse before any write.
 #[test]
 fn test_identity_collision_refuses_before_write() {
+    let _serial = serial_guard();
     const HASH_A: &str = "aaaaaaaaaaaaaaaa";
     const HASH_B: &str = "bbbbbbbbbbbbbbbb";
 
@@ -1065,6 +1124,7 @@ fn shape_accept_applied(
     let parent = unique_temp_dir(&format!("plan-census-{case}"));
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     {
         let fx = fixture(&root);
         fx.seed(HASH, &format!("row-{case}"));
@@ -1123,6 +1183,7 @@ fn shape_case(case: &str, needle: &str, mutate: impl FnOnce(&Path, &Path)) {
 /// shard file and a non-conforming registry row.
 #[test]
 fn test_unknown_schema_encoding_and_tiers_refuse() {
+    let _serial = serial_guard();
     const HASH: &str = "aaaaaaaaaaaaaaaa";
 
     // §A.1 (e) ACCEPT — the BASE SHAPE defined ONCE above (`accepted_shape_statements`):
@@ -1627,12 +1688,14 @@ impl Fixture {
 /// replacement that rewrites history inside `content`/`metadata`.
 #[test]
 fn test_full_typed_raw_merge_preserves_history() {
+    let _serial = serial_guard();
     const TARGET: &str = "1111111111111111";
     const SOURCE: &str = "2222222222222222";
 
     let parent = unique_temp_dir("merge-preserve");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     let target_tag = format!("opencode_project_{TARGET}");
     let source_tag = format!("opencode_project_{SOURCE}");
     {
@@ -1787,6 +1850,7 @@ fn test_full_typed_raw_merge_preserves_history() {
 /// and failing every duplicate group instead of collapsing it.
 #[test]
 fn test_exact_duplicates_account_occurrences() {
+    let _serial = serial_guard();
     const TARGET: &str = "1111111111111111";
     const SOURCE_A: &str = "2222222222222222";
     const SOURCE_B: &str = "3333333333333333";
@@ -1794,6 +1858,7 @@ fn test_exact_duplicates_account_occurrences() {
     let parent = unique_temp_dir("merge-duplicates");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     {
         let fx = fixture(&root);
         for (hash, description) in [
@@ -1866,12 +1931,14 @@ fn test_exact_duplicates_account_occurrences() {
 /// flag or `metadata`.
 #[test]
 fn test_divergent_ids_abort_whole_plan() {
+    let _serial = serial_guard();
     const TARGET: &str = "1111111111111111";
     const SOURCE: &str = "2222222222222222";
 
     let parent = unique_temp_dir("merge-divergent");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     {
         let fx = fixture(&root);
         fx.seed_row(
@@ -1975,12 +2042,14 @@ fn staged_root_opt(parent: &Path) -> Option<PathBuf> {
 /// missing required identity key as adoptable.
 #[test]
 fn test_embedding_identity_mismatch_refuses() {
+    let _serial = serial_guard();
     const TARGET: &str = "1111111111111111";
     const SOURCE: &str = "2222222222222222";
 
     let parent = unique_temp_dir("merge-embedding");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     {
         let fx = fixture(&root);
         fx.seed_row(
@@ -2061,6 +2130,7 @@ fn test_embedding_identity_mismatch_refuses() {
 /// registry that keeps retired source rows.
 #[test]
 fn test_capacity_and_registry_counts() {
+    let _serial = serial_guard();
     const TARGET: &str = "1111111111111111";
     const SOURCE_A: &str = "2222222222222222";
     const SOURCE_B: &str = "3333333333333333";
@@ -2068,6 +2138,7 @@ fn test_capacity_and_registry_counts() {
     let parent = unique_temp_dir("merge-capacity");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     let home = parent.join("home");
     write_fixture_config(&home, 2);
     {
@@ -2165,6 +2236,7 @@ fn test_capacity_and_registry_counts() {
     let parent = unique_temp_dir("merge-capacity-zero");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     write_fixture_config(&parent.join("home"), 0);
     {
         let fx = fixture(&root);
@@ -2191,11 +2263,13 @@ fn test_capacity_and_registry_counts() {
 /// built under a held root.
 #[test]
 fn test_foreign_writer_and_reservation_block_startup() {
+    let _serial = serial_guard();
     const HASH: &str = "1111111111111111";
 
     let parent = unique_temp_dir("merge-foreign-holder");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     {
         let fx = fixture(&root);
         fx.seed_row(HASH, &record("row", &format!("opencode_project_{HASH}")));
@@ -2344,6 +2418,7 @@ fn aux_entry<'a>(report: &'a serde_json::Value, db: &str, table: &str) -> &'a se
 /// as one `carry` line in the custody sidecar.
 #[test]
 fn test_auxiliary_persisted_closure() {
+    let _serial = serial_guard();
     const SOURCE_A: &str = "4444444444444444";
     const SOURCE_B: &str = "5555555555555555";
     let target_identity = "path:/home/opencode/Code/thing";
@@ -2355,6 +2430,7 @@ fn test_auxiliary_persisted_closure() {
     let parent = unique_temp_dir("aux-closure");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     {
         let fx = fixture(&root);
         fx.seed_row(
@@ -2645,6 +2721,7 @@ fn test_auxiliary_persisted_closure() {
         let parent = unique_temp_dir(&format!("aux-outside-{case}"));
         let root = parent.join("data");
         std::fs::create_dir_all(&root).expect("fixture root");
+        acquire_window(&root);
         {
             let fx = fixture(&root);
             fx.seed_row(
@@ -2714,6 +2791,7 @@ fn test_auxiliary_persisted_closure() {
         let parent = unique_temp_dir("aux-mapped-vs-carried");
         let root = parent.join("data");
         std::fs::create_dir_all(&root).expect("fixture root");
+        acquire_window(&root);
         {
             let fx = fixture(&root);
             fx.seed_row(
@@ -2796,6 +2874,7 @@ fn test_auxiliary_persisted_closure() {
         let parent = unique_temp_dir("aux-git-common-host");
         let root = parent.join("data");
         std::fs::create_dir_all(&root).expect("fixture root");
+        acquire_window(&root);
         {
             let fx = fixture(&root);
             fx.seed(HASH, "row-git");
@@ -2850,6 +2929,7 @@ fn test_auxiliary_persisted_closure() {
 /// `created_at` in a divergent group still refuses 71 before any comparison.
 #[test]
 fn test_auxiliary_collision_aborts() {
+    let _serial = serial_guard();
     const SOURCE_A: &str = "4444444444444444";
     const SOURCE_B: &str = "5555555555555555";
     const SOURCE_C: &str = "7777777777777777";
@@ -2866,6 +2946,7 @@ fn test_auxiliary_collision_aborts() {
     let parent = unique_temp_dir("aux-collision");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     {
         let fx = fixture(&root);
         for (hash, name) in [
@@ -2978,6 +3059,7 @@ fn test_auxiliary_collision_aborts() {
     let parent = unique_temp_dir("aux-discard-only");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     {
         let fx = fixture(&root);
         fx.seed_row(
@@ -3106,6 +3188,7 @@ fn test_auxiliary_collision_aborts() {
     let parent = unique_temp_dir("aux-created-at");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     {
         let fx = fixture(&root);
         fx.seed_row(
@@ -3166,6 +3249,7 @@ fn test_auxiliary_collision_aborts() {
     let parent = unique_temp_dir("aux-discarded-carrier");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     {
         let fx = fixture(&root);
         fx.seed_row(
@@ -3254,20 +3338,31 @@ fn test_auxiliary_collision_aborts() {
 // Step 6 — reservation custody: release gate + pre-journal adopt (§E.2)
 // ---------------------------------------------------------------------------
 
-use mem_store::maintenance_reservation as reservation;
-
 /// Writes a reservation body at `<parent>/RESERVATION_FILE` for `root`.
-fn write_reservation_body(parent: &Path, pid: u32, start_time: Option<u64>, nonce: &str) {
+fn write_reservation_body(
+    parent: &Path,
+    root: &Path,
+    pid: u32,
+    start_time: Option<u64>,
+    nonce: &str,
+) {
+    let meta = std::fs::symlink_metadata(root).expect("root metadata");
+    #[cfg(unix)]
+    use std::os::unix::fs::MetadataExt;
+    #[cfg(unix)]
+    let (s_dev, s_ino) = (Some(meta.dev()), Some(meta.ino()));
+    #[cfg(not(unix))]
+    let (s_dev, s_ino) = (Some(0_u64), Some(0_u64));
     let body = serde_json::json!({
         "pid": pid,
         "start_time": start_time,
         "operation": "maintenance",
-        "root_basename": "data",
+        "root_basename": root.file_name().and_then(|n| n.to_str()).unwrap_or("data"),
         "nonce": nonce,
         "created_utc": "2026-11-12T00:00:00+00:00",
         "retake_seq": null,
-        "s_dev": 1_u64,
-        "s_ino": 1_u64,
+        "s_dev": s_dev,
+        "s_ino": s_ino,
     });
     std::fs::write(parent.join(RESERVATION_FILE), body.to_string()).expect("write reservation");
 }
@@ -3278,8 +3373,51 @@ fn dead_pid() -> u32 {
     4_194_000
 }
 
+/// `<parent>/recovery/` must be 0700 and owned by us; `create_dir_all` would
+/// leave it 0755 under the default umask and the flock refuses that.
+fn make_recovery_dir(recovery: &Path) {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .recursive(true)
+        .create(recovery)
+        .expect("recovery dir");
+}
+
+/// Writes a custody dir `<parent>/recovery/consolidation-1-<wtok>/` holding a
+/// single chained journal record at `phase`. `wtok` derives from `nonce`
+/// exactly as the root code derives it.
+fn write_custody_journal(parent: &Path, nonce: &str, phase: &str) -> PathBuf {
+    let wtok = &mem_core::sha256::hex(&mem_core::sha256::digest(nonce.as_bytes()))[..16];
+    let recovery = parent.join("recovery");
+    make_recovery_dir(&recovery);
+    let custody = recovery.join(format!("consolidation-1-{wtok}"));
+    std::fs::create_dir_all(&custody).expect("custody dir");
+    // EV-M: the custody dir is 0700 (create_dir_all defaults to 0755).
+    std::fs::set_permissions(
+        &custody,
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )
+    .expect("custody 0700 (EV-M)");
+    let record = serde_json::json!({
+        "seq": 1,
+        "prev_hash": "",
+        "record_hash": "fixture",
+        "phase": phase,
+    });
+    std::fs::write(custody.join("journal.json"), format!("{record}\n")).expect("journal");
+    std::fs::set_permissions(
+        custody.join("journal.json"),
+        std::os::unix::fs::PermissionsExt::from_mode(0o600),
+    )
+    .expect("journal 0600");
+    custody
+}
+
 #[test]
 fn test_reservation_release_requires_nonce_and_dead_pid() {
+    let _serial = serial_guard();
+    use opencode_agents_memory::shard_consolidation::release_gated;
     let parent = unique_temp_dir("release-gate");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
@@ -3288,57 +3426,101 @@ fn test_reservation_release_requires_nonce_and_dead_pid() {
     let own = std::process::id();
 
     // (1) wrong nonce refuses, even with a dead holder.
-    write_reservation_body(&parent, dead_pid(), Some(7), nonce);
-    let phase = reservation::ReleasePhase::Verified;
-    assert!(
-        reservation::release(&root, "BBBBBBBBBBBBBBBBBBBBBB==", phase).is_err(),
-        "wrong nonce must refuse"
-    );
+    write_reservation_body(&parent, &root, dead_pid(), Some(7), nonce);
+    write_custody_journal(&parent, nonce, "RolledBack");
+    let refusal =
+        release_gated(&root, "BBBBBBBBBBBBBBBBBBBBBB==").expect_err("wrong nonce must refuse");
+    assert_eq!(refusal.code, 77);
+    assert_eq!(refusal.event, "consolidation.release_nonce_mismatch");
     assert!(
         parent.join(RESERVATION_FILE).exists(),
         "refused release keeps the file"
     );
 
     // (2) a live holder refuses, even with the right nonce.
-    write_reservation_body(&parent, own, own_token, nonce);
-    assert!(
-        reservation::release(&root, nonce, phase).is_err(),
-        "a live holder must refuse"
-    );
+    write_reservation_body(&parent, &root, own, own_token, nonce);
+    let refusal = release_gated(&root, nonce).expect_err("a live holder must refuse");
+    assert_eq!(refusal.code, 77);
+    assert_eq!(refusal.event, "consolidation.release_holder_alive");
 
-    // (3) a pid-reused holder (token differs from the live process) releases.
+    // (3) a pid-reused holder (token differs from the live process) releases;
+    // the journal is kept.
     write_reservation_body(
         &parent,
+        &root,
         own,
         Some(own_token.unwrap_or(0).wrapping_add(1)),
         nonce,
     );
+    release_gated(&root, nonce).expect("a token-differing (pid-reused) holder releases");
     assert!(
-        reservation::release(&root, nonce, phase).is_ok(),
-        "a token-differing (pid-reused) holder releases"
+        !parent.join(RESERVATION_FILE).exists(),
+        "reservation unlinked"
     );
-    assert!(!parent.join(RESERVATION_FILE).exists());
+    let custody = parent
+        .join("recovery")
+        .read_dir()
+        .expect("recovery readable")
+        .flatten()
+        .map(|entry| entry.path())
+        .next()
+        .expect("custody dir kept");
+    assert!(custody.join("journal.json").exists(), "journal kept");
 
     // (4) a start_time-less body with a present pid refuses.
-    write_reservation_body(&parent, own, None, nonce);
-    assert!(
-        reservation::release(&root, nonce, phase).is_err(),
-        "start_time-less body with a present pid must refuse"
-    );
-
-    // (5) effective phase outside {Verified, RolledBack} refuses.
-    write_reservation_body(&parent, dead_pid(), Some(7), nonce);
-    assert!(
-        reservation::release(&root, nonce, reservation::ReleasePhase::Installing).is_err(),
-        "a non-terminal journal phase must refuse"
-    );
+    write_reservation_body(&parent, &root, own, None, nonce);
+    let refusal = release_gated(&root, nonce)
+        .expect_err("start_time-less body with a present pid must refuse");
+    assert_eq!(refusal.code, 77);
+    assert_eq!(refusal.event, "consolidation.release_holder_alive");
     assert!(parent.join(RESERVATION_FILE).exists());
 
     let _ = std::fs::remove_dir_all(&parent);
 }
 
 #[test]
+fn test_release_phase_and_custody_refusals_carry_pinned_messages() {
+    let _serial = serial_guard();
+    use opencode_agents_memory::shard_consolidation::release_gated;
+    let parent = unique_temp_dir("release-phase");
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    let nonce = "AAAAAAAAAAAAAAAAAAAAAA==";
+
+    // (5) a non-terminal effective phase refuses with the phase in the message.
+    write_reservation_body(&parent, &root, dead_pid(), Some(7), nonce);
+    write_custody_journal(&parent, nonce, "Installing");
+    let refusal = release_gated(&root, nonce).expect_err("non-terminal phase must refuse");
+    assert_eq!(refusal.code, 77);
+    assert_eq!(refusal.event, "consolidation.release_phase_nonterminal");
+    assert_eq!(refusal.message, "journal phase Installing is non-terminal");
+    assert!(parent.join(RESERVATION_FILE).exists());
+    let _ = std::fs::remove_dir_all(parent.join("recovery"));
+
+    // (6) no custody dir refuses with the N-1 message.
+    let refusal = release_gated(&root, nonce).expect_err("no custody journal must refuse");
+    assert_eq!(refusal.code, 77);
+    assert_eq!(refusal.event, "consolidation.release_phase_nonterminal");
+    assert_eq!(refusal.message, "no custody journal for window");
+
+    // N-2: two custody dirs for one window token refuse as evidence mismatch.
+    write_custody_journal(&parent, nonce, "RolledBack");
+    let second = parent.join("recovery").join(format!(
+        "consolidation-2-{}",
+        &mem_core::sha256::hex(&mem_core::sha256::digest(nonce.as_bytes()))[..16]
+    ));
+    std::fs::create_dir_all(&second).expect("second custody dir");
+    let refusal = release_gated(&root, nonce).expect_err("two custody dirs must refuse");
+    assert_eq!(refusal.code, 77);
+    assert_eq!(refusal.event, "consolidation.release_evidence_mismatch");
+
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+#[test]
 fn test_reservation_abandoned_before_journal_recovers_as_rolledback() {
+    let _serial = serial_guard();
+    use opencode_agents_memory::shard_consolidation::{adopt_gated, release_gated};
     let parent = unique_temp_dir("pre-journal-adopt");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
@@ -3346,21 +3528,19 @@ fn test_reservation_abandoned_before_journal_recovers_as_rolledback() {
     let nonce = "AAAAAAAAAAAAAAAAAAAAAA==";
 
     // Orphaned reservation: dead holder, journal ABSENT (no custody dir).
-    write_reservation_body(&parent, dead_pid(), Some(7), nonce);
+    write_reservation_body(&parent, &root, dead_pid(), Some(7), nonce);
     let before = tree_digest(&root);
 
-    let adopted = reservation::adopt_pre_journal(&root, nonce)
-        .expect("orphan + absent journal + dead holder adopts");
-    assert_eq!(
-        adopted.record_kind(),
-        "RolledBack",
-        "synthesized one-record journal is RolledBack{{pre_journal_abandon}}"
-    );
+    let adopted = adopt_gated(&root, nonce).expect("orphan + absent journal + dead holder adopts");
+    assert_eq!(adopted.record_kind(), "RolledBack");
     assert_eq!(adopted.reason(), "pre_journal_abandon");
-    assert!(
-        reservation::release(&root, nonce, reservation::ReleasePhase::RolledBack).is_ok(),
-        "the adopted orphan releases"
-    );
+
+    // A second adopt over the now-present journal refuses.
+    let refusal = adopt_gated(&root, nonce).expect_err("journal present must refuse adopt");
+    assert_eq!(refusal.code, 77);
+    assert_eq!(refusal.event, "consolidation.release_journal_present");
+
+    release_gated(&root, nonce).expect("the adopted orphan releases");
     assert!(!parent.join(RESERVATION_FILE).exists());
     assert_eq!(before, tree_digest(&root), "S is byte-unchanged");
 
@@ -3369,13 +3549,14 @@ fn test_reservation_abandoned_before_journal_recovers_as_rolledback() {
     let reused = mem_store::platform::process_start_time(own)
         .unwrap_or(0)
         .wrapping_add(1);
-    write_reservation_body(&parent, own, Some(reused), nonce);
-    assert!(
-        reservation::adopt_pre_journal(&root, nonce).is_ok(),
-        "a pid-reused (token-refuted) holder is dead and adopts"
-    );
+    let parent2 = unique_temp_dir("pre-journal-reuse");
+    let root2 = parent2.join("data");
+    std::fs::create_dir_all(&root2).expect("fixture root");
+    write_reservation_body(&parent2, &root2, own, Some(reused), nonce);
+    adopt_gated(&root2, nonce).expect("a pid-reused (token-refuted) holder is dead and adopts");
 
     let _ = std::fs::remove_dir_all(&parent);
+    let _ = std::fs::remove_dir_all(&parent2);
 }
 
 // ---------------------------------------------------------------------------
@@ -3396,6 +3577,7 @@ fn run_snapshot(root: &Path, custody: &Path) -> (Option<i32>, String, String) {
         .arg(format!("--custody={}", custody.display()))
         .env("HOME", &home)
         .stdin(Stdio::null())
+        .envs(window_env(root).map(|nonce| ("OPENCODE_MEM_MAINTENANCE_NONCE", nonce)))
         .output()
         .expect("snapshot child runs");
     (
@@ -3429,9 +3611,11 @@ fn plant_wal_only_rows(db: &Path) {
 
 #[test]
 fn test_snapshot_precedes_native_recovery() {
+    let _serial = serial_guard();
     let parent = unique_temp_dir("snapshot-native");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     let db = root.join("episodic.db");
     plant_wal_only_rows(&db);
     std::fs::write(root.join("sentinel.txt"), b"sentinel").expect("sentinel");
@@ -3506,6 +3690,7 @@ fn test_snapshot_precedes_native_recovery() {
         let parent = unique_temp_dir("premise-per-path");
         let root = parent.join("data");
         std::fs::create_dir_all(root.join("projects")).expect("fixture tree");
+        acquire_window(&root);
         std::fs::write(root.join("projects").join("project_x_shard_0.db"), b"x").expect("child");
         // A child file with a group write bit: the root is clean, the path is not.
         std::fs::set_permissions(
@@ -3600,6 +3785,7 @@ fn run_verify_snapshot(custody: &Path) -> Option<i32> {
         .arg(format!("--custody={}", custody.display()))
         .env("HOME", parent.join("home"))
         .stdin(Stdio::null())
+        .envs(window_env(&root).map(|nonce| ("OPENCODE_MEM_MAINTENANCE_NONCE", nonce)))
         .output()
         .expect("verify child runs");
     output.status.code()
@@ -3626,6 +3812,7 @@ fn run_journal_write(custody: &Path) -> (Option<i32>, String, String) {
         .arg(format!("--custody={}", custody.display()))
         .env("HOME", &home)
         .stdin(Stdio::null())
+        .envs(window_env(&root).map(|nonce| ("OPENCODE_MEM_MAINTENANCE_NONCE", nonce)))
         .output()
         .expect("journal child runs");
     (
@@ -3655,6 +3842,7 @@ fn run_recover(custody: &Path) -> (Option<i32>, String) {
         .arg(format!("--custody={}", custody.display()))
         .env("HOME", &home)
         .stdin(Stdio::null())
+        .envs(window_env(&root).map(|nonce| ("OPENCODE_MEM_MAINTENANCE_NONCE", nonce)))
         .output()
         .expect("recover child runs");
     (
@@ -3672,6 +3860,7 @@ fn install_fixture(parent: &Path) -> (PathBuf, PathBuf) {
     std::fs::create_dir_all(&staged).expect("staged");
     std::fs::write(live.join("sentinel.txt"), b"old-live").expect("live sentinel");
     std::fs::write(staged.join("sentinel.txt"), b"new-staged").expect("staged sentinel");
+    acquire_window(&live);
     (live, staged)
 }
 
@@ -3700,6 +3889,7 @@ fn last_journal_record(custody: &Path) -> serde_json::Value {
 
 #[test]
 fn test_install_crash_boundaries_recover() {
+    let _serial = serial_guard();
     let parent = unique_temp_dir("install-crash");
     let custody = parent
         .join("recovery")
@@ -3752,6 +3942,9 @@ fn test_install_crash_boundaries_recover() {
         write_fixture_config(&home, 1000);
         let root = parent.join("data-window");
         std::fs::create_dir_all(&root).expect("window root");
+        // One reservation per parent: `install_fixture` already holds it at
+        // `parent`, so the child reuses that live window's nonce.
+        let live_nonce = window_env(&live).expect("install fixture window");
         let status = Command::new(env!("CARGO_BIN_EXE_opencode-agents-memory"))
             .arg(format!("--storage-root={}", root.display()))
             .arg("--mode=consolidate-journal")
@@ -3759,6 +3952,7 @@ fn test_install_crash_boundaries_recover() {
             .env("OPENCODE_MEM_CONSOLIDATE_KILL_AT", "journal-tmp")
             .env("HOME", &home)
             .stdin(Stdio::null())
+            .env("OPENCODE_MEM_MAINTENANCE_NONCE", live_nonce)
             .output()
             .expect("window child runs");
         assert_eq!(
@@ -3949,6 +4143,7 @@ fn run_staged_verify(root: &Path, custody: &Path, staged: &Path) -> (Option<i32>
         .arg(format!("--staged={}", staged.display()))
         .env("HOME", &home)
         .stdin(Stdio::null())
+        .envs(window_env(root).map(|nonce| ("OPENCODE_MEM_MAINTENANCE_NONCE", nonce)))
         .output()
         .expect("staged-verify child runs");
     (
@@ -3995,6 +4190,7 @@ fn run_install_child(
         .env("OPENCODE_MEM_CONSOLIDATE_KILL_AT", boundary)
         .env("HOME", &home)
         .stdin(Stdio::null())
+        .envs(window_env(live).map(|nonce| ("OPENCODE_MEM_MAINTENANCE_NONCE", nonce)))
         .output()
         .expect("install child runs");
     (
@@ -4036,6 +4232,7 @@ fn recover_with_journal(name: &str, bytes: &[u8]) -> (Option<i32>, String, PathB
     let custody = parent
         .join("recovery")
         .join("consolidation-20261112T000000Z-corrupt");
+    make_recovery_dir(&parent.join("recovery"));
     std::fs::create_dir_all(&custody).expect("custody");
     std::fs::set_permissions(
         &custody,
@@ -4052,12 +4249,16 @@ fn recover_with_journal(name: &str, bytes: &[u8]) -> (Option<i32>, String, PathB
     // A real window past `SnapshotVerified` already holds the rev-13 sidecar;
     // plant it so EV-M's presence rule never masks the check under test.
     write_fixture_aux_sidecar(&custody);
+    // The recover child's storage root is `parent/data`; hold the window there.
+    std::fs::create_dir_all(parent.join("data")).expect("recover storage root");
+    acquire_window(&parent.join("data"));
     let (code, stderr) = run_recover(&custody);
     (code, stderr, parent)
 }
 
 #[test]
 fn test_corrupt_journal_fails_closed() {
+    let _serial = serial_guard();
     // (1) truncated JSON: refuse 77 for the unparseable record, archive the
     // journal aside, never guess a state from a torn tail.
     let (code, stderr, parent) =
@@ -4185,6 +4386,7 @@ fn run_custody_child(
         .env("OPENCODE_MEM_CONSOLIDATE_KILL_AT", boundary)
         .env("HOME", &home)
         .stdin(Stdio::null())
+        .envs(window_env(root).map(|nonce| ("OPENCODE_MEM_MAINTENANCE_NONCE", nonce)))
         .output()
         .expect("custody child runs");
     (
@@ -4195,6 +4397,7 @@ fn run_custody_child(
 
 #[test]
 fn test_restore_is_whole_root_and_idempotent() {
+    let _serial = serial_guard();
     use std::os::unix::fs::PermissionsExt;
     // A partial apply: a sentinel and a new DB were added, an unrelated file
     // mutated, and two modes widened. Restore from the frozen snapshot must
@@ -4202,6 +4405,7 @@ fn test_restore_is_whole_root_and_idempotent() {
     let parent = unique_temp_dir("restore-whole-root");
     let root = parent.join("data");
     std::fs::create_dir_all(root.join("projects")).expect("projects");
+    acquire_window(&root);
     std::fs::write(root.join("keep.txt"), b"original").expect("keep");
     std::fs::write(
         root.join("projects").join("project_x_shard_0.db"),
@@ -4353,6 +4557,7 @@ fn test_restore_is_whole_root_and_idempotent() {
     let no_journal_parent = unique_temp_dir("restore-no-journal");
     let no_journal_root = no_journal_parent.join("data");
     std::fs::create_dir_all(&no_journal_root).expect("no-journal root");
+    acquire_window(&no_journal_root);
     std::fs::write(no_journal_root.join("keep.txt"), b"original").expect("no-journal keep");
     let no_journal_custody = no_journal_parent
         .join("recovery")
@@ -4385,6 +4590,7 @@ fn test_restore_is_whole_root_and_idempotent() {
     let crash_parent = unique_temp_dir("restore-crash");
     let crash_root = crash_parent.join("data");
     std::fs::create_dir_all(crash_root.join("projects")).expect("crash projects");
+    acquire_window(&crash_root);
     std::fs::write(crash_root.join("keep.txt"), b"original").expect("crash keep");
     let crash_custody = crash_parent
         .join("recovery")
@@ -4445,12 +4651,14 @@ fn test_restore_is_whole_root_and_idempotent() {
 
 #[test]
 fn test_verified_repeat_apply_is_noop() {
+    let _serial = serial_guard();
     // A verified apply followed by an identical second invocation must not
     // touch bytes, mtimes, or the backup set. A changed plan refuses.
     let parent = unique_temp_dir("repeat-apply-noop");
     let custody = parent.join("recovery").join("consolidation-repeat-nonce");
     let root = parent.join("data");
     std::fs::create_dir_all(root.join("projects")).expect("root");
+    acquire_window(&root);
     std::fs::write(
         root.join("projects").join("project_x_shard_0.db"),
         b"verified",
@@ -4484,6 +4692,7 @@ fn test_verified_repeat_apply_is_noop() {
         .arg(format!("--staged={}", staged.display()))
         .env("HOME", parent.join("home"))
         .stdin(Stdio::null())
+        .envs(window_env(&root).map(|nonce| ("OPENCODE_MEM_MAINTENANCE_NONCE", nonce)))
         .output()
         .expect("install child runs");
     assert_eq!(
@@ -4553,12 +4762,14 @@ fn test_verified_repeat_apply_is_noop() {
 
 #[test]
 fn test_settlement_recomputes_final_artifacts() {
+    let _serial = serial_guard();
     // Settlement must recompute the final artifacts from disk, never trust a
     // self-written flag. A flipped persisted vector byte and a post-manifest
     // source edit must each reject.
     let parent = unique_temp_dir("settlement-recompute");
     let root = parent.join("data");
     std::fs::create_dir_all(root.join("projects")).expect("projects");
+    acquire_window(&root);
     std::fs::write(
         root.join("projects").join("project_x_shard_0.db"),
         b"settled",
@@ -4707,6 +4918,7 @@ fn test_settlement_recomputes_final_artifacts() {
 /// mis-aimed harness never creates a reservation under the live root.
 #[test]
 fn test_rehearsal_refuses_mis_aimed_storage_root() {
+    let _serial = serial_guard();
     let scratch = unique_temp_dir("c3-scratch");
     let rehearsal = scratch.join("rehearsal-20261112T000000Z");
     std::fs::create_dir_all(&rehearsal).expect("rehearsal tree");
@@ -4742,6 +4954,7 @@ fn test_rehearsal_refuses_mis_aimed_storage_root() {
         .arg("--dry-run")
         .env("HOME", scratch.join("home"))
         .stdin(Stdio::null())
+        .envs(window_env(&mis_aimed).map(|nonce| ("OPENCODE_MEM_MAINTENANCE_NONCE", nonce)))
         .output()
         .expect("harness runs");
     assert_ne!(
@@ -4786,6 +4999,7 @@ fn one_group_apply_fixture(prefix: &str) -> (PathBuf, PathBuf, PathBuf) {
     let parent = unique_temp_dir(prefix);
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     {
         let fx = fixture(&root);
         fx.seed_row(SOURCE, &record("b", &format!("opencode_project_{SOURCE}")));
@@ -4855,6 +5069,7 @@ fn shard_count_facts(shard: &Path) -> (Option<i64>, i64) {
 /// pre-fix order) — the repeat then exits 72 with `source_set_mismatch`.
 #[test]
 fn test_repeat_apply_over_installed_window_refuses_window_not_applyable() {
+    let _serial = serial_guard();
     const SOURCE: &str = "2222222222222222";
     let (parent, root, plan) = one_group_apply_fixture("reapply-installed");
     let custody = fixture_custody(&parent);
@@ -4943,11 +5158,13 @@ fn test_repeat_apply_over_installed_window_refuses_window_not_applyable() {
 /// rows while the shard holds 5).
 #[test]
 fn test_staged_shard_stats_are_measured_counts() {
+    let _serial = serial_guard();
     const SOURCE_A: &str = "2222222222222222";
     const SOURCE_B: &str = "3333333333333333";
     let parent = unique_temp_dir("staged-shard-stats");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     let append_identity = "path:/home/opencode/Code/thing";
     let append_hash = identity_hash(append_identity);
     let fresh_identity = "path:/home/opencode/Code/other";
@@ -5040,6 +5257,7 @@ const DEAD_MARKER_BODY: &[u8] =
 /// (bytes change), and creates one where S had none.
 #[test]
 fn test_apply_never_writes_the_live_wal_mode_marker() {
+    let _serial = serial_guard();
     // Subcase (i): an existing marker keeps its bytes.
     let (parent, root, plan) = one_group_apply_fixture("apply-live-marker");
     let marker = root.join(".wal-mode");
@@ -5100,10 +5318,12 @@ fn test_apply_never_writes_the_live_wal_mode_marker() {
 /// `Verified`, and this test goes RED on its first settlement assertion.
 #[test]
 fn test_writable_open_before_settlement_refuses() {
+    let _serial = serial_guard();
     const HASH: &str = "1111111111111111";
     let parent = unique_temp_dir("settle-after-writable-open");
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     {
         let fx = fixture(&root);
         fx.seed_row(HASH, &record("a", &format!("opencode_project_{HASH}")));
@@ -5185,6 +5405,7 @@ fn test_writable_open_before_settlement_refuses() {
 /// behaviour) — S is retired with no restorable copy and the exit is 0.
 #[test]
 fn test_install_requires_a_verified_custody_baseline() {
+    let _serial = serial_guard();
     // (1) No snapshot: a typed refusal, and neither rename has happened.
     let parent = unique_temp_dir("install-no-baseline");
     let custody = parent
@@ -5307,6 +5528,7 @@ fn reparent_fixture(tag: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
     let parent = unique_temp_dir(tag);
     let root = parent.join("data");
     std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
     {
         let fx = fixture(&root);
         fx.seed_row(
@@ -5449,6 +5671,7 @@ fn rewrite_last_journal_digest(custody: &Path, digest: &str) {
 /// count oracle 1 → 0.
 #[test]
 fn test_reparent_check_eight() {
+    let _serial = serial_guard();
     use std::os::unix::fs::PermissionsExt;
     // ---- base tree: the correct outcome installs (subcase iv) ----
     let (parent, root, plan, custody) = reparent_fixture("reparent-base");
@@ -5954,4 +6177,353 @@ fn text_cell_opt(cells: &BTreeMap<String, Value>, name: &str) -> Option<String> 
     cells
         .get(name)
         .and_then(|value| value.as_text().map(str::to_string))
+}
+
+/// FS-3 gate evidence (blueprint `FOLLOW-ON-ACQ` subcases (a)–(h) and (g2)).
+/// Each case builds its own root, spawns the real binary, and asserts the exit
+/// code plus the structured event; the apply cases also assert that no
+/// `journal.json` is created.
+#[test]
+fn test_apply_cannot_run_without_a_reservation() {
+    let _serial = serial_guard();
+    const HASH: &str = "8888888888888888";
+    const N1: &str = "BBBBBBBBBBBBBBBBBBBBBA==";
+
+    // Builds a root with one planned row and returns (parent, root, plan, custody).
+    let build = |tag: &str| {
+        let parent = unique_temp_dir(tag);
+        let root = parent.join("data");
+        std::fs::create_dir_all(&root).expect("fixture root");
+        {
+            let fx = fixture(&root);
+            fx.seed_row(HASH, &record("row", &format!("opencode_project_{HASH}")));
+        }
+        let identity = "path:/fixture/self";
+        let rows = vec![valid_row(&root, HASH, identity, identity, false)];
+        let plan = write_plan(&parent.join("plans"), &root, rows);
+        let custody = fixture_custody(&parent);
+        (parent, root, plan, custody)
+    };
+
+    // Spawns the real binary with explicit args and an explicit nonce env
+    // (`None` = unset). Returns (exit code, stderr).
+    let spawn = |root: &Path, args: &[String], nonce: Option<&str>| {
+        let home = root.parent().expect("parent").join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        if !home.join(".config/opencode/opencode-mem.jsonc").exists() {
+            write_fixture_config(&home, 1000);
+        }
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_opencode-agents-memory"));
+        cmd.arg(format!("--storage-root={}", root.display()))
+            .args(args)
+            .env("HOME", &home)
+            .stdin(Stdio::null());
+        cmd.env_remove("OPENCODE_MEM_MAINTENANCE_NONCE");
+        if let Some(value) = nonce {
+            cmd.env("OPENCODE_MEM_MAINTENANCE_NONCE", value);
+        }
+        let out = cmd.output().expect("child runs");
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr).to_string(),
+        )
+    };
+    let apply_args = |plan: &Path, custody: &Path| {
+        vec![
+            "--mode=consolidate-shards".to_string(),
+            format!("--plan={}", plan.display()),
+            format!("--custody={}", custody.display()),
+        ]
+    };
+
+    // (a) Flagless apply on an unreserved (Absent) root -> 77, no journal.json.
+    {
+        let (parent, root, plan, custody) = build("ftr-a");
+        let (code, stderr) = spawn(&root, &apply_args(&plan, &custody), None);
+        assert_eq!(code, Some(77), "(a) Absent apply exits 77; {stderr}");
+        assert!(
+            stderr.contains("consolidation.window_not_held"),
+            "(a) event named; {stderr}"
+        );
+        assert!(
+            !custody.join("journal.json").exists(),
+            "(a) no journal.json is written"
+        );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    // (b) + (g2) Held by a foreign live holder: wrong, unset, or empty nonce -> 76.
+    for nonce in [Some("wrong-nonce"), None, Some("")] {
+        let (parent, root, plan, custody) = build("ftr-b");
+        let own_token = mem_store::platform::process_start_time(std::process::id());
+        let _ = own_token;
+        // A live foreign holder: pid 1 (init) is alive and is not this test.
+        write_reservation_body(
+            &parent,
+            &root,
+            1,
+            mem_store::platform::process_start_time(1),
+            N1,
+        );
+        let (code, stderr) = spawn(&root, &apply_args(&plan, &custody), nonce);
+        assert_eq!(
+            code,
+            Some(76),
+            "(b)/(g2) nonce {nonce:?} refuses 76; {stderr}"
+        );
+        assert!(
+            stderr.contains("maintenance.reservation_held"),
+            "(b)/(g2) event named; {stderr}"
+        );
+        assert!(
+            !custody.join("journal.json").exists(),
+            "(b)/(g2) no journal"
+        );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    // (c) Held by a live foreign holder with the MATCHING nonce -> admitted, not 76.
+    {
+        let (parent, root, plan, custody) = build("ftr-c");
+        write_reservation_body(
+            &parent,
+            &root,
+            1,
+            mem_store::platform::process_start_time(1),
+            N1,
+        );
+        let (code, stderr) = spawn(&root, &apply_args(&plan, &custody), Some(N1));
+        assert_ne!(code, Some(76), "(c) matching nonce is admitted; {stderr}");
+        assert_ne!(code, Some(77), "(c) matching nonce is not Absent; {stderr}");
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    // (d) --dry-run with the right nonce on a Held root -> 76 (dry-run keeps the
+    // old fence: Held refuses regardless of nonce, O1).
+    {
+        let (parent, root, plan, _custody) = build("ftr-d");
+        write_reservation_body(
+            &parent,
+            &root,
+            1,
+            mem_store::platform::process_start_time(1),
+            N1,
+        );
+        let (code, stderr) = spawn(
+            &root,
+            &[
+                "--mode=consolidate-shards".to_string(),
+                format!("--plan={}", plan.display()),
+                "--dry-run".to_string(),
+            ],
+            Some(N1),
+        );
+        assert_eq!(code, Some(76), "(d) dry-run on Held refuses 76; {stderr}");
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    // (e) + (f) every W mode, fully specified with its required absolute
+    // arguments, on an unreserved root -> 77 window_not_held. A mode that
+    // cannot parse its arguments exits 64 before FS-3, so the shapes below are
+    // the parser's required shapes (src/main.rs consolidate arms).
+    {
+        let (parent, root, plan, custody) = build("ftr-ef");
+        let staged = parent.join("staged");
+        let w_args: Vec<(&str, Vec<String>)> = vec![
+            (
+                "consolidate-rollback",
+                vec![format!("--custody={}", custody.display())],
+            ),
+            (
+                "consolidate-install",
+                vec![
+                    format!("--custody={}", custody.display()),
+                    format!("--staged={}", staged.display()),
+                ],
+            ),
+            (
+                "consolidate-recover",
+                vec![format!("--custody={}", custody.display())],
+            ),
+            (
+                "consolidate-staged-verify",
+                vec![
+                    format!("--custody={}", custody.display()),
+                    format!("--staged={}", staged.display()),
+                ],
+            ),
+            (
+                "consolidate-journal",
+                vec![format!("--custody={}", custody.display())],
+            ),
+            (
+                "consolidate-snapshot",
+                vec![format!("--custody={}", custody.display())],
+            ),
+            (
+                "consolidate-verify-snapshot",
+                vec![format!("--custody={}", custody.display())],
+            ),
+            (
+                "consolidate-verify",
+                vec![format!("--custody={}", custody.display())],
+            ),
+            ("consolidate-shards", apply_args(&plan, &custody)),
+        ];
+        for (mode, args) in w_args {
+            let mut full = if mode == "consolidate-shards" {
+                args
+            } else {
+                vec![format!("--mode={mode}")]
+                    .into_iter()
+                    .chain(args)
+                    .collect()
+            };
+            if mode == "consolidate-shards" {
+                full.truncate(full.len());
+            }
+            let (code, stderr) = spawn(&root, &full, None);
+            assert_eq!(code, Some(77), "(e/f) {mode} on Absent exits 77; {stderr}");
+            assert!(
+                stderr.contains("consolidation.window_not_held"),
+                "(e/f) {mode} names window_not_held; {stderr}"
+            );
+        }
+        assert!(
+            !custody.join("journal.json").exists(),
+            "(e/f) no journal written"
+        );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    // (g) same-nonce W while <parent>/recovery/ is flocked -> 77 window_busy.
+    {
+        let (parent, root, plan, custody) = build("ftr-g");
+        make_recovery_dir(&parent.join("recovery"));
+        write_reservation_body(
+            &parent,
+            &root,
+            1,
+            mem_store::platform::process_start_time(1),
+            N1,
+        );
+        let recovery = std::fs::File::open(parent.join("recovery")).expect("recovery fd");
+        let fd = std::os::unix::io::AsRawFd::as_raw_fd(&recovery);
+        assert_eq!(unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) }, 0);
+        let (code, stderr) = spawn(&root, &apply_args(&plan, &custody), Some(N1));
+        assert_eq!(code, Some(77), "(g) flocked recovery/ refuses 77; {stderr}");
+        assert!(
+            stderr.contains("consolidation.window_busy"),
+            "(g) event window_busy; {stderr}"
+        );
+        assert!(!custody.join("journal.json").exists(), "(g) no journal");
+        drop(recovery);
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    // (h) forbidden apply spellings on consolidate-shards -> 64.
+    // `--apply false` (two tokens) is not seen by the consolidate guard: the
+    // generic parser rejects `false` as an unknown argument first, exit 2. That
+    // is measured and pinned here as a SPEC-FINDING (blueprint says 64); it
+    // still refuses before any write.
+    for (extra, expected) in [
+        (vec!["--apply=false".to_string()], 64),
+        (vec!["--apply".to_string(), "false".to_string()], 2),
+        (vec!["--apply".to_string()], 64),
+        (vec!["--confirm".to_string(), "tok".to_string()], 64),
+    ] {
+        let (parent, root, plan, custody) = build("ftr-h");
+        let mut args = apply_args(&plan, &custody);
+        args.extend(extra.clone());
+        let (code, stderr) = spawn(&root, &args, None);
+        assert_eq!(
+            code,
+            Some(expected),
+            "(h) {extra:?} refuses {expected}; {stderr}"
+        );
+        assert!(!custody.join("journal.json").exists(), "(h) no journal");
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+}
+
+/// O3 fixture: a live engine holder whose argv spells the storage root with a
+/// `..` component is a foreign engine (exit 77 `acquire_foreign_engine_holder`);
+/// the exact lexical spelling is admitted. Acceptance from the coder obligations.
+#[test]
+fn test_acquire_pins_lexical_storage_root_spelling() {
+    let _serial = serial_guard();
+    let parent = unique_temp_dir("o3-lexical");
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("o3 root");
+    let canonical = std::fs::canonicalize(&root).expect("canonical root");
+    let dotted = canonical
+        .parent()
+        .expect("parent")
+        .join("data-x")
+        .join("..")
+        .join("data");
+    std::fs::create_dir_all(canonical.parent().expect("parent").join("data-x")).expect("dotdir");
+    let dotted_str = dotted.display().to_string();
+
+    // A live holder: this test process's own engine-shaped child. Spawn the real
+    // binary in stdio mode with the lexical spelling, then record it in the lock.
+    let home = parent.join("home");
+    std::fs::create_dir_all(&home).expect("home");
+    write_fixture_config(&home, 1000);
+    let mut holder = Command::new(env!("CARGO_BIN_EXE_opencode-agents-memory"))
+        .arg("--mode")
+        .arg("stdio")
+        .arg("--storage-root")
+        .arg(&dotted_str)
+        .env("HOME", &home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("holder spawns");
+    // Keep stdin open so the stdio engine stays alive while it is inspected.
+    let _stdin_keepalive = holder.stdin.take();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let pid = holder.id();
+    let start = mem_store::platform::process_start_time(pid);
+    assert!(start.is_some(), "O3: holder start-time token readable");
+    let lock = serde_json::json!({
+        "pid": pid,
+        "timestamp": "2026-11-14T00:00:00Z",
+        "operation": null,
+        "start_time": start,
+    });
+    std::fs::write(root.join(".engine.lock"), lock.to_string()).expect("engine lock");
+
+    // Exact lexical spelling of the holder's argv: the holder is an engine, so
+    // acquire is refused only when the argv spelling does not match. Use the
+    // canonical root as lexical (no `..`), which the holder did NOT spell: refused.
+    let refused = mem_store::maintenance_reservation::acquire(&canonical, &canonical);
+    let refused_is_foreign = matches!(
+        refused,
+        Err(mem_store::maintenance_reservation::ReservationError::ForeignEngineHolder)
+    );
+
+    // The dotted spelling is the one the holder was launched with: admitted.
+    let admitted = mem_store::maintenance_reservation::acquire(&dotted, &canonical);
+
+    let _ = holder.kill();
+    let _ = holder.wait();
+    let _ = std::fs::remove_dir_all(&parent);
+
+    assert!(
+        refused_is_foreign,
+        "O3: argv spelled with `..` must not match the canonical lexical root"
+    );
+    // The F7 seam is what O3 pins: the exact lexical spelling must not be
+    // refused as a foreign holder. A live engine then trips the active-writer
+    // check, which is a different refusal and is not F7's verdict.
+    assert!(
+        !matches!(
+            admitted,
+            Err(mem_store::maintenance_reservation::ReservationError::ForeignEngineHolder)
+        ),
+        "O3: the exact lexical spelling is not a foreign holder; {:?}",
+        admitted.err()
+    );
 }

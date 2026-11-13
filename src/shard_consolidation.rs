@@ -177,6 +177,105 @@ struct PreflightSource {
     columns: BTreeSet<String>,
 }
 
+/// The one-record journal a pre-journal adopt synthesizes (§E.2): the
+/// synthesized terminal record is always `RolledBack` / `pre_journal_abandon`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdoptedRecord {
+    kind: &'static str,
+    reason: &'static str,
+}
+
+impl AdoptedRecord {
+    /// The record kind (`RolledBack`).
+    #[must_use]
+    pub fn record_kind(&self) -> &'static str {
+        self.kind
+    }
+
+    /// The rollback reason (`pre_journal_abandon`).
+    #[must_use]
+    pub fn reason(&self) -> &'static str {
+        self.reason
+    }
+}
+
+/// The single `<parent>/recovery/` advisory flock for one consolidation
+/// window (§L L2): mkdir `0700` → open `O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC` → fstat
+/// verify dir/owner/`0700` → fsync parent → `flock(LOCK_EX|LOCK_NB)`. The loser
+/// refuses 77 `consolidation.window_busy` and mutates nothing.
+pub struct RecoveryFlock {
+    // Held for its flock: dropping the descriptor releases the lock.
+    _file: std::fs::File,
+}
+
+impl RecoveryFlock {
+    pub fn acquire(storage_root: &Path) -> Result<Self, Refusal> {
+        let parent = storage_root
+            .parent()
+            .ok_or_else(|| custody_refusal("storage root has no parent"))?;
+        let recovery = parent.join("recovery");
+        use std::os::unix::fs::DirBuilderExt;
+        match std::fs::DirBuilder::new().mode(0o700).create(&recovery) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(custody_refusal(format!("recovery dir: {error}"))),
+        }
+        use std::os::unix::fs::OpenOptionsExt;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(&recovery)
+            .map_err(|error| custody_refusal(format!("recovery open: {error}")))?;
+        use std::os::unix::fs::MetadataExt;
+        use std::os::unix::fs::PermissionsExt;
+        let metadata = file
+            .metadata()
+            .map_err(|error| custody_refusal(format!("recovery stat: {error}")))?;
+        if !metadata.is_dir()
+            || metadata.uid() != unsafe { libc::geteuid() } as u32
+            || (metadata.permissions().mode() & 0o777) != 0o700
+        {
+            return Err(custody_refusal("recovery dir is not 0700"));
+        }
+        if let Some(parent_dir) = recovery.parent() {
+            let _ = std::fs::File::open(parent_dir).and_then(|dir| dir.sync_all());
+        }
+        let fd = std::os::unix::io::AsRawFd::as_raw_fd(&file);
+        if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            return Err(Refusal::new(
+                77,
+                "consolidation.window_busy",
+                "the recovery flock is held by another window",
+            ));
+        }
+        Ok(Self { _file: file })
+    }
+}
+
+/// FS-3 plus the `<parent>/recovery/` single-descriptor flock: the window
+/// admission shared by all nine `W` modes. `Absent` refuses 77
+/// (`consolidation.window_not_held`); `Held` is adjudicated by nonce /
+/// holder-self; the winner keeps the flock until the process exits.
+pub fn admit_window_step(mode_name: &str, storage_root: &Path) -> Result<RecoveryFlock, Refusal> {
+    let flock = RecoveryFlock::acquire(storage_root)?;
+    let nonce = std::env::var("OPENCODE_MEM_MAINTENANCE_NONCE").ok();
+    let verdict =
+        mem_store::maintenance_reservation::check_for_window(storage_root, nonce.as_deref());
+    match verdict {
+        mem_store::maintenance_reservation::WindowAdmissionVerdict::Absent => Err(Refusal::new(
+            77,
+            "consolidation.window_not_held",
+            format!("{mode_name}: no maintenance reservation held"),
+        )),
+        mem_store::maintenance_reservation::WindowAdmissionVerdict::HeldRefused => {
+            // F11: the 76 line is the operation + root_basename payload only.
+            mem_store::maintenance_reservation::refuse_held_exit(mode_name, storage_root)
+        }
+        mem_store::maintenance_reservation::WindowAdmissionVerdict::AdmittedByNonce(_)
+        | mem_store::maintenance_reservation::WindowAdmissionVerdict::HeldBySelf(_) => Ok(flock),
+    }
+}
+
 /// Entry point for `--mode=consolidate-shards --plan <json> [--custody <abs-dir>] [--dry-run]`.
 ///
 /// Returns the process exit code; a refusal has already been emitted on
@@ -3569,6 +3668,31 @@ fn effective_phase(custody: &Path) -> Result<Option<String>, Refusal> {
     Ok(None)
 }
 
+/// True when the journal's record chain contains `StagedVerified` or any phase
+/// written after it. Unreadable or unparseable journals answer `true`, so the
+/// sidecar requirement stays in force on any doubt (fail-closed).
+fn chain_reached_staged_verified(custody: &Path) -> bool {
+    const AFTER_STAGED: &[&str] = &[
+        PHASE_STAGED_VERIFIED,
+        PHASE_INSTALLING,
+        PHASE_INSTALLED_UNVERIFIED,
+        PHASE_VERIFIED,
+    ];
+    let Ok(text) = std::fs::read_to_string(custody.join(JOURNAL_FILE)) else {
+        return true;
+    };
+    text.lines()
+        .filter(|line| !line.trim().is_empty())
+        .any(|line| {
+            serde_json::from_str::<Value>(line).map_or(true, |record| {
+                record
+                    .get("phase")
+                    .and_then(Value::as_str)
+                    .is_some_and(|phase| AFTER_STAGED.contains(&phase))
+            })
+        })
+}
+
 /// §C.5 rev 13: a re-apply over a window whose journal reached
 /// `InstalledUnverified` or `Verified` is REFUSED 77 — the sidecar is not
 /// hashed into any manifest, so this is what stops a re-apply from silently
@@ -3716,9 +3840,14 @@ fn ev_m_preflight(custody: &Path) -> Result<(), Refusal> {
     // `SnapshotVerified` may legitimately have none. The phase read is LENIENT
     // here: a corrupt journal is the recover path's own failure to archive, not
     // an EV-M mode refusal.
+    // Narrowest reading (§H.1 `none` row): a journal whose record chain never
+    // reached `StagedVerified` — the pre-journal `RolledBack` synthesized by
+    // adopt is the case — never wrote a sidecar, so the sidecar is mandatory
+    // only when some record at or past `StagedVerified` exists.
     if let Some(phase) = effective_phase(custody).ok().flatten()
         && phase != PHASE_PREPARED
         && phase != PHASE_SNAPSHOT_VERIFIED
+        && chain_reached_staged_verified(custody)
     {
         let sidecar = custody.join(AUX_SIDECAR);
         let mode = std::fs::metadata(&sidecar)
@@ -4365,20 +4494,532 @@ fn last_journal_record(custody: &Path) -> Result<Option<Value>, Refusal> {
     Ok(Some(record))
 }
 
-/// `--mode=consolidate-recover --custody <dir>`: EV-M first; a journal at
-/// `Installing` with S absent and the staged tree present completes L5 and
-/// records `InstalledUnverified`. Nothing else is guessed.
-pub fn run_recover(custody: &Path) -> i32 {
-    match recover(custody) {
+/// The root-private unlink: re-read the reservation bytes and unlink only on a
+/// byte-equal re-read (§E.2 defense in depth).
+fn remove_reservation_if_bytes_equal(res_path: &Path, expected: &[u8]) -> Result<(), Refusal> {
+    let current = std::fs::read(res_path).map_err(|error| {
+        Refusal::new(
+            77,
+            "consolidation.release_nonce_mismatch",
+            format!("reservation changed before unlink: {error}"),
+        )
+    })?;
+    if current != expected {
+        return Err(Refusal::new(
+            77,
+            "consolidation.release_nonce_mismatch",
+            "reservation changed before unlink",
+        ));
+    }
+    std::fs::remove_file(res_path).map_err(|error| {
+        Refusal::new(
+            77,
+            "consolidation.release_nonce_mismatch",
+            format!("reservation unlink failed: {error}"),
+        )
+    })?;
+    if let Some(parent) = res_path.parent() {
+        let _ = std::fs::File::open(parent).and_then(|dir| dir.sync_all());
+    }
+    Ok(())
+}
+
+/// Root `release_gated`: nonce match, dead holder, terminal journal phase,
+/// EV evidence, then the byte-equal unlink of the reservation.
+pub fn release_gated(storage_root: &Path, nonce: &str) -> Result<(), Refusal> {
+    let flock = RecoveryFlock::acquire(storage_root)?;
+    release_gated_with_flock(storage_root, nonce, &flock)
+}
+
+fn release_gated_with_flock(
+    storage_root: &Path,
+    nonce: &str,
+    _flock: &RecoveryFlock,
+) -> Result<(), Refusal> {
+    let Some((path, body, raw)) =
+        mem_store::maintenance_reservation::reservation_bytes(storage_root).map_err(|error| {
+            Refusal::new(
+                77,
+                "consolidation.release_nonce_mismatch",
+                format!("reservation body unreadable or corrupt: {error}"),
+            )
+        })?
+    else {
+        return Err(Refusal::new(
+            77,
+            "consolidation.window_not_held",
+            "no maintenance reservation held",
+        ));
+    };
+    if nonce.is_empty() || body.nonce != nonce {
+        return Err(Refusal::new(
+            77,
+            "consolidation.release_nonce_mismatch",
+            "reservation nonce mismatch",
+        ));
+    }
+    if !mem_store::maintenance_reservation::holder_is_dead(&body) {
+        return Err(Refusal::new(
+            77,
+            "consolidation.release_holder_alive",
+            "reservation holder is still alive or unverifiable",
+        ));
+    }
+    let wtok = mem_core::sha256::hex(&mem_core::sha256::digest(nonce.as_bytes()))[..16].to_string();
+    let parent = storage_root
+        .parent()
+        .ok_or_else(|| custody_refusal("storage root has no parent"))?;
+    let recovery = parent.join("recovery");
+    let entries = std::fs::read_dir(&recovery)
+        .map_err(|error| custody_refusal(format!("recovery dir unreadable: {error}")))?;
+    let mut custody_dirs: Vec<std::path::PathBuf> = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with("consolidation-") {
+            continue;
+        }
+        if [
+            "consolidation-retired-",
+            "consolidation-corrupt-",
+            "consolidation-failed-",
+            "consolidation-quarantine-",
+            "consolidation-escalation-",
+        ]
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+        {
+            continue;
+        }
+        if !name.contains(&format!("-{wtok}")) {
+            continue;
+        }
+        custody_dirs.push(entry.path());
+    }
+    if custody_dirs.len() > 1 {
+        return Err(Refusal::new(
+            77,
+            "consolidation.release_evidence_mismatch",
+            "multiple custody directories found for window token",
+        ));
+    }
+    if custody_dirs.is_empty() {
+        return Err(Refusal::new(
+            77,
+            "consolidation.release_phase_nonterminal",
+            "no custody journal for window",
+        ));
+    }
+    let custody = custody_dirs
+        .pop()
+        .ok_or_else(|| custody_refusal("no custody directory resolved"))?;
+    let journal = custody.join(JOURNAL_FILE);
+    let metadata = std::fs::symlink_metadata(&journal).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            Refusal::new(
+                77,
+                "consolidation.release_phase_nonterminal",
+                "no custody journal for window",
+            )
+        } else {
+            Refusal::new(
+                77,
+                "consolidation.release_journal_unreadable",
+                "custody journal exists but cannot be read",
+            )
+        }
+    })?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(Refusal::new(
+            77,
+            "consolidation.release_journal_unreadable",
+            "custody journal exists but cannot be read",
+        ));
+    }
+    let text = std::fs::read_to_string(&journal).map_err(|error| {
+        Refusal::new(
+            77,
+            "consolidation.release_journal_unreadable",
+            format!("custody journal exists but cannot be read: {error}"),
+        )
+    })?;
+    if text.trim().is_empty() {
+        return Err(Refusal::new(
+            77,
+            "consolidation.release_journal_unreadable",
+            "custody journal exists but cannot be read",
+        ));
+    }
+    verify_record_chain(&text)?;
+    let phase = effective_phase(&custody)?
+        .ok_or_else(|| custody_refusal("the custody journal has no effective phase"))?;
+    if phase != PHASE_VERIFIED && phase != PHASE_ROLLED_BACK {
+        return Err(Refusal::new(
+            77,
+            "consolidation.release_phase_nonterminal",
+            format!("journal phase {phase} is non-terminal"),
+        ));
+    }
+    release_evidence(storage_root, &body, &recovery, &wtok, &custody, &phase)?;
+    remove_reservation_if_bytes_equal(&path, &raw)
+}
+
+/// §H.1 evidence for a terminal phase, checked against disk before the
+/// reservation unlink. Every failure is `release_evidence_mismatch`, exit 77.
+///
+/// Verified: EV-R (one retired entry, and it is the original S inode), EV-G
+/// (staged tree consumed by L5), EV-N (S is a different inode whose manifest
+/// equals the verified staged manifest), EV-C (already resolved to one dir by
+/// the caller), EV-M (custody modes).
+///
+/// RolledBack: (α) S is the original inode and no retired entry exists, or
+/// (ζ) S manifest equals the `$SNAP` manifest. Any other state refuses.
+fn release_evidence(
+    storage_root: &Path,
+    body: &mem_store::maintenance_reservation::ReservationBody,
+    recovery: &Path,
+    wtok: &str,
+    custody: &Path,
+    phase: &str,
+) -> Result<(), Refusal> {
+    use std::os::unix::fs::MetadataExt;
+    let mismatch = |detail: &str| {
+        Refusal::new(
+            77,
+            "consolidation.release_evidence_mismatch",
+            detail.to_string(),
+        )
+    };
+    let s_meta = std::fs::symlink_metadata(storage_root)
+        .ok()
+        .filter(|meta| meta.is_dir() && !meta.file_type().is_symlink());
+    let original = match (body.s_dev, body.s_ino) {
+        (Some(dev), Some(ino)) => Some((dev, ino)),
+        _ => None,
+    };
+    let s_is_original = match (&s_meta, original) {
+        (Some(meta), Some((dev, ino))) => meta.dev() == dev && meta.ino() == ino,
+        _ => false,
+    };
+    let retired: Vec<std::path::PathBuf> = std::fs::read_dir(recovery)
+        .map_err(|error| custody_refusal(format!("recovery dir unreadable: {error}")))?
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            name.starts_with("consolidation-retired-") && name.contains(wtok)
+        })
+        .map(|entry| entry.path())
+        .collect();
+    // EV-M applies to every terminal resume, before any further reliance.
+    ev_m_preflight(custody).map_err(|refusal| mismatch(&refusal.message))?;
+
+    if phase == PHASE_VERIFIED {
+        // EV-R == 1, and the retired entry is the original S inode.
+        if retired.len() != 1 {
+            return Err(mismatch("EV-R: expected exactly one retired entry"));
+        }
+        let retired_meta = std::fs::symlink_metadata(&retired[0])
+            .ok()
+            .filter(|meta| meta.is_dir() && !meta.file_type().is_symlink());
+        let retired_is_original = match (&retired_meta, original) {
+            (Some(meta), Some((dev, ino))) => meta.dev() == dev && meta.ino() == ino,
+            _ => false,
+        };
+        if !retired_is_original {
+            return Err(mismatch("EV-R: retired entry is not the original S inode"));
+        }
+        let record = last_journal_record(custody)?
+            .ok_or_else(|| mismatch("EV-G: no journal record to read the staged tree from"))?;
+        let staged = record
+            .get("staged")
+            .and_then(Value::as_str)
+            .ok_or_else(|| mismatch("EV-G: record names no staged tree"))?;
+        // EV-G: L5 consumes the staged directory; a present one means L5 did not run.
+        if Path::new(staged).exists() {
+            return Err(mismatch("EV-G: staged tree still present, L5 did not run"));
+        }
+        // EV-N: S is a real directory, a different inode than the original, and
+        // its manifest equals the verified staged manifest.
+        if s_meta.is_none() || s_is_original {
+            return Err(mismatch("EV-N: S is not the installed tree"));
+        }
+        let staged_name = Path::new(staged)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| mismatch("EV-N: staged name unreadable"))?;
+        let verified =
+            std::fs::read_to_string(custody.join(format!("{staged_name}.manifest.sha256")))
+                .map_err(|_| mismatch("EV-N: staged manifest unreadable"))?;
+        if manifest_of(storage_root).ok().as_deref() != Some(verified.as_str()) {
+            return Err(mismatch(
+                "EV-N: installed S differs from the verified staged manifest",
+            ));
+        }
+        return Ok(());
+    }
+
+    // RolledBack: (α) original inode and no retired entry, or (ζ) S equals $SNAP.
+    if s_is_original && retired.is_empty() {
+        return Ok(());
+    }
+    let snap = custody.join(SNAP_DATA);
+    let zeta = s_meta.is_some()
+        && snap.is_dir()
+        && matches!(
+            (manifest_of(storage_root), manifest_of(&snap)),
+            (Ok(live), Ok(snapshot)) if live == snapshot
+        );
+    if zeta {
+        return Ok(());
+    }
+    Err(mismatch(
+        "RolledBack: S is neither the original inode with no retired entry nor equal to the snapshot",
+    ))
+}
+
+/// Root `adopt_gated`: the pre-journal orphan path — nonce, dead holder, EV-S,
+/// EV-R == 0, custody scan, then the synthesized `RolledBack` journal.
+pub fn adopt_gated(storage_root: &Path, nonce: &str) -> Result<AdoptedRecord, Refusal> {
+    let flock = RecoveryFlock::acquire(storage_root)?;
+    adopt_gated_with_flock(storage_root, nonce, &flock)
+}
+
+fn adopt_gated_with_flock(
+    storage_root: &Path,
+    nonce: &str,
+    _flock: &RecoveryFlock,
+) -> Result<AdoptedRecord, Refusal> {
+    let Some((_path, body, _raw)) =
+        mem_store::maintenance_reservation::reservation_bytes(storage_root).map_err(|error| {
+            Refusal::new(
+                77,
+                "consolidation.release_nonce_mismatch",
+                format!("reservation body unreadable or corrupt: {error}"),
+            )
+        })?
+    else {
+        return Err(Refusal::new(
+            77,
+            "consolidation.window_not_held",
+            "no maintenance reservation held",
+        ));
+    };
+    if nonce.is_empty() || body.nonce != nonce {
+        return Err(Refusal::new(
+            77,
+            "consolidation.release_nonce_mismatch",
+            "reservation nonce mismatch",
+        ));
+    }
+    if !mem_store::maintenance_reservation::holder_is_dead(&body) {
+        return Err(Refusal::new(
+            77,
+            "consolidation.release_holder_alive",
+            "reservation holder is still alive or unverifiable",
+        ));
+    }
+    let wtok = mem_core::sha256::hex(&mem_core::sha256::digest(nonce.as_bytes()))[..16].to_string();
+    let parent = storage_root
+        .parent()
+        .ok_or_else(|| custody_refusal("storage root has no parent"))?;
+    let recovery = parent.join("recovery");
+    let entries = std::fs::read_dir(&recovery)
+        .map_err(|error| custody_refusal(format!("recovery dir unreadable: {error}")))?;
+    let mut custody_dirs: Vec<std::path::PathBuf> = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with("consolidation-")
+            || [
+                "consolidation-retired-",
+                "consolidation-corrupt-",
+                "consolidation-failed-",
+                "consolidation-quarantine-",
+                "consolidation-escalation-",
+            ]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+        {
+            continue;
+        }
+        if !name.contains(&format!("-{wtok}")) {
+            continue;
+        }
+        custody_dirs.push(entry.path());
+    }
+    if custody_dirs.len() > 1 {
+        return Err(Refusal::new(
+            77,
+            "consolidation.release_evidence_mismatch",
+            "multiple custody directories found for window token",
+        ));
+    }
+    let custody = if custody_dirs.len() == 1 {
+        let custody = custody_dirs
+            .pop()
+            .ok_or_else(|| custody_refusal("no custody directory resolved"))?;
+        let journal = custody.join(JOURNAL_FILE);
+        match std::fs::symlink_metadata(&journal) {
+            Ok(meta) => {
+                if meta.is_file() && !meta.file_type().is_symlink() {
+                    return Err(Refusal::new(
+                        77,
+                        "consolidation.release_journal_present",
+                        "custody journal is already present",
+                    ));
+                }
+                return Err(Refusal::new(
+                    77,
+                    "consolidation.release_journal_unreadable",
+                    "custody journal is unreadable",
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => {
+                return Err(Refusal::new(
+                    77,
+                    "consolidation.release_journal_unreadable",
+                    "custody journal metadata unreadable",
+                ));
+            }
+        }
+        custody
+    } else {
+        // Pre-journal: create custody dir for <wtok>.
+        use std::os::unix::fs::DirBuilderExt;
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        let custody = recovery.join(format!("consolidation-{stamp}-{wtok}"));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&custody)
+            .map_err(|error| custody_refusal(format!("custody dir: {error}")))?;
+        std::fs::File::open(&recovery)
+            .and_then(|dir| dir.sync_all())
+            .map_err(|error| custody_refusal(format!("fsync recovery: {error}")))?;
+        custody
+    };
+    // EV-S: storage root identity must match reservation.
+    let ev_s_ok = std::fs::symlink_metadata(storage_root)
+        .map(|meta| {
+            use std::os::unix::fs::MetadataExt;
+            meta.is_dir()
+                && body.s_dev.is_some()
+                && body.s_ino.is_some()
+                && Some(meta.dev()) == body.s_dev
+                && Some(meta.ino()) == body.s_ino
+        })
+        .unwrap_or(false);
+    if !ev_s_ok {
+        return Err(Refusal::new(
+            77,
+            "consolidation.release_evidence_mismatch",
+            "the storage root identity differs from the reservation",
+        ));
+    }
+    // EV-R == 0: no retired/staged artifacts for this window in the family.
+    // (Simplified: any consolidation-retired-*<wtok> refuses.)
+    if let Ok(entries) = std::fs::read_dir(&recovery) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("consolidation-retired-") && name.contains(&wtok) {
+                return Err(Refusal::new(
+                    77,
+                    "consolidation.release_evidence_mismatch",
+                    "retired custody artifacts remain for this window",
+                ));
+            }
+        }
+    }
+    // Synthesize 1-record RolledBack journal.
+    journal_write_record(
+        &custody,
+        &json!({ "phase": PHASE_ROLLED_BACK, "reason": "pre_journal_abandon" }),
+    )?;
+    Ok(AdoptedRecord {
+        kind: "RolledBack",
+        reason: "pre_journal_abandon",
+    })
+}
+
+/// `--mode=consolidate-acquire`: mint the maintenance reservation (S1a).
+pub fn run_acquire(lexical_root: &Path, storage_root: &Path) -> i32 {
+    match mem_store::maintenance_reservation::acquire(lexical_root, storage_root) {
+        Ok(_) => 0,
+        Err(error) => {
+            let (event, message) = match error {
+                mem_store::maintenance_reservation::ReservationError::AlreadyExists => (
+                    "consolidation.acquire_reservation_exists",
+                    "the maintenance reservation already exists",
+                ),
+                mem_store::maintenance_reservation::ReservationError::RootPermissionsInvalid => (
+                    "consolidation.acquire_root_permissions_invalid",
+                    "the storage root fails the ownership preflight",
+                ),
+                mem_store::maintenance_reservation::ReservationError::ForeignEngineHolder => (
+                    "consolidation.acquire_foreign_engine_holder",
+                    "a live foreign engine holds the storage root",
+                ),
+                mem_store::maintenance_reservation::ReservationError::ActiveWriter => (
+                    "consolidation.acquire_writer_active",
+                    "an active writer holds the storage root",
+                ),
+                mem_store::maintenance_reservation::ReservationError::RootUnreadable(_)
+                | mem_store::maintenance_reservation::ReservationError::Io(_) => (
+                    "consolidation.acquire_io",
+                    "the reservation could not be acquired",
+                ),
+            };
+            emit_refusal(&Refusal::new(77, event, message))
+        }
+    }
+}
+
+/// `--mode=consolidate-release`: the gated release path.
+pub fn run_release(storage_root: &Path, nonce: &str) -> i32 {
+    match release_gated(storage_root, nonce) {
         Ok(()) => 0,
         Err(refusal) => emit_refusal(&refusal),
     }
 }
 
-fn recover(custody: &Path) -> Result<(), Refusal> {
+/// `--mode=consolidate-recover --custody <dir>`: EV-M first; a journal at
+/// `Installing` with S absent and the staged tree present completes L5 and
+/// records `InstalledUnverified`. Nothing else is guessed.
+pub fn run_recover(storage_root: &Path, custody: &Path) -> i32 {
+    let nonce = match std::env::var("OPENCODE_MEM_MAINTENANCE_NONCE") {
+        Ok(value) if !value.is_empty() => value,
+        _ => {
+            return Refusal::new(
+                77,
+                "consolidation.release_nonce_mismatch",
+                "OPENCODE_MEM_MAINTENANCE_NONCE is required",
+            )
+            .code;
+        }
+    };
+    let flock = match admit_window_step("consolidate-recover", storage_root) {
+        Ok(flock) => flock,
+        Err(refusal) => return refusal.code,
+    };
+    match recover(storage_root, custody, &nonce, &flock) {
+        Ok(()) => 0,
+        Err(refusal) => emit_refusal(&refusal),
+    }
+}
+
+fn recover(
+    storage_root: &Path,
+    custody: &Path,
+    nonce: &str,
+    flock: &RecoveryFlock,
+) -> Result<(), Refusal> {
     ev_m_preflight(custody)?;
     let journal = custody.join(JOURNAL_FILE);
     if !journal.exists() {
+        // Pre-journal orphan (§H.1 `none` row): adopt synthesizes the RolledBack
+        // record; release then unlinks the reservation under the same flock.
+        adopt_gated_with_flock(storage_root, nonce, flock)?;
+        release_gated_with_flock(storage_root, nonce, flock)?;
         return Ok(());
     }
     let text = std::fs::read_to_string(&journal)

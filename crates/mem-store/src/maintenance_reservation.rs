@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 /// The reservation file name, at the PARENT of the storage root.
-pub const RESERVATION_FILE: &str = ".opencode-mem-maintenance.lock";
+const RESERVATION_FILE: &str = ".opencode-mem-maintenance.lock";
 
 /// The reserved operation recorded in every body this build writes.
 pub const RESERVATION_OPERATION: &str = "maintenance";
@@ -50,7 +50,7 @@ const NONCE_BYTES: usize = 16;
 /// platform cannot observe one); `retake_seq` exists only after a retake;
 /// `s_dev`/`s_ino` pin the storage root identity recorded AT ACQUIRE (the
 /// evidence the pre-journal adopt row compares against, §H.1 EV-S).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReservationBody {
     /// The holder's pid.
     pub pid: u32,
@@ -115,6 +115,14 @@ impl AcquiredReservation {
 pub enum ReservationError {
     /// The reservation file already exists. Never overwritten here.
     AlreadyExists,
+    /// The storage root or its parent fails the F12 ownership/mode preflight
+    /// (real dir, owner-owned, not group/other-writable).
+    RootPermissionsInvalid,
+    /// A live `.engine.lock` holder is not the expected pre-quiesce engine
+    /// (F7 / F13 / F22a).
+    ForeignEngineHolder,
+    /// An active writer or open-fd holder owns the storage root.
+    ActiveWriter,
     /// The storage root is not an inspectable directory, so its `dev`/`ino`
     /// identity cannot be pinned.
     RootUnreadable(std::io::Error),
@@ -126,6 +134,13 @@ impl std::fmt::Display for ReservationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::AlreadyExists => write!(f, "reservation already exists"),
+            Self::RootPermissionsInvalid => {
+                write!(f, "the storage root fails the ownership preflight")
+            }
+            Self::ForeignEngineHolder => {
+                write!(f, "a live foreign engine holds the storage root")
+            }
+            Self::ActiveWriter => write!(f, "an active writer holds the storage root"),
             Self::RootUnreadable(error) => {
                 write!(f, "storage root cannot be inspected: {error}")
             }
@@ -138,7 +153,7 @@ impl std::error::Error for ReservationError {}
 
 /// The reservation path for `storage_root`: the parent directory joined with
 /// [`RESERVATION_FILE`]. A root with no parent has none.
-pub fn reservation_path(storage_root: &Path) -> Option<PathBuf> {
+fn reservation_path(storage_root: &Path) -> Option<PathBuf> {
     storage_root
         .parent()
         .map(|parent| parent.join(RESERVATION_FILE))
@@ -170,10 +185,166 @@ pub fn check(storage_root: &Path) -> ReservationVerdict {
     ReservationVerdict::Held
 }
 
+/// F12 (rev-15 §G S1a): the parent of the storage root and the storage root
+/// itself must be real directories owned by the running user and not
+/// group/other-writable before a reservation is minted beside them.
+#[cfg(unix)]
+fn check_root_permissions(root: &Path) -> Result<(), ReservationError> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let metadata = fs::symlink_metadata(root).map_err(ReservationError::RootUnreadable)?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(ReservationError::RootPermissionsInvalid);
+    }
+    if metadata.uid() != unsafe { libc::geteuid() } as u32 {
+        return Err(ReservationError::RootPermissionsInvalid);
+    }
+    if (metadata.permissions().mode() & 0o022) != 0 {
+        return Err(ReservationError::RootPermissionsInvalid);
+    }
+    Ok(())
+}
+
+/// §E.2 S1a refusal 2: a live `.engine.lock` holder that fails the F7 minimal
+/// identity test (NUL-split argv pair, byte-equal storage root, no inline form,
+/// mode ∈ {stdio, standalone}) is a foreign engine and refuses the acquire.
+fn check_foreign_engine_holder(
+    lexical_root: &Path,
+    storage_root: &Path,
+) -> Result<(), ReservationError> {
+    let contents = match fs::read_to_string(storage_root.join(crate::engine_lock::ENGINE_LOCK_FILE))
+    {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err(ReservationError::ForeignEngineHolder),
+    };
+    if contents.trim().is_empty() {
+        return Err(ReservationError::ForeignEngineHolder);
+    }
+    let Ok(record) = serde_json::from_str::<crate::operation_lock::LockRecord>(&contents) else {
+        return Err(ReservationError::ForeignEngineHolder);
+    };
+    if record.state.pid == 0 {
+        return Err(ReservationError::ForeignEngineHolder);
+    }
+    if record.start_time.is_none_or(|token| token == 0) {
+        // A record without a start-time token cannot be proven foreign-or-safe:
+        // fail closed.
+        return Err(ReservationError::ForeignEngineHolder);
+    }
+    let observed = crate::platform::observe_process(record.state.pid);
+    let liveness = crate::platform::decide_liveness(
+        record.state.pid,
+        record.start_time,
+        observed,
+        crate::platform::ProcObservability::current(),
+    );
+    if liveness.is_alive()
+        && !crate::platform::is_expected_live_engine(
+            record.state.pid,
+            record.start_time.unwrap_or(0),
+            lexical_root,
+            storage_root,
+        )
+    {
+        return Err(ReservationError::ForeignEngineHolder);
+    }
+    Ok(())
+}
+
+/// §E.2 S1a refusal 3: an operation/migration lock or an open-fd holder under
+/// the storage root means a writer is live and refuses the acquire.
+fn check_active_writer(storage_root: &Path) -> Result<(), ReservationError> {
+    for file in [
+        crate::operation_lock::OPERATION_LOCK_FILE,
+        crate::operation_lock::LEGACY_MIGRATION_LOCK_FILE,
+    ] {
+        if crate::operation_lock::read_live_lock(
+            storage_root,
+            file,
+            &crate::platform::SystemProcessProbe,
+        )
+        .is_some()
+        {
+            return Err(ReservationError::ActiveWriter);
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if live_process_holds_fd_under(storage_root, std::process::id()) {
+            return Err(ReservationError::ActiveWriter);
+        }
+    }
+    Ok(())
+}
+
+/// §E.2 S1a refusal 3 (open descriptors): walk `/proc/<pid>/fd` across
+/// same-uid live processes and refuse when one holds a descriptor resolving
+/// under the storage root. Fail closed on any unreadable directory.
+#[cfg(target_os = "linux")]
+fn live_process_holds_fd_under(storage_root: &Path, skip_pid: u32) -> bool {
+    let canonical =
+        std::fs::canonicalize(storage_root).unwrap_or_else(|_| storage_root.to_path_buf());
+    let proc = std::path::PathBuf::from("/proc");
+    let entries = match std::fs::read_dir(&proc) {
+        Ok(entries) => entries,
+        Err(_) => return true,
+    };
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(pid_text) = file_name.to_str() else {
+            continue;
+        };
+        let Ok(pid) = pid_text.parse::<u32>() else {
+            continue;
+        };
+        if pid == skip_pid || pid == std::process::id() {
+            continue;
+        }
+        // Same-uid only: never judge another user's descriptors.
+        let Ok(status) = std::fs::read_to_string(proc.join(pid_text).join("status")) else {
+            continue;
+        };
+        let euid = unsafe { libc::geteuid() }.to_string();
+        let same_uid = status.lines().any(|line| {
+            let Some((key, value)) = line.split_once(':') else {
+                return false;
+            };
+            key == "Uid"
+                && value
+                    .split_whitespace()
+                    .nth(1)
+                    .is_some_and(|field| field == euid.as_str())
+        });
+        if !same_uid {
+            continue;
+        }
+        let fd_dir = proc.join(pid_text).join("fd");
+        let Ok(fds) = std::fs::read_dir(&fd_dir) else {
+            return true;
+        };
+        for fd in fds.flatten() {
+            let Ok(target) = std::fs::read_link(fd.path()) else {
+                continue;
+            };
+            if target.starts_with(&canonical) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Acquires the reservation with the pinned L1 ordering: exclusive-create at
 /// 0600 → write body → `fsync(file)` → `fsync(parent dir)`. The reservation is
 /// not considered held until the parent fsync returns.
-pub fn acquire(storage_root: &Path) -> Result<AcquiredReservation, ReservationError> {
+///
+/// `lexical_root` is the `--storage-root` spelling as typed (before
+/// canonicalize); F7 admits the holder's argv only if it spells that exact
+/// string or the canonical root (O3).
+pub fn acquire(
+    lexical_root: &Path,
+    storage_root: &Path,
+) -> Result<AcquiredReservation, ReservationError> {
     let Some(path) = reservation_path(storage_root) else {
         return Err(ReservationError::RootUnreadable(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -193,6 +364,17 @@ pub fn acquire(storage_root: &Path) -> Result<AcquiredReservation, ReservationEr
             "the reservation path has no parent directory",
         ))
     })?;
+    // F12 (rev-15 §G S1a): the parent of the storage root and the root itself
+    // must be real, owner-owned, not group/other-writable directories before a
+    // reservation is minted into the parent.
+    #[cfg(unix)]
+    check_root_permissions(parent)?;
+    #[cfg(unix)]
+    check_root_permissions(storage_root)?;
+    // §E.2 S1a acquire refusals, before the exclusive-create: a live foreign
+    // engine holder (F7) or an active writer never gets a reservation minted.
+    check_foreign_engine_holder(lexical_root, storage_root)?;
+    check_active_writer(storage_root)?;
     let body = ReservationBody {
         pid: std::process::id(),
         start_time: crate::platform::process_start_time(std::process::id()),
@@ -239,19 +421,24 @@ pub fn acquire(storage_root: &Path) -> Result<AcquiredReservation, ReservationEr
     Ok(AcquiredReservation { path, body })
 }
 
-/// The effective journal phase a release or adopt is judged against (§E.2).
-/// Only the two terminal phases may release the reservation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReleasePhase {
-    /// Terminal success: the installed tree is settled.
-    Verified,
-    /// Terminal rollback: the original tree is restored.
-    RolledBack,
-    /// Any non-terminal phase: never releasable.
-    Installing,
+/// The admission verdict for one consolidation window (§E.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WindowAdmissionVerdict {
+    /// No reservation file at the parent: the window is not held (FS-3 → 77).
+    Absent,
+    /// The reservation names THIS process (pid + start-time token): proceed as
+    /// the holder.
+    HeldBySelf(ReservationBody),
+    /// The env nonce matches the reservation body: proceed under the recovery
+    /// flock (the custodian's admit path).
+    AdmittedByNonce(ReservationBody),
+    /// Any other state — a foreign holder, a corrupt body, a 0-byte body, an
+    /// unset/empty/mismatched nonce: refuse (76).
+    HeldRefused,
 }
 
-/// The one-record journal a pre-journal adopt synthesizes (§E.2).
+/// The one-record journal a pre-journal adopt synthesizes (§E.2): the
+/// synthesized terminal record is always `RolledBack` / `pre_journal_abandon`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdoptedRecord {
     kind: &'static str,
@@ -272,26 +459,11 @@ impl AdoptedRecord {
     }
 }
 
-/// Reads the reservation body at the parent, fail-closed on any unreadable or
-/// corrupt state. Returns `None` when no reservation exists.
-fn read_body(storage_root: &Path) -> Result<Option<(PathBuf, ReservationBody)>, std::io::Error> {
-    let Some(path) = reservation_path(storage_root) else {
-        return Ok(None);
-    };
-    let text = match fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
-    let body = serde_json::from_str::<ReservationBody>(&text)
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-    Ok(Some((path, body)))
-}
-
 /// Holder liveness for release and adopt (§E.2): dead when the pid is gone or
-/// its start-time token differs; a `start_time`-less body with a present pid
-/// is never releasable.
-fn holder_is_dead(body: &ReservationBody) -> bool {
+/// its start-time token differs; a `start_time`-less body with a present pid is
+/// never releasable. Off Linux nothing is verifiable, so fail closed.
+#[cfg(target_os = "linux")]
+pub fn holder_is_dead(body: &ReservationBody) -> bool {
     let observed = crate::platform::observe_process(body.pid);
     match observed {
         crate::platform::ObservedProcess::Absent => true,
@@ -305,47 +477,58 @@ fn holder_is_dead(body: &ReservationBody) -> bool {
     }
 }
 
-/// Releases the reservation: nonce match, terminal journal phase, dead holder,
-/// then unlink after a byte-equal re-read (defense in depth, §E.2).
-pub fn release(storage_root: &Path, nonce: &str, phase: ReleasePhase) -> Result<(), String> {
-    if !matches!(phase, ReleasePhase::Verified | ReleasePhase::RolledBack) {
-        return Err("journal phase is not terminal".to_string());
-    }
-    let Some((path, body)) = read_body(storage_root).map_err(|error| error.to_string())? else {
-        return Err("no reservation".to_string());
-    };
-    if body.nonce != nonce {
-        return Err("nonce mismatch".to_string());
-    }
-    if !holder_is_dead(&body) {
-        return Err("holder is alive".to_string());
-    }
-    let first = fs::read(&path).map_err(|error| error.to_string())?;
-    let second = fs::read(&path).map_err(|error| error.to_string())?;
-    if first != second {
-        return Err("reservation changed during release".to_string());
-    }
-    fs::remove_file(&path).map_err(|error| error.to_string())
+/// Off Linux the holder can never be proven dead (fail closed).
+#[cfg(not(target_os = "linux"))]
+pub fn holder_is_dead(_body: &ReservationBody) -> bool {
+    false
 }
 
-/// Adopts an orphaned reservation whose journal was never written (§E.2): the
-/// nonce must match, the holder must be dead, and the caller guarantees the
-/// journal is ABSENT. The synthesized record is one `RolledBack` with reason
-/// `pre_journal_abandon`; nothing is written to the storage root.
-pub fn adopt_pre_journal(storage_root: &Path, nonce: &str) -> Result<AdoptedRecord, String> {
-    let Some((_, body)) = read_body(storage_root).map_err(|error| error.to_string())? else {
-        return Err("no reservation".to_string());
+/// The reservation at `storage_root` with its raw bytes: `None` when absent,
+/// `Err` when corrupt or unreadable (fail closed downstream).
+pub fn reservation_bytes(
+    storage_root: &Path,
+) -> Result<Option<(PathBuf, ReservationBody, Vec<u8>)>, std::io::Error> {
+    let Some(path) = reservation_path(storage_root) else {
+        return Ok(None);
     };
-    if body.nonce != nonce {
-        return Err("nonce mismatch".to_string());
+    let raw = match fs::read(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let text = std::str::from_utf8(&raw)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let body = serde_json::from_str::<ReservationBody>(text)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    Ok(Some((path, body, raw)))
+}
+
+/// The window admission verdict for one storage root under the recovery flock
+/// (§E.2): `Absent` → the window is not held (FS-3 → 77); `HeldRefused` → a
+/// foreign/empty/mismatched holder (76); `AdmittedByNonce` / `HeldBySelf` → the
+/// caller may proceed while holding the flock.
+pub fn check_for_window(storage_root: &Path, env_nonce: Option<&str>) -> WindowAdmissionVerdict {
+    match reservation_bytes(storage_root) {
+        Ok(Some((_, body, _raw))) => {
+            if body.nonce.is_empty() {
+                return WindowAdmissionVerdict::HeldRefused;
+            }
+            if let Some(nonce) = env_nonce
+                && !nonce.is_empty()
+                && nonce == body.nonce
+            {
+                return WindowAdmissionVerdict::AdmittedByNonce(body);
+            }
+            let own_pid = std::process::id();
+            let own_token = crate::platform::process_start_time(own_pid);
+            if body.pid == own_pid && body.start_time.is_some() && body.start_time == own_token {
+                return WindowAdmissionVerdict::HeldBySelf(body);
+            }
+            WindowAdmissionVerdict::HeldRefused
+        }
+        Ok(None) => WindowAdmissionVerdict::Absent,
+        Err(_) => WindowAdmissionVerdict::HeldRefused,
     }
-    if !holder_is_dead(&body) {
-        return Err("holder is alive".to_string());
-    }
-    Ok(AdoptedRecord {
-        kind: "RolledBack",
-        reason: "pre_journal_abandon",
-    })
 }
 
 /// Emits the exit-76 structured line and exits. The payload carries ONLY
@@ -442,5 +625,26 @@ mod tests {
             base64_encode(&[0_u8; NONCE_BYTES]),
             "AAAAAAAAAAAAAAAAAAAAAA=="
         );
+    }
+
+    /// A live holder (this process, its real start-time token) is never dead.
+    /// Mutant: `holder_is_dead` returning `true` for a live holder goes RED here.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_holder_is_dead_is_false_for_live_holder() {
+        let pid = std::process::id();
+        let body = ReservationBody {
+            pid,
+            start_time: crate::platform::process_start_time(pid),
+            operation: RESERVATION_OPERATION.to_string(),
+            root_basename: "data".to_string(),
+            nonce: "AAAAAAAAAAAAAAAAAAAAAA==".to_string(),
+            created_utc: "2026-11-14T00:00:00+00:00".to_string(),
+            retake_seq: None,
+            s_dev: None,
+            s_ino: None,
+        };
+        assert!(body.start_time.is_some(), "live token readable");
+        assert!(!holder_is_dead(&body), "a live holder is not dead");
     }
 }

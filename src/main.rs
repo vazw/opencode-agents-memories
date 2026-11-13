@@ -381,6 +381,17 @@ fn refuse_if_reservation_held(operation: &str, storage_root: &Path) {
 fn main() {
     let mut argv: Vec<(String, Option<String>)> = Vec::new();
     let raw: Vec<String> = std::env::args().skip(1).collect();
+    // prctl(PR_SET_DUMPABLE, 0) and RLIMIT_CORE 0 are scoped to consolidate*
+    // invocations only (rev-15 §G S1a / C5).
+    #[cfg(target_os = "linux")]
+    if raw.iter().any(|token| token.contains("consolidate")) {
+        unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) };
+        let limit = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        unsafe { libc::setrlimit(libc::RLIMIT_CORE, &limit) };
+    }
     let mut index = 0usize;
     while index < raw.len() {
         let arg = raw[index].clone();
@@ -529,6 +540,9 @@ fn main() {
     // touching the filesystem; the last fallback keeps the raw value (an
     // engine that cannot even resolve its cwd degrades the way it did
     // before this fix rather than refusing to start).
+    // O3: keep the lexical spelling for F7's argv comparison; canonicalize
+    // below replaces the stored root.
+    let lexical_storage_root = config.storage_root.clone();
     config.storage_root = std::fs::canonicalize(&config.storage_root)
         .or_else(|_| std::path::absolute(&config.storage_root))
         .unwrap_or_else(|_| config.storage_root.clone());
@@ -558,6 +572,8 @@ fn main() {
     let mut rollback_request: Option<(bool, PathBuf)> = None;
     let mut install_request: Option<(bool, PathBuf, Option<PathBuf>)> = None;
     let mut staged_verify_request: Option<(PathBuf, PathBuf)> = None;
+    let mut consolidation_acquire = false;
+    let mut consolidation_release = false;
     let args_dry_run = args.dry_run;
     let args_rehearsal = args.rehearsal.clone();
     if let Some(mode) = args.mode.clone() {
@@ -570,7 +586,11 @@ fn main() {
             }
             return;
         }
-        if mode == "purge-session" {
+        if mode == "consolidate-acquire" {
+            consolidation_acquire = true;
+        } else if mode == "consolidate-release" {
+            consolidation_release = true;
+        } else if mode == "purge-session" {
             // W7.1/M19: the confirmation is validated HERE, before
             // `Config::load_default` and before any store is opened.
             let request = mem_bridge::purge::PurgeRequest {
@@ -670,6 +690,12 @@ fn main() {
                 }
             }
         } else if mode == "consolidate-shards" {
+            // Flag refusals (rev-15 §E.5 / blueprint Step 5): apply/confirm/scope
+            // forms are never accepted on consolidate-shards.
+            if args.apply || args.apply_inline || apply_value_trap || reap_foreign_flag {
+                eprintln!("consolidate-shards: forbidden flag");
+                std::process::exit(64);
+            }
             // The plan is required and absolute (parent Step 4 pin): a relative
             // or absent plan would resolve against the wrong tree.
             match args.plan.as_deref() {
@@ -731,12 +757,36 @@ fn main() {
             std::process::exit(70);
         });
 
+    // `--mode=consolidate-acquire`: mint the reservation (S1a) and exit.
+    if consolidation_acquire {
+        std::process::exit(shard_consolidation::run_acquire(
+            &lexical_storage_root,
+            &config.storage_root,
+        ));
+    }
+    // `--mode=consolidate-release`: gated release under the recovery flock.
+    if consolidation_release {
+        let nonce = std::env::var("OPENCODE_MEM_MAINTENANCE_NONCE").unwrap_or_default();
+        if nonce.is_empty() {
+            eprintln!("consolidate-release: OPENCODE_MEM_MAINTENANCE_NONCE is required");
+            std::process::exit(77);
+        }
+        std::process::exit(shard_consolidation::run_release(
+            &config.storage_root,
+            &nonce,
+        ));
+    }
+
     // W7.1 — the purge dispatch sits BEFORE the engine runtime. The root is
     // the HostConfig value (`--storage-root` → `OPENCODE_MEM_STORAGE_ROOT` →
     // `$HOME/.opencode-mem/data`); the JSONC `storagePath` is not the engine
     // root and is never consulted here.
     if let Some((rollback, custody)) = rollback_request {
-        refuse_if_reservation_held("consolidate-rollback", &config.storage_root);
+        if let Err(refusal) =
+            shard_consolidation::admit_window_step("consolidate-rollback", &config.storage_root)
+        {
+            shard_consolidation::emit_refusal(&refusal);
+        }
         std::process::exit(if rollback {
             shard_consolidation::run_rollback(&config.storage_root, &custody)
         } else {
@@ -745,7 +795,12 @@ fn main() {
     }
 
     if let Some((custody, staged)) = staged_verify_request {
-        refuse_if_reservation_held("consolidate-staged-verify", &config.storage_root);
+        if let Err(refusal) = shard_consolidation::admit_window_step(
+            "consolidate-staged-verify",
+            &config.storage_root,
+        ) {
+            shard_consolidation::emit_refusal(&refusal);
+        }
         std::process::exit(shard_consolidation::run_staged_verify(
             &config.storage_root,
             &custody,
@@ -754,7 +809,11 @@ fn main() {
     }
 
     if let Some((install, custody, staged)) = install_request {
-        refuse_if_reservation_held("consolidate-install", &config.storage_root);
+        if let Err(refusal) =
+            shard_consolidation::admit_window_step("consolidate-install", &config.storage_root)
+        {
+            shard_consolidation::emit_refusal(&refusal);
+        }
         std::process::exit(if install {
             shard_consolidation::run_install(
                 &config.storage_root,
@@ -762,19 +821,27 @@ fn main() {
                 staged.as_deref().unwrap_or(Path::new("")),
             )
         } else {
-            shard_consolidation::run_recover(&custody)
+            shard_consolidation::run_recover(&config.storage_root, &custody)
         });
     }
 
     if let Some(custody) = journal_request {
-        refuse_if_reservation_held("consolidate-journal", &config.storage_root);
+        if let Err(refusal) =
+            shard_consolidation::admit_window_step("consolidate-journal", &config.storage_root)
+        {
+            shard_consolidation::emit_refusal(&refusal);
+        }
         std::process::exit(shard_consolidation::run_journal_write(&custody, "Prepared"));
     }
 
     if let Some((snapshot, custody)) = custody_request {
         // The snapshot reads the root but never opens a store; the reservation
         // gate still applies so no snapshot races a consolidation window.
-        refuse_if_reservation_held("consolidate-snapshot", &config.storage_root);
+        if let Err(refusal) =
+            shard_consolidation::admit_window_step("consolidate-snapshot", &config.storage_root)
+        {
+            shard_consolidation::emit_refusal(&refusal);
+        }
         std::process::exit(if snapshot {
             shard_consolidation::run_snapshot(&config.storage_root, &custody)
         } else {
@@ -792,7 +859,13 @@ fn main() {
                 &config.storage_root,
             );
         }
-        refuse_if_reservation_held("consolidate-shards", &config.storage_root);
+        if args_dry_run {
+            refuse_if_reservation_held("consolidate-shards", &config.storage_root);
+        } else if let Err(refusal) =
+            shard_consolidation::admit_window_step("consolidate-shards", &config.storage_root)
+        {
+            shard_consolidation::emit_refusal(&refusal);
+        }
         std::process::exit(shard_consolidation::run_plan(
             &plan,
             &config.storage_root,
