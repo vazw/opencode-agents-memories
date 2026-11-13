@@ -2247,7 +2247,9 @@ fn test_foreign_writer_and_reservation_block_startup() {
 const EPISODIC_FIXTURE_DDL: [&str; 5] = [
     "CREATE TABLE IF NOT EXISTS agent_sessions (
        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, session_id TEXT NOT NULL,
-       agent_id TEXT NOT NULL, parent_session_id TEXT, summary TEXT NOT NULL,
+       agent_id TEXT NOT NULL,
+       parent_session_id TEXT REFERENCES agent_sessions(id) ON DELETE SET NULL,
+       summary TEXT NOT NULL,
        metadata TEXT NOT NULL, embedding F32_BLOB(2) NOT NULL, created_at INTEGER NOT NULL,
        updated_at INTEGER NOT NULL, deleted_at INTEGER, orphaned INTEGER NOT NULL DEFAULT 0,
        capture_id TEXT, agent_role TEXT NOT NULL DEFAULT 'main',
@@ -2989,7 +2991,9 @@ fn test_auxiliary_collision_aborts() {
         &episodic,
         "CREATE TABLE agent_sessions (
            id TEXT PRIMARY KEY, project_id TEXT NOT NULL, session_id TEXT NOT NULL,
-           agent_id TEXT NOT NULL, parent_session_id TEXT, summary TEXT NOT NULL,
+           agent_id TEXT NOT NULL,
+           parent_session_id TEXT REFERENCES agent_sessions(id) ON DELETE SET NULL,
+           summary TEXT NOT NULL,
            metadata TEXT NOT NULL, embedding F32_BLOB(2) NOT NULL, created_at INTEGER NOT NULL,
            updated_at INTEGER NOT NULL, deleted_at INTEGER, orphaned INTEGER NOT NULL DEFAULT 0,
            capture_id TEXT, agent_role TEXT NOT NULL DEFAULT 'main')",
@@ -4592,6 +4596,106 @@ fn test_settlement_recomputes_final_artifacts() {
         "a post-manifest source edit rejects; {edited_err}"
     );
     let _ = std::fs::remove_dir_all(&parent);
+
+    // Subcase (vi) (§C.5a settlement leg, C42): the installed S holds one
+    // dangling reference, so settlement refuses 77
+    // `consolidation.reparent_dangling_installed` and WRITES `RollingBack`.
+    //
+    // The pre-install leg is bypassed BY CONSTRUCTION: the tree installed clean
+    // (it would refuse 77 otherwise), and it is danglified afterwards. The
+    // manifest compare is passed by re-recording the staged-manifest custody
+    // artifacts from the dangling tree — the channel §C.5a itself describes. A
+    // plain post-install edit without re-recording refuses 77 "post-install
+    // source edit" instead, which is subcase (ii).
+    use std::os::unix::fs::PermissionsExt;
+    let (parent, root, plan, custody) = reparent_fixture("settlement-dangling");
+    let (snap, _snap_out, snap_err) = run_snapshot(&root, &custody);
+    assert_eq!(snap, Some(0), "the snapshot is taken; {snap_err}");
+    let (applied, _apply_out, apply_err) = run_consolidate(&root, &plan, false, Some(&custody));
+    assert_eq!(applied, Some(0), "the apply succeeds; {apply_err}");
+    let staged = staged_root(&parent);
+    let (verified, verify_err) = run_staged_verify(&root, &custody, &staged);
+    assert_eq!(verified, Some(0), "the staged tree verifies; {verify_err}");
+    let (installed, install_err) = run_install_mode(&custody, &root, &staged);
+    assert_eq!(
+        installed,
+        Some(0),
+        "the CLEAN tree installs before the danglify; {install_err}"
+    );
+    assert_eq!(
+        last_journal_record(&custody)["phase"],
+        "InstalledUnverified",
+        "(vi) the install leaves the record unsettled"
+    );
+
+    // Danglify the INSTALLED tree only.
+    fixture_exec(
+        &root,
+        &root.join("episodic.db"),
+        "UPDATE agent_sessions SET parent_session_id = 'L' WHERE id = 'C'",
+        Vec::new(),
+    );
+    assert_eq!(
+        dangling_parent_sessions(&root.join("episodic.db")),
+        1,
+        "(vi) the installed tree carries exactly one dangling reference"
+    );
+
+    // The dangling tree's manifest TEXT, taken from a throwaway snapshot's
+    // baseline (never a re-implementation of `manifest_of`). The spare lives
+    // outside `recovery/` so the custody-dir geometry is untouched.
+    let spare = parent.join("spare-recovery").join("spare-custody");
+    let (spare_code, _spare_out, spare_err) = run_snapshot(&root, &spare);
+    assert_eq!(
+        spare_code,
+        Some(0),
+        "the dangling tree is manifested; {spare_err}"
+    );
+    let manifest = std::fs::read_to_string(spare.join("baseline.sha256"))
+        .expect("the spare snapshot writes the manifest verbatim");
+    let digest = mem_core::sha256::hex(&mem_core::sha256::digest(manifest.as_bytes()));
+
+    // BOTH artifacts are re-recorded, or the fixture proves a different
+    // refusal: only the manifest file -> 77 "staged manifest differs from its
+    // recorded digest"; only the digest -> 77 "post-install source edit".
+    let manifest_path = custody.join(format!(
+        "{}.manifest.sha256",
+        staged
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("the staged tree has a name")
+    ));
+    std::fs::write(&manifest_path, &manifest).expect("re-record the staged manifest");
+    std::fs::set_permissions(&manifest_path, std::fs::Permissions::from_mode(0o600))
+        .expect("manifest mode 0600");
+    rewrite_last_journal_digest(&custody, &digest);
+
+    let (settled, settle_err) = run_custody_mode("consolidate-verify", &root, &custody);
+    assert_subcase_refusal(
+        "(vi) settlement",
+        settled,
+        77,
+        &settle_err,
+        "consolidation.reparent_dangling_installed",
+    );
+    assert!(
+        settle_err.contains("1 dangling references, source baseline 0"),
+        "(vi) the refusal counts the installed dangle; {settle_err}"
+    );
+    let record = last_journal_record(&custody);
+    assert_eq!(
+        record["phase"], "RollingBack",
+        "(vi) the settlement legs WRITES RollingBack; read from the record, never assumed: {record}"
+    );
+    assert_eq!(
+        record["staged_manifest_sha256"], digest,
+        "(vi) the RollingBack record keeps the pinned shape: {record}"
+    );
+    assert!(
+        record["staged"].is_string() && record["storage_root"].is_string(),
+        "(vi) the RollingBack record names staged and storage_root: {record}"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
 }
 
 // ---------------------------------------------------------------------------
@@ -4666,4 +4770,1188 @@ fn test_rehearsal_refuses_mis_aimed_storage_root() {
         "no reservation is created beside the mis-aimed root"
     );
     let _ = std::fs::remove_dir_all(&scratch);
+}
+
+// ---------------------------------------------------------------------------
+// Step 10 rehearsal rework — F1, F3, F4, F5, F6 (F2 is a design ruling, not a
+// code fix: the divergence rule is untouched by this wave).
+// ---------------------------------------------------------------------------
+
+/// One source shard → one target: the smallest REAL apply. Its plan names a
+/// source the install retires, which is the shape F1 needs (a repeat apply whose
+/// `preflight` must fail on its own, so the guard is the only thing that can
+/// answer 77).
+fn one_group_apply_fixture(prefix: &str) -> (PathBuf, PathBuf, PathBuf) {
+    const SOURCE: &str = "2222222222222222";
+    let parent = unique_temp_dir(prefix);
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    {
+        let fx = fixture(&root);
+        fx.seed_row(SOURCE, &record("b", &format!("opencode_project_{SOURCE}")));
+    }
+    let rows = vec![valid_row(
+        &root,
+        SOURCE,
+        "path:/home/vaz/Code/thing",
+        "path:/home/opencode/Code/thing",
+        false,
+    )];
+    let plan = write_plan(&parent.join("plans"), &root, rows);
+    (parent, root, plan)
+}
+
+/// How many staged trees sit under `parent` — a repeat apply must add none.
+fn staged_tree_count(parent: &Path) -> usize {
+    std::fs::read_dir(parent)
+        .expect("fixture parent lists")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("consolidation-staged-"))
+        })
+        .count()
+}
+
+/// `(shard_stats.vector_count, COUNT(*) FROM memories)` for one staged shard.
+/// `None` for the count when the shard carries no `shard_stats` row — exactly
+/// the shape `shard_facts` calls a W7 reaping trigger.
+fn shard_count_facts(shard: &Path) -> (Option<i64>, i64) {
+    run_async(async {
+        let mut options = ConnectOptions::default();
+        options.read_only = true;
+        let handle = TursoConnectFactory
+            .connect(shard.to_path_buf(), options)
+            .await
+            .expect("open the staged shard");
+        let stats = handle
+            .query(
+                "SELECT vector_count FROM shard_stats WHERE id = 1",
+                Vec::new(),
+            )
+            .await
+            .expect("select shard_stats");
+        let count = handle
+            .query("SELECT COUNT(*) AS count FROM memories", Vec::new())
+            .await
+            .expect("count memories");
+        (
+            stats.first().and_then(|row| row.i64("vector_count")),
+            count.first().and_then(|row| row.i64("count")).unwrap_or(-1),
+        )
+    })
+}
+
+/// F1 (rehearsal finding, BLOCKING): a repeat apply over an installed window
+/// refuses 77 `window_not_applyable`, not 72 `source_set_mismatch`.
+///
+/// The fixture is the discriminator the review demanded: the install RETIRES
+/// the plan's sources, so `preflight` refuses 72 on its own — only a guard that
+/// runs BEFORE `preflight` can answer 77. Both settled phases are exercised
+/// (`InstalledUnverified` and `Verified`).
+///
+/// Mutant killed: `refuse_installed_window` called after `preflight` (the
+/// pre-fix order) — the repeat then exits 72 with `source_set_mismatch`.
+#[test]
+fn test_repeat_apply_over_installed_window_refuses_window_not_applyable() {
+    const SOURCE: &str = "2222222222222222";
+    let (parent, root, plan) = one_group_apply_fixture("reapply-installed");
+    let custody = fixture_custody(&parent);
+
+    // The snapshot precedes the apply: install now requires a verified baseline
+    // (F6), and the window must be a real one.
+    let (snap, _snap_out, snap_err) = run_snapshot(&root, &custody);
+    assert_eq!(snap, Some(0), "the snapshot precedes apply; {snap_err}");
+    let (applied, _apply_out, apply_err) = run_consolidate(&root, &plan, false, Some(&custody));
+    assert_eq!(applied, Some(0), "the first apply succeeds; {apply_err}");
+    let staged = staged_root(&parent);
+    let (staged_verified, staged_err) = run_staged_verify(&root, &custody, &staged);
+    assert_eq!(
+        staged_verified,
+        Some(0),
+        "the staged tree verifies; {staged_err}"
+    );
+    let (installed, install_err) = run_install_mode(&custody, &root, &staged);
+    assert_eq!(installed, Some(0), "the install completes; {install_err}");
+    assert_eq!(
+        last_journal_record(&custody)["phase"].as_str(),
+        Some("InstalledUnverified"),
+        "the window is installed and unsettled"
+    );
+    // The discriminating fixture property: the source the plan names is GONE
+    // from the installed S, so `preflight` would refuse 72 on its own.
+    assert!(
+        !root
+            .join("projects")
+            .join(format!("project_{SOURCE}_shard_0.db"))
+            .exists(),
+        "the install retired the plan's source, so preflight would fail first"
+    );
+    assert_eq!(staged_tree_count(&parent), 0, "L5 consumed the staged tree");
+
+    let (repeat, _repeat_out, repeat_err) = run_consolidate(&root, &plan, false, Some(&custody));
+    assert_refusal(
+        repeat,
+        77,
+        &repeat_err,
+        "consolidation.window_not_applyable",
+    );
+    assert!(
+        !repeat_err.contains("consolidation.source_set_mismatch"),
+        "the guard fires BEFORE preflight; {repeat_err}"
+    );
+    assert_eq!(
+        staged_tree_count(&parent),
+        0,
+        "the refused repeat builds no staged tree"
+    );
+
+    // Same refusal at the other settled phase.
+    let (settled, settle_err) = run_custody_mode("consolidate-verify", &root, &custody);
+    assert_eq!(
+        settled,
+        Some(0),
+        "settlement accepts the install; {settle_err}"
+    );
+    assert_eq!(
+        last_journal_record(&custody)["phase"].as_str(),
+        Some("Verified"),
+        "settlement records the Verified phase"
+    );
+    let (verified_repeat, _out, verified_err) =
+        run_consolidate(&root, &plan, false, Some(&custody));
+    assert_refusal(
+        verified_repeat,
+        77,
+        &verified_err,
+        "consolidation.window_not_applyable",
+    );
+    assert!(
+        !verified_err.contains("consolidation.source_set_mismatch"),
+        "the guard fires BEFORE preflight at Verified too; {verified_err}"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// F3 (rehearsal finding, BLOCKING): every written shard's `shard_stats` equals
+/// its own `COUNT(*)`, for a FRESH shard and for an APPENDED pre-existing one.
+///
+/// Mutants killed: `write_groups` inserting rows without `SYNC_COUNT_SQL` (a
+/// fresh shard then carries no count, an appended target keeps its pre-append
+/// value), and a constant/`chunk.len()` count (the append case's chunk is 3
+/// rows while the shard holds 5).
+#[test]
+fn test_staged_shard_stats_are_measured_counts() {
+    const SOURCE_A: &str = "2222222222222222";
+    const SOURCE_B: &str = "3333333333333333";
+    let parent = unique_temp_dir("staged-shard-stats");
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    let append_identity = "path:/home/opencode/Code/thing";
+    let append_hash = identity_hash(append_identity);
+    let fresh_identity = "path:/home/opencode/Code/other";
+    let fresh_hash = identity_hash(fresh_identity);
+    {
+        let fx = fixture(&root);
+        // Two pre-existing rows in the target of group 1: the append case.
+        fx.seed_row(
+            &append_hash,
+            &record("t1", &format!("opencode_project_{append_hash}")),
+        );
+        fx.seed_row(
+            &append_hash,
+            &record("t2", &format!("opencode_project_{append_hash}")),
+        );
+        for id in ["s1", "s2", "s3"] {
+            fx.seed_row(
+                SOURCE_A,
+                &record(id, &format!("opencode_project_{SOURCE_A}")),
+            );
+        }
+        for id in ["f1", "f2"] {
+            fx.seed_row(
+                SOURCE_B,
+                &record(id, &format!("opencode_project_{SOURCE_B}")),
+            );
+        }
+    }
+    let rows = vec![
+        valid_row(
+            &root,
+            SOURCE_A,
+            "path:/home/vaz/Code/thing",
+            append_identity,
+            false,
+        ),
+        valid_row(
+            &root,
+            SOURCE_B,
+            "path:/home/vaz/Code/other",
+            fresh_identity,
+            false,
+        ),
+    ];
+    let plan = write_plan(&parent.join("plans"), &root, rows);
+    let (code, _stdout, stderr) =
+        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
+    assert_eq!(code, Some(0), "the apply succeeds; {stderr}");
+
+    let staged = staged_root(&parent);
+    // The append target: 2 pre-existing + 3 merged = 5 rows, 3 in this chunk.
+    assert_eq!(
+        shard_count_facts(&staged_shard(&staged, &append_hash, 0)),
+        (Some(5), 5),
+        "an appended target's count is its whole row count, never the chunk's"
+    );
+    assert_eq!(
+        registry_rows(&staged, &append_hash),
+        vec![(0, 5, 1)],
+        "the registry adopts the committed count"
+    );
+    // The fresh target: 2 merged rows.
+    assert_eq!(
+        shard_count_facts(&staged_shard(&staged, &fresh_hash, 0)),
+        (Some(2), 2),
+        "a fresh shard records the count it was just written with"
+    );
+    assert_eq!(
+        registry_rows(&staged, &fresh_hash),
+        vec![(0, 2, 1)],
+        "the fresh target's registry count matches its shard"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// A marker body the open guard reads as a DEAD holder: pid 999999 is not
+/// running, so a writable open rewrites it with this process's pid and clock.
+const DEAD_MARKER_BODY: &[u8] =
+    br#"{"pid":999999,"timestamp":"2020-01-01T00:00:00.000Z","start_time":null,"mode":"legacy"}"#;
+
+/// F4 (rehearsal finding, BLOCKING): an apply never writes the live root's
+/// `.wal-mode`.
+///
+/// The staged opens carry `ConnectOptions::storage_root`, so the guard's marker
+/// belongs to the STAGED root. Two subcases: a marker that exists in S keeps its
+/// bytes, and a root with no marker gains none.
+///
+/// Mutant killed: `store_config.storage_path = storage_root` (the pre-fix
+/// pointer) — the guard rewrites S's marker with this process's pid and clock
+/// (bytes change), and creates one where S had none.
+#[test]
+fn test_apply_never_writes_the_live_wal_mode_marker() {
+    // Subcase (i): an existing marker keeps its bytes.
+    let (parent, root, plan) = one_group_apply_fixture("apply-live-marker");
+    let marker = root.join(".wal-mode");
+    std::fs::write(&marker, DEAD_MARKER_BODY).expect("plant the live marker");
+    let before = std::fs::read(&marker).expect("read the live marker");
+    let (code, _stdout, stderr) =
+        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
+    assert_eq!(code, Some(0), "the apply succeeds; {stderr}");
+    assert_eq!(
+        std::fs::read(&marker).expect("the live marker still exists"),
+        before,
+        "the apply leaves S's .wal-mode byte-identical"
+    );
+    // The staged tree carries no marker: the guard wrote it into the staged
+    // root and `apply_plan` drops it before the tree is offered for verify
+    // (§C.7). Together with S's untouched bytes this places the marker in the
+    // staged tree, not in S.
+    let staged = staged_root(&parent);
+    assert!(
+        !staged.join(".wal-mode").exists(),
+        "the staged tree never carries a .wal-mode into its manifest"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+
+    // Subcase (ii): a root with NO marker gains none.
+    let (parent, root, plan) = one_group_apply_fixture("apply-absent-marker");
+    let marker = root.join(".wal-mode");
+    let _ = std::fs::remove_file(&marker);
+    assert!(!marker.exists(), "the fixture root starts with no marker");
+    let (code, _stdout, stderr) =
+        run_consolidate(&root, &plan, false, Some(&fixture_custody(&parent)));
+    assert_eq!(code, Some(0), "the apply succeeds; {stderr}");
+    assert!(
+        !marker.exists(),
+        "the apply never creates a marker in the live root"
+    );
+    let staged = staged_root(&parent);
+    assert!(
+        !staged.join(".wal-mode").exists(),
+        "the staged marker is dropped, never carried"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// F5 (rehearsal finding, reclassified): a writable open of the installed tree
+/// BEFORE settlement is a window violation, and settlement refusing it is the
+/// design's alarm (§C.1b/§C.7: the marker's regeneration and every fresh
+/// `-wal`/`-shm`/`-tshm` sidecar happen only after settlement). The maintenance
+/// reservation keeps the engine down for the whole window, so no legitimate
+/// open precedes the recompute.
+///
+/// Settlement therefore compares the plain M1 manifest (`status`,
+/// `engine.lock` only) and the guard's marker makes it refuse 77 at
+/// `InstalledUnverified`, flipping the journal to `RollingBack`.
+///
+/// Mutant killed: a second exclusion set (`SETTLEMENT_EXCLUDED = [".wal-mode"]`)
+/// fed to the manifest builder — settlement then returns 0 and records
+/// `Verified`, and this test goes RED on its first settlement assertion.
+#[test]
+fn test_writable_open_before_settlement_refuses() {
+    const HASH: &str = "1111111111111111";
+    let parent = unique_temp_dir("settle-after-writable-open");
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    {
+        let fx = fixture(&root);
+        fx.seed_row(HASH, &record("a", &format!("opencode_project_{HASH}")));
+    }
+    // The staged tree is derived from the snapshot, which must therefore carry
+    // no marker — the same shape a real apply produces (§C.7 drops it).
+    let marker = root.join(".wal-mode");
+    let _ = std::fs::remove_file(&marker);
+    let custody = parent
+        .join("recovery")
+        .join("consolidation-settle-open-nonce");
+    let (snap, _snap_out, snap_err) = run_snapshot(&root, &custody);
+    assert_eq!(snap, Some(0), "the snapshot precedes install; {snap_err}");
+    let staged = parent.join("consolidation-staged-settleopen");
+    copy_tree_for_test(&custody.join("data"), &staged);
+    make_writable_for_test(&staged);
+    let (verified, verify_err) = run_staged_verify(&root, &custody, &staged);
+    assert_eq!(verified, Some(0), "the staged tree verifies; {verify_err}");
+    write_fixture_aux_sidecar(&custody);
+    let (installed, install_err) = run_install_mode(&custody, &root, &staged);
+    assert_eq!(installed, Some(0), "the install completes; {install_err}");
+    assert!(
+        !root.join(".wal-mode").exists(),
+        "the installed tree carries no marker until something opens it writable"
+    );
+
+    // The engine's first writable open: the guard owns the installed root.
+    let config = fixture_config(&root);
+    run_async(async {
+        let handle = TursoConnectFactory
+            .connect(
+                root.join("metadata.db"),
+                ConnectOptions::for_config(&config, Platform::current()),
+            )
+            .await
+            .expect("open the installed registry writable");
+        handle
+            .query("SELECT 1", Vec::new())
+            .await
+            .expect("query the installed registry");
+    });
+    assert!(
+        root.join(".wal-mode").is_file(),
+        "the writable open wrote its marker into the installed tree"
+    );
+    let marker_bytes = std::fs::read(&marker).expect("read the installed marker");
+
+    let (settled, settle_err) = run_custody_mode("consolidate-verify", &root, &custody);
+    assert_refusal(settled, 77, &settle_err, "consolidation.snapshot_refused");
+    assert!(
+        settle_err.contains("post-install source edit"),
+        "settlement names the differing installed tree; {settle_err}"
+    );
+    assert_eq!(
+        last_journal_record(&custody)["phase"].as_str(),
+        Some("RollingBack"),
+        "a window violation at InstalledUnverified flips the journal to RollingBack"
+    );
+    // Settlement neither restores nor clears anything: the installed tree and
+    // the marker that proved the early open are both still there, and the
+    // rollback stays an explicit operator command (§H.1).
+    assert!(
+        root.is_dir(),
+        "the installed root survives the refusal for an operator restore"
+    );
+    assert_eq!(
+        std::fs::read(&marker).expect("the marker survives the refusal"),
+        marker_bytes,
+        "the refusal leaves S's .wal-mode byte-identical"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// F6 (rehearsal finding, BLOCKING control gap): an install without a verified
+/// custody baseline is refused in the custody family, and a proper window still
+/// installs, settles and restores.
+///
+/// Mutant killed: `install` licensed by `StagedVerified` alone (the pre-fix
+/// behaviour) — S is retired with no restorable copy and the exit is 0.
+#[test]
+fn test_install_requires_a_verified_custody_baseline() {
+    // (1) No snapshot: a typed refusal, and neither rename has happened.
+    let parent = unique_temp_dir("install-no-baseline");
+    let custody = parent
+        .join("recovery")
+        .join("consolidation-20261112T000000Z-nobase");
+    let (live, staged) = install_fixture(&parent);
+    let (verified, verify_err) = run_staged_verify(&live, &custody, &staged);
+    assert_eq!(verified, Some(0), "the staged tree verifies; {verify_err}");
+    write_fixture_aux_sidecar(&custody);
+    assert!(
+        !custody.join("baseline.sha256").exists(),
+        "the fixture window has no custody snapshot"
+    );
+    let (refused, refused_err) = run_install_mode(&custody, &live, &staged);
+    assert_refusal(refused, 77, &refused_err, "consolidation.snapshot_refused");
+    assert!(
+        refused_err.contains("baseline"),
+        "the refusal names the missing baseline; {refused_err}"
+    );
+    assert_eq!(
+        std::fs::read(live.join("sentinel.txt")).expect("live sentinel"),
+        b"old-live",
+        "L4 never ran: the live tree is untouched"
+    );
+    assert!(
+        staged.join("sentinel.txt").exists(),
+        "L5 never ran: the staged tree is still at its staged name"
+    );
+    assert!(
+        !journal_phases(&custody)
+            .iter()
+            .any(|phase| phase == "Installing"),
+        "no install intent is recorded: {:?}",
+        journal_phases(&custody)
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+
+    // (2) A proper window installs and settles.
+    let parent = unique_temp_dir("install-with-baseline");
+    let custody = parent
+        .join("recovery")
+        .join("consolidation-20261112T000000Z-base");
+    let (live, staged) = install_fixture(&parent);
+    let (snap, _snap_out, snap_err) = run_snapshot(&live, &custody);
+    assert_eq!(snap, Some(0), "the baseline is taken; {snap_err}");
+    let (verified, verify_err) = run_staged_verify(&live, &custody, &staged);
+    assert_eq!(verified, Some(0), "the staged tree verifies; {verify_err}");
+    write_fixture_aux_sidecar(&custody);
+    let (installed, install_err) = run_install_mode(&custody, &live, &staged);
+    assert_eq!(
+        installed,
+        Some(0),
+        "a window with a baseline installs; {install_err}"
+    );
+    let (settled, settle_err) = run_custody_mode("consolidate-verify", &live, &custody);
+    assert_eq!(settled, Some(0), "the window settles; {settle_err}");
+    let _ = std::fs::remove_dir_all(&parent);
+
+    // (3) A proper window restores from the baseline.
+    let parent = unique_temp_dir("install-baseline-rollback");
+    let custody = parent
+        .join("recovery")
+        .join("consolidation-20261112T000000Z-rollback");
+    let (live, staged) = install_fixture(&parent);
+    let before = tree_digest(&live);
+    let (snap, _snap_out, snap_err) = run_snapshot(&live, &custody);
+    assert_eq!(snap, Some(0), "the baseline is taken; {snap_err}");
+    let (verified, verify_err) = run_staged_verify(&live, &custody, &staged);
+    assert_eq!(verified, Some(0), "the staged tree verifies; {verify_err}");
+    write_fixture_aux_sidecar(&custody);
+    let (installed, install_err) = run_install_mode(&custody, &live, &staged);
+    assert_eq!(installed, Some(0), "the window installs; {install_err}");
+    let (rolled_back, rollback_err) = run_custody_mode("consolidate-rollback", &live, &custody);
+    assert_eq!(
+        rolled_back,
+        Some(0),
+        "the baseline restores the window; {rollback_err}"
+    );
+    assert_eq!(
+        tree_digest(&live),
+        before,
+        "the pre-install tree is back byte-for-byte"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// A fixture's OWN refusal assertion: exit code plus event, LABELLED with the
+/// subcase tag, so a mutant's RED names the fixture that killed it. The shared
+/// `assert_refusal` prints only "expected exit 72", which is ambiguous once one
+/// test hosts a dozen refusals.
+fn assert_subcase_refusal(tag: &str, code: Option<i32>, expected: i32, stderr: &str, event: &str) {
+    assert_eq!(
+        code,
+        Some(expected),
+        "{tag}: expected exit {expected}; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains(event),
+        "{tag}: the refusal must name {event:?}; stderr: {stderr}"
+    );
+}
+
+/// §C.5a base fixture: group 1 (losers `L`, kept `K`, same triple) with the
+/// moved child `C` and the unchanged child `P`; group 2 (losers `L2`, kept
+/// `K2`, a distinct triple) with an unchanged child pointing at `K2`. All four
+/// parents carry `parent_session_id = NULL`, so the reparent set is exactly
+/// `{C}`.
+///
+/// File-scope because TWO tests need it: `test_reparent_check_eight` (subcases
+/// i–x) and `test_settlement_recomputes_final_artifacts` (subcase vi, the
+/// settlement leg of the dangling term).
+fn reparent_fixture(tag: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+    const SOURCE_A: &str = "4444444444444444";
+    const SOURCE_B: &str = "5555555555555555";
+    let target_identity = "path:/home/opencode/Code/thing";
+    let source_a_identity = "path:/home/vaz/Code/thing";
+    let source_b_identity = "path:/fixture/marker-root";
+    let target = "/home/opencode/Code/thing";
+
+    let parent = unique_temp_dir(tag);
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    {
+        let fx = fixture(&root);
+        fx.seed_row(
+            SOURCE_A,
+            &record("row-a", &format!("opencode_project_{SOURCE_A}")),
+        );
+        fx.seed_row(
+            SOURCE_B,
+            &record("row-b", &format!("opencode_project_{SOURCE_B}")),
+        );
+    }
+    seed_episodic(&root);
+    let episodic = root.join("episodic.db");
+    // Group 1: L (source_a, older) loses to K (source_b, newer), same triple.
+    // Group 2: L2 (older) loses to K2 (newer), a distinct triple.
+    // All four parents are `parent_session_id = NULL`.
+    for (id, pid, sid, created) in [
+        ("L", source_a_identity, "s-one", 10_i64),
+        ("K", source_b_identity, "s-one", 20_i64),
+        ("L2", source_a_identity, "s-two", 10_i64),
+        ("K2", source_b_identity, "s-two", 20_i64),
+    ] {
+        fixture_exec(
+            &root,
+            &episodic,
+            "INSERT INTO agent_sessions (id, project_id, session_id, agent_id, parent_session_id,
+               summary, metadata, embedding, created_at, updated_at, deleted_at, orphaned)
+             VALUES (?1, ?2, ?3, 'main', NULL, ?1, '{}', vector32('[0.5,-1.5]'), ?4, 1, NULL, 0)",
+            vec![
+                Value::Text(id.to_string()),
+                Value::Text(pid[5..].to_string()),
+                Value::Text(sid.to_string()),
+                Value::Integer(created),
+            ],
+        );
+    }
+    // C: moved child referencing L. P: unchanged child referencing K.
+    // L2-child: unchanged child referencing K2.
+    for (id, sid, parent_id) in [
+        ("C", "s-three", "L"),
+        ("P", "s-four", "K"),
+        ("L2-child", "s-five", "K2"),
+    ] {
+        fixture_exec(
+            &root,
+            &episodic,
+            "INSERT INTO agent_sessions (id, project_id, session_id, agent_id, parent_session_id,
+               summary, metadata, embedding, created_at, updated_at, deleted_at, orphaned)
+             VALUES (?1, ?2, ?3, 'main', ?4, ?1, '{}', vector32('[0.5,-1.5]'), 30, 1, NULL, 0)",
+            vec![
+                Value::Text(id.to_string()),
+                Value::Text(target.to_string()),
+                Value::Text(sid.to_string()),
+                Value::Text(parent_id.to_string()),
+            ],
+        );
+    }
+    let rows = vec![
+        valid_row(&root, SOURCE_A, source_a_identity, target_identity, false),
+        valid_row(&root, SOURCE_B, source_b_identity, target_identity, false),
+    ];
+    let plan = write_plan(&parent.join("plans"), &root, rows);
+    let custody = fixture_custody(&parent);
+    (parent, root, plan, custody)
+}
+
+/// The reparent oracle's OWN plain-SQL dangling count over
+/// `agent_sessions.parent_session_id`: one `SELECT COUNT(*) … NOT EXISTS`
+/// written in the test, so a bug in production's `dangling_by_pair` cannot make
+/// this assertion green. `PRAGMA foreign_key_check` is never used (§C.5a: turso
+/// answers it with zero columns).
+fn dangling_parent_sessions(db: &Path) -> i64 {
+    run_async(async {
+        let mut options = ConnectOptions::default();
+        options.read_only = true;
+        let handle = TursoConnectFactory
+            .connect(db.to_path_buf(), options)
+            .await
+            .unwrap_or_else(|error| panic!("open {} read-only: {error}", db.display()));
+        let rows = handle
+            .query(
+                "SELECT COUNT(*) AS n FROM agent_sessions c \
+                 WHERE c.parent_session_id IS NOT NULL \
+                   AND NOT EXISTS (SELECT 1 FROM agent_sessions p \
+                                   WHERE p.id = c.parent_session_id)",
+                Vec::new(),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("dangling count on {}: {error}", db.display()));
+        rows.first().and_then(|row| row.i64("n")).unwrap_or(-1)
+    })
+}
+
+/// Rewrites the auxiliary sidecar IN PLACE (never tmp + rename: a rename can
+/// change the 0600 mode and EV-M would then refuse 77 for the wrong reason).
+/// The sidecar is unhashed (R1) and `install` never re-runs the render, so a
+/// post-verify edit is legal input to check (8).
+fn rewrite_sidecar(custody: &Path, mutate: impl FnOnce(&mut Vec<serde_json::Value>)) {
+    use std::os::unix::fs::PermissionsExt;
+    let path = custody.join("journal.json.aux-divergent");
+    let mut lines = aux_sidecar_lines(custody);
+    mutate(&mut lines);
+    let text: String = lines.iter().map(|line| format!("{line}\n")).collect();
+    std::fs::write(&path, text).unwrap_or_else(|error| panic!("rewrite sidecar: {error}"));
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+        .expect("sidecar mode 0600");
+}
+
+/// Replaces the LAST journal record's `staged_manifest_sha256` in place (never
+/// tmp + rename: the mode must stay 0600). This is the C42 fixture's channel —
+/// settlement compares the installed tree against THIS digest and the manifest
+/// file beside the custody, and neither is hashed by another manifest. It
+/// breaks no chain check: `verify_record_chain` only requires `seq` to
+/// increment and `prev_hash` to equal the previous line's `record_hash`, and
+/// the last line has no successor.
+fn rewrite_last_journal_digest(custody: &Path, digest: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let path = custody.join("journal.json");
+    let text = std::fs::read_to_string(&path).expect("journal readable");
+    let mut lines: Vec<String> = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(str::to_string)
+        .collect();
+    let last = lines.pop().expect("a journal record exists");
+    let mut record: serde_json::Value =
+        serde_json::from_str(&last).expect("the last record parses");
+    record["staged_manifest_sha256"] = serde_json::json!(digest);
+    lines.push(record.to_string());
+    std::fs::write(&path, format!("{}\n", lines.join("\n"))).expect("journal rewritten");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).expect("journal mode");
+}
+
+/// §C.5a (rev 14): a divergent `agent_sessions` discard reparents the inbound
+/// `parent_session_id` references, and check (8) plus the dangling term guard
+/// the install. Subcases (i)–(v) vary the STAGED tree or the sidecar and each
+/// must refuse 72 `consolidation.reparent_identity_mismatch` (or install at
+/// (iv)); (vi)–(viii) isolate one guard each (stale line, per-line `rows`,
+/// clause (c) `kept == to`); (ix) is the pre-install dangling 77; (x) is the
+/// count oracle 1 → 0.
+#[test]
+fn test_reparent_check_eight() {
+    use std::os::unix::fs::PermissionsExt;
+    // ---- base tree: the correct outcome installs (subcase iv) ----
+    let (parent, root, plan, custody) = reparent_fixture("reparent-base");
+    let (snap, _so, snap_err) = run_snapshot(&root, &custody);
+    assert_eq!(snap, Some(0), "snapshot precedes apply; {snap_err}");
+    let (code, _out, stderr) = run_consolidate(&root, &plan, false, Some(&custody));
+    assert_eq!(code, Some(0), "the base apply succeeds; {stderr}");
+    let staged = staged_root(&parent);
+    let sessions = aux_rows(&staged.join("episodic.db"), "agent_sessions", "id");
+    let parent_of = |id: &str| -> Option<String> {
+        sessions
+            .iter()
+            .find(|row| text_cell_opt(row, "id").as_deref() == Some(id))
+            .and_then(|row| text_cell_opt(row, "parent_session_id"))
+    };
+    assert_eq!(parent_of("C").as_deref(), Some("K"), "C is reparented to K");
+    assert_eq!(parent_of("P").as_deref(), Some("K"), "P is untouched");
+    assert_eq!(
+        parent_of("L2-child").as_deref(),
+        Some("K2"),
+        "L2-child is untouched"
+    );
+    assert!(
+        !sessions
+            .iter()
+            .any(|row| text_cell_opt(row, "id").as_deref() == Some("L")),
+        "the loser L is discarded from the staged tree"
+    );
+    let lines = aux_sidecar_lines(&custody);
+    let reparents: Vec<&serde_json::Value> =
+        lines.iter().filter(|l| l["kind"] == "reparent").collect();
+    assert_eq!(reparents.len(), 1, "exactly one reparent line: {lines:?}");
+    assert_eq!(reparents[0]["from"], "L");
+    assert_eq!(reparents[0]["to"], "K");
+    assert_eq!(reparents[0]["rows"], 1);
+    for line in &reparents {
+        assert!(
+            !["P", "L2-child"]
+                .iter()
+                .any(|k| line["from"] == *k || line["to"] == *k),
+            "no reparent line names P or the L2 child"
+        );
+    }
+
+    // ---- (x) the count oracle reads 1 → 0 over the one moved child ----
+    //
+    // The `1` is the SKIP-PASS shape, built as its own copy so the digest taken
+    // below still covers the shipped tree: the loser `L` is discarded and `C`
+    // still points at it. The `0` is the shipped pass on the same tree. The
+    // count is the test's own SQL, so production's `dangling_by_pair` cannot
+    // make this green by agreeing with itself.
+    let skip_pass = parent.join("skip-pass-copy");
+    copy_tree_for_test(&staged, &skip_pass);
+    fixture_exec(
+        &root,
+        &skip_pass.join("episodic.db"),
+        "UPDATE agent_sessions SET parent_session_id = 'L' WHERE id = 'C'",
+        Vec::new(),
+    );
+    assert_eq!(
+        dangling_parent_sessions(&skip_pass.join("episodic.db")),
+        1,
+        "with the reparent SKIPPED the moved child dangles (the `1`)"
+    );
+    assert_eq!(
+        dangling_parent_sessions(&staged.join("episodic.db")),
+        0,
+        "the shipped pass reparents it: no dangling reference remains (the `0`)"
+    );
+    let staged_verified = run_staged_verify(&root, &custody, &staged);
+    assert_eq!(
+        staged_verified.0,
+        Some(0),
+        "the base staged tree verifies; {}",
+        staged_verified.1
+    );
+    let (code, stderr) = run_install_mode(&custody, &root, &staged);
+    assert_eq!(
+        code,
+        Some(0),
+        "subcase (iv): the correct tree installs; {stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+
+    // ---- (i) changed cell to valid K, no line -> 72 ----
+    let (parent, root, plan, custody) = reparent_fixture("reparent-i");
+    assert_eq!(
+        run_snapshot(&root, &custody).0,
+        Some(0),
+        "snapshot precedes apply"
+    );
+    assert_eq!(
+        run_consolidate(&root, &plan, false, Some(&custody)).0,
+        Some(0)
+    );
+    let staged = staged_root(&parent);
+    fixture_exec(
+        &root,
+        &staged.join("episodic.db"),
+        "UPDATE agent_sessions SET parent_session_id = 'K' WHERE id = 'C'",
+        Vec::new(),
+    );
+    let (verified, verr) = run_staged_verify(&root, &custody, &staged);
+    assert_eq!(
+        verified,
+        Some(0),
+        "the wrong tree is staged BEFORE the digest; {verr}"
+    );
+    let before = tree_digest(&root);
+    // Remove the reparent line so the changed cell has no matching line.
+    let sidecar = custody.join("journal.json.aux-divergent");
+    let kept: String = std::fs::read_to_string(&sidecar)
+        .unwrap()
+        .lines()
+        .filter(|l| !l.contains("\"kind\":\"reparent\""))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(&sidecar, kept).unwrap();
+    std::fs::set_permissions(&sidecar, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let (code, stderr) = run_install_mode(&custody, &root, &staged);
+    assert_refusal(
+        Some(code.unwrap_or(-1)),
+        72,
+        &stderr,
+        "consolidation.reparent_identity_mismatch",
+    );
+    assert_eq!(before, tree_digest(&root), "(i) S is byte-identical");
+    assert_eq!(last_journal_record(&custody)["phase"], "StagedVerified");
+    let _ = std::fs::remove_dir_all(&parent);
+
+    // ---- (ii) a reparent line naming the unchanged child P -> 72 ----
+    let (parent, root, plan, custody) = reparent_fixture("reparent-ii");
+    assert_eq!(
+        run_snapshot(&root, &custody).0,
+        Some(0),
+        "snapshot precedes apply"
+    );
+    assert_eq!(
+        run_consolidate(&root, &plan, false, Some(&custody)).0,
+        Some(0)
+    );
+    let staged = staged_root(&parent);
+    let (verified, _) = run_staged_verify(&root, &custody, &staged);
+    assert_eq!(verified, Some(0));
+    let sidecar = custody.join("journal.json.aux-divergent");
+    let mut text = std::fs::read_to_string(&sidecar).unwrap();
+    text.push_str("{\"kind\":\"reparent\",\"db\":\"episodic.db\",\"table\":\"agent_sessions\",\"column\":\"parent_session_id\",\"from\":\"K\",\"to\":\"L\",\"rows\":1}\n");
+    std::fs::write(&sidecar, text).unwrap();
+    std::fs::set_permissions(&sidecar, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let (code, stderr) = run_install_mode(&custody, &root, &staged);
+    assert_refusal(
+        Some(code.unwrap_or(-1)),
+        72,
+        &stderr,
+        "consolidation.reparent_identity_mismatch",
+    );
+    assert_eq!(
+        last_journal_record(&custody)["phase"],
+        "StagedVerified",
+        "(ii) journal stays StagedVerified"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+
+    // ---- (iii) staged C = K2, line L->K2 -> 72 via clause (c) ----
+    let (parent, root, plan, custody) = reparent_fixture("reparent-iii");
+    assert_eq!(
+        run_snapshot(&root, &custody).0,
+        Some(0),
+        "snapshot precedes apply"
+    );
+    assert_eq!(
+        run_consolidate(&root, &plan, false, Some(&custody)).0,
+        Some(0)
+    );
+    let staged = staged_root(&parent);
+    fixture_exec(
+        &root,
+        &staged.join("episodic.db"),
+        "UPDATE agent_sessions SET parent_session_id = 'K2' WHERE id = 'C'",
+        Vec::new(),
+    );
+    let sidecar = custody.join("journal.json.aux-divergent");
+    let text = std::fs::read_to_string(&sidecar)
+        .unwrap()
+        .replace("\"to\":\"K\"", "\"to\":\"K2\"");
+    std::fs::write(&sidecar, text).unwrap();
+    std::fs::set_permissions(&sidecar, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(run_staged_verify(&root, &custody, &staged).0, Some(0));
+    let before = tree_digest(&root);
+    let (code, stderr) = run_install_mode(&custody, &root, &staged);
+    assert_refusal(
+        Some(code.unwrap_or(-1)),
+        72,
+        &stderr,
+        "consolidation.reparent_identity_mismatch",
+    );
+    assert_eq!(before, tree_digest(&root), "(iii) S is byte-identical");
+    assert_eq!(
+        last_journal_record(&custody)["phase"],
+        "StagedVerified",
+        "(iii) journal stays StagedVerified"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+
+    // ---- (v) staged C = K2, line L->K2, divergent kept rewritten to K2 ----
+    let (parent, root, plan, custody) = reparent_fixture("reparent-v");
+    assert_eq!(
+        run_snapshot(&root, &custody).0,
+        Some(0),
+        "snapshot precedes apply"
+    );
+    assert_eq!(
+        run_consolidate(&root, &plan, false, Some(&custody)).0,
+        Some(0)
+    );
+    let staged = staged_root(&parent);
+    fixture_exec(
+        &root,
+        &staged.join("episodic.db"),
+        "UPDATE agent_sessions SET parent_session_id = 'K2' WHERE id = 'C'",
+        Vec::new(),
+    );
+    // In-place (truncate-write, mode 0600) edit AFTER apply, never re-apply.
+    let sidecar = custody.join("journal.json.aux-divergent");
+    let text = std::fs::read_to_string(&sidecar)
+        .unwrap()
+        .replace("\"to\":\"K\"", "\"to\":\"K2\"")
+        .lines()
+        .map(|line| {
+            if line.contains("\"kind\":\"divergent\"") && line.contains("\"id\":\"K\"") {
+                line.replacen("\"id\":\"K\"", "\"id\":\"K2\"", 1)
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    std::fs::write(&sidecar, text).unwrap();
+    std::fs::set_permissions(&sidecar, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(run_staged_verify(&root, &custody, &staged).0, Some(0));
+    let before = tree_digest(&root);
+    let (code, stderr) = run_install_mode(&custody, &root, &staged);
+    assert_refusal(
+        Some(code.unwrap_or(-1)),
+        72,
+        &stderr,
+        "consolidation.reparent_identity_mismatch",
+    );
+    assert_eq!(before, tree_digest(&root), "(v) S is byte-identical");
+    assert_eq!(
+        last_journal_record(&custody)["phase"],
+        "StagedVerified",
+        "(v) journal stays StagedVerified"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+
+    // ---- (vi) a reparent line matching NO changed row -> 72 (stale line) ----
+    //
+    // The base tree is UNTOUCHED; the sidecar gains one line naming a
+    // `(from, to)` pair that exists in no tree. `rows` MUST be 0: with `rows: 1`
+    // the per-line `rows` check refuses once the stale branch is removed, and
+    // the fixture would prove the wrong rule — that shape is subcase (ii).
+    let (parent, root, plan, custody) = reparent_fixture("reparent-vi");
+    assert_eq!(
+        run_snapshot(&root, &custody).0,
+        Some(0),
+        "snapshot precedes apply"
+    );
+    assert_eq!(
+        run_consolidate(&root, &plan, false, Some(&custody)).0,
+        Some(0)
+    );
+    let staged = staged_root(&parent);
+    assert_eq!(
+        run_staged_verify(&root, &custody, &staged).0,
+        Some(0),
+        "the base staged tree verifies"
+    );
+    rewrite_sidecar(&custody, |lines| {
+        lines.push(serde_json::json!({
+            "kind": "reparent",
+            "db": "episodic.db",
+            "table": "agent_sessions",
+            "column": "parent_session_id",
+            "from": "L2",
+            "to": "K2",
+            "rows": 0
+        }));
+    });
+    let before = tree_digest(&root);
+    let (code, stderr) = run_install_mode(&custody, &root, &staged);
+    assert_subcase_refusal(
+        "(vi)",
+        code,
+        72,
+        &stderr,
+        "consolidation.reparent_identity_mismatch",
+    );
+    assert!(
+        stderr.contains("matches no changed row"),
+        "(vi) the refusal names the STALE line, not another 72 branch; {stderr}"
+    );
+    assert_eq!(before, tree_digest(&root), "(vi) S is byte-identical");
+    assert_eq!(
+        last_journal_record(&custody)["phase"],
+        "StagedVerified",
+        "(vi) journal stays StagedVerified"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+
+    // ---- (vii) a line's `rows` disagreeing with the diff -> 72 (C-3) ----
+    //
+    // Base tree unchanged; the single reparent line's `rows` 1 -> 2.
+    let (parent, root, plan, custody) = reparent_fixture("reparent-vii");
+    assert_eq!(
+        run_snapshot(&root, &custody).0,
+        Some(0),
+        "snapshot precedes apply"
+    );
+    assert_eq!(
+        run_consolidate(&root, &plan, false, Some(&custody)).0,
+        Some(0)
+    );
+    let staged = staged_root(&parent);
+    assert_eq!(run_staged_verify(&root, &custody, &staged).0, Some(0));
+    rewrite_sidecar(&custody, |lines| {
+        for line in lines.iter_mut() {
+            if line["kind"] == "reparent" {
+                line["rows"] = serde_json::json!(2);
+            }
+        }
+    });
+    let edited = aux_sidecar_lines(&custody);
+    let reparent = edited
+        .iter()
+        .find(|line| line["kind"] == "reparent")
+        .unwrap_or_else(|| panic!("(vii) the reparent line survives the edit: {edited:?}"));
+    assert_eq!(reparent["rows"], 2, "(vii) the edit cannot silently no-op");
+    let before = tree_digest(&root);
+    let (code, stderr) = run_install_mode(&custody, &root, &staged);
+    assert_subcase_refusal(
+        "(vii)",
+        code,
+        72,
+        &stderr,
+        "consolidation.reparent_identity_mismatch",
+    );
+    assert!(
+        stderr.contains("rows 2 != 1 changed rows"),
+        "(vii) the refusal is the per-line rows equality; {stderr}"
+    );
+    assert_eq!(before, tree_digest(&root), "(vii) S is byte-identical");
+    assert_eq!(
+        last_journal_record(&custody)["phase"],
+        "StagedVerified",
+        "(vii) journal stays StagedVerified"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+
+    // ---- (viii) a kept-only lie on a CORRECT tree -> 72 (clause (c)) ----
+    //
+    // Distinct from (iii)/(v): the staged tree stays CORRECT (`C = K`), so the
+    // tree-derived parent of `L` is `K` and equals `to`. Only the sidecar's
+    // `kept` disagrees, so only the keyed `kept == to` clause can refuse.
+    let (parent, root, plan, custody) = reparent_fixture("reparent-viii");
+    assert_eq!(
+        run_snapshot(&root, &custody).0,
+        Some(0),
+        "snapshot precedes apply"
+    );
+    assert_eq!(
+        run_consolidate(&root, &plan, false, Some(&custody)).0,
+        Some(0)
+    );
+    let staged = staged_root(&parent);
+    let sessions = aux_rows(&staged.join("episodic.db"), "agent_sessions", "id");
+    let moved = sessions
+        .iter()
+        .find(|row| text_cell_opt(row, "id").as_deref() == Some("C"))
+        .expect("the moved child is staged");
+    assert_eq!(
+        text_cell_opt(moved, "parent_session_id").as_deref(),
+        Some("K"),
+        "(viii) the tree is CORRECT; only the record will lie"
+    );
+    assert_eq!(run_staged_verify(&root, &custody, &staged).0, Some(0));
+    rewrite_sidecar(&custody, |lines| {
+        for line in lines.iter_mut() {
+            if line["kind"] == "divergent" && line["key"]["session_id"] == "s-one" {
+                line["kept"]["id"] = serde_json::json!("K2");
+            }
+        }
+    });
+    let edited = aux_sidecar_lines(&custody);
+    let lied = edited
+        .iter()
+        .find(|line| line["kind"] == "divergent" && line["key"]["session_id"] == "s-one")
+        .unwrap_or_else(|| panic!("(viii) the divergent line survives: {edited:?}"));
+    assert_eq!(
+        lied["kept"]["id"], "K2",
+        "(viii) the edit cannot silently no-op"
+    );
+    let before = tree_digest(&root);
+    let (code, stderr) = run_install_mode(&custody, &root, &staged);
+    assert_subcase_refusal(
+        "(viii)",
+        code,
+        72,
+        &stderr,
+        "consolidation.reparent_identity_mismatch",
+    );
+    assert!(
+        stderr.contains("divergent kept agent_sessions.id is not Text(\\\"K\\\")"),
+        "(viii) the refusal is the keyed kept clause; {stderr}"
+    );
+    assert_eq!(before, tree_digest(&root), "(viii) S is byte-identical");
+    assert_eq!(
+        last_journal_record(&custody)["phase"],
+        "StagedVerified",
+        "(viii) journal stays StagedVerified"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+
+    // ---- (ix) pre-install dangling term -> 77 reparent_dangling_staged ----
+    //
+    // The staged tree's `C` is reverted to the discarded `L` and the reparent
+    // line REMOVED. Order is load-bearing: check (8) only compares CHANGED
+    // cells, so a reverted cell is invisible to it — but the line, if left in,
+    // would match no changed row and refuse 72 first. The wrongness is baked in
+    // BEFORE the digest, or the manifest compare refuses 77 first.
+    let (parent, root, plan, custody) = reparent_fixture("reparent-ix");
+    assert_eq!(
+        run_snapshot(&root, &custody).0,
+        Some(0),
+        "snapshot precedes apply"
+    );
+    assert_eq!(
+        run_consolidate(&root, &plan, false, Some(&custody)).0,
+        Some(0)
+    );
+    let staged = staged_root(&parent);
+    fixture_exec(
+        &root,
+        &staged.join("episodic.db"),
+        "UPDATE agent_sessions SET parent_session_id = 'L' WHERE id = 'C'",
+        Vec::new(),
+    );
+    let sessions = aux_rows(&staged.join("episodic.db"), "agent_sessions", "id");
+    let reverted = sessions
+        .iter()
+        .find(|row| text_cell_opt(row, "id").as_deref() == Some("C"))
+        .expect("the moved child is staged");
+    assert_eq!(
+        text_cell_opt(reverted, "parent_session_id").as_deref(),
+        Some("L"),
+        "(ix) the staged child points back at the discarded loser"
+    );
+    assert!(
+        !ids(&sessions).iter().any(|id| id == "L"),
+        "(ix) the loser is absent from the staged tree, so C dangles"
+    );
+    rewrite_sidecar(&custody, |lines| {
+        lines.retain(|line| line["kind"] != "reparent")
+    });
+    let (verified, verr) = run_staged_verify(&root, &custody, &staged);
+    assert_eq!(
+        verified,
+        Some(0),
+        "(ix) the wrongness is baked in before the digest; {verr}"
+    );
+    let before = tree_digest(&root);
+    let (code, stderr) = run_install_mode(&custody, &root, &staged);
+    assert_subcase_refusal(
+        "(ix)",
+        code,
+        77,
+        &stderr,
+        "consolidation.reparent_dangling_staged",
+    );
+    assert!(
+        stderr.contains("1 dangling references, source baseline 0"),
+        "(ix) the refusal counts the one dangling child; {stderr}"
+    );
+    assert_eq!(before, tree_digest(&root), "(ix) S is byte-identical");
+    assert_eq!(
+        last_journal_record(&custody)["phase"],
+        "StagedVerified",
+        "(ix) journal is NOT advanced"
+    );
+    assert!(
+        !journal_phases(&custody)
+            .iter()
+            .any(|phase| phase == "Installing"),
+        "(ix) no install intent is recorded: {:?}",
+        journal_phases(&custody)
+    );
+    assert!(staged.is_dir(), "(ix) the staged tree is left in place");
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+fn text_cell_opt(cells: &BTreeMap<String, Value>, name: &str) -> Option<String> {
+    cells
+        .get(name)
+        .and_then(|value| value.as_text().map(str::to_string))
 }
