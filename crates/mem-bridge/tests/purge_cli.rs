@@ -1074,6 +1074,31 @@ fn build_root_binary_cmd(_manifest_dir: &Path, target_dir_env: Option<&OsStr>) -
     cmd
 }
 
+/// Serializes every nested `cargo build` in this test binary. Cargo's target-dir
+/// lock is keyed by the path as spelled, not the resolved real path, so two
+/// builds naming the same directory through different spellings (one via the
+/// `issue-125-probe` symlink, one direct) race each other's dep-graph files.
+static BUILD_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_builds() -> std::sync::MutexGuard<'static, ()> {
+    BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Removes `path` whatever it currently is: a real directory (left behind by an
+/// earlier run), a symlink to one, or a plain file. `symlink_metadata` reports
+/// the link itself, so a symlink-to-directory still takes the `remove_file`
+/// branch.
+fn remove_probe_path(path: &Path) {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return;
+    };
+    if meta.file_type().is_dir() {
+        let _ = std::fs::remove_dir_all(path);
+    } else {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 fn binary_path() -> PathBuf {
     use std::sync::OnceLock;
     static BUILT: OnceLock<()> = OnceLock::new();
@@ -1088,6 +1113,7 @@ fn binary_path() -> PathBuf {
     // argv surface. The build is incremental and serialized by cargo's own
     // target-dir lock.
     BUILT.get_or_init(|| {
+        let _build_lock = lock_builds();
         let status = build_root_binary_cmd(manifest_dir, target_dir_var.as_deref())
             .status()
             .expect("build the root binary");
@@ -1240,17 +1266,13 @@ fn test_relative_cargo_target_dir_does_not_leak_into_crate_tree() {
     let scratch_dir = ws_root.join(".tmp").join("scratch");
     std::fs::create_dir_all(&scratch_dir).expect("create scratch dir");
     let probe_symlink = scratch_dir.join("issue-125-probe");
-    if std::fs::symlink_metadata(&probe_symlink).is_ok() {
-        let _ = std::fs::remove_file(&probe_symlink);
-    }
+    remove_probe_path(&probe_symlink);
     std::os::unix::fs::symlink(active_target, &probe_symlink).expect("create probe symlink");
 
     struct SymlinkGuard(PathBuf);
     impl Drop for SymlinkGuard {
         fn drop(&mut self) {
-            if std::fs::symlink_metadata(&self.0).is_ok() {
-                let _ = std::fs::remove_file(&self.0);
-            }
+            remove_probe_path(&self.0);
         }
     }
     let _guard = SymlinkGuard(probe_symlink);
@@ -1259,7 +1281,10 @@ fn test_relative_cargo_target_dir_does_not_leak_into_crate_tree() {
         manifest_dir,
         Some(OsStr::new(".tmp/scratch/issue-125-probe")),
     );
-    let status = cmd.status().expect("cargo build");
+    let status = {
+        let _build_lock = lock_builds();
+        cmd.status().expect("cargo build")
+    };
     assert!(status.success(), "cargo build failed");
 
     assert!(
