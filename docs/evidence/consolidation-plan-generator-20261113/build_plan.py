@@ -139,19 +139,26 @@ for name in shards:
     lines.append(json.dumps([f"projects/{name}", uv, tables, cols], sort_keys=True))
 schema_manifest = hashlib.sha256(("\n".join(lines) + "\n").encode()).hexdigest()
 
-# `consolidate-snapshot` writes `baseline.sha256` (file/dir format), not the
-# `sha256  ./path` manifest this script's first revision assumed. Both are only
-# bound into the plan digest — the CLI never verifies either against the tree —
-# so hashing whichever the snapshot actually wrote is correct and needs no
-# extra artifact in the window.
-_custody = os.path.dirname(S)
-for _name in ("manifest.sha256", "baseline.sha256"):
-    _p = os.path.join(_custody, _name)
-    if os.path.isfile(_p):
-        baseline = hashlib.sha256(open(_p, "rb").read()).hexdigest()
-        break
+# `consolidate-snapshot --custody <dir>` lays out `<dir>/data` (the snapshot of
+# S) plus `<dir>/custody/baseline.sha256`; older rehearsal tooling instead put a
+# `sha256  ./path` manifest.sha256 beside data/. Both are only bound into the
+# plan digest — the CLI never verifies either against the tree — so hashing
+# whichever the snapshot step actually wrote is correct and needs no extra
+# artifact in the window. Search the levels the snapshot step really uses.
+_root = os.path.dirname(os.path.abspath(S))
+_dirs = (_root, os.path.join(_root, "custody"), os.path.dirname(_root))
+for _d in _dirs:
+    for _name in ("manifest.sha256", "baseline.sha256"):
+        _p = os.path.join(_d, _name)
+        if os.path.isfile(_p):
+            baseline = hashlib.sha256(open(_p, "rb").read()).hexdigest()
+            baseline_source = _p
+            break
+    else:
+        continue
+    break
 else:
-    sys.exit(f"build_plan: no manifest.sha256 or baseline.sha256 beside {S}")
+    sys.exit(f"build_plan: no manifest.sha256 or baseline.sha256 in {_dirs}")
 
 plan = {
     "format_version": 1,
@@ -174,5 +181,6 @@ print(json.dumps({
     "registry_ok": reg_ok,
     "schema_manifest_sha256": schema_manifest,
     "baseline_manifest_sha256": baseline,
+    "baseline_source": baseline_source,
     "plan_mode": oct(os.stat(OUT).st_mode & 0o777),
 }, indent=1))

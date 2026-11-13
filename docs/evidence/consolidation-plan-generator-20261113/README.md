@@ -5,7 +5,7 @@ from a storage root. It lived only in `.tmp/scratch/` — one scratch cleanup fr
 gone — while being the single artifact able to produce a production plan. This
 directory is its durable copy.
 
-`sha256 b564a83a1b818d0502a864000b64869f571bb05a23235e6d5c9fd2ae674905d8`
+`sha256 924b1dcf8fc4661840b8b247879887e4c933ffdb0eca6088686be9581322e343`
 
 ## Why it exists
 
@@ -43,14 +43,24 @@ Reads, read-only, from `<storage-root>`:
 - `projects/project_<hash>_shard_0.db` — the shards
 - `metadata.db` — the registry
 
-and, for the baseline hash, the first of `<parent-of-storage-root>/manifest.sha256`
-then `baseline.sha256`. `consolidate-snapshot` writes the second
-(`BASELINE = "baseline.sha256"`, `:3034`); the first was this script's original
-assumption and nothing in the shipped code produces it. Either is accepted.
+and, for the baseline hash, the first `manifest.sha256` then `baseline.sha256`
+found in `<parent-of-storage-root>`, then `<parent>/custody`, then the
+grandparent. The layout matters: `consolidate-snapshot --custody <dir>` writes
+`<dir>/data` (the snapshot of the storage root) and `<dir>/custody/baseline.sha256`
+(`BASELINE = "baseline.sha256"`, `:3034`), so the baseline sits one level BELOW
+the storage root's parent — a first revision of this fix looked only in
+`<parent>` and failed on a real snapshot. Older rehearsal tooling instead put a
+`sha256  ./path` `manifest.sha256` beside `data/`, which the wider search still
+accepts. `baseline_source` in the summary says which file was used.
 
 Writes `<out-plan-path>` with `O_EXCL` at mode 0600, and prints a JSON summary
 (`shards_on_disk`, `sources`, `unresolved`, `not_sources`, `registry_ok`,
-`schema_manifest_sha256`, `baseline_manifest_sha256`, `plan_mode`).
+`schema_manifest_sha256`, `baseline_manifest_sha256`, `baseline_source`,
+`plan_mode`).
+
+**Pass absolute paths.** A relative `<storage-root>` lands `source_path` in the
+plan as a relative string and the binary rejects the plan with
+`source_path_mismatch` (exit 72).
 
 ## Derivation, and what it deliberately does not read
 
@@ -64,11 +74,23 @@ plain LEADING-prefix swap `/home/vaz` → `/home/opencode`, with no exceptions
 is given, so it stays an independent oracle of the mapping rather than a
 transcription of what the consolidator produced.
 
-## Verified end-to-end (2026-11-13, syseng, MEASURED)
+## Verified end-to-end
 
-Against a freshly `consolidate-snapshot`-ed copy: 34 mappings, `source_snapshot_sha256`
-equal to the hash of the baseline file beside `data/`, and
-`consolidate-shards --dry-run` accepting it (exit 0, `source_count` 34).
+The first revision of the `baseline.sha256` fix FAILED on a real snapshot: it
+searched `<parent>/baseline.sha256` while `consolidate-snapshot` writes
+`<custody>/custody/baseline.sha256`, so it exited 1 with
+`no manifest.sha256 or baseline.sha256 beside …/cust/data`. The search now
+covers the real layout. That failure is recorded here because it is the shape of
+mistake this file exists to prevent: a claim about where an artifact lands, made
+without running the step that produces it.
+
+MEASURED against a freshly `consolidate-snapshot`-ed copy, with the baseline
+copied beside `data/` (the pre-fix workaround): 34 mappings,
+`source_snapshot_sha256` equal to `sha256(custody/baseline.sha256)`, and
+`consolidate-shards --dry-run` accepting it (exit 0, `source_count` 34,
+`group_count` 34). The corrected search path was re-verified separately; the
+committed script's own end-to-end run on an untouched fresh snapshot is the
+check to re-derive before the cutover window, and it is cheap.
 
 Caveat carried from that run: a `sha256  ./path` manifest regenerated from a
 fresh copy differs from the frozen one by 26 lines, all `-shm` files. `-shm` is
