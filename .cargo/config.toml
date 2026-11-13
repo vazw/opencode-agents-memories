@@ -14,8 +14,10 @@
 # Why each entry:
 #   * `linker = "clang"` — gcc's `-fuse-ld` accepts only named linkers (bfd/gold/lld/mold),
 #     never a path, so clang is the driver that can reach wild at all.
-#   * `--ld-path=` absolute — a bare name resolves through PATH and a missing linker would
-#     fail less clearly; an absolute path errors out loudly, which is what we measured.
+#   * `--ld-path=wild` resolves via PATH (portable across hosts with `wild` installed;
+#     on this host `/home/opencode/.cargo/bin/wild`, 0.11.0). The earlier absolute
+#     host-specific pin was correct for the original machine but breaks default linker
+#     resolution on this host. Evidence/rationale for choosing wild is unchanged.
 #   * `--no-madvise-huge-pages` — REQUIRED, not a preference. wild 0.11.0 enables
 #     MADV_HUGEPAGE on the output mmap by default; on this xfs `target/` with THP at
 #     [madvise] that costs 8-25 s per link of the 195 MB debug binary (2 MB page faults
@@ -28,6 +30,6 @@
 [target.x86_64-unknown-linux-gnu]
 linker = "clang"
 rustflags = [
-    "-Clink-arg=--ld-path=/home/vaz/.cargo/bin/wild",
+    "-Clink-arg=--ld-path=wild",
     "-Clink-arg=-Wl,--no-madvise-huge-pages",
 ]
