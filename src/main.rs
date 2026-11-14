@@ -782,11 +782,13 @@ fn main() {
     // `$HOME/.opencode-mem/data`); the JSONC `storagePath` is not the engine
     // root and is never consulted here.
     if let Some((rollback, custody)) = rollback_request {
-        if let Err(refusal) =
-            shard_consolidation::admit_window_step("consolidate-rollback", &config.storage_root)
-        {
-            shard_consolidation::emit_refusal(&refusal);
-        }
+        let _recovery_flock = match shard_consolidation::admit_window_step(
+            "consolidate-rollback",
+            &config.storage_root,
+        ) {
+            Ok(flock) => flock,
+            Err(refusal) => shard_consolidation::emit_refusal(&refusal),
+        };
         std::process::exit(if rollback {
             shard_consolidation::run_rollback(&config.storage_root, &custody)
         } else {
@@ -795,12 +797,13 @@ fn main() {
     }
 
     if let Some((custody, staged)) = staged_verify_request {
-        if let Err(refusal) = shard_consolidation::admit_window_step(
+        let _recovery_flock = match shard_consolidation::admit_window_step(
             "consolidate-staged-verify",
             &config.storage_root,
         ) {
-            shard_consolidation::emit_refusal(&refusal);
-        }
+            Ok(flock) => flock,
+            Err(refusal) => shard_consolidation::emit_refusal(&refusal),
+        };
         std::process::exit(shard_consolidation::run_staged_verify(
             &config.storage_root,
             &custody,
@@ -809,11 +812,13 @@ fn main() {
     }
 
     if let Some((install, custody, staged)) = install_request {
-        if let Err(refusal) =
-            shard_consolidation::admit_window_step("consolidate-install", &config.storage_root)
-        {
-            shard_consolidation::emit_refusal(&refusal);
-        }
+        let _recovery_flock = match shard_consolidation::admit_window_step(
+            "consolidate-install",
+            &config.storage_root,
+        ) {
+            Ok(flock) => flock,
+            Err(refusal) => shard_consolidation::emit_refusal(&refusal),
+        };
         std::process::exit(if install {
             shard_consolidation::run_install(
                 &config.storage_root,
@@ -821,27 +826,31 @@ fn main() {
                 staged.as_deref().unwrap_or(Path::new("")),
             )
         } else {
-            shard_consolidation::run_recover(&config.storage_root, &custody)
+            shard_consolidation::run_recover(&config.storage_root, &custody, &_recovery_flock)
         });
     }
 
     if let Some(custody) = journal_request {
-        if let Err(refusal) =
-            shard_consolidation::admit_window_step("consolidate-journal", &config.storage_root)
-        {
-            shard_consolidation::emit_refusal(&refusal);
-        }
+        let _recovery_flock = match shard_consolidation::admit_window_step(
+            "consolidate-journal",
+            &config.storage_root,
+        ) {
+            Ok(flock) => flock,
+            Err(refusal) => shard_consolidation::emit_refusal(&refusal),
+        };
         std::process::exit(shard_consolidation::run_journal_write(&custody, "Prepared"));
     }
 
     if let Some((snapshot, custody)) = custody_request {
         // The snapshot reads the root but never opens a store; the reservation
         // gate still applies so no snapshot races a consolidation window.
-        if let Err(refusal) =
-            shard_consolidation::admit_window_step("consolidate-snapshot", &config.storage_root)
-        {
-            shard_consolidation::emit_refusal(&refusal);
-        }
+        let _recovery_flock = match shard_consolidation::admit_window_step(
+            "consolidate-snapshot",
+            &config.storage_root,
+        ) {
+            Ok(flock) => flock,
+            Err(refusal) => shard_consolidation::emit_refusal(&refusal),
+        };
         std::process::exit(if snapshot {
             shard_consolidation::run_snapshot(&config.storage_root, &custody)
         } else {
@@ -859,13 +868,22 @@ fn main() {
                 &config.storage_root,
             );
         }
-        if args_dry_run {
+        // The flock binding lives to the end of this block: the W step keeps
+        // `<parent>/recovery/` locked for its whole run (blueprint §E.5 / §H).
+        let _recovery_flock = if args_dry_run {
             refuse_if_reservation_held("consolidate-shards", &config.storage_root);
-        } else if let Err(refusal) =
-            shard_consolidation::admit_window_step("consolidate-shards", &config.storage_root)
-        {
-            shard_consolidation::emit_refusal(&refusal);
-        }
+            None
+        } else {
+            Some(
+                match shard_consolidation::admit_window_step(
+                    "consolidate-shards",
+                    &config.storage_root,
+                ) {
+                    Ok(flock) => flock,
+                    Err(refusal) => shard_consolidation::emit_refusal(&refusal),
+                },
+            )
+        };
         std::process::exit(shard_consolidation::run_plan(
             &plan,
             &config.storage_root,

@@ -437,28 +437,6 @@ pub enum WindowAdmissionVerdict {
     HeldRefused,
 }
 
-/// The one-record journal a pre-journal adopt synthesizes (§E.2): the
-/// synthesized terminal record is always `RolledBack` / `pre_journal_abandon`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AdoptedRecord {
-    kind: &'static str,
-    reason: &'static str,
-}
-
-impl AdoptedRecord {
-    /// The record kind (`RolledBack`).
-    #[must_use]
-    pub fn record_kind(&self) -> &'static str {
-        self.kind
-    }
-
-    /// The rollback reason (`pre_journal_abandon`).
-    #[must_use]
-    pub fn reason(&self) -> &'static str {
-        self.reason
-    }
-}
-
 /// Holder liveness for release and adopt (§E.2): dead when the pid is gone or
 /// its start-time token differs; a `start_time`-less body with a present pid is
 /// never releasable. Off Linux nothing is verifiable, so fail closed.

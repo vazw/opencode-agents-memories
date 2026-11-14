@@ -3764,6 +3764,11 @@ fn journal_write_record(custody: &Path, record: &Value) -> Result<(), Refusal> {
         .open(&tmp)
         .map_err(|error| io(format!("create {}: {error}", tmp.display())))?;
     let mut text = history;
+    // A history without a final newline must not get the new record glued onto
+    // its last line: that would make one unparseable line and break the chain.
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
     text.push_str(&format!("{body}\n"));
     file.write_all(text.as_bytes())
         .map_err(|error| io(format!("write {}: {error}", tmp.display())))?;
@@ -4883,20 +4888,12 @@ fn adopt_gated_with_flock(
         }
         custody
     } else {
-        // Pre-journal: create custody dir for <wtok>.
-        use std::os::unix::fs::DirBuilderExt;
+        // Pre-journal: the custody dir is created only after EV-S and EV-R pass
+        // (below). A refused adopt must leave `recovery/` as it found it.
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs());
-        let custody = recovery.join(format!("consolidation-{stamp}-{wtok}"));
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&custody)
-            .map_err(|error| custody_refusal(format!("custody dir: {error}")))?;
-        std::fs::File::open(&recovery)
-            .and_then(|dir| dir.sync_all())
-            .map_err(|error| custody_refusal(format!("fsync recovery: {error}")))?;
-        custody
+        recovery.join(format!("consolidation-{stamp}-{wtok}"))
     };
     // EV-S: storage root identity must match reservation.
     let ev_s_ok = std::fs::symlink_metadata(storage_root)
@@ -4929,6 +4926,18 @@ fn adopt_gated_with_flock(
                 ));
             }
         }
+    }
+    // Pre-journal: materialize the 0700 custody dir now that EV-S and EV-R
+    // have passed. An existing dir (the journal-present branch above) is kept.
+    if !custody.is_dir() {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&custody)
+            .map_err(|error| custody_refusal(format!("custody dir: {error}")))?;
+        std::fs::File::open(&recovery)
+            .and_then(|dir| dir.sync_all())
+            .map_err(|error| custody_refusal(format!("fsync recovery: {error}")))?;
     }
     // Synthesize 1-record RolledBack journal.
     journal_write_record(
@@ -4985,7 +4994,11 @@ pub fn run_release(storage_root: &Path, nonce: &str) -> i32 {
 /// `--mode=consolidate-recover --custody <dir>`: EV-M first; a journal at
 /// `Installing` with S absent and the staged tree present completes L5 and
 /// records `InstalledUnverified`. Nothing else is guessed.
-pub fn run_recover(storage_root: &Path, custody: &Path) -> i32 {
+///
+/// The caller already admitted the window and holds the recovery flock
+/// (`main.rs` binds it for the whole step). Re-admitting here would be a second
+/// descriptor on `<parent>/recovery/` in one process: a self-conflict (`window_busy`).
+pub fn run_recover(storage_root: &Path, custody: &Path, flock: &RecoveryFlock) -> i32 {
     let nonce = match std::env::var("OPENCODE_MEM_MAINTENANCE_NONCE") {
         Ok(value) if !value.is_empty() => value,
         _ => {
@@ -4997,14 +5010,96 @@ pub fn run_recover(storage_root: &Path, custody: &Path) -> i32 {
             .code;
         }
     };
-    let flock = match admit_window_step("consolidate-recover", storage_root) {
-        Ok(flock) => flock,
-        Err(refusal) => return refusal.code,
-    };
-    match recover(storage_root, custody, &nonce, &flock) {
+    match recover(storage_root, custody, &nonce, flock) {
         Ok(()) => 0,
         Err(refusal) => emit_refusal(&refusal),
     }
+}
+
+/// L7 reservation retake (§H, rev 6 S2/F17), under the recovery flock:
+/// write-ahead `Retaken` record (L3) → write `<parent>/.opencode-mem-maintenance.lock.retake`
+/// (0600, `O_NOFOLLOW`) → fsync → re-read the live reservation and require its
+/// bytes equal the gated old body → rename over the reservation → fsync parent.
+/// The reservation file exists at every instant, and the body keeps the nonce.
+/// `retake_seq` is derived from the journal's `Retaken` count, never copied.
+fn atomic_replace_reservation_body(
+    storage_root: &Path,
+    custody: &Path,
+    nonce: &str,
+) -> Result<(), Refusal> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let io = |detail: String| Refusal::new(EXIT_STORE_OR_IO, "consolidation.journal_io", detail);
+    let parent = storage_root
+        .parent()
+        .ok_or_else(|| custody_refusal("storage root has no parent"))?;
+    let reservation = parent.join(".opencode-mem-maintenance.lock");
+    let retake = parent.join(".opencode-mem-maintenance.lock.retake");
+    let Some((_path, old, raw)) =
+        mem_store::maintenance_reservation::reservation_bytes(storage_root)
+            .map_err(|error| custody_refusal(format!("reservation unreadable: {error}")))?
+    else {
+        return Err(Refusal::new(
+            77,
+            "consolidation.window_not_held",
+            "no maintenance reservation held",
+        ));
+    };
+    if old.nonce != nonce {
+        return Err(Refusal::new(
+            77,
+            "consolidation.release_nonce_mismatch",
+            "reservation nonce mismatch",
+        ));
+    }
+    // Retakes so far = `Retaken` records in the journal; the new seq is that + 1.
+    let retakes = std::fs::read_to_string(custody.join(JOURNAL_FILE))
+        .map_err(|error| custody_refusal(format!("journal read: {error}")))?
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|record| record.get("phase").and_then(Value::as_str) == Some("Retaken"))
+        .count() as u64;
+    let retake_seq = retakes + 1;
+    // Write-ahead: the `Retaken` record is durable before the body changes.
+    journal_write_record(
+        custody,
+        &json!({ "phase": "Retaken", "retake_seq": retake_seq }),
+    )?;
+    let mut body = old.clone();
+    body.retake_seq = Some(retake_seq);
+    let encoded = serde_json::to_string(&body)
+        .map_err(|error| io(format!("reservation body serialization: {error}")))?;
+    let _ = std::fs::remove_file(&retake);
+    {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&retake)
+            .map_err(|error| io(format!("create {}: {error}", retake.display())))?;
+        file.write_all(encoded.as_bytes())
+            .map_err(|error| io(format!("write retake body: {error}")))?;
+        file.sync_all()
+            .map_err(|error| io(format!("fsync retake body: {error}")))?;
+    }
+    // Byte-equal re-read: the gated old body must still be the live reservation.
+    let current =
+        std::fs::read(&reservation).map_err(|error| io(format!("re-read reservation: {error}")))?;
+    if current != raw {
+        let _ = std::fs::remove_file(&retake);
+        return Err(Refusal::new(
+            77,
+            "consolidation.release_nonce_mismatch",
+            "reservation changed during retake",
+        ));
+    }
+    std::fs::rename(&retake, &reservation)
+        .map_err(|error| io(format!("rename retake over reservation: {error}")))?;
+    std::fs::File::open(parent)
+        .and_then(|dir| dir.sync_all())
+        .map_err(|error| io(format!("fsync parent after retake: {error}")))
 }
 
 fn recover(
@@ -5050,8 +5145,25 @@ fn recover(
         ));
     }
     check_journal_paths(&record, custody)?;
-    if record.get("phase").and_then(Value::as_str) == Some(PHASE_INSTALLED_UNVERIFIED) {
-        return Ok(());
+    // L7 retake (§H, rev 6 S2): every resume of a non-terminal window first
+    // atomically replaces the reservation body under the recovery flock, so the
+    // reservation never disappears and the resume is attributed to this process.
+    // The journal's effective phase, not its raw last line, selects the row.
+    let phase = effective_phase(custody)?
+        .ok_or_else(|| custody_refusal("the custody journal has no effective phase"))?;
+    if phase != PHASE_VERIFIED && phase != PHASE_ROLLED_BACK {
+        atomic_replace_reservation_body(storage_root, custody, nonce)?;
+    }
+    if phase == PHASE_INSTALLED_UNVERIFIED {
+        // Settlement verification decides the next phase (§H.1 row
+        // `InstalledUnverified`): pass -> Verified, mismatch -> 77 hold.
+        settle(storage_root, custody)?;
+        return journal_write_record(custody, &json!({ "phase": PHASE_VERIFIED }));
+    }
+    if phase == PHASE_VERIFIED || phase == PHASE_ROLLED_BACK {
+        // Terminal phases (§H.1 `Verified`, `RolledBack`): the release gate owns
+        // the unlink, under the same recovery flock.
+        return release_gated_with_flock(storage_root, nonce, flock);
     }
     if record.get("phase").and_then(Value::as_str) == Some(PHASE_INSTALLING) {
         // L5 is licensed by the durable `Installing` record, which names the

@@ -3517,6 +3517,369 @@ fn test_release_phase_and_custody_refusals_carry_pinned_messages() {
     let _ = std::fs::remove_dir_all(&parent);
 }
 
+/// One hash-chained journal record, the same chain `verify_record_chain` reads.
+fn chained_journal(records: &[serde_json::Value]) -> String {
+    let mut prev = String::new();
+    let mut text = String::new();
+    for (index, record) in records.iter().enumerate() {
+        let mut body = record.clone();
+        body["seq"] = serde_json::json!(index as u64 + 1);
+        body["prev_hash"] = serde_json::json!(prev);
+        let line = body.to_string();
+        let hash = mem_core::sha256::hex(&mem_core::sha256::digest(line.as_bytes()));
+        body["record_hash"] = serde_json::json!(hash);
+        text.push_str(&format!("{body}\n"));
+        prev = hash;
+    }
+    text
+}
+
+/// Sets `path` to `mode` (0600 for files, 0700 for dirs).
+fn set_mode(path: &Path, mode: u32) {
+    std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(mode))
+        .expect("set mode");
+}
+
+/// A fully consistent terminal window for `release_gated`, staged the way the
+/// consolidator leaves it on success. Returns (parent, root, custody, nonce).
+///
+/// Verified shape (rev-15 §H.1): the original S inode retired under
+/// `recovery/consolidation-retired-<stamp>`, a NEW S holding the verified
+/// staged manifest, the staged tree consumed, journal
+/// `StagedVerified`→`InstalledUnverified`→`Verified`, sidecar 0600.
+/// RolledBack shape: `alpha` = S still the original inode and nothing retired.
+struct Terminal {
+    parent: PathBuf,
+    root: PathBuf,
+    custody: PathBuf,
+    nonce: &'static str,
+}
+
+fn terminal_window(tag: &str, phase: &str) -> Terminal {
+    use std::os::unix::fs::MetadataExt;
+    const NONCE: &str = "CCCCCCCCCCCCCCCCCCCCCC==";
+    let parent = unique_temp_dir(tag);
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    std::fs::write(root.join("live.txt"), b"original S").expect("original S body");
+    let wtok = mem_core::sha256::hex(&mem_core::sha256::digest(NONCE.as_bytes()))[..16].to_string();
+    let recovery = parent.join("recovery");
+    make_recovery_dir(&recovery);
+    let custody = recovery.join(format!("consolidation-1-{wtok}"));
+    std::fs::create_dir_all(&custody).expect("custody dir");
+    set_mode(&custody, 0o700);
+
+    // The installed S is a different inode from the original. For Verified,
+    // the original is renamed under recovery/ and the staged tree becomes S.
+    let staged = parent.join("consolidation-staged-fixture");
+    if phase == "Verified" {
+        std::fs::create_dir_all(&staged).expect("staged dir");
+        std::fs::write(staged.join("live.txt"), b"installed S").expect("staged body");
+        let staged_manifest = manifest_of_for_test(&staged);
+        let retired = recovery.join(format!("consolidation-retired-consolidation-1-{wtok}"));
+        std::fs::rename(&root, &retired).expect("retire original S");
+        std::fs::rename(&staged, &root).expect("install staged as S");
+        // Staged consumed; EV-G requires the staged path absent.
+        let installed_manifest = manifest_of_for_test(&root);
+        assert!(!staged_manifest.is_empty(), "staged manifest non-empty");
+        std::fs::write(
+            custody.join("consolidation-staged-fixture.manifest.sha256"),
+            &staged_manifest,
+        )
+        .expect("staged manifest sidecar");
+        assert_eq!(
+            installed_manifest, staged_manifest,
+            "installed S equals staged"
+        );
+        let body = serde_json::json!({
+            "pid": dead_pid(),
+            "start_time": Some(7u64),
+            "operation": "maintenance",
+            "root_basename": "data",
+            "nonce": NONCE,
+            "created_utc": "2026-11-12T00:00:00+00:00",
+            "retake_seq": null,
+            "s_dev": Some(std::fs::metadata(&retired).expect("retired meta").dev()),
+            "s_ino": Some(std::fs::metadata(&retired).expect("retired meta").ino()),
+        });
+        std::fs::write(parent.join(RESERVATION_FILE), body.to_string()).expect("reservation");
+        let journal = chained_journal(&[
+            serde_json::json!({ "phase": "StagedVerified", "staged": staged.to_string_lossy(), "staged_manifest_sha256": sha256_of_str(&staged_manifest) }),
+            serde_json::json!({ "phase": "InstalledUnverified", "staged": staged.to_string_lossy(), "staged_manifest_sha256": sha256_of_str(&staged_manifest), "storage_root": root.to_string_lossy() }),
+            serde_json::json!({ "phase": "Verified", "staged": staged.to_string_lossy(), "staged_manifest_sha256": sha256_of_str(&staged_manifest) }),
+        ]);
+        std::fs::write(custody.join("journal.json"), journal).expect("journal");
+        set_mode(&custody.join("journal.json"), 0o600);
+        std::fs::write(custody.join(AUX_SIDECAR_FOR_TEST), b"{}").expect("aux sidecar");
+        set_mode(&custody.join(AUX_SIDECAR_FOR_TEST), 0o600);
+    } else {
+        let body = serde_json::json!({
+            "pid": dead_pid(),
+            "start_time": Some(7u64),
+            "operation": "maintenance",
+            "root_basename": "data",
+            "nonce": NONCE,
+            "created_utc": "2026-11-12T00:00:00+00:00",
+            "retake_seq": null,
+            "s_dev": Some(std::fs::metadata(&root).expect("root meta").dev()),
+            "s_ino": Some(std::fs::metadata(&root).expect("root meta").ino()),
+        });
+        std::fs::write(parent.join(RESERVATION_FILE), body.to_string()).expect("reservation");
+        let journal = chained_journal(&[serde_json::json!({ "phase": "RolledBack" })]);
+        std::fs::write(custody.join("journal.json"), journal).expect("journal");
+        set_mode(&custody.join("journal.json"), 0o600);
+    }
+    Terminal {
+        parent,
+        root,
+        custody,
+        nonce: NONCE,
+    }
+}
+
+fn manifest_of_for_test(root: &Path) -> String {
+    // The same M1 bytes the library produces: `dir`/`file`/`link` lines.
+    let mut out = String::new();
+    let mut stack = vec![root.to_path_buf()];
+    let mut entries: Vec<(String, PathBuf)> = Vec::new();
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).expect("dir lists").flatten() {
+            let path = entry.path();
+            let rel = path
+                .strip_prefix(root)
+                .expect("under root")
+                .display()
+                .to_string();
+            if rel == "status" || rel == "engine.lock" {
+                continue;
+            }
+            if path.is_dir() {
+                entries.push((rel.clone(), path.clone()));
+                stack.push(path);
+            } else {
+                entries.push((rel, path));
+            }
+        }
+    }
+    entries.sort();
+    for (rel, path) in entries {
+        if path.is_dir() {
+            out.push_str(&format!("dir {rel}\n"));
+        } else {
+            let bytes = std::fs::read(&path).expect("file reads");
+            let digest = mem_core::sha256::hex(&mem_core::sha256::digest(&bytes));
+            out.push_str(&format!("file {digest} {rel}\n"));
+        }
+    }
+    out
+}
+
+fn sha256_of_str(text: &str) -> String {
+    mem_core::sha256::hex(&mem_core::sha256::digest(text.as_bytes()))
+}
+
+const AUX_SIDECAR_FOR_TEST: &str = "journal.json.aux-divergent";
+
+/// Positive control (item 3): a fully consistent Verified window releases.
+/// Deleting any one EV check in `release_evidence`'s Verified branch turns this
+/// red; the per-check tests below each name the single check they pin.
+#[test]
+fn test_release_verified_success_positive_control() {
+    let _serial = serial_guard();
+    use opencode_agents_memory::shard_consolidation::release_gated;
+    let t = terminal_window("rel-verified-ok", "Verified");
+    let result = release_gated(&t.root, t.nonce);
+    assert!(result.is_ok(), "Verified success must release; {result:?}");
+    assert!(
+        !t.parent.join(RESERVATION_FILE).exists(),
+        "reservation unlinked"
+    );
+    let _ = std::fs::remove_dir_all(&t.parent);
+}
+
+/// The RolledBack (alpha) positive control: the original S inode, nothing retired.
+#[test]
+fn test_release_rolledback_alpha_positive_control() {
+    let _serial = serial_guard();
+    use opencode_agents_memory::shard_consolidation::release_gated;
+    let t = terminal_window("rel-alpha-ok", "RolledBack");
+    let result = release_gated(&t.root, t.nonce);
+    assert!(result.is_ok(), "alpha success must release; {result:?}");
+    let _ = std::fs::remove_dir_all(&t.parent);
+}
+
+/// Each EV check in the Verified branch has one negative fixture. The
+/// positive control above passes; each negative is the SAME window with
+/// exactly one evidence fact broken, so only its own check refuses. Deleting
+/// that check lets the broken window release, turning the test red.
+fn assert_ev_refusal(t: &Terminal, needle: &str) {
+    use opencode_agents_memory::shard_consolidation::release_gated;
+    let refusal = release_gated(&t.root, t.nonce).expect_err("broken evidence must refuse");
+    assert_eq!(refusal.code, 77);
+    assert_eq!(refusal.event, "consolidation.release_evidence_mismatch");
+    assert!(
+        refusal.message.contains(needle),
+        "refused by `{needle}`, got `{}`",
+        refusal.message
+    );
+    assert!(
+        t.parent.join(RESERVATION_FILE).exists(),
+        "refused release keeps the reservation"
+    );
+    let _ = std::fs::remove_dir_all(&t.parent);
+}
+
+/// EV-M: a custody dir that is not 0700 refuses before any evidence is read.
+#[test]
+fn test_release_ev_m_custody_mode_is_enforced() {
+    let _serial = serial_guard();
+    let t = terminal_window("rel-ev-m", "Verified");
+    set_mode(&t.custody, 0o755);
+    assert_ev_refusal(&t, "EV-M");
+}
+
+/// EV-R: the retired entry must be the original S inode. Replacing the retired
+/// directory with a different inode while the original is gone breaks EV-R.
+#[test]
+fn test_release_ev_r_retired_must_be_original_inode() {
+    let _serial = serial_guard();
+    let t = terminal_window("rel-ev-r", "Verified");
+    let recovery = t.parent.join("recovery");
+    let retired = std::fs::read_dir(&recovery)
+        .expect("recovery lists")
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("consolidation-retired-"))
+        })
+        .expect("retired entry");
+    // Swap the retired entry for a fresh directory: a different inode.
+    std::fs::rename(&retired, recovery.join("consolidation-retired-moved")).expect("move");
+    std::fs::create_dir(&retired).expect("impostor retired dir");
+    assert_ev_refusal(&t, "EV-R");
+}
+
+/// EV-G: the staged tree must be consumed. Recreating it after L5 breaks EV-G.
+#[test]
+fn test_release_ev_g_staged_tree_must_be_consumed() {
+    let _serial = serial_guard();
+    let t = terminal_window("rel-ev-g", "Verified");
+    std::fs::create_dir_all(t.parent.join("consolidation-staged-fixture")).expect("restage");
+    assert_ev_refusal(&t, "EV-G");
+}
+
+/// EV-N: the installed S must differ from the original inode AND its manifest
+/// must equal the verified staged manifest. Editing S breaks the manifest.
+#[test]
+fn test_release_ev_n_installed_manifest_must_match_staged() {
+    let _serial = serial_guard();
+    let t = terminal_window("rel-ev-n", "Verified");
+    std::fs::write(t.root.join("live.txt"), b"tampered after install").expect("tamper S");
+    assert_ev_refusal(&t, "EV-N");
+}
+
+/// RolledBack (alpha): S is the original inode and nothing is retired. A
+/// retired entry alongside the original breaks alpha and refuses.
+#[test]
+fn test_release_rolledback_alpha_refuses_with_retired_entry() {
+    let _serial = serial_guard();
+    let t = terminal_window("rel-alpha-no", "RolledBack");
+    let recovery = t.parent.join("recovery");
+    std::fs::create_dir(recovery.join(format!(
+        "consolidation-retired-consolidation-1-{}",
+        &mem_core::sha256::hex(&mem_core::sha256::digest(t.nonce.as_bytes()))[..16]
+    )))
+    .expect("stray retired entry");
+    assert_ev_refusal(&t, "RolledBack");
+}
+
+/// RolledBack (zeta) positive control: S is a NEW inode whose manifest equals
+/// the custody `data` snapshot. Deleting the zeta check turns this red,
+/// because the window then refuses with the same message as the negative.
+#[test]
+fn test_release_rolledback_zeta_positive_control() {
+    let _serial = serial_guard();
+    use opencode_agents_memory::shard_consolidation::release_gated;
+    let t = terminal_window("rel-zeta-ok", "RolledBack");
+    // Snapshot holds the same bytes S will hold, under the SNAP_DATA name.
+    let snap = t.custody.join("data");
+    std::fs::create_dir_all(&snap).expect("snapshot dir");
+    std::fs::write(snap.join("live.txt"), b"original S").expect("snapshot body");
+    // S is replaced by a new inode with identical bytes.
+    std::fs::remove_dir_all(&t.root).expect("drop original");
+    std::fs::create_dir_all(&t.root).expect("new S");
+    std::fs::write(t.root.join("live.txt"), b"original S").expect("new S body");
+    let result = release_gated(&t.root, t.nonce);
+    assert!(result.is_ok(), "zeta success must release; {result:?}");
+    let _ = std::fs::remove_dir_all(&t.parent);
+}
+
+/// RolledBack (zeta): S is no longer the original inode, but its manifest
+/// equals the $SNAP manifest. Without the snapshot, the window refuses.
+#[test]
+fn test_release_rolledback_zeta_requires_snapshot_match() {
+    let _serial = serial_guard();
+    let t = terminal_window("rel-zeta-no", "RolledBack");
+    // Replace S with a fresh directory whose contents differ from any snapshot.
+    std::fs::remove_dir_all(&t.root).expect("drop original");
+    std::fs::create_dir_all(&t.root).expect("new S");
+    std::fs::write(t.root.join("live.txt"), b"not the snapshot").expect("new body");
+    assert_ev_refusal(&t, "RolledBack");
+}
+
+/// L7 (item 4): a resume of a non-terminal window retakes the reservation
+/// before routing. Driven through the real `consolidate-recover` CLI on an
+/// `InstalledUnverified` journal under the matching nonce. Observable effects:
+/// the journal gains a write-ahead `Retaken` record, the reservation body keeps
+/// the nonce and gains `retake_seq = 1`, and the reservation file is never
+/// absent. Deleting the retake call leaves no `Retaken` record and no seq, so
+/// the assertions below turn red.
+#[test]
+fn test_recover_retakes_reservation_before_routing() {
+    let _serial = serial_guard();
+    let t = terminal_window("l7-retake", "Verified");
+    let staged = t.parent.join("consolidation-staged-fixture");
+    let journal = chained_journal(&[
+        serde_json::json!({ "phase": "StagedVerified", "staged": staged.to_string_lossy(), "staged_manifest_sha256": "" }),
+        serde_json::json!({ "phase": "InstalledUnverified", "staged": staged.to_string_lossy(), "staged_manifest_sha256": "", "storage_root": t.root.to_string_lossy() }),
+    ]);
+    std::fs::write(t.custody.join("journal.json"), journal).expect("rewind journal");
+    set_mode(&t.custody.join("journal.json"), 0o600);
+    let nonce_before = {
+        let text = std::fs::read_to_string(t.parent.join(RESERVATION_FILE)).expect("reservation");
+        serde_json::from_str::<serde_json::Value>(&text).expect("json")["nonce"].clone()
+    };
+
+    // The child gets the window nonce through the registry; register this
+    // fixture's nonce for its root so admission reaches the retake path.
+    window_registry()
+        .lock()
+        .expect("window registry lock")
+        .insert(t.root.clone(), t.nonce.to_string());
+    let (code, stderr) = run_recover(&t.custody);
+    // Settlement with empty manifest digests refuses; the retake is the
+    // observable under test, and it must have happened before that refusal.
+    let _ = (code, &stderr);
+
+    let text = std::fs::read_to_string(t.parent.join(RESERVATION_FILE))
+        .expect("reservation exists after retake");
+    let after: serde_json::Value = serde_json::from_str(&text).expect("json after");
+    assert_eq!(after["nonce"], nonce_before, "retake keeps the nonce");
+    assert_eq!(after["retake_seq"], serde_json::json!(1), "retake_seq is 1");
+    let journal_text = std::fs::read_to_string(t.custody.join("journal.json")).expect("journal");
+    assert!(
+        journal_text.lines().any(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .map(|record| record["phase"] == "Retaken")
+                .unwrap_or(false)
+        }),
+        "a write-ahead Retaken record is journaled"
+    );
+    let _ = std::fs::remove_dir_all(&t.parent);
+}
+
 #[test]
 fn test_reservation_abandoned_before_journal_recovers_as_rolledback() {
     let _serial = serial_guard();
@@ -4228,6 +4591,16 @@ fn run_recover_expect(custody: &Path) -> (Option<i32>, String) {
 /// Writes raw bytes as the custody journal and runs recover; returns the exit,
 /// the stderr, and the fixture parent.
 fn recover_with_journal(name: &str, bytes: &[u8]) -> (Option<i32>, String, PathBuf) {
+    recover_with_journal_setup(name, bytes, |_| {})
+}
+
+/// `recover_with_journal` with a hook that runs on the custody dir before the
+/// single recover invocation, so a fixture file is in place before the first run.
+fn recover_with_journal_setup(
+    name: &str,
+    bytes: &[u8],
+    setup: impl FnOnce(&Path),
+) -> (Option<i32>, String, PathBuf) {
     let parent = unique_temp_dir(name);
     let custody = parent
         .join("recovery")
@@ -4252,6 +4625,7 @@ fn recover_with_journal(name: &str, bytes: &[u8]) -> (Option<i32>, String, PathB
     // The recover child's storage root is `parent/data`; hold the window there.
     std::fs::create_dir_all(parent.join("data")).expect("recover storage root");
     acquire_window(&parent.join("data"));
+    setup(&custody);
     let (code, stderr) = run_recover(&custody);
     (code, stderr, parent)
 }
@@ -4317,18 +4691,14 @@ fn test_corrupt_journal_fails_closed() {
     // (3) stale baseline: a valid chain whose recorded baseline differs from
     // baseline.sha256 in the custody dir must refuse, never proceed.
     let stale = br#"{"phase":"Prepared","baseline_sha256":"0000","seq":1,"prev_hash":"","record_hash":"aa"}"#;
-    let (code, stderr, parent) = recover_with_journal("corrupt-stale", stale);
-    let custody = parent
-        .join("recovery")
-        .join("consolidation-20261112T000000Z-corrupt");
-    std::fs::write(custody.join("baseline.sha256"), "1111\n").expect("baseline");
-    let (code2, stderr2) = run_recover(&custody);
-    assert_eq!(code2, Some(77), "a stale baseline refuses 77; {stderr2}");
+    let (code, stderr, parent) = recover_with_journal_setup("corrupt-stale", stale, |custody| {
+        std::fs::write(custody.join("baseline.sha256"), "1111\n").expect("baseline");
+    });
+    assert_eq!(code, Some(77), "a stale baseline refuses 77; {stderr}");
     assert!(
-        stderr2.contains("stale baseline"),
-        "refusal is the baseline check; {stderr2}"
+        stderr.contains("stale baseline"),
+        "refusal is the baseline check; {stderr}"
     );
-    let _ = (code, stderr);
     let _ = std::fs::remove_dir_all(&parent);
 
     // (4) interior chain break: the second record's prev_hash does not equal
@@ -6183,74 +6553,166 @@ fn text_cell_opt(cells: &BTreeMap<String, Value>, name: &str) -> Option<String> 
 /// Each case builds its own root, spawns the real binary, and asserts the exit
 /// code plus the structured event; the apply cases also assert that no
 /// `journal.json` is created.
+/// Builds a root with one planned row and returns (parent, root, plan, custody).
+fn ftr_build(tag: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+    const HASH: &str = "8888888888888888";
+    let parent = unique_temp_dir(tag);
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    {
+        let fx = fixture(&root);
+        fx.seed_row(HASH, &record("row", &format!("opencode_project_{HASH}")));
+    }
+    let identity = "path:/fixture/self";
+    let rows = vec![valid_row(&root, HASH, identity, identity, false)];
+    let plan = write_plan(&parent.join("plans"), &root, rows);
+    let custody = fixture_custody(&parent);
+    (parent, root, plan, custody)
+}
+
+/// Spawns the real binary with explicit args and an explicit nonce env
+/// (`None` = unset). Returns (exit code, stderr).
+fn ftr_spawn(root: &Path, args: &[String], nonce: Option<&str>) -> (Option<i32>, String) {
+    let home = root.parent().expect("parent").join("home");
+    std::fs::create_dir_all(&home).expect("home");
+    if !home.join(".config/opencode/opencode-mem.jsonc").exists() {
+        write_fixture_config(&home, 1000);
+    }
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_opencode-agents-memory"));
+    cmd.arg(format!("--storage-root={}", root.display()))
+        .args(args)
+        .env("HOME", &home)
+        .stdin(Stdio::null());
+    cmd.env_remove("OPENCODE_MEM_MAINTENANCE_NONCE");
+    if let Some(value) = nonce {
+        cmd.env("OPENCODE_MEM_MAINTENANCE_NONCE", value);
+    }
+    let out = cmd.output().expect("child runs");
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr).to_string(),
+    )
+}
+
+fn ftr_apply_args(plan: &Path, custody: &Path) -> Vec<String> {
+    vec![
+        "--mode=consolidate-shards".to_string(),
+        format!("--plan={}", plan.display()),
+        format!("--custody={}", custody.display()),
+    ]
+}
+
+const FTR_N1: &str = "BBBBBBBBBBBBBBBBBBBBBA==";
+
+/// (a) Flagless apply on an unreserved (Absent) root -> 77, no journal.json.
+#[test]
+fn test_apply_absent_refuses_window_not_held() {
+    let _serial = serial_guard();
+    let (parent, root, plan, custody) = ftr_build("ftr-a");
+    let (code, stderr) = ftr_spawn(&root, &ftr_apply_args(&plan, &custody), None);
+    assert_eq!(code, Some(77), "(a) Absent apply exits 77; {stderr}");
+    assert!(
+        stderr.contains("consolidation.window_not_held"),
+        "(a) event named; {stderr}"
+    );
+    assert!(
+        !custody.join("journal.json").exists(),
+        "(a) no journal.json is written"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// (c) Held by a live foreign holder with the MATCHING nonce: the flagless
+/// apply is admitted and runs `apply_plan`, so it exits 0, stages one tree
+/// beside the root and writes no journal (the journal is an install-phase
+/// artifact). Exact observable, not `!= 76`: a mutant that refuses 76 at the
+/// dry-run fence fails here.
+#[test]
+fn test_apply_matching_nonce_on_held_root_is_admitted() {
+    let _serial = serial_guard();
+    let (parent, root, plan, custody) = ftr_build("ftr-c");
+    write_reservation_body(
+        &parent,
+        &root,
+        1,
+        mem_store::platform::process_start_time(1),
+        FTR_N1,
+    );
+    let (code, stderr) = ftr_spawn(&root, &ftr_apply_args(&plan, &custody), Some(FTR_N1));
+    assert_eq!(
+        code,
+        Some(0),
+        "(c) matching nonce applies and exits 0; {stderr}"
+    );
+    assert_eq!(
+        staged_tree_count(&parent),
+        1,
+        "(c) exactly one staged tree is written beside the root"
+    );
+    assert!(
+        !custody.join("journal.json").exists(),
+        "(c) apply writes no install journal"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// The W step keeps `<parent>/recovery/` flocked for its whole run. A child
+/// blocked at the `--plan` FIFO after admission holds the lock; a second
+/// `flock(LOCK_EX|LOCK_NB)` from this process must fail with EWOULDBLOCK.
+/// At the dropped-guard HEAD the probe succeeds, so this is red there.
+#[test]
+fn test_w_step_holds_recovery_flock_for_its_duration() {
+    let _serial = serial_guard();
+    let (parent, root, _plan, custody) = ftr_build("ftr-flock");
+    write_reservation_body(
+        &parent,
+        &root,
+        1,
+        mem_store::platform::process_start_time(1),
+        FTR_N1,
+    );
+    let fifo = parent.join("plan.fifo");
+    let mkfifo = Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .expect("mkfifo runs");
+    assert!(mkfifo.success(), "mkfifo fixture");
+    let home = parent.join("home");
+    std::fs::create_dir_all(&home).expect("home");
+    write_fixture_config(&home, 1000);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_opencode-agents-memory"))
+        .arg(format!("--storage-root={}", root.display()))
+        .arg("--mode=consolidate-shards")
+        .arg(format!("--plan={}", fifo.display()))
+        .arg(format!("--custody={}", custody.display()))
+        .env("HOME", &home)
+        .env("OPENCODE_MEM_MAINTENANCE_NONCE", FTR_N1)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("W child spawns");
+    // Admission happens before the plan is opened; the FIFO has no writer, so
+    // the child blocks there while holding whatever admission returned.
+    std::thread::sleep(Duration::from_millis(800));
+    let recovery = std::fs::File::open(parent.join("recovery")).expect("recovery fd");
+    let fd = std::os::unix::io::AsRawFd::as_raw_fd(&recovery);
+    let rc = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+    let errno = std::io::Error::last_os_error().raw_os_error();
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&parent);
+    assert_eq!(rc, -1, "a running W step must hold recovery/ flocked");
+    assert_eq!(errno, Some(libc::EWOULDBLOCK), "EWOULDBLOCK from the probe");
+}
+
 #[test]
 fn test_apply_cannot_run_without_a_reservation() {
     let _serial = serial_guard();
-    const HASH: &str = "8888888888888888";
-    const N1: &str = "BBBBBBBBBBBBBBBBBBBBBA==";
-
-    // Builds a root with one planned row and returns (parent, root, plan, custody).
-    let build = |tag: &str| {
-        let parent = unique_temp_dir(tag);
-        let root = parent.join("data");
-        std::fs::create_dir_all(&root).expect("fixture root");
-        {
-            let fx = fixture(&root);
-            fx.seed_row(HASH, &record("row", &format!("opencode_project_{HASH}")));
-        }
-        let identity = "path:/fixture/self";
-        let rows = vec![valid_row(&root, HASH, identity, identity, false)];
-        let plan = write_plan(&parent.join("plans"), &root, rows);
-        let custody = fixture_custody(&parent);
-        (parent, root, plan, custody)
-    };
-
-    // Spawns the real binary with explicit args and an explicit nonce env
-    // (`None` = unset). Returns (exit code, stderr).
-    let spawn = |root: &Path, args: &[String], nonce: Option<&str>| {
-        let home = root.parent().expect("parent").join("home");
-        std::fs::create_dir_all(&home).expect("home");
-        if !home.join(".config/opencode/opencode-mem.jsonc").exists() {
-            write_fixture_config(&home, 1000);
-        }
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_opencode-agents-memory"));
-        cmd.arg(format!("--storage-root={}", root.display()))
-            .args(args)
-            .env("HOME", &home)
-            .stdin(Stdio::null());
-        cmd.env_remove("OPENCODE_MEM_MAINTENANCE_NONCE");
-        if let Some(value) = nonce {
-            cmd.env("OPENCODE_MEM_MAINTENANCE_NONCE", value);
-        }
-        let out = cmd.output().expect("child runs");
-        (
-            out.status.code(),
-            String::from_utf8_lossy(&out.stderr).to_string(),
-        )
-    };
-    let apply_args = |plan: &Path, custody: &Path| {
-        vec![
-            "--mode=consolidate-shards".to_string(),
-            format!("--plan={}", plan.display()),
-            format!("--custody={}", custody.display()),
-        ]
-    };
-
-    // (a) Flagless apply on an unreserved (Absent) root -> 77, no journal.json.
-    {
-        let (parent, root, plan, custody) = build("ftr-a");
-        let (code, stderr) = spawn(&root, &apply_args(&plan, &custody), None);
-        assert_eq!(code, Some(77), "(a) Absent apply exits 77; {stderr}");
-        assert!(
-            stderr.contains("consolidation.window_not_held"),
-            "(a) event named; {stderr}"
-        );
-        assert!(
-            !custody.join("journal.json").exists(),
-            "(a) no journal.json is written"
-        );
-        let _ = std::fs::remove_dir_all(&parent);
-    }
+    let build = ftr_build;
+    let spawn = ftr_spawn;
+    let apply_args = ftr_apply_args;
+    const N1: &str = FTR_N1;
 
     // (b) + (g2) Held by a foreign live holder: wrong, unset, or empty nonce -> 76.
     for nonce in [Some("wrong-nonce"), None, Some("")] {
@@ -6279,22 +6741,6 @@ fn test_apply_cannot_run_without_a_reservation() {
             !custody.join("journal.json").exists(),
             "(b)/(g2) no journal"
         );
-        let _ = std::fs::remove_dir_all(&parent);
-    }
-
-    // (c) Held by a live foreign holder with the MATCHING nonce -> admitted, not 76.
-    {
-        let (parent, root, plan, custody) = build("ftr-c");
-        write_reservation_body(
-            &parent,
-            &root,
-            1,
-            mem_store::platform::process_start_time(1),
-            N1,
-        );
-        let (code, stderr) = spawn(&root, &apply_args(&plan, &custody), Some(N1));
-        assert_ne!(code, Some(76), "(c) matching nonce is admitted; {stderr}");
-        assert_ne!(code, Some(77), "(c) matching nonce is not Absent; {stderr}");
         let _ = std::fs::remove_dir_all(&parent);
     }
 
