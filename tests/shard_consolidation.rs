@@ -3761,6 +3761,43 @@ fn test_release_ev_r_retired_must_be_original_inode() {
     assert_ev_refusal(&t, "EV-R");
 }
 
+/// EV-R count arm: exactly one retired entry. A second retired entry (the
+/// original inode stays in place, so the inode arm alone would not refuse)
+/// must refuse by the count, not by the inode check.
+#[test]
+fn test_release_ev_r_count_refuses_two_retired_entries() {
+    let _serial = serial_guard();
+    let t = terminal_window("rel-ev-r-two", "Verified");
+    let recovery = t.parent.join("recovery");
+    std::fs::create_dir(recovery.join(format!(
+        "consolidation-retired-extra-{}",
+        &mem_core::sha256::hex(&mem_core::sha256::digest(t.nonce.as_bytes()))[..16]
+    )))
+    .expect("second retired entry");
+    assert_ev_refusal(&t, "EV-R: expected exactly one retired entry");
+}
+
+/// EV-R count arm: exactly one retired entry. Zero retired entries must
+/// refuse by the count, before the inode check indexes the missing entry.
+#[test]
+fn test_release_ev_r_count_refuses_zero_retired_entries() {
+    let _serial = serial_guard();
+    let t = terminal_window("rel-ev-r-zero", "Verified");
+    let recovery = t.parent.join("recovery");
+    let retired = std::fs::read_dir(&recovery)
+        .expect("recovery lists")
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("consolidation-retired-"))
+        })
+        .expect("retired entry");
+    std::fs::rename(&retired, recovery.join("moved-away")).expect("move retired out");
+    assert_ev_refusal(&t, "EV-R: expected exactly one retired entry");
+}
+
 /// EV-G: the staged tree must be consumed. Recreating it after L5 breaks EV-G.
 #[test]
 fn test_release_ev_g_staged_tree_must_be_consumed() {
