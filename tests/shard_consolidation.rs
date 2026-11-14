@@ -3917,6 +3917,438 @@ fn test_recover_retakes_reservation_before_routing() {
     let _ = std::fs::remove_dir_all(&t.parent);
 }
 
+// ---------------------------------------------------------------------------
+// Bookkeeping records (`Retaken`) are never phases (§H). Eight tests, all RED
+// on unfixed HEAD: every raw last-record reader takes the bookkeeping record
+// as a phase. Shared helpers first.
+// ---------------------------------------------------------------------------
+
+/// Appends one write-ahead `Retaken` bookkeeping record to the custody journal,
+/// chained the same way the production writer (`journal_write_record`) chains:
+/// `seq` = last `seq` + 1, `prev_hash` = last `record_hash`, and `record_hash`
+/// = sha256 of the serialized body before `record_hash` is added. The helper
+/// uses the same keys and the same hashing scheme as the production writer; it
+/// does not reproduce the seam's bytes, and no test asserts byte-equality with
+/// the seam. Disclosure: `verify_record_chain` checks `seq` and `prev_hash`
+/// only, so `record_hash` is written but unchecked by every verifier.
+fn append_retaken(custody: &Path) {
+    let journal = custody.join("journal.json");
+    let text = std::fs::read_to_string(&journal).expect("journal readable");
+    let last = text
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .expect("journal has a record");
+    let last_record: serde_json::Value = serde_json::from_str(last).expect("record parses");
+    let seq = last_record
+        .get("seq")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+        + 1;
+    let prev_hash = last_record
+        .get("record_hash")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let mut body = serde_json::json!({ "phase": "Retaken", "retake_seq": 1 });
+    body["seq"] = serde_json::json!(seq);
+    body["prev_hash"] = serde_json::json!(prev_hash);
+    let line = body.to_string();
+    let record_hash = mem_core::sha256::hex(&mem_core::sha256::digest(line.as_bytes()));
+    body["record_hash"] = serde_json::json!(record_hash);
+    let mut updated = text;
+    if !updated.is_empty() && !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    updated.push_str(&format!("{body}\n"));
+    std::fs::write(&journal, updated).expect("append Retaken");
+    set_mode(&journal, 0o600);
+}
+
+/// Shared real-chain builder: snapshot → staged-verify → REAL install, so the
+/// journal is `[StagedVerified, InstalledUnverified]` with real digests and the
+/// live S equals the staged tree. The snapshot precedes the install because the
+/// install requires a verified baseline (F6,
+/// `test_install_requires_a_verified_custody_baseline`). The reservation is
+/// held by THIS test process (`install_fixture` acquires it) and its nonce is
+/// registered for `live`, so every child's admission reaches the window; the
+/// custody name carries the window token, as release's custody resolution
+/// requires. Returns (parent, live, staged, custody, live tree digest taken
+/// before the install).
+fn installed_window(tag: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf, BTreeMap<String, String>) {
+    let parent = unique_temp_dir(tag);
+    let (live, staged) = install_fixture(&parent);
+    let nonce = window_registry()
+        .lock()
+        .expect("window registry lock")
+        .get(&live)
+        .cloned()
+        .expect("the fixture holds the window");
+    let wtok = &mem_core::sha256::hex(&mem_core::sha256::digest(nonce.as_bytes()))[..16];
+    make_recovery_dir(&parent.join("recovery"));
+    let custody = parent
+        .join("recovery")
+        .join(format!("consolidation-20261112T000000Z-{wtok}"));
+    let (snap, _snap_out, snap_err) = run_snapshot(&live, &custody);
+    assert_eq!(
+        snap,
+        Some(0),
+        "the snapshot precedes the install; {snap_err}"
+    );
+    let original = tree_digest(&live);
+    let (verified, verify_err) = run_staged_verify(&live, &custody, &staged);
+    assert_eq!(verified, Some(0), "the staged tree verifies; {verify_err}");
+    write_fixture_aux_sidecar(&custody);
+    let (installed, install_err) = run_install_mode(&custody, &live, &staged);
+    assert_eq!(installed, Some(0), "the install completes; {install_err}");
+    (parent, live, staged, custody, original)
+}
+
+/// Test 1a: `settle` reads the effective phase across a trailing `Retaken`
+/// bookkeeping record. Fixture journal `[StagedVerified, InstalledUnverified,
+/// Retaken]` with real digests. HEAD reads the raw last line, sees
+/// `storage_root: ""`, and refuses `journal names a different storage_root`;
+/// the fix skips the bookkeeping record, settles, and appends `Verified`.
+#[test]
+fn test_bookkeeping_retaken_last_settles() {
+    let _serial = serial_guard();
+    let (parent, live, _staged, custody, _original) = installed_window("bk-retaken-last");
+    append_retaken(&custody);
+    let (code, stderr) = run_custody_mode("consolidate-verify", &live, &custody);
+    assert_eq!(
+        code,
+        Some(0),
+        "settle proceeds past the trailing Retaken; {stderr}"
+    );
+    let text = std::fs::read_to_string(custody.join("journal.json")).expect("journal readable");
+    assert!(
+        text.lines().any(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .map(|record| record["phase"] == "Retaken")
+                .unwrap_or(false)
+        }),
+        "the Retaken record is still journalled before the settled record"
+    );
+    assert_eq!(
+        last_journal_record(&custody)["phase"].as_str(),
+        Some("Verified"),
+        "settle appended Verified after the bookkeeping record"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// Test 1b: `recover` routes across a trailing `Retaken` record. Fixture
+/// journal `[StagedVerified, InstalledUnverified, Retaken]`, fresh window.
+/// HEAD takes the effective phase `Retaken`, has no arm for it, and refuses
+/// `journal phase requires an operator decision`; the fix retakes again and
+/// converges through `settle` to a `Verified` last phase record.
+#[test]
+fn test_bookkeeping_retaken_last_recovers() {
+    let _serial = serial_guard();
+    let (parent, _live, _staged, custody, _original) = installed_window("bk-retaken-recover");
+    append_retaken(&custody);
+    let (code, stderr) = run_recover(&custody);
+    assert_eq!(
+        code,
+        Some(0),
+        "recover resumes from a bookkeeping-last journal; {stderr}"
+    );
+    assert_eq!(
+        last_journal_record(&custody)["phase"].as_str(),
+        Some("Verified"),
+        "recover converged to Verified"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// Test 2: release proceeds across a trailing `Retaken`. Fixture
+/// `[StagedVerified, InstalledUnverified, Verified, Retaken]`. HEAD reads the
+/// effective phase `Retaken` and refuses `consolidation.release_phase_nonterminal`;
+/// the fix reaches the EV checks and releases.
+#[test]
+fn test_bookkeeping_retaken_after_verified_releases() {
+    let _serial = serial_guard();
+    use opencode_agents_memory::shard_consolidation::release_gated;
+    let t = terminal_window("bk-release", "Verified");
+    append_retaken(&t.custody);
+    let result = release_gated(&t.root, t.nonce);
+    if let Err(refusal) = &result {
+        assert_ne!(
+            refusal.event, "consolidation.release_phase_nonterminal",
+            "the phase gate must not see the bookkeeping record: {}",
+            refusal.message
+        );
+    }
+    assert!(
+        result.is_ok(),
+        "release proceeds past the Retaken record; {result:?}"
+    );
+    assert!(
+        !t.parent.join(RESERVATION_FILE).exists(),
+        "reservation unlinked"
+    );
+    let _ = std::fs::remove_dir_all(&t.parent);
+}
+
+/// Test 3 (§H.1 `StagedVerified` row): install proceeds across a trailing
+/// `Retaken`. Fixture journal `[StagedVerified, Retaken]`. HEAD reads the raw
+/// last line and refuses `install requires the effective phase StagedVerified`;
+/// the fix enters `install()` in full, retiring S for the staged tree.
+#[test]
+fn test_bookkeeping_install_proceeds_after_retaken_staged() {
+    let _serial = serial_guard();
+    let parent = unique_temp_dir("bk-install-staged");
+    let (live, staged) = install_fixture(&parent);
+    let nonce = window_registry()
+        .lock()
+        .expect("window registry lock")
+        .get(&live)
+        .cloned()
+        .expect("the fixture holds the window");
+    let wtok = &mem_core::sha256::hex(&mem_core::sha256::digest(nonce.as_bytes()))[..16];
+    make_recovery_dir(&parent.join("recovery"));
+    let custody = parent
+        .join("recovery")
+        .join(format!("consolidation-20261112T000000Z-{wtok}"));
+    let (snap, _snap_out, snap_err) = run_snapshot(&live, &custody);
+    assert_eq!(
+        snap,
+        Some(0),
+        "the snapshot precedes the install; {snap_err}"
+    );
+    let (verified, verify_err) = run_staged_verify(&live, &custody, &staged);
+    assert_eq!(verified, Some(0), "the staged tree verifies; {verify_err}");
+    write_fixture_aux_sidecar(&custody);
+    append_retaken(&custody);
+    // Install renames the staged tree into S: capture its manifest first.
+    let staged_manifest = manifest_of_for_test(&staged);
+    let (installed, install_err) = run_install_mode(&custody, &live, &staged);
+    assert_eq!(
+        installed,
+        Some(0),
+        "install proceeds past the Retaken record; {install_err}"
+    );
+    assert_eq!(
+        last_journal_record(&custody)["phase"].as_str(),
+        Some("InstalledUnverified"),
+        "the window is installed"
+    );
+    assert_eq!(
+        manifest_of_for_test(&live),
+        staged_manifest,
+        "S holds exactly the verified staged tree"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// Test 4 (§H.1 `InstalledUnverified` row): rollback proceeds across a trailing
+/// `Retaken`. Fixture journal `[StagedVerified, InstalledUnverified, Retaken]`.
+/// HEAD reads the raw last line and refuses `rollback requires an install in
+/// flight or a begun restore`; the fix restores the snapshot and records
+/// `RolledBack`, with S whole-root equal to the pre-install snapshot state.
+#[test]
+fn test_bookkeeping_rollback_proceeds_after_retaken_installed() {
+    let _serial = serial_guard();
+    let (parent, live, _staged, custody, original) = installed_window("bk-rollback");
+    append_retaken(&custody);
+    let (code, stderr) = run_custody_mode("consolidate-rollback", &live, &custody);
+    assert_eq!(
+        code,
+        Some(0),
+        "rollback proceeds past the Retaken record; {stderr}"
+    );
+    assert_eq!(
+        tree_digest(&live),
+        original,
+        "S is restored whole-root to the snapshot state"
+    );
+    assert_eq!(
+        last_journal_record(&custody)["phase"].as_str(),
+        Some("RolledBack"),
+        "the window is rolled back"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// Test 5: a bookkeeping-only journal refuses 77 `journal has no phase record`
+/// and is NEVER archived or guessed from. Under mutant (iii) (`Ok(None)` from
+/// `last_journal_record`) `settle` would enter its no-journal branch; under
+/// mutant (vi) (archive on `Ok(None)`) a `consolidation-corrupt-*` entry would
+/// appear; under mutant (ii) (raw last line) the verify half would answer
+/// `different storage_root`. HEAD reads the raw `Retaken`, retakes, and
+/// mutates the journal, so the byte-equality assertions go red.
+#[test]
+fn test_bookkeeping_only_journal_refuses_without_guessing() {
+    let _serial = serial_guard();
+    let (parent, live, _staged, custody, _original) = installed_window("bk-only");
+    std::fs::write(
+        custody.join("journal.json"),
+        chained_journal(&[serde_json::json!({ "phase": "Retaken", "retake_seq": 1 })]),
+    )
+    .expect("rewrite journal");
+    set_mode(&custody.join("journal.json"), 0o600);
+    let journal_before = std::fs::read(custody.join("journal.json")).expect("journal bytes");
+    let reservation_before = std::fs::read(parent.join(RESERVATION_FILE)).expect("reservation");
+    let recovery_entries = || -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(parent.join("recovery"))
+            .expect("recovery lists")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        names
+    };
+    let entries_before = recovery_entries();
+
+    let (code, stderr) = run_recover(&custody);
+    assert_eq!(code, Some(77), "bookkeeping-only journal refuses; {stderr}");
+    assert!(
+        stderr.contains("journal has no phase record"),
+        "the refusal names the absent phase record; {stderr}"
+    );
+    assert_eq!(
+        std::fs::read(custody.join("journal.json")).expect("journal bytes"),
+        journal_before,
+        "the journal is not touched"
+    );
+    assert_eq!(
+        std::fs::read(parent.join(RESERVATION_FILE)).expect("reservation bytes"),
+        reservation_before,
+        "the reservation is not touched"
+    );
+    assert_eq!(recovery_entries(), entries_before, "no archive entry");
+    assert!(
+        !std::fs::read_dir(parent.join("recovery"))
+            .expect("recovery lists")
+            .any(|entry| {
+                entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("consolidation-corrupt-")
+            }),
+        "a bookkeeping-only journal is never archived"
+    );
+
+    let (code, stderr) = run_custody_mode("consolidate-verify", &live, &custody);
+    assert_eq!(code, Some(77), "settle refuses without guessing; {stderr}");
+    assert!(
+        stderr.contains("journal has no phase record"),
+        "settle refuses from the journal branch, not the no-journal branch; {stderr}"
+    );
+    assert!(
+        !stderr.contains("different storage_root"),
+        "the raw last line is never read as a phase; {stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// Test 8: re-apply over a retaken installed window refuses
+/// `consolidation.window_not_applyable`. HEAD reads the effective phase
+/// `Retaken`, passes `refuse_installed_window`, and the apply reaches
+/// `preflight`, which refuses 72 `consolidation.source_set_mismatch` because
+/// the install retired the plan's sources.
+#[test]
+fn test_bookkeeping_retaken_installed_window_refuses_reapply() {
+    let _serial = serial_guard();
+    let (parent, root, plan) = one_group_apply_fixture("bk-reapply");
+    let custody = fixture_custody(&parent);
+    let (snap, _snap_out, snap_err) = run_snapshot(&root, &custody);
+    assert_eq!(snap, Some(0), "the snapshot precedes apply; {snap_err}");
+    let (applied, _apply_out, apply_err) = run_consolidate(&root, &plan, false, Some(&custody));
+    assert_eq!(applied, Some(0), "the first apply succeeds; {apply_err}");
+    let staged = staged_root(&parent);
+    let (staged_verified, staged_err) = run_staged_verify(&root, &custody, &staged);
+    assert_eq!(
+        staged_verified,
+        Some(0),
+        "the staged tree verifies; {staged_err}"
+    );
+    let (installed, install_err) = run_install_mode(&custody, &root, &staged);
+    assert_eq!(installed, Some(0), "the install completes; {install_err}");
+    append_retaken(&custody);
+    let (repeat, _repeat_out, repeat_err) = run_consolidate(&root, &plan, false, Some(&custody));
+    assert_refusal(
+        repeat,
+        77,
+        &repeat_err,
+        "consolidation.window_not_applyable",
+    );
+    assert!(
+        !repeat_err.contains("consolidation.source_set_mismatch"),
+        "the installed-window guard fires before preflight; {repeat_err}"
+    );
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// Test 9 (pins the deleted redundant write): recover converges
+/// `InstalledUnverified` to a COMPLETE `Verified` record (settle's own), and
+/// the converged window is then verifiable and past the release phase gate.
+/// HEAD refuses inside `run_recover` (`different storage_root` off the raw
+/// `Retaken` the retake writes ahead of `settle`). With 2a–2e applied but 2f
+/// omitted, the bare `Verified` recover writes shadows settle's complete one
+/// and step (i) below fails with `different storage_root` — that mutant
+/// pairing is the discriminator for Change 2.
+#[test]
+fn test_bookkeeping_recover_convergence_is_verifiable_and_releasable() {
+    let _serial = serial_guard();
+    let (parent, live, _staged, custody, _original) = installed_window("bk-converge");
+    let (code, stderr) = run_recover(&custody);
+    assert_eq!(code, Some(0), "recover converges the window; {stderr}");
+    let last = last_journal_record(&custody);
+    assert_eq!(
+        last["phase"].as_str(),
+        Some("Verified"),
+        "converged: {last}"
+    );
+    assert!(
+        last.get("staged").is_some(),
+        "the converged record names the staged tree"
+    );
+    assert!(
+        last.get("staged_manifest_sha256").is_some(),
+        "the converged record names the staged manifest digest"
+    );
+    assert!(
+        last.get("storage_root").is_some(),
+        "the converged record names the storage root"
+    );
+
+    // (i) verifiable: settlement re-runs without a storage_root mismatch.
+    let (code, stderr) = run_custody_mode("consolidate-verify", &live, &custody);
+    assert_eq!(code, Some(0), "the converged window verifies; {stderr}");
+    assert!(
+        !stderr.contains("different storage_root"),
+        "settlement reads the complete record; {stderr}"
+    );
+
+    // (ii) past the release phase gate: no EV-G miss, no phase-gate refusal.
+    // The reservation holder is this live test process, so a holder-liveness
+    // refusal is a later-stage outcome and is accepted here by design.
+    let nonce = window_registry()
+        .lock()
+        .expect("window registry lock")
+        .get(&live)
+        .cloned()
+        .expect("the fixture holds the window");
+    let result = opencode_agents_memory::shard_consolidation::release_gated(&live, &nonce);
+    if let Err(refusal) = &result {
+        assert_ne!(
+            refusal.event, "consolidation.release_phase_nonterminal",
+            "the release phase gate must see Verified: {}",
+            refusal.message
+        );
+        assert!(
+            !refusal
+                .message
+                .contains("EV-G: record names no staged tree"),
+            "EV-G reads the complete record; {}",
+            refusal.message
+        );
+    }
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
 #[test]
 fn test_reservation_abandoned_before_journal_recovers_as_rolledback() {
     let _serial = serial_guard();

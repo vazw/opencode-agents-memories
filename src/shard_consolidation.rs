@@ -3661,8 +3661,41 @@ fn effective_phase(custody: &Path) -> Result<Option<String>, Refusal> {
     for line in text.lines().rev().filter(|line| !line.trim().is_empty()) {
         let record: Value = serde_json::from_str(line)
             .map_err(|error| custody_refusal(format!("journal unparseable: {error}")))?;
-        if let Some(phase) = record.get("phase").and_then(Value::as_str) {
-            return Ok(Some(phase.to_string()));
+        if is_phase_record(&record) {
+            return Ok(record
+                .get("phase")
+                .and_then(Value::as_str)
+                .map(str::to_string));
+        }
+    }
+    Ok(None)
+}
+
+/// Bookkeeping records carry a `phase` key but are never phases (§H).
+// ponytail: `TailDiscarded` has no writer yet. It is listed so the bookkeeping
+// set matches §H in one place. Add its writer and recover arm with tail-discard.
+const BOOKKEEPING_PHASES: &[&str] = &["Retaken", "TailDiscarded"];
+
+fn is_phase_record(record: &Value) -> bool {
+    record
+        .get("phase")
+        .and_then(Value::as_str)
+        .is_some_and(|phase| !BOOKKEEPING_PHASES.contains(&phase))
+}
+
+/// Last PHASE record of a journal text, scanning from the end. `Err` on an
+/// empty text or an unparseable line. `Ok(None)` when records exist but none
+/// is a phase record (bookkeeping only). Callers verify the chain first.
+fn last_phase_record_of(text: &str) -> Result<Option<Value>, Refusal> {
+    let lines = text.lines().rev().filter(|line| !line.trim().is_empty());
+    if lines.clone().next().is_none() {
+        return Err(custody_refusal("journal is empty"));
+    }
+    for line in lines {
+        let record: Value = serde_json::from_str(line)
+            .map_err(|error| custody_refusal(format!("journal unparseable: {error}")))?;
+        if is_phase_record(&record) {
+            return Ok(Some(record));
         }
     }
     Ok(None)
@@ -4481,8 +4514,9 @@ fn staged_verify(storage_root: &Path, custody: &Path, staged: &Path) -> Result<(
     )
 }
 
-/// The last non-empty journal record, chain-verified; `None` when no journal
-/// exists. A broken chain refuses here rather than being read as a guess.
+/// The last PHASE record, chain-verified over the whole file; None when no
+/// journal exists. Bookkeeping records are skipped. A journal with no phase
+/// record refuses 77.
 fn last_journal_record(custody: &Path) -> Result<Option<Value>, Refusal> {
     let journal = custody.join(JOURNAL_FILE);
     if !journal.exists() {
@@ -4491,11 +4525,8 @@ fn last_journal_record(custody: &Path) -> Result<Option<Value>, Refusal> {
     let text = std::fs::read_to_string(&journal)
         .map_err(|error| custody_refusal(format!("journal read: {error}")))?;
     verify_record_chain(&text)?;
-    let Some(last) = text.lines().rev().find(|line| !line.trim().is_empty()) else {
-        return Err(custody_refusal("journal is empty"));
-    };
-    let record = serde_json::from_str(last)
-        .map_err(|error| custody_refusal(format!("journal unparseable: {error}")))?;
+    let record = last_phase_record_of(&text)?
+        .ok_or_else(|| custody_refusal("journal has no phase record"))?;
     Ok(Some(record))
 }
 
@@ -5066,6 +5097,7 @@ fn atomic_replace_reservation_body(
         custody,
         &json!({ "phase": "Retaken", "retake_seq": retake_seq }),
     )?;
+    kill_at("retake-after-record");
     let mut body = old.clone();
     body.retake_seq = Some(retake_seq);
     let encoded = serde_json::to_string(&body)
@@ -5123,16 +5155,12 @@ fn recover(
         archive_corrupt_journal(custody)?;
         return Err(refusal);
     }
-    let last = text
-        .lines()
-        .rev()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or_default();
-    let record: Value = match serde_json::from_str(last) {
-        Ok(record) => record,
-        Err(error) => {
+    let record = match last_phase_record_of(&text) {
+        Ok(Some(record)) => record,
+        Ok(None) => return Err(custody_refusal("journal has no phase record")),
+        Err(refusal) => {
             archive_corrupt_journal(custody)?;
-            return Err(custody_refusal(format!("journal unparseable: {error}")));
+            return Err(refusal);
         }
     };
     if let (Some(recorded), Ok(expected)) = (
@@ -5155,10 +5183,11 @@ fn recover(
         atomic_replace_reservation_body(storage_root, custody, nonce)?;
     }
     if phase == PHASE_INSTALLED_UNVERIFIED {
-        // Settlement verification decides the next phase (§H.1 row
-        // `InstalledUnverified`): pass -> Verified, mismatch -> 77 hold.
-        settle(storage_root, custody)?;
-        return journal_write_record(custody, &json!({ "phase": PHASE_VERIFIED }));
+        // `settle` appends the complete `Verified` (staged, staged_manifest_sha256,
+        // storage_root). A bare `Verified` here would shadow it as the last phase
+        // record and fail the next verify (`different storage_root`) and release
+        // (`EV-G: record names no staged tree`). Nothing is appended after settle.
+        return settle(storage_root, custody);
     }
     if phase == PHASE_VERIFIED || phase == PHASE_ROLLED_BACK {
         // Terminal phases (§H.1 `Verified`, `RolledBack`): the release gate owns
