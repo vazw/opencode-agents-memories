@@ -52,6 +52,16 @@ name = "opencode-agents-memory"
 version.workspace = true
 edition.workspace = true
 
+# Slice 2 of the feature/home-input split (blueprint 20261117-1738-r2):
+# `shard-consolidation` is default-ON; a build with `--no-default-features`
+# still recognizes every `consolidate-*` mode and refuses it with exit 69
+# (`consolidation.feature_absent`) before any config load or root access.
+# `mem-store::maintenance_reservation` is never gated — it is the engine's
+# startup fence.
+[features]
+default = ["shard-consolidation"]
+shard-consolidation = []
+
 [dependencies]
 mem-ai = { workspace = true }
 mem-bridge = { workspace = true }

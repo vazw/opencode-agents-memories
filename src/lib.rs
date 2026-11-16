@@ -16,6 +16,7 @@
 //! target.
 
 pub mod portability_backend;
+#[cfg(feature = "shard-consolidation")]
 pub mod shard_consolidation;
 pub mod web_dist;
 pub mod web_identity;

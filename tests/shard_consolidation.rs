@@ -3,6 +3,7 @@
 //! pinned runner is `--test-threads=1` and every named run uses
 //! `cargo test --offline --locked --test shard_consolidation <NAME> --
 //!  --exact --nocapture --test-threads=1`.
+#![cfg(feature = "shard-consolidation")]
 
 use std::collections::BTreeMap;
 use std::io::Read;

@@ -51,6 +51,7 @@ use mem_web::api::store_adapter::{
     production_skill_port,
 };
 use opencode_agents_memory::portability_backend::ProductionPortabilityFactory;
+#[cfg(feature = "shard-consolidation")]
 use opencode_agents_memory::shard_consolidation;
 use opencode_agents_memory::web_dist::{self, ResolvedDist};
 
@@ -88,6 +89,11 @@ fn version_line() -> String {
 /// open: a `--help` probe that fell through into a real stdio engine on the
 /// default root took the live engine's lock and wrote a bogus `degraded`
 /// `status` line into the live store.
+///
+/// A binary built without the `shard-consolidation` cargo feature
+/// (`--no-default-features`) refuses every `--mode=consolidate-*` invocation
+/// with exit 69 and the `consolidation.feature_absent` event, before any
+/// config load or root access.
 const USAGE: &str = "\
 usage: opencode-agents-memory [--mode=<mode>] [--storage-root <path>] [options]
 
@@ -378,6 +384,17 @@ fn refuse_if_reservation_held(operation: &str, storage_root: &Path) {
 /// values by the caller peeking ahead; only inline (`=`) forms are ACTUALLY
 /// parsed here. `run` is called with the resolved config; parse-crates is a
 /// SYNC dispatch done BEFORE the engine's runtime exists.
+///
+/// Off-build lint note (blueprint r2 Decision 2, form (b)): without the
+/// feature the parse chain still runs but its consolidate locals are never
+/// read at the cfg'd-out dispatch statements; this ONE fn-level allow
+/// silences `unused_variables`/`unused_assignments` for the whole of `main`
+/// in off builds only. Under default features this expands to nothing and
+/// the pre-commit gate lints the shipped configuration in full.
+#[cfg_attr(
+    not(feature = "shard-consolidation"),
+    allow(unused_variables, unused_assignments)
+)]
 fn main() {
     let mut argv: Vec<(String, Option<String>)> = Vec::new();
     let raw: Vec<String> = std::env::args().skip(1).collect();
@@ -586,6 +603,25 @@ fn main() {
             }
             return;
         }
+        // Off-build refusal (blueprint r2 Decision 1): a build compiled
+        // without the shard-consolidation feature still RECOGNIZES the whole
+        // `consolidate-*` namespace and refuses it with exit 69
+        // (EX_UNAVAILABLE) BEFORE `Config::load_default` and before any root
+        // access — never the stale-binary 64. Prefix match is the ruling:
+        // the whole namespace is the gated surface, zero drift risk.
+        #[cfg(not(feature = "shard-consolidation"))]
+        if mode.starts_with("consolidate-") {
+            structured_stderr(
+                "consolidation.feature_absent",
+                "warn",
+                "engine",
+                mem_store::serde_json::json!({ "mode": mode }),
+            );
+            eprintln!(
+                "{mode}: this binary was built without the shard-consolidation cargo feature; rebuild with --features shard-consolidation"
+            );
+            std::process::exit(69);
+        }
         if mode == "consolidate-acquire" {
             consolidation_acquire = true;
         } else if mode == "consolidate-release" {
@@ -758,6 +794,7 @@ fn main() {
         });
 
     // `--mode=consolidate-acquire`: mint the reservation (S1a) and exit.
+    #[cfg(feature = "shard-consolidation")]
     if consolidation_acquire {
         std::process::exit(shard_consolidation::run_acquire(
             &lexical_storage_root,
@@ -765,6 +802,7 @@ fn main() {
         ));
     }
     // `--mode=consolidate-release`: gated release under the recovery flock.
+    #[cfg(feature = "shard-consolidation")]
     if consolidation_release {
         let nonce = std::env::var("OPENCODE_MEM_MAINTENANCE_NONCE").unwrap_or_default();
         if nonce.is_empty() {
@@ -781,6 +819,7 @@ fn main() {
     // the HostConfig value (`--storage-root` → `OPENCODE_MEM_STORAGE_ROOT` →
     // `$HOME/.opencode-mem/data`); the JSONC `storagePath` is not the engine
     // root and is never consulted here.
+    #[cfg(feature = "shard-consolidation")]
     if let Some((rollback, custody)) = rollback_request {
         let _recovery_flock = match shard_consolidation::admit_window_step(
             "consolidate-rollback",
@@ -796,6 +835,7 @@ fn main() {
         });
     }
 
+    #[cfg(feature = "shard-consolidation")]
     if let Some((custody, staged)) = staged_verify_request {
         let _recovery_flock = match shard_consolidation::admit_window_step(
             "consolidate-staged-verify",
@@ -811,6 +851,7 @@ fn main() {
         ));
     }
 
+    #[cfg(feature = "shard-consolidation")]
     if let Some((install, custody, staged)) = install_request {
         let _recovery_flock = match shard_consolidation::admit_window_step(
             "consolidate-install",
@@ -830,6 +871,7 @@ fn main() {
         });
     }
 
+    #[cfg(feature = "shard-consolidation")]
     if let Some(custody) = journal_request {
         let _recovery_flock = match shard_consolidation::admit_window_step(
             "consolidate-journal",
@@ -841,6 +883,7 @@ fn main() {
         std::process::exit(shard_consolidation::run_journal_write(&custody, "Prepared"));
     }
 
+    #[cfg(feature = "shard-consolidation")]
     if let Some((snapshot, custody)) = custody_request {
         // The snapshot reads the root but never opens a store; the reservation
         // gate still applies so no snapshot races a consolidation window.
@@ -858,6 +901,7 @@ fn main() {
         });
     }
 
+    #[cfg(feature = "shard-consolidation")]
     if let Some(plan) = consolidation_plan {
         // C3 (opsec carry-forward): a rehearsal run must target its own scratch
         // tree. Checked BEFORE the reservation gate, so a mis-aimed harness is
