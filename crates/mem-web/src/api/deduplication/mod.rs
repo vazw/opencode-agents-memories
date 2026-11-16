@@ -365,7 +365,7 @@ impl RunGuard {
         // through this counter, so `Relaxed` would be sound; `AcqRel`/`Acquire`
         // is the conservative house choice, not a data-publication need).
         running
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
                 (count == 0).then_some(1)
             })
             .ok()
@@ -630,4 +630,27 @@ pub fn production_deduplication_port_with_cancel(
         ProductionDeduplication::new(store, shards, prompts, retention_days, enabled, threshold)
             .with_cancellation(cancel),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RunGuard;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn run_guard_rejects_when_already_running() {
+        let running = Arc::new(AtomicUsize::new(0));
+        let guard = RunGuard::acquire(&running).expect("first acquire should succeed");
+        assert!(
+            RunGuard::acquire(&running).is_none(),
+            "second acquire while guard held must be rejected"
+        );
+        drop(guard);
+        assert_eq!(
+            running.load(Ordering::Acquire),
+            0,
+            "counter must return to 0 after drop"
+        );
+    }
 }
