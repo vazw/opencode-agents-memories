@@ -295,9 +295,35 @@ fn read_comm(pid: u32) -> String {
         .to_string()
 }
 
+/// Polls `/proc/<pid>/stat` (5 ms cadence, 5 s deadline) until the process
+/// state char is `want`; panics naming the last observed state on timeout.
+fn wait_for_state(pid: u32, want: char) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut last = None;
+    while Instant::now() < deadline {
+        if let Some(state) = process_state(pid) {
+            if state == want {
+                return;
+            }
+            last = Some(state);
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!("pid {pid} never reached state {want} within 5 s; last observed {last:?}");
+}
+
+/// The kernel task-state char from `/proc/<pid>/stat`, parsed after the LAST
+/// `)` so a `comm` containing `)` cannot shift the fields. `None` when the
+/// process is gone or the stat line is malformed.
+fn process_state(pid: u32) -> Option<char> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let after_comm = stat.rsplit_once(')')?.1;
+    after_comm.split_whitespace().next()?.chars().next()
+}
+
 /// Every same-uid process whose `/proc/<pid>/fd` is unreadable, as
-/// `(pid, comm)`. Time-varying by nature: a property, never a count.
-fn unreadable_same_uid_census() -> Vec<(u32, String)> {
+/// `(pid, comm, state)`. Time-varying by nature: a property, never a count.
+fn unreadable_same_uid_census() -> Vec<(u32, String, char)> {
     let uid_text = effective_uid().to_string();
     let mut census = Vec::new();
     let Ok(entries) = std::fs::read_dir("/proc") else {
@@ -332,7 +358,8 @@ fn unreadable_same_uid_census() -> Vec<(u32, String)> {
                 .unwrap_or_default()
                 .trim_end_matches('\n')
                 .to_string();
-            census.push((pid, comm));
+            let state = process_state(pid).unwrap_or('?');
+            census.push((pid, comm, state));
         }
     }
     census.sort();
@@ -340,22 +367,25 @@ fn unreadable_same_uid_census() -> Vec<(u32, String)> {
 }
 
 /// The precondition both expect-`Ok` tests share: every same-uid process with
-/// an unreadable `fd/` is `comm=sshd-session`, so the exemption covers the
-/// whole host and an `Ok` is attributable to the code under test. On violation
-/// the full census is printed — a host artifact is never mistaken for a
-/// regression.
-fn assert_census_is_sshd_session_only() {
+/// an unreadable `fd/` is exempt — `comm=sshd-session` (the measured name
+/// heuristic) or state `Z` (the provably holder-free class the arm skips: a
+/// census zombie no longer confounds an expect-`Ok` verdict) — so the
+/// exemptions cover the whole host and an `Ok` is attributable to the code
+/// under test. On violation the full census is printed — a host artifact is
+/// never mistaken for a regression.
+fn assert_census_is_exempt_only() {
     let census = unreadable_same_uid_census();
-    let foreign: Vec<&(u32, String)> = census
+    let foreign: Vec<&(u32, String, char)> = census
         .iter()
-        .filter(|(_, comm)| comm != "sshd-session")
+        .filter(|(_, comm, state)| comm != "sshd-session" && *state != 'Z')
         .collect();
     assert!(
         foreign.is_empty(),
-        "every same-uid process with an unreadable /proc/<pid>/fd must be comm=sshd-session; \
-         census (pid, comm) = {census:?}, foreign = {foreign:?}"
+        "every same-uid process with an unreadable /proc/<pid>/fd must be exempt \
+         (comm=sshd-session or state Z); census (pid, comm, state) = {census:?}, \
+         foreign = {foreign:?}"
     );
-    println!("unreadable same-uid census (pid, comm) = {census:?}");
+    println!("unreadable same-uid census (pid, comm, state) = {census:?}");
 }
 
 /// `Err(ActiveWriter)` exactly — variant equality, not `is_err()`.
@@ -390,7 +420,7 @@ fn test_unreadable_fd_dir_of_sshd_session_process_is_exempt() {
         None,
         "the sshd-session fixture holds no descriptor"
     );
-    assert_census_is_sshd_session_only();
+    assert_census_is_exempt_only();
 
     let reservation = match acquire(&root, &root) {
         Ok(reservation) => reservation,
@@ -424,6 +454,18 @@ fn test_unreadable_fd_dir_of_non_sshd_process_refuses() {
     let fixture = FdFixture::spawn(&base, &root, "hold-nondumpable", None);
     assert_fixture_preconditions(fixture.pid, ExpectedComm::Not("sshd-session"), false);
     assert_eq!(fixture.holding_fd(), None);
+    // Bound-direction discriminator: while the live nondumpable child is up,
+    // the census must list it as a live, non-exempt entry — proving the
+    // exemption stays bounded to state `Z` and does not swallow this class.
+    let census = unreadable_same_uid_census();
+    assert!(
+        census
+            .iter()
+            .any(|(pid, _, state)| *pid == fixture.pid && *state != 'Z'),
+        "T1's live nondumpable child (pid {}) must be listed as a live, non-exempt \
+         census entry; census (pid, comm, state) = {census:?}",
+        fixture.pid
+    );
 
     assert_active_writer(
         acquire(&root, &root),
@@ -537,7 +579,7 @@ fn test_readable_fd_dir_of_non_holding_process_is_not_a_refusal() {
         None,
         "the idle fixture holds no descriptor"
     );
-    assert_census_is_sshd_session_only();
+    assert_census_is_exempt_only();
 
     let reservation = match acquire(&root, &root) {
         Ok(reservation) => reservation,
@@ -552,6 +594,71 @@ fn test_readable_fd_dir_of_non_holding_process_is_not_a_refusal() {
     );
 
     fixture.release();
+}
+
+// ---------------------------------------------------------------------------
+// T7 — RED-first: the zombie skip
+// ---------------------------------------------------------------------------
+
+/// An unreaped zombie (state `Z`) whose `fd/` answers EACCES holds no
+/// descriptors — its descriptor table was destroyed at exit — so it must not
+/// fail the arm closed. The child is never reaped until this fixture's `Drop`
+/// (kill + `wait()`), so `acquire` scans it as a live, same-uid zombie.
+#[test]
+fn test_zombie_child_does_not_refuse_acquire() {
+    let _serial = fixture_lock();
+    let base = fixture_base("zombie");
+    let root = base.join("data");
+    let mut fixture = FdFixture::spawn(&base, &root, "hold-dumpable", None);
+    // Preconditions BEFORE any acquire: same euid, not the sshd-session name.
+    assert_eq!(
+        status_effective_uid(fixture.pid),
+        effective_uid(),
+        "fixture pid {} must run as this euid",
+        fixture.pid
+    );
+    assert_ne!(
+        read_comm(fixture.pid),
+        "sshd-session",
+        "fixture pid {} must not carry comm=sshd-session",
+        fixture.pid
+    );
+    // EOF on stdin: the child exits WITHOUT a release write and stays
+    // unreaped (`Child` does not reap on `Drop`), i.e. a real zombie.
+    drop(fixture.stdin.take());
+    wait_for_state(fixture.pid, 'Z');
+    // The measured zombie signature: `fd/` answers EACCES exactly. Any other
+    // errno (e.g. ENOENT) is a fixture bug, not the arm under test.
+    let error = std::fs::read_dir(format!("/proc/{}/fd", fixture.pid))
+        .expect_err("a zombie's /proc/<pid>/fd must be unreadable");
+    assert_eq!(
+        error.raw_os_error(),
+        Some(13),
+        "the zombie's fd/ must fail with EACCES (the measured signature), got {error:?}"
+    );
+    assert_eq!(
+        status_effective_uid(fixture.pid),
+        effective_uid(),
+        "the zombie must still run as this euid"
+    );
+    // Exempt-direction discriminator: with the zombie unreaped, the census
+    // must list no non-exempt entry.
+    assert_census_is_exempt_only();
+
+    let reservation = match acquire(&root, &root) {
+        Ok(reservation) => reservation,
+        Err(error) => panic!("an unreaped zombie must not fail the arm closed, got Err({error:?})"),
+    };
+    let path = reservation.path().to_path_buf();
+    assert_eq!(
+        path,
+        base.join(".opencode-mem-maintenance.lock"),
+        "the reservation must be minted at the parent of the root"
+    );
+
+    // Reap the zombie BEFORE `FIXTURE_LOCK` release: `Drop` kills + `wait()`s,
+    // and `wait()` on a zombie reaps it.
+    drop(fixture);
 }
 
 // ---------------------------------------------------------------------------

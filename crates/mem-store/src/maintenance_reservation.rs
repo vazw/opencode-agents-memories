@@ -294,11 +294,37 @@ fn comm_is_sshd_session(proc: &Path, pid_text: &str) -> bool {
         .is_ok_and(|comm| comm.trim_end_matches('\n') == SSHD_SESSION_COMM)
 }
 
+/// True when the task state parsed from an ALREADY-read `/proc/<pid>/status`
+/// string is `Z` (zombie).
+///
+/// The parser anchors on the LAST `State:`-keyed line: task state is
+/// kernel-owned and not settable by any `prctl`, while the only
+/// user-controlled text in `status` is `comm` on the first `Name:` line
+/// (`PR_SET_NAME` permits an embedded `\n`). A forged `State:` line injected
+/// through `comm` therefore precedes the kernel's real one, and last-match
+/// ignores it. A zombie's descriptor table was destroyed at exit, so this is
+/// evidence it holds no descriptor — unlike the [`comm_is_sshd_session`]
+/// name heuristic.
+#[cfg(target_os = "linux")]
+fn status_is_zombie(status: &str) -> bool {
+    status
+        .lines()
+        .rev()
+        .find_map(|line| {
+            line.split_once(':')
+                .filter(|(k, _)| *k == "State")
+                .map(|(_, v)| v)
+        })
+        .is_some_and(|v| v.trim_start().starts_with('Z'))
+}
+
 /// §E.2 S1a refusal 3 (open descriptors): walk `/proc/<pid>/fd` across
 /// same-uid live processes and refuse when one holds a descriptor resolving
-/// under the storage root. Fail closed on any unreadable directory, with one
-/// measured exception: a process whose `comm` is exactly `sshd-session`
-/// (OpenSSH's per-session leader) is skipped — see [`comm_is_sshd_session`].
+/// under the storage root. Fail closed on any unreadable directory, with two
+/// measured exceptions, both skipped: state-`Z` zombies (provably holder-free
+/// — MEASURED kernel 6.18.39_1 — a zombie's descriptor table is destroyed at
+/// exit) and processes whose `comm` is exactly `sshd-session` (OpenSSH's
+/// per-session leader; a heuristic, see [`comm_is_sshd_session`]).
 #[cfg(target_os = "linux")]
 fn live_process_holds_fd_under(storage_root: &Path, skip_pid: u32) -> bool {
     let canonical =
@@ -339,21 +365,38 @@ fn live_process_holds_fd_under(storage_root: &Path, skip_pid: u32) -> bool {
         }
         let fd_dir = proc.join(pid_text).join("fd");
         let Ok(fds) = std::fs::read_dir(&fd_dir) else {
-            // OpenSSH sets PR_SET_DUMPABLE=0 on its per-session leader, which
-            // makes that process's fd/ unreadable even to its own uid; the
-            // class was MEASURED holding no descriptor under the root, so it is
-            // skipped instead of refused. Every other unreadable process still
-            // fails closed.
+            // Invariant at this loop top: every not-yet-skipped same-uid pid
+            // scanned so far either held no descriptor under the canonical
+            // root or was refused — `true` is returned only for a pid that is
+            // same-uid, non-exempt, and not provably holder-free. Each
+            // `/proc` entry is visited once and every branch returns or
+            // continues, so termination is unchanged.
+            //
+            // A state-`Z` zombie's descriptor table was destroyed at exit, so
+            // it cannot hold a descriptor under the root; skipped, not
+            // refused. State is kernel-owned (not settable by any prctl), and
+            // this parses the SAME `status` snapshot the uid check read — no
+            // second read, no new TOCTOU window.
+            //
+            // The live-nondumpable class is still refused: OpenSSH sets
+            // PR_SET_DUMPABLE=0 on its per-session leader, which makes that
+            // process's fd/ unreadable even to its own uid; the class was
+            // MEASURED holding no descriptor under the root, so it is skipped
+            // instead of refused. Every other unreadable process still fails
+            // closed.
             //
             // This is not a security boundary and must not be sold as one: a
             // same-uid process can write the storage root directly, with or
             // without a descriptor this function can see. The arm exists to
-            // catch *accidental* writers. The exemption is also blind by
+            // catch *accidental* writers. The exemptions are also blind by
             // construction (an sshd-session leader that DID hold a descriptor
-            // would be skipped too) and self-assignable by any same-uid process
-            // via prctl(PR_SET_NAME, "sshd-session"): the name match is a
-            // heuristic for one measured class, not an allowlist and not a
-            // trust signal.
+            // would be skipped too) and the name half self-assignable by any
+            // same-uid process via prctl(PR_SET_NAME, "sshd-session"): the
+            // name match is a heuristic for one measured class, not an
+            // allowlist and not a trust signal.
+            if status_is_zombie(&status) {
+                continue;
+            }
             if comm_is_sshd_session(&proc, pid_text) {
                 continue;
             }
@@ -661,5 +704,32 @@ mod tests {
         };
         assert!(body.start_time.is_some(), "live token readable");
         assert!(!holder_is_dead(&body), "a live holder is not dead");
+    }
+
+    /// Mutants separated by these vectors: key matched as `"state"` (case
+    /// miss) reds on vector 1; `trim_start` dropped reds on vector 1 (leading
+    /// `\t`); inverted comparator reds on vectors 2/4/5/6; first-match instead
+    /// of last-match reds on vector 3 (comm-injection via `Name:`, forged `Z`
+    /// before the kernel's real `State:` line — must stay false).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_status_is_zombie_parses_proc_status_state_line() {
+        // Real-shaped zombie status: kernel State line, later keys follow.
+        assert!(status_is_zombie(
+            "Name:\tsh\nState:\tZ (zombie)\nTgid:\t42\n"
+        ));
+        // Sleeping live process.
+        assert!(!status_is_zombie("State:\tS (sleeping)\n"));
+        // comm-injection vector: forged `Z` line precedes the real State line;
+        // last-match must answer false.
+        assert!(!status_is_zombie(
+            "Name:\tx\nState:\tZ (forged)\nState:\tS (sleeping)\nTgid:\t1\n"
+        ));
+        // No State: line at all.
+        assert!(!status_is_zombie("Uid:\t1000\t1000\t1000\t1000\n"));
+        // Empty status.
+        assert!(!status_is_zombie(""));
+        // Empty State value (no tab, no state char).
+        assert!(!status_is_zombie("State:\n"));
     }
 }
