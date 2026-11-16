@@ -1,8 +1,15 @@
 # Cutover runbook — lossless shard consolidation (Steps 11–13)
 
-**Status: DRAFT. This document authorises nothing.** Running it without an explicit,
-separately recorded user approval is a production mutation. Step 11 (user cutover
-approval) is a hard stop, and it is not satisfied by this file existing.
+**Status: EXECUTED 2026-11-16 18:12 +0700 — the window ran against the live root.**
+Custody `recovery/consolidation-1794827545-7788a5b952ddd3c5` holds the journal
+`StagedVerified(1) → Installing(2) → InstalledUnverified(3) → Verified(4)`; measured
+before → after: 37 shards / **5939** memory rows → 35 shards / **5939** rows, identity
+rewrite `/home/vaz` → `/home/opencode` complete (0 rows left with a vaz-rooted
+`project_path`), 300 children reparented with 0 dangling references. The deployable
+for that run was H3 `e07df280…`; H4 `872bcede…` (wildcard-bind host fix) was staged
+and activated at 19:59. **Everything below is kept unchanged as the record of what
+was actually run** — it was written as a DRAFT and is not a standing authorisation
+for a second run: a re-run needs its own approval and its own custody.
 
 Every command below is written against the tree at `07d4440`. Every claim carries
 `MEASURED` (a command was run and its output is quoted) or `READ` (source was read,
