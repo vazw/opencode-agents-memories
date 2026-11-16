@@ -80,18 +80,22 @@ impl HostRootMap {
                 return Err(degenerate(&format!("{label} must be an absolute path")));
             }
             if root == "/" {
-                return Err(degenerate("{label} must not be the filesystem root"));
+                return Err(degenerate(&format!(
+                    "{label} must not be the filesystem root"
+                )));
             }
             if root.ends_with('/') {
-                return Err(degenerate("{label} must not end with a trailing slash"));
+                return Err(degenerate(&format!(
+                    "{label} must not end with a trailing slash"
+                )));
             }
             if root
                 .split('/')
                 .any(|component| component == "." || component == "..")
             {
-                return Err(degenerate(
-                    "{label} must not contain a `.` or `..` path component",
-                ));
+                return Err(degenerate(&format!(
+                    "{label} must not contain a `.` or `..` path component"
+                )));
             }
         }
         if old == new {

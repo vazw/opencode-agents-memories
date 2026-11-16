@@ -7608,20 +7608,53 @@ fn test_plan_v1_format_refused() {
 /// would re-match its own output). Validation lives in
 /// `HostRootMap::from_parts` — the single seam behind both modes.
 ///
-/// Mutant killed: `from_parts` validation dropped — `old == new == "/x"` then
-/// proceeds to preflight and answers exit 0 where the correct code refuses 64.
+/// Mutant killed: any of `from_parts`' three label-bearing reasons reverted to a
+/// plain string literal (`src/shard_consolidation.rs:83/:86/:93`) — the stderr
+/// then prints `{label} must …` and the matching reason assertion, or the
+/// `!contains("{label}")` assertion, goes red.
 #[test]
 fn test_host_roots_degenerate_refused() {
     let _serial = serial_guard();
-    let variants: [(&str, &str, &str); 6] = [
-        ("equal", "/x", "/x"),
-        ("filesystem-root", "/", "/srv/new"),
-        ("trailing-slash", "/srv/old/", "/srv/new"),
-        ("dot-component", "/srv/./old", "/srv/new"),
-        ("dotdot-component", "/srv/../old", "/srv/new"),
-        ("new-under-old", "/srv/old", "/srv/old/new"),
+    // (case, old, new, the reason rendered verbatim)
+    let variants: [(&str, &str, &str, &str); 6] = [
+        (
+            "equal",
+            "/x",
+            "/x",
+            "old_host_root and new_host_root are equal",
+        ),
+        (
+            "filesystem-root",
+            "/",
+            "/srv/new",
+            "old_host_root must not be the filesystem root",
+        ),
+        (
+            "trailing-slash",
+            "/srv/old/",
+            "/srv/new",
+            "old_host_root must not end with a trailing slash",
+        ),
+        (
+            "dot-component",
+            "/srv/./old",
+            "/srv/new",
+            "old_host_root must not contain a `.` or `..` path component",
+        ),
+        (
+            "dotdot-component",
+            "/srv/../old",
+            "/srv/new",
+            "old_host_root must not contain a `.` or `..` path component",
+        ),
+        (
+            "new-under-old",
+            "/srv/old",
+            "/srv/old/new",
+            "new_host_root lies under old_host_root; the mapping would re-match its own output",
+        ),
     ];
-    for (case, old, new) in variants {
+    for (case, old, new, reason) in variants {
         let parent = unique_temp_dir(&format!("host-roots-{case}"));
         let root = parent.join("data");
         std::fs::create_dir_all(&root).expect("fixture root");
@@ -7649,6 +7682,14 @@ fn test_host_roots_degenerate_refused() {
         assert!(
             stderr.contains(new),
             "{case}: the refusal names the new value; stderr: {stderr}"
+        );
+        assert!(
+            stderr.contains(reason),
+            "{case}: the refusal states the reason verbatim; stderr: {stderr}"
+        );
+        assert!(
+            !stderr.contains("{label}"),
+            "{case}: the label is interpolated, never printed literally; stderr: {stderr}"
         );
         assert_eq!(
             before,
