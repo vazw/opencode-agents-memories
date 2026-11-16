@@ -161,9 +161,11 @@ else:
     sys.exit(f"build_plan: no manifest.sha256 or baseline.sha256 in {_dirs}")
 
 plan = {
-    "format_version": 1,
+    "format_version": 2,
     "storage_root": S,
     "source_snapshot_sha256": baseline,
+    "old_host_root": OLD,
+    "new_host_root": NEW,
     "schema_manifest_sha256": schema_manifest,
     "baseline_manifest_sha256": baseline,
     "mapping": rows,

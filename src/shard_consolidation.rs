@@ -27,8 +27,10 @@ use mem_store::serde_json::{self, Value, json};
 use mem_store::shard_manager::ShardManager;
 
 /// The plan format this build accepts. A future format is a refusal, never a
-/// best-effort read.
-pub const PLAN_FORMAT_VERSION: u32 = 1;
+/// best-effort read. Version 2 adds the plan-carried host-root pair
+/// (`old_host_root` / `new_host_root`); a v1 plan refuses loudly rather than
+/// being reinterpreted under the new semantics.
+pub const PLAN_FORMAT_VERSION: u32 = 2;
 
 /// The report format this build emits.
 pub const REPORT_FORMAT_VERSION: u32 = 1;
@@ -48,10 +50,98 @@ pub const EXIT_STORE_OR_IO: i32 = 74;
 /// Exit code: custody/snapshot/manifest verification failure.
 pub const EXIT_CUSTODY_REFUSAL: i32 = 77;
 
-/// The pre-consolidation host prefix and its replacement, applied at PATH
-/// COMPONENT boundaries only (rule B.4 — `/home/vaz2` is untouched).
-const OLD_HOST_ROOT: &str = "/home/vaz";
-const NEW_HOST_ROOT: &str = "/home/opencode";
+/// The plan-carried host-root pair: the single source of truth for every
+/// identity derivation and auxiliary swap this module performs. The pair rides
+/// [`render_plan_digest`], so `plan_sha256` binds which mapping produced the
+/// stored rows — no compiled constant can silently disagree with the plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostRootMap {
+    /// The pre-consolidation root (`old_host_root`).
+    pub old: String,
+    /// The post-consolidation root (`new_host_root`).
+    pub new: String,
+}
+
+impl HostRootMap {
+    /// Wraps the pair parsed from the required plan fields, refusing any
+    /// degenerate mapping at the single parse seam behind both modes: a root
+    /// must be absolute, not `/`, without a trailing `/` or a `.`/`..`
+    /// component; `old == new` and `new` under `old` (the swap re-matching its
+    /// own output) refuse outright. The message names BOTH values so a hostile
+    /// or mistyped plan is diagnosable from the refusal line alone.
+    fn from_parts(old: String, new: String) -> Result<Self, Refusal> {
+        let degenerate = |reason: &str| {
+            plan_invalid(&format!(
+                "host roots are degenerate (old {old:?}, new {new:?}): {reason}"
+            ))
+        };
+        for (label, root) in [("old_host_root", &old), ("new_host_root", &new)] {
+            if !root.starts_with('/') {
+                return Err(degenerate(&format!("{label} must be an absolute path")));
+            }
+            if root == "/" {
+                return Err(degenerate("{label} must not be the filesystem root"));
+            }
+            if root.ends_with('/') {
+                return Err(degenerate("{label} must not end with a trailing slash"));
+            }
+            if root
+                .split('/')
+                .any(|component| component == "." || component == "..")
+            {
+                return Err(degenerate(
+                    "{label} must not contain a `.` or `..` path component",
+                ));
+            }
+        }
+        if old == new {
+            return Err(degenerate("old_host_root and new_host_root are equal"));
+        }
+        if new.starts_with(&format!("{old}/")) {
+            return Err(degenerate(
+                "new_host_root lies under old_host_root; the mapping would re-match its own output",
+            ));
+        }
+        Ok(Self { old, new })
+    }
+
+    /// Rule B.4 keyed on the plan pair: plain component-boundary host
+    /// replacement from `old_host_root` to `new_host_root`, with NO exceptions
+    /// (user ruling 2026-11-12). A sibling root sharing the textual prefix
+    /// (`old` glued to more characters with no `/`) is NOT a component of
+    /// `old`.
+    ///
+    /// `Some` when the source's own canonical identity fixes the target: any
+    /// pre-migration `old_host_root`-rooted identity. `None` for a source
+    /// outside that root (a marker root, an already-migrated path) — those
+    /// fold onto a target the plan pins, so no derivation applies.
+    fn constrain_identity(&self, source_identity: &str) -> Option<String> {
+        let (scheme, path) = source_identity.split_once(':')?;
+        if path == self.old {
+            return Some(format!("{scheme}:{}", self.new));
+        }
+        let prefix = format!("{}/", self.old);
+        path.strip_prefix(&prefix)
+            .map(|rest| format!("{}:{}/{}", scheme, self.new, rest))
+    }
+
+    /// §B.4's pinned swap applied to an auxiliary cell, keyed on the plan
+    /// pair: the exact `old_host_root`, or a LEADING `old_host_root/` prefix.
+    /// An occurrence of `old_host_root` further along the string is content
+    /// and stays — a mid-path replacement is never authorised.
+    fn swap_value(&self, value: &str) -> String {
+        if value == self.old {
+            return self.new.clone();
+        }
+        match value
+            .strip_prefix(&self.old)
+            .and_then(|rest| rest.strip_prefix('/'))
+        {
+            Some(rest) => format!("{}/{rest}", self.new),
+            None => value.to_string(),
+        }
+    }
+}
 
 /// `memories` v1 columns, in DDL order (`crates/mem-store/src/sql.rs`).
 const MEMORIES_V1: [&str; 17] = [
@@ -117,6 +207,8 @@ pub struct IdentityMap {
 pub struct ConsolidationPlan {
     /// [`PLAN_FORMAT_VERSION`].
     pub format_version: u32,
+    /// The host-root pair every derivation and swap keys on (v2, required).
+    pub host_roots: HostRootMap,
     /// The storage root the plan describes.
     pub storage_root: PathBuf,
     /// The custody snapshot the plan was derived from.
@@ -382,8 +474,13 @@ fn plan_from_json(value: &Value) -> Result<ConsolidationPlan, Refusal> {
         .iter()
         .map(identity_map_from_json)
         .collect::<Result<Vec<_>, _>>()?;
+    let host_roots = HostRootMap::from_parts(
+        required_string(object, "old_host_root")?,
+        required_string(object, "new_host_root")?,
+    )?;
     Ok(ConsolidationPlan {
         format_version,
+        host_roots,
         storage_root: PathBuf::from(required_string(object, "storage_root")?),
         source_snapshot_sha256: required_string(object, "source_snapshot_sha256")?,
         mapping,
@@ -569,7 +666,7 @@ fn preflight(
                 ),
             ));
         }
-        if let Some(expected) = constrained_target(&row.source_identity)
+        if let Some(expected) = plan.host_roots.constrain_identity(&row.source_identity)
             && expected != row.target_identity
         {
             return Err(Refusal::new(
@@ -634,6 +731,8 @@ fn render_plan_digest(plan: &ConsolidationPlan) -> String {
     digest.push_str(&format!("{}\n", plan.source_snapshot_sha256));
     digest.push_str(&format!("{}\n", plan.schema_manifest_sha256));
     digest.push_str(&format!("{}\n", plan.baseline_manifest_sha256));
+    digest.push_str(&format!("{}\n", plan.host_roots.old));
+    digest.push_str(&format!("{}\n", plan.host_roots.new));
     for row in &plan.mapping {
         digest.push_str(&format!(
             "{}|{}|{}|{}|{}|{}|{}\n",
@@ -705,24 +804,6 @@ fn is_linked(path: &Path) -> bool {
     std::fs::symlink_metadata(path)
         .map(|metadata| metadata.file_type().is_symlink())
         .unwrap_or(false)
-}
-
-/// Rule B.4: plain component-boundary host replacement `/home/vaz` →
-/// `/home/opencode`, with NO exceptions (user ruling 2026-11-12). `/home/vaz2`
-/// is NOT a `/home/vaz` component.
-///
-/// `Some` when the source's own canonical identity fixes the target: any
-/// pre-migration `/home/vaz`-rooted identity. `None` for a source outside that
-/// root (a marker root, an already-migrated path) — those fold onto a target the
-/// plan pins, so no derivation applies.
-fn constrained_target(source_identity: &str) -> Option<String> {
-    let (scheme, path) = source_identity.split_once(':')?;
-    if path == OLD_HOST_ROOT {
-        return Some(format!("{scheme}:{NEW_HOST_ROOT}"));
-    }
-    let prefix = format!("{OLD_HOST_ROOT}/");
-    path.strip_prefix(&prefix)
-        .map(|rest| format!("{scheme}:{NEW_HOST_ROOT}/{rest}"))
 }
 
 /// `sha256(canonical identity)[..16]` — the production TagResolver shorthand
@@ -2051,6 +2132,7 @@ fn auxiliary_closure(
                 db.name,
                 table,
                 &domain,
+                &plan.host_roots,
             )?);
         }
         // §C.5a: the seam is the LAST step of this database's iteration, after
@@ -2479,6 +2561,7 @@ fn read_aux_table(
     db_name: &'static str,
     table: &AuxTable,
     domain: &AuxDomain,
+    roots: &HostRootMap,
 ) -> Result<AuxRewrite, Refusal> {
     let unreadable = |detail: String| {
         Refusal::new(
@@ -2524,7 +2607,7 @@ fn read_aux_table(
         let Some(current) = row.get(column).cloned() else {
             continue;
         };
-        match remap_cell(&current, domain, table.strict, path, table, column)? {
+        match remap_cell(&current, domain, table.strict, path, table, column, roots)? {
             None => {}
             Some(Remap::Mapped(value)) => {
                 row.insert(column.to_string(), value);
@@ -2610,6 +2693,7 @@ fn remap_cell(
     path: &Path,
     table: &AuxTable,
     column: &str,
+    roots: &HostRootMap,
 ) -> Result<Option<Remap>, Refusal> {
     match value {
         DbValue::Null => Ok(None),
@@ -2628,7 +2712,7 @@ fn remap_cell(
             }
             Ok(Some(Remap::Carried {
                 original: DbValue::Text(current.clone()),
-                carried: DbValue::Text(swap_host_root(current)),
+                carried: DbValue::Text(roots.swap_value(current)),
             }))
         }
         other => Err(Refusal::new(
@@ -2640,22 +2724,6 @@ fn remap_cell(
                 table.table
             ),
         )),
-    }
-}
-
-/// §B.4's pinned swap applied to an auxiliary cell: the exact host root, or a
-/// LEADING `OLD_HOST_ROOT/` prefix. A `/home/vaz` component further along the
-/// string is content and stays — a mid-path replacement is never authorised.
-fn swap_host_root(value: &str) -> String {
-    if value == OLD_HOST_ROOT {
-        return NEW_HOST_ROOT.to_string();
-    }
-    match value
-        .strip_prefix(OLD_HOST_ROOT)
-        .and_then(|rest| rest.strip_prefix('/'))
-    {
-        Some(rest) => format!("{NEW_HOST_ROOT}/{rest}"),
-        None => value.to_string(),
     }
 }
 

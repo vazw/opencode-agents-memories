@@ -404,9 +404,11 @@ fn valid_row(
 fn write_plan(dir: &Path, root: &Path, mapping: Vec<serde_json::Value>) -> PathBuf {
     std::fs::create_dir_all(dir).expect("plan dir");
     let plan = serde_json::json!({
-        "format_version": 1,
+        "format_version": 2,
         "storage_root": root,
         "source_snapshot_sha256": "0".repeat(64),
+        "old_host_root": "/home/vaz",
+        "new_host_root": "/home/opencode",
         "mapping": mapping,
         "schema_manifest_sha256": "0".repeat(64),
         "baseline_manifest_sha256": "0".repeat(64),
@@ -7441,4 +7443,518 @@ fn test_acquire_pins_lexical_storage_root_spelling() {
         "O3: the exact lexical spelling is not a foreign holder; {:?}",
         admitted.err()
     );
+}
+
+// ---------------------------------------------------------------------------
+// Plan-carried host roots (20261116-consolidation-feature-home-input-r2)
+// ---------------------------------------------------------------------------
+
+/// A v2 plan with the GIVEN host-root pair in its fields and the given mapping
+/// rows. Every plan-shape test in this section pins a NON-DEFAULT pair in the
+/// fields so the derivation/swap logic is forced to read the plan: a compiled-
+/// constant mutant ignores these fields and diverges observably. Pre-slice
+/// tests keep flowing through `write_plan`, whose historical pair is pinned
+/// (ruling 5).
+fn write_plan_pair(
+    dir: &Path,
+    root: &Path,
+    old: &str,
+    new: &str,
+    mapping: Vec<serde_json::Value>,
+) -> PathBuf {
+    let written = write_plan(dir, root, mapping);
+    let mut value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&written).expect("plan text"))
+            .expect("plan json");
+    {
+        let object = value.as_object_mut().expect("plan object");
+        object.insert(
+            "old_host_root".to_string(),
+            serde_json::Value::String(old.to_string()),
+        );
+        object.insert(
+            "new_host_root".to_string(),
+            serde_json::Value::String(new.to_string()),
+        );
+    }
+    std::fs::write(&written, value.to_string()).expect("rewrite the plan");
+    written
+}
+
+/// A seeded fixture shard for the slice's plan-shape tests: one registered
+/// `HASH_A` shard so a wrongly-accepted plan reaches a clean exit 0 (a
+/// parse-shape mutant must die on the exit code, never on a missing fixture).
+fn seed_hash_a(root: &Path) {
+    let fx = fixture(root);
+    fx.seed("aaaaaaaaaaaaaaaa", "row-a");
+}
+
+/// The host-root pair is REQUIRED plan input on the single parse seam behind
+/// both modes: a v2 plan missing either root refuses 64
+/// `consolidation.plan_invalid` naming the key — dry-run AND apply.
+///
+/// Mutant killed: the parse falls back to compiled constants when the keys are
+/// absent (the exact hardcode rebirth). That mutant answers exit 0 with a
+/// report; the correct code refuses 64 before any disk access.
+#[test]
+fn test_plan_requires_host_roots() {
+    let _serial = serial_guard();
+    const HASH_A: &str = "aaaaaaaaaaaaaaaa";
+
+    let parent = unique_temp_dir("plan-requires-host-roots");
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    seed_hash_a(&root);
+    let rows = vec![valid_row(
+        &root,
+        HASH_A,
+        "path:/fixture/a",
+        "path:/fixture/a",
+        false,
+    )];
+
+    // Subcase A — `old_host_root` absent, dry-run: the refusal names the key.
+    let written = write_plan(&parent.join("plans-no-old"), &root, rows.clone());
+    let mut value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&written).expect("plan text"))
+            .expect("plan json");
+    value
+        .as_object_mut()
+        .expect("plan object")
+        .remove("old_host_root");
+    std::fs::write(&written, value.to_string()).expect("rewrite the plan");
+    let before = tree_digest(&root);
+    let (code, _stdout, stderr) = run_dry_run(&root, &written);
+    assert_refusal(code, 64, &stderr, "consolidation.plan_invalid");
+    assert!(
+        stderr.contains("old_host_root"),
+        "the refusal names the missing key; stderr: {stderr}"
+    );
+    assert_eq!(
+        before,
+        tree_digest(&root),
+        "the refused dry-run mutates nothing"
+    );
+
+    // Subcase B — `new_host_root` absent, APPLY mode: the same parse seam
+    // refuses 64 before any custody or staged work.
+    let written = write_plan(&parent.join("plans-no-new"), &root, rows);
+    let mut value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&written).expect("plan text"))
+            .expect("plan json");
+    value
+        .as_object_mut()
+        .expect("plan object")
+        .remove("new_host_root");
+    std::fs::write(&written, value.to_string()).expect("rewrite the plan");
+    acquire_window(&root);
+    let (code, _stdout, stderr) =
+        run_consolidate(&root, &written, false, Some(&fixture_custody(&parent)));
+    assert_refusal(code, 64, &stderr, "consolidation.plan_invalid");
+    assert!(
+        stderr.contains("new_host_root"),
+        "the refusal names the missing key; stderr: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// A `format_version: 1` plan refuses `consolidation.plan_format_unsupported`
+/// (65) EVEN with both roots present: a stale plan is never silently
+/// reinterpreted under the new semantics. The only v1-plan writers (the
+/// generator and this helper) both moved to v2 in the same slice, so every v1
+/// plan in the wild is stale by construction.
+///
+/// Mutant killed: the version check removed or widened to accept 1 — that
+/// mutant runs preflight (exit 0) where the correct code refuses 65.
+#[test]
+fn test_plan_v1_format_refused() {
+    let _serial = serial_guard();
+    const HASH_A: &str = "aaaaaaaaaaaaaaaa";
+
+    let parent = unique_temp_dir("plan-v1-refused");
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    seed_hash_a(&root);
+    let plan_dir = parent.join("plans-v1");
+    std::fs::create_dir_all(&plan_dir).expect("plan dir");
+    let plan = plan_dir.join("plan.json");
+    let body = serde_json::json!({
+        "format_version": 1,
+        "storage_root": root,
+        "source_snapshot_sha256": "0".repeat(64),
+        "old_host_root": "/home/vaz",
+        "new_host_root": "/home/opencode",
+        "mapping": [valid_row(
+            &root,
+            HASH_A,
+            "path:/fixture/a",
+            "path:/fixture/a",
+            false,
+        )],
+        "schema_manifest_sha256": "0".repeat(64),
+        "baseline_manifest_sha256": "0".repeat(64),
+    });
+    std::fs::write(&plan, body.to_string()).expect("write the v1 plan");
+    let (code, _stdout, stderr) = run_dry_run(&root, &plan);
+    assert_refusal(code, 65, &stderr, "consolidation.plan_format_unsupported");
+
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// Degenerate host-root pairs refuse 64 `consolidation.plan_invalid` naming
+/// BOTH values: non-absolute roots, the filesystem root, trailing `/`, a
+/// `.`/`..` component, `old == new`, and `new` under `old` (a mapping that
+/// would re-match its own output). Validation lives in
+/// `HostRootMap::from_parts` — the single seam behind both modes.
+///
+/// Mutant killed: `from_parts` validation dropped — `old == new == "/x"` then
+/// proceeds to preflight and answers exit 0 where the correct code refuses 64.
+#[test]
+fn test_host_roots_degenerate_refused() {
+    let _serial = serial_guard();
+    let variants: [(&str, &str, &str); 6] = [
+        ("equal", "/x", "/x"),
+        ("filesystem-root", "/", "/srv/new"),
+        ("trailing-slash", "/srv/old/", "/srv/new"),
+        ("dot-component", "/srv/./old", "/srv/new"),
+        ("dotdot-component", "/srv/../old", "/srv/new"),
+        ("new-under-old", "/srv/old", "/srv/old/new"),
+    ];
+    for (case, old, new) in variants {
+        let parent = unique_temp_dir(&format!("host-roots-{case}"));
+        let root = parent.join("data");
+        std::fs::create_dir_all(&root).expect("fixture root");
+        seed_hash_a(&root);
+        let plan = write_plan_pair(
+            &parent.join("plans"),
+            &root,
+            old,
+            new,
+            vec![valid_row(
+                &root,
+                "aaaaaaaaaaaaaaaa",
+                "path:/fixture/a",
+                "path:/fixture/a",
+                false,
+            )],
+        );
+        let before = tree_digest(&root);
+        let (code, _stdout, stderr) = run_dry_run(&root, &plan);
+        assert_refusal(code, 64, &stderr, "consolidation.plan_invalid");
+        assert!(
+            stderr.contains(old),
+            "{case}: the refusal names the old value; stderr: {stderr}"
+        );
+        assert!(
+            stderr.contains(new),
+            "{case}: the refusal names the new value; stderr: {stderr}"
+        );
+        assert_eq!(
+            before,
+            tree_digest(&root),
+            "{case}: the refused dry-run mutates nothing"
+        );
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+}
+
+/// The identity derivation is keyed on the PLAN's pair: a source under the
+/// plan's `old_host_root` must derive to the plan's `new_host_root`, so a
+/// pinned target that disagrees refuses 72
+/// `consolidation.target_identity_mismatch`.
+///
+/// Mutant killed: the consumers keep the compiled constants — with the plan
+/// pinning `/srv/old` → `/srv/new`, the constants derive nothing for
+/// `path:/srv/old/proj`, the check is skipped, and the wrong target is
+/// accepted (exit 0 where the correct code refuses 72).
+#[test]
+fn test_swap_derivation_uses_plan_pair() {
+    let _serial = serial_guard();
+    const HASH_A: &str = "aaaaaaaaaaaaaaaa";
+
+    let parent = unique_temp_dir("swap-derivation-plan-pair");
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    seed_hash_a(&root);
+    let plan = write_plan_pair(
+        &parent.join("plans"),
+        &root,
+        "/srv/old",
+        "/srv/new",
+        vec![valid_row(
+            &root,
+            HASH_A,
+            "path:/srv/old/proj",
+            "path:/fixture/wrong",
+            false,
+        )],
+    );
+    let before = tree_digest(&root);
+    let (code, _stdout, stderr) = run_dry_run(&root, &plan);
+    assert_refusal(code, 72, &stderr, "consolidation.target_identity_mismatch");
+    assert_eq!(
+        before,
+        tree_digest(&root),
+        "the refused dry-run mutates nothing"
+    );
+
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// The EXACT-root branch survives under a non-default pair: an identity that
+/// IS the plan's `old_host_root` verbatim (no suffix) derives to the plan's
+/// `new_host_root`, so a disagreeing pinned target refuses 72.
+///
+/// Mutant killed: the exact-equality branch dropped, prefix-only kept —
+/// `constrain_identity` returns `None` for the bare root and the wrong target
+/// is accepted (exit 0 where the correct code refuses 72).
+#[test]
+fn test_exact_root_identity_under_plan_pair() {
+    let _serial = serial_guard();
+    const HASH_A: &str = "aaaaaaaaaaaaaaaa";
+
+    let parent = unique_temp_dir("exact-root-plan-pair");
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    seed_hash_a(&root);
+    let plan = write_plan_pair(
+        &parent.join("plans"),
+        &root,
+        "/srv/old",
+        "/srv/new",
+        vec![valid_row(
+            &root,
+            HASH_A,
+            "path:/srv/old",
+            "path:/fixture/wrong",
+            false,
+        )],
+    );
+    let (code, _stdout, stderr) = run_dry_run(&root, &plan);
+    assert_refusal(code, 72, &stderr, "consolidation.target_identity_mismatch");
+
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// Rule B.4's component boundary under a NON-DEFAULT pair: a sibling root
+/// sharing the textual prefix (`/srv/old2`) is NOT a component of the plan's
+/// `old_host_root` (`/srv/old`) — no derivation applies, the consistent pinned
+/// target plans clean, and both `/srv/old2` aux cells are content, carried
+/// unchanged on the apply path.
+///
+/// Mutant killed: a naive substring replace (`str::replace`) instead of the
+/// exact/`old + "/"` boundary — that mutant derives `path:/srv/new2/x` from
+/// `path:/srv/old2/x`, the mismatch fires, and the dry-run refuses 72 where
+/// the correct code exits 0. GREEN before the consumers move (today's
+/// constants also derive nothing here): this test is the pure mutant-killer,
+/// its power is in the re-run under the mutant, not in a RED.
+#[test]
+fn test_component_boundary_under_plan_pair() {
+    let _serial = serial_guard();
+    const HASH_A: &str = "aaaaaaaaaaaaaaaa";
+
+    let parent = unique_temp_dir("boundary-plan-pair");
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    seed_hash_a(&root);
+
+    // Part 1 — dry-run: the sibling-root identity plans clean on its own pin.
+    let plan = write_plan_pair(
+        &parent.join("plans"),
+        &root,
+        "/srv/old",
+        "/srv/new",
+        vec![valid_row(
+            &root,
+            HASH_A,
+            "path:/srv/old2/x",
+            "path:/srv/old2/x",
+            false,
+        )],
+    );
+    let (code, stdout, stderr) = run_dry_run(&root, &plan);
+    assert_eq!(
+        code,
+        Some(0),
+        "a sibling-root identity is never derived; stderr: {stderr}"
+    );
+    let report = report_json(&stdout, &stderr);
+    let sources = report["sources"].as_array().expect("sources array");
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0]["target_identity"], "path:/srv/old2/x");
+
+    // Part 2 — apply: both `/srv/old2` cells pass unchanged. The first equals
+    // the mapped source (identity mapping, no carry), the second is outside
+    // the closure and is SWAP-AND-CARRIED with carried == original.
+    acquire_window(&root);
+    seed_episodic(&root);
+    for value in ["/srv/old2/x", "/srv/old2/deep/cell"] {
+        fixture_exec(
+            &root,
+            &root.join("episodic.db"),
+            "INSERT INTO episodic_raw_context (project_id, session_id, agent_id, raw_context,
+               byte_len, captured_at) VALUES (?1, 's1', 'main', 'raw', 3, 1)",
+            vec![Value::Text(value.to_string())],
+        );
+    }
+    let custody = fixture_custody(&parent);
+    let before = tree_digest(&root);
+    let (code, _stdout, stderr) = run_consolidate(&root, &plan, false, Some(&custody));
+    assert_eq!(
+        code,
+        Some(0),
+        "the sibling-root plan applies clean; stderr: {stderr}"
+    );
+    assert_eq!(before, tree_digest(&root), "the apply mutates no S byte");
+    let staged = staged_root(&parent);
+    let raw = aux_rows(
+        &staged.join("episodic.db"),
+        "episodic_raw_context",
+        "session_id",
+    );
+    assert_eq!(raw.len(), 2, "neither row is dropped");
+    let mut cells: Vec<&str> = raw.iter().map(|row| text_cell(row, "project_id")).collect();
+    cells.sort_unstable();
+    assert_eq!(
+        cells,
+        vec!["/srv/old2/deep/cell", "/srv/old2/x"],
+        "both sibling-root cells are content under the plan pair"
+    );
+    for line in aux_sidecar_lines(&custody) {
+        let carried = line["carried"].as_str().unwrap_or_default();
+        assert!(
+            !carried.contains("/srv/new2"),
+            "no naive rewrite of a sibling root: {line}"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// The auxiliary carry is keyed on the PLAN's pair: a cell outside the closure
+/// (`/srv/old/x` under plan pair `/srv/old` → `/srv/new`) is carried as the
+/// swap of the ORIGINAL value, recorded in the custody sidecar.
+///
+/// Mutant killed: `swap_value` keeps the compiled constants — the cell is
+/// carried unchanged (`carried == original`) where the correct code swaps it
+/// to `/srv/new/x`.
+#[test]
+fn test_aux_carry_uses_plan_pair() {
+    let _serial = serial_guard();
+    const SOURCE_A: &str = "4444444444444444";
+    let source_identity = "path:/srv/old/proj";
+
+    let parent = unique_temp_dir("aux-carry-plan-pair");
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    acquire_window(&root);
+    {
+        let fx = fixture(&root);
+        fx.seed_row(
+            SOURCE_A,
+            &record("row-a", &format!("opencode_project_{SOURCE_A}")),
+        );
+    }
+    seed_episodic(&root);
+    fixture_exec(
+        &root,
+        &root.join("episodic.db"),
+        "INSERT INTO episodic_raw_context (project_id, session_id, agent_id, raw_context,
+           byte_len, captured_at) VALUES (?1, 's1', 'main', 'raw bytes', 9, 1)",
+        vec![Value::Text("/srv/old/x".to_string())],
+    );
+    let plan = write_plan_pair(
+        &parent.join("plans"),
+        &root,
+        "/srv/old",
+        "/srv/new",
+        vec![valid_row(
+            &root,
+            SOURCE_A,
+            source_identity,
+            "path:/srv/new/proj",
+            false,
+        )],
+    );
+    let custody = fixture_custody(&parent);
+    let (code, _stdout, stderr) = run_consolidate(&root, &plan, false, Some(&custody));
+    assert_eq!(
+        code,
+        Some(0),
+        "the carried cell never refuses; stderr: {stderr}"
+    );
+    let staged = staged_root(&parent);
+    let raw = aux_rows(
+        &staged.join("episodic.db"),
+        "episodic_raw_context",
+        "session_id",
+    );
+    assert_eq!(raw.len(), 1, "the carried row is never dropped");
+    assert_eq!(
+        text_cell(&raw[0], "project_id"),
+        "/srv/new/x",
+        "the staged cell is the swap keyed on the PLAN pair"
+    );
+    let lines = aux_sidecar_lines(&custody);
+    assert_eq!(lines.len(), 1, "exactly one carry line: {lines:?}");
+    assert_eq!(lines[0]["kind"], "carry");
+    assert_eq!(lines[0]["db"], "episodic.db");
+    assert_eq!(lines[0]["table"], "episodic_raw_context");
+    assert_eq!(lines[0]["column"], "project_id");
+    assert_eq!(lines[0]["original"], "/srv/old/x");
+    assert_eq!(lines[0]["carried"], "/srv/new/x");
+    assert_eq!(lines[0]["rows"], 1);
+
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+/// The plan digest binds the host-root pair: two plans identical except their
+/// roots yield DIFFERENT `plan_sha256` values in the dry-run report, so the
+/// staged-tree seed and the custody/journal chain (which already bind
+/// `plan_sha256`) prove which mapping produced the stored rows.
+///
+/// Mutant killed: the roots omitted from `render_plan_digest` — the two
+/// digests come out EQUAL where the correct code differs.
+#[test]
+fn test_plan_digest_binds_host_roots() {
+    let _serial = serial_guard();
+
+    let parent = unique_temp_dir("digest-binds-host-roots");
+    let root = parent.join("data");
+    std::fs::create_dir_all(&root).expect("fixture root");
+    seed_hash_a(&root);
+    let row = valid_row(
+        &root,
+        "aaaaaaaaaaaaaaaa",
+        "path:/fixture/a",
+        "path:/fixture/a",
+        false,
+    );
+    let plan_one = write_plan_pair(
+        &parent.join("plans-one"),
+        &root,
+        "/srv/one",
+        "/srv/two",
+        vec![row.clone()],
+    );
+    let plan_two = write_plan_pair(
+        &parent.join("plans-two"),
+        &root,
+        "/srv/alpha",
+        "/srv/beta",
+        vec![row],
+    );
+    let (code_one, stdout_one, stderr_one) = run_dry_run(&root, &plan_one);
+    assert_eq!(code_one, Some(0), "the first plan dry-runs clean");
+    let (code_two, stdout_two, stderr_two) = run_dry_run(&root, &plan_two);
+    assert_eq!(code_two, Some(0), "the second plan dry-runs clean");
+    let digest_one = report_json(&stdout_one, &stderr_one)["plan_sha256"].clone();
+    let digest_two = report_json(&stdout_two, &stderr_two)["plan_sha256"].clone();
+    assert_ne!(
+        digest_one, digest_two,
+        "the roots must ride the plan digest: {digest_one}"
+    );
+
+    let _ = std::fs::remove_dir_all(&parent);
 }
