@@ -74,12 +74,12 @@ them, and prefer a description over a numeral when the numeral cannot be kept ch
 - Root package `opencode-agents-memory` is the **composition root** over the **12 crates under
   `crates/*`**: `src/main.rs` is sync arg-parse and dispatch (a `purge-session` mode included), `src/lib.rs`
   exposes `web_dist` (`src/web_dist.rs` resolves the built UI), and root `tests/` holds
-  18 workspace-level suites (`tests/workspace_deps.rs` enforces ADR-0001's allowed edges;
+  20 workspace-level suites (`tests/workspace_deps.rs` enforces ADR-0001's allowed edges;
   `tests/web_identity.rs` is the web-identity resolver's contract, added by issues 115/116).
 - Every tracked `Cargo.toml` is `edition = "2024"` (members inherit `[workspace.package]`); `web-ui/` is an
   excluded workspace of its own (Leptos/Thaw CSR, wasm-only, `trunk`-built).
 - `plugin/` is the OpenCode wrapper — plain `node`, no npm/Bun dependency, no lockfile: `plugin/dist/`
-  bundles, 28 `*.test.mjs` files, and `plugin/scripts/stage-engine.sh`, which stages a built engine
+  bundles, 31 `*.test.mjs` files, and `plugin/scripts/stage-engine.sh`, which stages a built engine
   beside the packaged UI under the gitignored `plugin/engine/<platform>-<arch>/`.
 - Dependencies live once in `[workspace.dependencies]`, consumed as `{ workspace = true }`: `turso` 0.8,
   `tokio`, `ort` + `tokenizers`, `axum` 0.8 + `tower-http`, `serde`/`jsonc-parser`, `tracing`, `chrono`,
@@ -145,7 +145,7 @@ Verify the gate itself with:
 ```sh
 bash -n .githooks/pre-commit && bash -n scripts/test-pre-commit.sh
 shellcheck .githooks/pre-commit scripts/test-pre-commit.sh
-bash scripts/test-pre-commit.sh     # 17 behavioural cases in throwaway repos; prints PASS 17/17 on success
+bash scripts/test-pre-commit.sh     # 20 behavioural cases in throwaway repos; prints PASS 20/20 on success
 ```
 
 See `docs/adr/0016-pre-commit-gate.md` for the decisions, costs and limitations.
