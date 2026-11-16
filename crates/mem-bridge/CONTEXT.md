@@ -67,8 +67,15 @@
   pinning input in `tests/host_endpoint.rs`.
 - **two branches** — an `opencodeBaseUrl` override is branch A (the file is
   then credential-only: same-origin credentials only, no liveness probe); the
-  file is branch B (liveness, then start-time recycling, then URL shape, then
-  credentials, then the model ref). `"inherit"` is never forwarded.
+  file is branch B (liveness, then start-time recycling, then wildcard-bind
+  normalization, then URL shape, then credentials, then the model ref).
+  Normalization rewrites the two canonical wildcard bind spellings the file may
+  carry (`0.0.0.0`, `[::]`) to `127.0.0.1` in branch B only — a wildcard bind
+  means "this machine", and a dual-stack `[::]` listener serves loopback.
+  Parsed IPv6 hosts are bracketed, so `validate_shape`'s bare `"::1"` arm never
+  matches a URL: `http://[::1]:<port>` is refused `host_url_not_loopback`
+  today, and fixing that would widen branch A, which shares the validator —
+  deliberately out of scope. `"inherit"` is never forwarded.
 - **`LazyHostProvider`** — resolve on use, cache on success, clear on ANY inner
   error (a foreign listener on a recycled port answers `401`/`404`/junk, never
   `Network`). `warm()` is the startup probe and never caches a failure. Model

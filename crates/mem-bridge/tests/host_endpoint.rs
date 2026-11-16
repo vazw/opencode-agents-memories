@@ -141,6 +141,82 @@ fn test_service_file_origin_and_api_prefix_are_used() {
 }
 
 #[test]
+fn test_wildcard_service_file_origin_still_does_not_bind_override_credentials() {
+    let dir = TestDir::new("host-endpoint-wildcard-branch-a");
+    write_service(
+        dir.path(),
+        r#"{"url":"http://0.0.0.0:5000","pid":4242,"password":"s3cret"}"#,
+    );
+    let request = HostWiringRequest {
+        override_url: Some("http://127.0.0.1:5000"),
+        ..live_request()
+    };
+
+    let wiring = resolve(
+        &env_with_xdg(dir.path()),
+        // Branch A runs no liveness probe.
+        &FakeProbe::dead(),
+        &FakeClock::empty(),
+        &request,
+    )
+    .expect("the override itself resolves");
+
+    assert_eq!(wiring.base_url, "http://127.0.0.1:5000/api");
+    // The wildcard spelling is a different origin: the file's password never
+    // travels to it, on either spelling.
+    assert!(wiring.authorization.is_none());
+}
+
+#[test]
+fn test_wildcard_v4_bind_normalizes_to_loopback_and_binds_credentials() {
+    let dir = TestDir::new("host-endpoint-wildcard-v4");
+    write_service(
+        dir.path(),
+        r#"{"url":"http://0.0.0.0:49374","pid":4242,"password":"s3cret","version":"2.2.5"}"#,
+    );
+
+    let wiring = resolve(
+        &env_with_xdg(dir.path()),
+        &FakeProbe::with(&[4242]),
+        &FakeClock::with(&[(4242, 100)]),
+        &live_request(),
+    )
+    .expect("a wildcard bind is this machine, so it resolves");
+
+    assert_eq!(wiring.base_url, "http://127.0.0.1:49374/api");
+    assert_eq!(wiring.host_version.as_deref(), Some("2.2.5"));
+    let authorization = wiring.authorization.expect("credentials attach");
+    assert_eq!(
+        authorization.header_value().as_str(),
+        "Basic b3BlbmNvZGU6czNjcmV0"
+    );
+}
+
+#[test]
+fn test_wildcard_v6_bind_normalizes_to_loopback() {
+    let dir = TestDir::new("host-endpoint-wildcard-v6");
+    write_service(
+        dir.path(),
+        r#"{"url":"http://[::]:49374","pid":4242,"password":"s3cret","version":"2.2.5"}"#,
+    );
+
+    let wiring = resolve(
+        &env_with_xdg(dir.path()),
+        &FakeProbe::with(&[4242]),
+        &FakeClock::with(&[(4242, 100)]),
+        &live_request(),
+    )
+    .expect("a wildcard bind is this machine, so it resolves");
+
+    assert_eq!(wiring.base_url, "http://127.0.0.1:49374/api");
+    let authorization = wiring.authorization.expect("credentials attach");
+    assert_eq!(
+        authorization.header_value().as_str(),
+        "Basic b3BlbmNvZGU6czNjcmV0"
+    );
+}
+
+#[test]
 fn test_service_file_ignores_unknown_keys() {
     let dir = TestDir::new("host-endpoint-unknown-keys");
     // The measured file carries an `id` the resolver does not model.
@@ -333,6 +409,9 @@ fn test_non_loopback_url_is_rejected() {
     for (label, url) in [
         ("private address", "http://192.168.1.10:49374"),
         ("userinfo smuggle", "http://127.0.0.1:49374@evil.example:80"),
+        ("routable v4", "http://192.168.1.5:49374"),
+        ("routable name", "http://evil.example:49374"),
+        ("wildcard userinfo smuggle", "http://opencode@0.0.0.0:49374"),
     ] {
         let dir = TestDir::new("host-endpoint-not-loopback");
         write_service(
@@ -361,6 +440,7 @@ fn test_relative_and_non_http_urls_report_unsupported() {
         ("ftp scheme", "ftp://127.0.0.1:21"),
         ("relative path", "/session"),
         ("missing port", "http://127.0.0.1"),
+        ("wildcard v4 without a port", "http://0.0.0.0"),
     ] {
         let dir = TestDir::new("host-endpoint-unsupported");
         write_service(

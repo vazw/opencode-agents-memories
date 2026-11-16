@@ -14,7 +14,8 @@
 //!   consulted for **nothing but credential binding**; a different-origin
 //!   override gets no credentials at all, and no liveness probe runs.
 //! - **B** — the service file is the authority: state dir → file → pid liveness
-//!   → pid recycling → URL shape → credentials → model ref.
+//!   → pid recycling → wildcard-bind normalization → URL shape → credentials
+//!   → model ref.
 //!
 //! Every failure is a member of the closed [`HostWiringError`] set. The
 //! password is wrapped in [`Zeroizing`] immediately after the deserialize, in
@@ -290,7 +291,7 @@ fn resolve_service_file(
             None,
         ));
     };
-    let file = read_service_file(Some(state_dir))
+    let mut file = read_service_file(Some(state_dir))
         .map_err(|error| HostResolutionError::new(error, None))?;
     let version = file.version.clone();
 
@@ -314,6 +315,9 @@ fn resolve_service_file(
         ));
     }
 
+    // A wildcard bind address means "this machine, on every interface": the
+    // VALIDATED and DIALLED url is the normalized loopback one.
+    normalize_wildcard_bind(&mut file.url);
     validate_shape(&file.url).map_err(|error| HostResolutionError::new(error, version.as_ref()))?;
     if !supported_path(file.url.path()) {
         // The host wrote a sub-path: never silently stripped, never doubled.
@@ -391,6 +395,29 @@ fn read_service_file(state_dir: Option<&Path>) -> Result<ServiceFile, HostWiring
         password,
         version: bounded_version(wire.version),
     })
+}
+
+/// Branch B only. A wildcard bind address in the `0600` service record means
+/// "this machine, listening on every interface" — never a remote peer — and
+/// the loopback interface is necessarily among them, so the client dials the
+/// same machine by its loopback spelling. A routable address is a different
+/// machine and is never rewritten; `validate_shape` refuses it below.
+fn normalize_wildcard_bind(url: &mut Url) {
+    let loopback = match url.host_str() {
+        // host_str() is bracketed for IPv6 ("[::]") and set_host rejects bare
+        // IPv6 ("::1" → Err(InvalidDomainCharacter)), so the ONE reachable
+        // loopback rewrite is the IPv4 literal — faithful, because a
+        // dual-stack listener on [::] necessarily serves 127.0.0.1. The url
+        // crate canonicalizes what it parses, so these are the only spellings
+        // of an unspecified address a parsed URL can carry; anything else
+        // misses this match and is refused below: fail-closed.
+        Some("0.0.0.0") => "127.0.0.1",
+        Some("[::]") => "127.0.0.1",
+        _ => return,
+    };
+    // Unreachable for these literals; on failure the wildcard survives and
+    // validate_shape refuses it (fail-closed), so the error is discarded.
+    let _ = url.set_host(Some(loopback));
 }
 
 /// The URL rules both branches share.
