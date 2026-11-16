@@ -277,9 +277,28 @@ fn check_active_writer(storage_root: &Path) -> Result<(), ReservationError> {
     Ok(())
 }
 
+/// The `comm` value of OpenSSH's per-session leader — the one class exempted
+/// from the unreadable-`fd/` refusal (see [`comm_is_sshd_session`]).
+#[cfg(target_os = "linux")]
+const SSHD_SESSION_COMM: &str = "sshd-session";
+
+/// True when `/proc/<pid>/comm` is exactly `sshd-session`.
+///
+/// This is a **heuristic for one measured class, not an allowlist and not a
+/// trust signal**: any same-uid process can become "exempt" with one
+/// `prctl(PR_SET_NAME, "sshd-session")` call. An unreadable `comm` answers
+/// `false` (refuse), by construction.
+#[cfg(target_os = "linux")]
+fn comm_is_sshd_session(proc: &Path, pid_text: &str) -> bool {
+    std::fs::read_to_string(proc.join(pid_text).join("comm"))
+        .is_ok_and(|comm| comm.trim_end_matches('\n') == SSHD_SESSION_COMM)
+}
+
 /// §E.2 S1a refusal 3 (open descriptors): walk `/proc/<pid>/fd` across
 /// same-uid live processes and refuse when one holds a descriptor resolving
-/// under the storage root. Fail closed on any unreadable directory.
+/// under the storage root. Fail closed on any unreadable directory, with one
+/// measured exception: a process whose `comm` is exactly `sshd-session`
+/// (OpenSSH's per-session leader) is skipped — see [`comm_is_sshd_session`].
 #[cfg(target_os = "linux")]
 fn live_process_holds_fd_under(storage_root: &Path, skip_pid: u32) -> bool {
     let canonical =
@@ -320,6 +339,24 @@ fn live_process_holds_fd_under(storage_root: &Path, skip_pid: u32) -> bool {
         }
         let fd_dir = proc.join(pid_text).join("fd");
         let Ok(fds) = std::fs::read_dir(&fd_dir) else {
+            // OpenSSH sets PR_SET_DUMPABLE=0 on its per-session leader, which
+            // makes that process's fd/ unreadable even to its own uid; the
+            // class was MEASURED holding no descriptor under the root, so it is
+            // skipped instead of refused. Every other unreadable process still
+            // fails closed.
+            //
+            // This is not a security boundary and must not be sold as one: a
+            // same-uid process can write the storage root directly, with or
+            // without a descriptor this function can see. The arm exists to
+            // catch *accidental* writers. The exemption is also blind by
+            // construction (an sshd-session leader that DID hold a descriptor
+            // would be skipped too) and self-assignable by any same-uid process
+            // via prctl(PR_SET_NAME, "sshd-session"): the name match is a
+            // heuristic for one measured class, not an allowlist and not a
+            // trust signal.
+            if comm_is_sshd_session(&proc, pid_text) {
+                continue;
+            }
             return true;
         };
         for fd in fds.flatten() {
