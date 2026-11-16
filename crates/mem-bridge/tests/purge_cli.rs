@@ -1084,6 +1084,18 @@ fn lock_builds() -> std::sync::MutexGuard<'static, ()> {
     BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Per-run probe link name. Pids are unique among live processes, so each
+/// concurrent run owns its own rendezvous and no peer can unlink it mid-build.
+fn probe_name() -> String {
+    format!("issue-125-probe-{}", std::process::id())
+}
+
+/// Relative `CARGO_TARGET_DIR` spelling of the probe, kept relative so the
+/// relative branch of `resolve_target_dir` stays exercised.
+fn probe_relative_spelling() -> String {
+    format!(".tmp/scratch/{}", probe_name())
+}
+
 /// Removes `path` whatever it currently is: a real directory (left behind by an
 /// earlier run), a symlink to one, or a plain file. `symlink_metadata` reports
 /// the link itself, so a symlink-to-directory still takes the `remove_file`
@@ -1265,7 +1277,8 @@ fn test_relative_cargo_target_dir_does_not_leak_into_crate_tree() {
 
     let scratch_dir = ws_root.join(".tmp").join("scratch");
     std::fs::create_dir_all(&scratch_dir).expect("create scratch dir");
-    let probe_symlink = scratch_dir.join("issue-125-probe");
+    let probe_link_name = probe_name();
+    let probe_symlink = scratch_dir.join(&probe_link_name);
     remove_probe_path(&probe_symlink);
     std::os::unix::fs::symlink(active_target, &probe_symlink).expect("create probe symlink");
 
@@ -1277,10 +1290,8 @@ fn test_relative_cargo_target_dir_does_not_leak_into_crate_tree() {
     }
     let _guard = SymlinkGuard(probe_symlink);
 
-    let mut cmd = build_root_binary_cmd(
-        manifest_dir,
-        Some(OsStr::new(".tmp/scratch/issue-125-probe")),
-    );
+    let probe_rel = probe_relative_spelling();
+    let mut cmd = build_root_binary_cmd(manifest_dir, Some(OsStr::new(probe_rel.as_str())));
     let status = {
         let _build_lock = lock_builds();
         cmd.status().expect("cargo build")
@@ -1291,6 +1302,55 @@ fn test_relative_cargo_target_dir_does_not_leak_into_crate_tree() {
         !leaked_tmp.exists(),
         "cargo build leaked directory into crates/mem-bridge/.tmp"
     );
+}
+
+#[test]
+fn test_probe_name_embeds_the_process_id() {
+    assert_eq!(
+        probe_name(),
+        format!("issue-125-probe-{}", std::process::id())
+    );
+}
+
+#[test]
+fn test_probe_relative_spelling_matches_the_link_name_and_stays_relative() {
+    let rel = probe_relative_spelling();
+    assert_eq!(rel, format!(".tmp/scratch/{}", probe_name()));
+    assert!(
+        !Path::new(&rel).is_absolute(),
+        "spelling must stay relative"
+    );
+}
+
+#[test]
+fn test_remove_probe_path_handles_dirs_links_files_and_absent_paths() {
+    let root = scratch_home("remove-probe");
+    let target = root.join("target");
+    std::fs::create_dir_all(&target).expect("target dir");
+
+    let dir_path = root.join("real-dir");
+    std::fs::create_dir_all(dir_path.join("inner")).expect("real dir");
+    remove_probe_path(&dir_path);
+    assert!(std::fs::symlink_metadata(&dir_path).is_err());
+
+    let link = root.join("link");
+    std::os::unix::fs::symlink(&target, &link).expect("link to dir");
+    remove_probe_path(&link);
+    assert!(std::fs::symlink_metadata(&link).is_err());
+    assert!(target.is_dir(), "removing a link must not touch its target");
+
+    let file = root.join("file");
+    std::fs::write(&file, b"").expect("file");
+    remove_probe_path(&file);
+    assert!(std::fs::symlink_metadata(&file).is_err());
+
+    remove_probe_path(&root.join("absent"));
+
+    let seeded = root.join("seeded");
+    std::fs::create_dir_all(seeded.join("inner")).expect("seeded dir");
+    remove_probe_path(&seeded);
+    std::os::unix::fs::symlink(&target, &seeded)
+        .expect("symlink must succeed after clearing a real dir");
 }
 
 fn scratch_home(label: &str) -> PathBuf {
