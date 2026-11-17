@@ -1,6 +1,6 @@
 # 139 — Thaw adoption inventory: census every raw element and rule it
 
-Status: ready-for-agent — will create `web-ui/scripts/thaw-adoption-census.mjs` and a ruling table under `docs/evidence/`; changes no UI code.
+Status: done — 2026-11-18. Ruling landed: `docs/evidence/thaw-adoption-census/` holds the ruling, the probe report, the route walk and the README; `web-ui/scripts/thaw-adoption-census.mjs` and `thaw-census-browser.cjs` are the gates. Probe landed at HEAD `d58a94f`; replace set 6 kinds / 20 occurrences, all `core_screens.rs`. No UI code changed.
 
 *(Parent: issue 118.)*
 

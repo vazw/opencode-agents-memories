@@ -1,0 +1,5172 @@
+[
+  {
+    "route": "/",
+    "status": "measured",
+    "settled": true,
+    "authoredTags": [
+      {
+        "tag": "dd",
+        "inThawSubtree": true,
+        "count": 4
+      },
+      {
+        "tag": "div",
+        "inThawSubtree": true,
+        "count": 14
+      },
+      {
+        "tag": "dl",
+        "inThawSubtree": true,
+        "count": 4
+      },
+      {
+        "tag": "dt",
+        "inThawSubtree": true,
+        "count": 4
+      },
+      {
+        "tag": "h1",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "h2",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "main",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "nav",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "p",
+        "inThawSubtree": true,
+        "count": 2
+      },
+      {
+        "tag": "path",
+        "inThawSubtree": true,
+        "count": 11
+      },
+      {
+        "tag": "section",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "span",
+        "inThawSubtree": true,
+        "count": 1
+      }
+    ],
+    "unclassedUnderThaw": [
+      {
+        "localName": "div",
+        "parentClass": "thaw-config-provider"
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-shell"
+      },
+      {
+        "localName": "nav",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-nav-drawer__header"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-layout-row"
+      },
+      {
+        "localName": "h1",
+        "parentClass": "thaw-layout-header app-header"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "main",
+        "parentClass": "app-body"
+      },
+      {
+        "localName": "section",
+        "parentClass": "app-main"
+      },
+      {
+        "localName": "h2",
+        "parentClass": "home-panel"
+      },
+      {
+        "localName": "p",
+        "parentClass": "home-panel"
+      },
+      {
+        "localName": "div",
+        "parentClass": "home-panel"
+      },
+      {
+        "localName": "dl",
+        "parentClass": "thaw-card home-summary-card"
+      },
+      {
+        "localName": "dt",
+        "parentClass": ""
+      },
+      {
+        "localName": "dd",
+        "parentClass": ""
+      },
+      {
+        "localName": "dl",
+        "parentClass": "home-summary-card thaw-card"
+      },
+      {
+        "localName": "dt",
+        "parentClass": ""
+      },
+      {
+        "localName": "dd",
+        "parentClass": ""
+      },
+      {
+        "localName": "dl",
+        "parentClass": "home-summary-card thaw-card"
+      },
+      {
+        "localName": "dt",
+        "parentClass": ""
+      },
+      {
+        "localName": "dd",
+        "parentClass": ""
+      },
+      {
+        "localName": "dl",
+        "parentClass": "home-summary-card thaw-card"
+      },
+      {
+        "localName": "dt",
+        "parentClass": ""
+      },
+      {
+        "localName": "dd",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": "home-panel"
+      }
+    ],
+    "apiMisses": []
+  },
+  {
+    "route": "/project-memories",
+    "status": "measured",
+    "settled": true,
+    "authoredTags": [
+      {
+        "tag": "div",
+        "inThawSubtree": true,
+        "count": 45
+      },
+      {
+        "tag": "h1",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "h2",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "li",
+        "inThawSubtree": true,
+        "count": 15
+      },
+      {
+        "tag": "main",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "nav",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "path",
+        "inThawSubtree": true,
+        "count": 13
+      },
+      {
+        "tag": "section",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "span",
+        "inThawSubtree": true,
+        "count": 27
+      },
+      {
+        "tag": "ul",
+        "inThawSubtree": true,
+        "count": 1
+      }
+    ],
+    "unclassedUnderThaw": [
+      {
+        "localName": "div",
+        "parentClass": "thaw-config-provider"
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-shell"
+      },
+      {
+        "localName": "nav",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-nav-drawer__header"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-layout-row"
+      },
+      {
+        "localName": "h1",
+        "parentClass": "app-header thaw-layout-header"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "main",
+        "parentClass": "app-body"
+      },
+      {
+        "localName": "section",
+        "parentClass": "app-main"
+      },
+      {
+        "localName": "h2",
+        "parentClass": "memories-panel"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memories-panel"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-input__suffix"
+      },
+      {
+        "localName": "span",
+        "parentClass": "memories-filters"
+      },
+      {
+        "localName": "span",
+        "parentClass": "memories-filters"
+      },
+      {
+        "localName": "ul",
+        "parentClass": "memories-panel"
+      },
+      {
+        "localName": "li",
+        "parentClass": "memory-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-header__description"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-footer memory-card-foot"
+      },
+      {
+        "localName": "li",
+        "parentClass": "memory-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-header__description"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "li",
+        "parentClass": "memory-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-header__description"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-card memory-card"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-card memory-card"
+      },
+      {
+        "localName": "span",
+        "parentClass": "memory-card-foot thaw-card-footer"
+      },
+      {
+        "localName": "li",
+        "parentClass": "memory-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-header__description"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-card memory-card"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-card memory-card"
+      },
+      {
+        "localName": "li",
+        "parentClass": "memory-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-header__description"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "span",
+        "parentClass": "memory-card-foot thaw-card-footer"
+      },
+      {
+        "localName": "li",
+        "parentClass": "memory-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-header__description"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "li",
+        "parentClass": "memory-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-header__description"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-card memory-card"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-card memory-card"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-footer memory-card-foot"
+      },
+      {
+        "localName": "li",
+        "parentClass": "memory-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-header__description"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "li",
+        "parentClass": "memory-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-header__description"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-card memory-card"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-card memory-card"
+      },
+      {
+        "localName": "span",
+        "parentClass": "memory-card-foot thaw-card-footer"
+      },
+      {
+        "localName": "li",
+        "parentClass": "memory-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-header__description"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "li",
+        "parentClass": "memory-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-header__description"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-card memory-card"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-card memory-card"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-footer memory-card-foot"
+      },
+      {
+        "localName": "li",
+        "parentClass": "memory-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-header__description"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "li",
+        "parentClass": "memory-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-header__description"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-card memory-card"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-card memory-card"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-footer memory-card-foot"
+      },
+      {
+        "localName": "li",
+        "parentClass": "memory-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-header__description"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "li",
+        "parentClass": "memory-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-header__description"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memory-card thaw-card"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-card-footer memory-card-foot"
+      },
+      {
+        "localName": "div",
+        "parentClass": "memories-panel"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      }
+    ],
+    "apiMisses": []
+  },
+  {
+    "route": "/tags",
+    "status": "measured",
+    "settled": true,
+    "authoredTags": [
+      {
+        "tag": "a",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "code",
+        "inThawSubtree": true,
+        "count": 2
+      },
+      {
+        "tag": "div",
+        "inThawSubtree": true,
+        "count": 14
+      },
+      {
+        "tag": "h1",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "h2",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "h3",
+        "inThawSubtree": true,
+        "count": 3
+      },
+      {
+        "tag": "li",
+        "inThawSubtree": true,
+        "count": 2
+      },
+      {
+        "tag": "main",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "nav",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "path",
+        "inThawSubtree": true,
+        "count": 11
+      },
+      {
+        "tag": "section",
+        "inThawSubtree": true,
+        "count": 4
+      },
+      {
+        "tag": "span",
+        "inThawSubtree": true,
+        "count": 3
+      },
+      {
+        "tag": "ul",
+        "inThawSubtree": true,
+        "count": 2
+      }
+    ],
+    "unclassedUnderThaw": [
+      {
+        "localName": "div",
+        "parentClass": "thaw-config-provider"
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-shell"
+      },
+      {
+        "localName": "nav",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-nav-drawer__header"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-layout-row"
+      },
+      {
+        "localName": "h1",
+        "parentClass": "thaw-layout-header app-header"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "main",
+        "parentClass": "app-body"
+      },
+      {
+        "localName": "section",
+        "parentClass": "app-main"
+      },
+      {
+        "localName": "h2",
+        "parentClass": "tags-panel"
+      },
+      {
+        "localName": "section",
+        "parentClass": "tags-panel"
+      },
+      {
+        "localName": "h3",
+        "parentClass": "tag-group"
+      },
+      {
+        "localName": "ul",
+        "parentClass": "tag-group"
+      },
+      {
+        "localName": "li",
+        "parentClass": "tag-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "tag-row"
+      },
+      {
+        "localName": "code",
+        "parentClass": "tag-row"
+      },
+      {
+        "localName": "section",
+        "parentClass": "tags-panel"
+      },
+      {
+        "localName": "h3",
+        "parentClass": "tag-group"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-card tags-card"
+      },
+      {
+        "localName": "a",
+        "parentClass": "thaw-table-cell"
+      },
+      {
+        "localName": "section",
+        "parentClass": "tags-panel"
+      },
+      {
+        "localName": "h3",
+        "parentClass": "tag-group"
+      },
+      {
+        "localName": "ul",
+        "parentClass": "tag-group"
+      },
+      {
+        "localName": "li",
+        "parentClass": "tag-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "tag-row"
+      },
+      {
+        "localName": "code",
+        "parentClass": "tag-row"
+      }
+    ],
+    "apiMisses": []
+  },
+  {
+    "route": "/user-profile",
+    "status": "measured",
+    "settled": true,
+    "authoredTags": [
+      {
+        "tag": "code",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "div",
+        "inThawSubtree": true,
+        "count": 14
+      },
+      {
+        "tag": "h1",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "h2",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "h3",
+        "inThawSubtree": true,
+        "count": 3
+      },
+      {
+        "tag": "label",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "li",
+        "inThawSubtree": true,
+        "count": 3
+      },
+      {
+        "tag": "main",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "nav",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "option",
+        "inThawSubtree": true,
+        "count": 3
+      },
+      {
+        "tag": "p",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "path",
+        "inThawSubtree": true,
+        "count": 11
+      },
+      {
+        "tag": "section",
+        "inThawSubtree": true,
+        "count": 4
+      },
+      {
+        "tag": "select",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "span",
+        "inThawSubtree": true,
+        "count": 10
+      },
+      {
+        "tag": "ul",
+        "inThawSubtree": true,
+        "count": 3
+      }
+    ],
+    "unclassedUnderThaw": [
+      {
+        "localName": "div",
+        "parentClass": "thaw-config-provider"
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-shell"
+      },
+      {
+        "localName": "nav",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-nav-drawer__header"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-layout-row"
+      },
+      {
+        "localName": "h1",
+        "parentClass": "app-header thaw-layout-header"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "main",
+        "parentClass": "app-body"
+      },
+      {
+        "localName": "section",
+        "parentClass": "app-main"
+      },
+      {
+        "localName": "h2",
+        "parentClass": "profile-panel"
+      },
+      {
+        "localName": "p",
+        "parentClass": "profile-panel"
+      },
+      {
+        "localName": "code",
+        "parentClass": "profile-identity"
+      },
+      {
+        "localName": "label",
+        "parentClass": "profile-panel"
+      },
+      {
+        "localName": "select",
+        "parentClass": "profile-panel"
+      },
+      {
+        "localName": "option",
+        "parentClass": "profile-identity-select"
+      },
+      {
+        "localName": "option",
+        "parentClass": "profile-identity-select"
+      },
+      {
+        "localName": "option",
+        "parentClass": "profile-identity-select"
+      },
+      {
+        "localName": "div",
+        "parentClass": "profile-panel"
+      },
+      {
+        "localName": "span",
+        "parentClass": "profile-meta"
+      },
+      {
+        "localName": "span",
+        "parentClass": "profile-meta"
+      },
+      {
+        "localName": "span",
+        "parentClass": "profile-meta"
+      },
+      {
+        "localName": "section",
+        "parentClass": "profile-panel"
+      },
+      {
+        "localName": "h3",
+        "parentClass": "profile-section"
+      },
+      {
+        "localName": "ul",
+        "parentClass": "profile-section"
+      },
+      {
+        "localName": "li",
+        "parentClass": "profile-items"
+      },
+      {
+        "localName": "span",
+        "parentClass": "profile-item"
+      },
+      {
+        "localName": "span",
+        "parentClass": "profile-item"
+      },
+      {
+        "localName": "li",
+        "parentClass": "profile-items"
+      },
+      {
+        "localName": "span",
+        "parentClass": "profile-item"
+      },
+      {
+        "localName": "span",
+        "parentClass": "profile-item"
+      },
+      {
+        "localName": "section",
+        "parentClass": "profile-panel"
+      },
+      {
+        "localName": "h3",
+        "parentClass": "profile-section"
+      },
+      {
+        "localName": "ul",
+        "parentClass": "profile-section"
+      },
+      {
+        "localName": "li",
+        "parentClass": "profile-items"
+      },
+      {
+        "localName": "span",
+        "parentClass": "profile-item"
+      },
+      {
+        "localName": "span",
+        "parentClass": "profile-item"
+      },
+      {
+        "localName": "section",
+        "parentClass": "profile-panel"
+      },
+      {
+        "localName": "h3",
+        "parentClass": "profile-section"
+      },
+      {
+        "localName": "ul",
+        "parentClass": "profile-section"
+      }
+    ],
+    "apiMisses": []
+  },
+  {
+    "route": "/settings",
+    "status": "measured",
+    "settled": true,
+    "authoredTags": [
+      {
+        "tag": "dd",
+        "inThawSubtree": true,
+        "count": 4
+      },
+      {
+        "tag": "div",
+        "inThawSubtree": true,
+        "count": 14
+      },
+      {
+        "tag": "dl",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "dt",
+        "inThawSubtree": true,
+        "count": 4
+      },
+      {
+        "tag": "h1",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "h2",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "h3",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "main",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "nav",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "p",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "path",
+        "inThawSubtree": true,
+        "count": 11
+      },
+      {
+        "tag": "section",
+        "inThawSubtree": true,
+        "count": 2
+      },
+      {
+        "tag": "span",
+        "inThawSubtree": true,
+        "count": 2
+      }
+    ],
+    "unclassedUnderThaw": [
+      {
+        "localName": "div",
+        "parentClass": "thaw-config-provider"
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-shell"
+      },
+      {
+        "localName": "nav",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-nav-drawer__header"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-layout-row"
+      },
+      {
+        "localName": "h1",
+        "parentClass": "thaw-layout-header app-header"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "main",
+        "parentClass": "app-body"
+      },
+      {
+        "localName": "section",
+        "parentClass": "app-main"
+      },
+      {
+        "localName": "h2",
+        "parentClass": "settings-panel"
+      },
+      {
+        "localName": "dl",
+        "parentClass": "settings-panel"
+      },
+      {
+        "localName": "dt",
+        "parentClass": "settings-status"
+      },
+      {
+        "localName": "dd",
+        "parentClass": "settings-status"
+      },
+      {
+        "localName": "dt",
+        "parentClass": "settings-status"
+      },
+      {
+        "localName": "dd",
+        "parentClass": "settings-status"
+      },
+      {
+        "localName": "dt",
+        "parentClass": "settings-status"
+      },
+      {
+        "localName": "dd",
+        "parentClass": "settings-status"
+      },
+      {
+        "localName": "dt",
+        "parentClass": "settings-status"
+      },
+      {
+        "localName": "dd",
+        "parentClass": "settings-status"
+      },
+      {
+        "localName": "div",
+        "parentClass": ""
+      },
+      {
+        "localName": "section",
+        "parentClass": "settings-panel"
+      },
+      {
+        "localName": "h3",
+        "parentClass": "maintenance"
+      },
+      {
+        "localName": "p",
+        "parentClass": "maintenance"
+      },
+      {
+        "localName": "span",
+        "parentClass": "maintenance"
+      }
+    ],
+    "apiMisses": []
+  },
+  {
+    "route": "/export-import",
+    "status": "measured",
+    "settled": true,
+    "authoredTags": [
+      {
+        "tag": "div",
+        "inThawSubtree": true,
+        "count": 15
+      },
+      {
+        "tag": "h1",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "h2",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "label",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "main",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "nav",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "path",
+        "inThawSubtree": true,
+        "count": 11
+      },
+      {
+        "tag": "section",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "span",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "textarea",
+        "inThawSubtree": true,
+        "count": 1
+      }
+    ],
+    "unclassedUnderThaw": [
+      {
+        "localName": "div",
+        "parentClass": "thaw-config-provider"
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-shell"
+      },
+      {
+        "localName": "nav",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-nav-drawer__header"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-layout-row"
+      },
+      {
+        "localName": "h1",
+        "parentClass": "app-header thaw-layout-header"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "main",
+        "parentClass": "app-body"
+      },
+      {
+        "localName": "section",
+        "parentClass": "app-main"
+      },
+      {
+        "localName": "h2",
+        "parentClass": "export-import-panel"
+      },
+      {
+        "localName": "div",
+        "parentClass": "export-import-panel"
+      },
+      {
+        "localName": "label",
+        "parentClass": "export-import-panel"
+      },
+      {
+        "localName": "textarea",
+        "parentClass": "export-import-panel"
+      },
+      {
+        "localName": "div",
+        "parentClass": "export-import-panel"
+      }
+    ],
+    "apiMisses": []
+  },
+  {
+    "route": "/skill-library",
+    "status": "measured",
+    "settled": true,
+    "authoredTags": [
+      {
+        "tag": "code",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "div",
+        "inThawSubtree": true,
+        "count": 13
+      },
+      {
+        "tag": "h1",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "h2",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "li",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "main",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "nav",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "path",
+        "inThawSubtree": true,
+        "count": 11
+      },
+      {
+        "tag": "section",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "span",
+        "inThawSubtree": true,
+        "count": 8
+      },
+      {
+        "tag": "ul",
+        "inThawSubtree": true,
+        "count": 1
+      }
+    ],
+    "unclassedUnderThaw": [
+      {
+        "localName": "div",
+        "parentClass": "thaw-config-provider"
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-shell"
+      },
+      {
+        "localName": "nav",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-nav-drawer__header"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-layout-row"
+      },
+      {
+        "localName": "h1",
+        "parentClass": "app-header thaw-layout-header"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "main",
+        "parentClass": "app-body"
+      },
+      {
+        "localName": "section",
+        "parentClass": "app-main"
+      },
+      {
+        "localName": "h2",
+        "parentClass": "skill-library-panel"
+      },
+      {
+        "localName": "span",
+        "parentClass": "skill-library-panel"
+      },
+      {
+        "localName": "ul",
+        "parentClass": "skill-library-panel"
+      },
+      {
+        "localName": "li",
+        "parentClass": "skill-list"
+      },
+      {
+        "localName": "code",
+        "parentClass": "skill-row"
+      },
+      {
+        "localName": "span",
+        "parentClass": "skill-row"
+      },
+      {
+        "localName": "span",
+        "parentClass": "skill-row"
+      },
+      {
+        "localName": "span",
+        "parentClass": "skill-row"
+      },
+      {
+        "localName": "span",
+        "parentClass": "skill-row"
+      },
+      {
+        "localName": "span",
+        "parentClass": "skill-row"
+      },
+      {
+        "localName": "span",
+        "parentClass": "skill-library-panel"
+      }
+    ],
+    "apiMisses": []
+  },
+  {
+    "route": "/sessions",
+    "status": "measured",
+    "settled": true,
+    "authoredTags": [
+      {
+        "tag": "div",
+        "inThawSubtree": true,
+        "count": 14
+      },
+      {
+        "tag": "h1",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "h2",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "label",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "li",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "main",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "nav",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "option",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "p",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "path",
+        "inThawSubtree": true,
+        "count": 11
+      },
+      {
+        "tag": "section",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "select",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "span",
+        "inThawSubtree": true,
+        "count": 7
+      },
+      {
+        "tag": "ul",
+        "inThawSubtree": true,
+        "count": 1
+      }
+    ],
+    "unclassedUnderThaw": [
+      {
+        "localName": "div",
+        "parentClass": "thaw-config-provider"
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-shell"
+      },
+      {
+        "localName": "nav",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-nav-drawer__header"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-layout-row"
+      },
+      {
+        "localName": "h1",
+        "parentClass": "thaw-layout-header app-header"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "main",
+        "parentClass": "app-body"
+      },
+      {
+        "localName": "section",
+        "parentClass": "app-main"
+      },
+      {
+        "localName": "h2",
+        "parentClass": "session-history"
+      },
+      {
+        "localName": "p",
+        "parentClass": "session-history"
+      },
+      {
+        "localName": "div",
+        "parentClass": "session-history"
+      },
+      {
+        "localName": "label",
+        "parentClass": "session-controls"
+      },
+      {
+        "localName": "select",
+        "parentClass": "session-controls"
+      },
+      {
+        "localName": "option",
+        "parentClass": ""
+      },
+      {
+        "localName": "span",
+        "parentClass": "session-controls"
+      },
+      {
+        "localName": "ul",
+        "parentClass": "session-history"
+      },
+      {
+        "localName": "li",
+        "parentClass": "session-list"
+      },
+      {
+        "localName": "span",
+        "parentClass": "session-row"
+      },
+      {
+        "localName": "span",
+        "parentClass": "session-row"
+      },
+      {
+        "localName": "span",
+        "parentClass": "session-row"
+      },
+      {
+        "localName": "span",
+        "parentClass": "session-row"
+      },
+      {
+        "localName": "span",
+        "parentClass": "session-row"
+      }
+    ],
+    "apiMisses": []
+  },
+  {
+    "route": "/agents",
+    "status": "measured",
+    "settled": true,
+    "authoredTags": [
+      {
+        "tag": "div",
+        "inThawSubtree": true,
+        "count": 14
+      },
+      {
+        "tag": "h1",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "h2",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "label",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "li",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "main",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "nav",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "option",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "p",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "path",
+        "inThawSubtree": true,
+        "count": 11
+      },
+      {
+        "tag": "section",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "select",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "span",
+        "inThawSubtree": true,
+        "count": 5
+      },
+      {
+        "tag": "ul",
+        "inThawSubtree": true,
+        "count": 1
+      }
+    ],
+    "unclassedUnderThaw": [
+      {
+        "localName": "div",
+        "parentClass": "thaw-config-provider"
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-shell"
+      },
+      {
+        "localName": "nav",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-nav-drawer__header"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-layout-row"
+      },
+      {
+        "localName": "h1",
+        "parentClass": "thaw-layout-header app-header"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "main",
+        "parentClass": "app-body"
+      },
+      {
+        "localName": "section",
+        "parentClass": "app-main"
+      },
+      {
+        "localName": "h2",
+        "parentClass": "agents-panel"
+      },
+      {
+        "localName": "p",
+        "parentClass": "agents-panel"
+      },
+      {
+        "localName": "div",
+        "parentClass": "agents-panel"
+      },
+      {
+        "localName": "label",
+        "parentClass": "agents-controls"
+      },
+      {
+        "localName": "select",
+        "parentClass": "agents-controls"
+      },
+      {
+        "localName": "option",
+        "parentClass": "agents-project-select"
+      },
+      {
+        "localName": "ul",
+        "parentClass": "agents-panel"
+      },
+      {
+        "localName": "li",
+        "parentClass": "agents-roster"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-button--secondary agents-row thaw-button thaw-button--rounded thaw-button--medium"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-button--secondary agents-row thaw-button thaw-button--rounded thaw-button--medium"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-button--secondary agents-row thaw-button thaw-button--rounded thaw-button--medium"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-button--secondary agents-row thaw-button thaw-button--rounded thaw-button--medium"
+      }
+    ],
+    "apiMisses": []
+  },
+  {
+    "route": "/stats",
+    "status": "measured",
+    "settled": true,
+    "authoredTags": [
+      {
+        "tag": "div",
+        "inThawSubtree": true,
+        "count": 15
+      },
+      {
+        "tag": "h1",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "h2",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "h3",
+        "inThawSubtree": true,
+        "count": 6
+      },
+      {
+        "tag": "main",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "nav",
+        "inThawSubtree": true,
+        "count": 1
+      },
+      {
+        "tag": "p",
+        "inThawSubtree": true,
+        "count": 221
+      },
+      {
+        "tag": "path",
+        "inThawSubtree": true,
+        "count": 11
+      },
+      {
+        "tag": "progress",
+        "inThawSubtree": true,
+        "count": 32
+      },
+      {
+        "tag": "section",
+        "inThawSubtree": true,
+        "count": 4
+      },
+      {
+        "tag": "span",
+        "inThawSubtree": true,
+        "count": 37
+      },
+      {
+        "tag": "table",
+        "inThawSubtree": true,
+        "count": 2
+      },
+      {
+        "tag": "tbody",
+        "inThawSubtree": true,
+        "count": 2
+      },
+      {
+        "tag": "td",
+        "inThawSubtree": true,
+        "count": 250
+      },
+      {
+        "tag": "th",
+        "inThawSubtree": true,
+        "count": 21
+      },
+      {
+        "tag": "thead",
+        "inThawSubtree": true,
+        "count": 2
+      },
+      {
+        "tag": "tr",
+        "inThawSubtree": true,
+        "count": 40
+      }
+    ],
+    "unclassedUnderThaw": [
+      {
+        "localName": "div",
+        "parentClass": "thaw-config-provider"
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-shell"
+      },
+      {
+        "localName": "nav",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "span",
+        "parentClass": "thaw-nav-drawer__header"
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "thaw-scrollbar__content"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "div",
+        "parentClass": "app-layout-row"
+      },
+      {
+        "localName": "h1",
+        "parentClass": "thaw-layout-header app-header"
+      },
+      {
+        "localName": "path",
+        "parentClass": {}
+      },
+      {
+        "localName": "main",
+        "parentClass": "app-body"
+      },
+      {
+        "localName": "section",
+        "parentClass": "app-main"
+      },
+      {
+        "localName": "h2",
+        "parentClass": "stats-panel"
+      },
+      {
+        "localName": "section",
+        "parentClass": "stats-panel"
+      },
+      {
+        "localName": "h3",
+        "parentClass": "thaw-card stats-card"
+      },
+      {
+        "localName": "p",
+        "parentClass": "thaw-card stats-card"
+      },
+      {
+        "localName": "p",
+        "parentClass": "thaw-card stats-card"
+      },
+      {
+        "localName": "h3",
+        "parentClass": "thaw-card stats-card"
+      },
+      {
+        "localName": "p",
+        "parentClass": "thaw-card stats-card"
+      },
+      {
+        "localName": "p",
+        "parentClass": "thaw-card stats-card"
+      },
+      {
+        "localName": "h3",
+        "parentClass": "thaw-card stats-card"
+      },
+      {
+        "localName": "p",
+        "parentClass": "thaw-card stats-card"
+      },
+      {
+        "localName": "p",
+        "parentClass": "thaw-card stats-card"
+      },
+      {
+        "localName": "p",
+        "parentClass": "thaw-card stats-card"
+      },
+      {
+        "localName": "p",
+        "parentClass": "thaw-card stats-card"
+      },
+      {
+        "localName": "h3",
+        "parentClass": "stats-card thaw-card"
+      },
+      {
+        "localName": "p",
+        "parentClass": "stats-card thaw-card"
+      },
+      {
+        "localName": "p",
+        "parentClass": "stats-card thaw-card"
+      },
+      {
+        "localName": "section",
+        "parentClass": "stats-panel"
+      },
+      {
+        "localName": "h3",
+        "parentClass": "stats-section"
+      },
+      {
+        "localName": "div",
+        "parentClass": "stats-section"
+      },
+      {
+        "localName": "table",
+        "parentClass": "stats-daily-scroll"
+      },
+      {
+        "localName": "thead",
+        "parentClass": "stats-daily"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": ""
+      },
+      {
+        "localName": "tbody",
+        "parentClass": "stats-daily"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-errors-cell"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-errors-cell"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-errors-cell"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "progress",
+        "parentClass": "stats-counter"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-day"
+      },
+      {
+        "localName": "span",
+        "parentClass": "stats-errors-cell"
+      },
+      {
+        "localName": "section",
+        "parentClass": "stats-panel"
+      },
+      {
+        "localName": "h3",
+        "parentClass": "stats-section"
+      },
+      {
+        "localName": "div",
+        "parentClass": "stats-section"
+      },
+      {
+        "localName": "table",
+        "parentClass": "stats-shards-region"
+      },
+      {
+        "localName": "thead",
+        "parentClass": "stats-shards"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": ""
+      },
+      {
+        "localName": "th",
+        "parentClass": ""
+      },
+      {
+        "localName": "tbody",
+        "parentClass": "stats-shards"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "tr",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "p",
+        "parentClass": ""
+      },
+      {
+        "localName": "td",
+        "parentClass": "stats-shard-row"
+      }
+    ],
+    "apiMisses": []
+  }
+]
