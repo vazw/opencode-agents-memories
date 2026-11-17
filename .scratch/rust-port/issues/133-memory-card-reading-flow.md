@@ -1,6 +1,6 @@
 # 133 — the memory card's "Show more" splits the sentence it expands
 
-Status: ready-for-agent — will create `memory_body()` and `memory_toggle_label()` in `web-ui/src/core_screens.rs`, replacing the `<details>`/`<summary>` pair; deletes the `-webkit-line-clamp`/`-webkit-box`/`overflow` triple from `.memory-list .memory-content` in `web-ui/public/styles.css`.
+Status: done — 2026-11-17 — delivered in wave 5; verification under `## Outcome`.
 
 *(Parent: issue 118.)*
 
@@ -30,3 +30,12 @@ The card's height must not blow up: the preview is what bounds a collapsed card.
 ## Blocked by
 
 None — can start immediately.
+
+## Outcome (MEASURED, closed 2026-11-17)
+
+Delta landed in wave 5, commit `70fde7e`.
+
+- `memory_card_toggle_after_content`: `previewChars: 316`, `expandedChars: 1550`, `webkitLineClamp: "none"`, `display: "block"`, `ariaExpanded: ["false","true","false"]` — the toggle is the element after the contiguous body.
+- Clamp triple deleted from `web-ui/public/styles.css`; the grep runs twice (after deletion and after the mutant build restores the file) and stays empty.
+- Mutants M3 (`expanded = rest` only) and M4 (`collapsed = whole body`) each fail `test_memory_body_is_contiguous_when_expanded`; mutant M2 (clamp restored) fails the browser lane.
+- Evidence: `docs/evidence/issue-118-wave5/README.md` §1 G1, §2 M2–M4, §6.

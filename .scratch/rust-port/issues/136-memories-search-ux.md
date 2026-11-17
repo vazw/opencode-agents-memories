@@ -1,6 +1,6 @@
 # 136 — the memories search is a bare full-width field
 
-Status: ready-for-agent — will create `search_debounce_step()` (a pure state machine) in `web-ui/src/core_screens.rs`, bound the field with `.memories-search-field`, and add the clear affordance; CSS in `web-ui/public/styles.css`.
+Status: done — 2026-11-17 — delivered in wave 6; verification under `## Outcome`.
 
 *(Parent: issue 118.)*
 
@@ -28,3 +28,13 @@ Bound the field, give it a clear action that appears only when there is somethin
 ## Blocked by
 
 None — can start immediately.
+
+## Outcome (MEASURED, closed 2026-11-17)
+
+Delta landed in wave 6, commit `d36f491` (review 1 APPROVED, blueprint r7 stamp `77b5028db9ab`).
+
+- `search_field_is_bounded`: field 719.83 px on the pristine bundle → bounded inside the reserved slot; clear slot reserved via `InputSuffix`.
+- `search_debounce_one_request`: 0 requests on pristine → exactly one per burst; `search_clear_affordance_is_reactive` and `search_clear_restores_list` green.
+- `search_result_reflow_pinned`: pager and Reload keep position (|dx| ≤ 1 px).
+- Debounce is a pure function (`search_debounce_step`) exercisable without a DOM; the dedupe mutant (`pending != fired` guard dropped) is killed at the seam — `test_search_debounce_skips_repeated_query` fails 1/73.
+- Wasm suite 264 passed / 0 failed; census `191/191/232`, residue 0. Evidence: `docs/evidence/issue118-wave6/README.md`; review `.tmp/progress/20261117-1002-issue-118-wave6-search-and-stats-r7.review-1.md`.

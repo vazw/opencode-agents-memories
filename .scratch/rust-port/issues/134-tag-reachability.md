@@ -1,6 +1,6 @@
 # 134 — the memory card's `+N more` tags cannot be reached
 
-Status: ready-for-agent — will create `tag_chip()` and the `+N more` trigger in `web-ui/src/core_screens.rs`, reusing `.memory-tag-more`; inverts `pill_overflow_survives` and narrows `pill_has_stable_testid` in `web-ui/scripts/capture-evidence.cjs`.
+Status: done — 2026-11-17 — delivered in wave 5; verification under `## Outcome`.
 
 *(Parent: issue 118.)*
 
@@ -30,3 +30,12 @@ Note the evidence script currently pins the defect: one lane asserts the overflo
 ## Blocked by
 
 - 133 — same component and same file; land 133 first to avoid conflicting edits.
+
+## Outcome (MEASURED, closed 2026-11-17)
+
+Delta landed in wave 5, commit `70fde7e`.
+
+- `memory_card_tags_reachable`: pills `4 → 5` after one activation, last chip accessible name `"Filter by tag: fifth"`, the click issued a `tags=fifth` request end to end.
+- The overflow control is now a Button (`memory-tag-more`), not a span, and keeps an expanded state.
+- `capture-evidence.cjs` pill RED lanes narrowed from 4 to 1; the census moved `187 → 188` with `dead=0`, `unresolved=0`.
+- Evidence: `docs/evidence/issue-118-wave5/README.md` §3 greps, §4 census, §6.

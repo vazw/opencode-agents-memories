@@ -1,6 +1,6 @@
 # 137 — the `/stats` summary cards differ in height and alignment
 
-Status: ready-for-agent — will set `margin: 0` and stretch on `.stats-card` in `web-ui/public/styles.css`; will create `generated_label()` in `web-ui/src/core_screens.rs`.
+Status: done — 2026-11-17 — delivered in wave 6; verification under `## Outcome`.
 
 *(Parent: issue 118.)*
 
@@ -27,3 +27,12 @@ Equalise the cards (top-aligned, equal height) and stop the GENERATED timestamp 
 ## Blocked by
 
 None — can start immediately.
+
+## Outcome (MEASURED, closed 2026-11-17)
+
+Delta landed in wave 6, commit `d36f491`.
+
+- `stats_cards_equal_height_top`: tops spread 70.77 px on the pristine bundle → within 1 px on the final bundle.
+- `stats_generated_single_line`: was 2 lines in a 183.75 px content box → one line, no clipping; the full instant stays available as a `title`.
+- PROFILE card condenses six lines to four while keeping version, last-analyzed, all three counts and the prompt count; `/stats` scrollHeight 1358 → 1335 (Δ−23).
+- Evidence: `docs/evidence/issue118-wave6/README.md` §RED→GREEN, §Page heights.

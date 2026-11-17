@@ -1,6 +1,6 @@
 # 135 — the `/agents` project select has no accessible name
 
-Status: ready-for-agent — will create `AGENTS_PROJECT_SELECT_LABEL` and bind `for`/`id` in `web-ui/src/agents.rs`; adds one CDP case to `web-ui/scripts/` asserting the control's accessible name.
+Status: done — 2026-11-17 — delivered in wave 5; verification under `## Outcome`.
 
 *(Parent: issue 118.)*
 
@@ -27,3 +27,11 @@ Add a visible label bound to the control's id, using the same shape as the two e
 ## Blocked by
 
 None — can start immediately.
+
+## Outcome (MEASURED, closed 2026-11-17)
+
+Delta landed in wave 5, commit `70fde7e`.
+
+- `agents_select_has_accessible_name`: `tag: SELECT`, `labels: 1`, `label: "Project"`, AX `role: combobox`, AX `name: "Project"`.
+- `data-testid="agents-project-select"` unchanged; `for`/`id` derive from `AGENTS_PROJECT_SELECT_LABEL`, guarded by a wasm const-drift test (G2) that does not pretend to prove the DOM.
+- Evidence: `docs/evidence/issue-118-wave5/README.md` §1 F2, §6.

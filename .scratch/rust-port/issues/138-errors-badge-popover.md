@@ -1,6 +1,6 @@
 # 138 — the errors column resizes the table when opened
 
-Status: ready-for-agent — will create the errors trigger (`Thaw Badge` inside a `Thaw Button`) and its `Popover` surface in `web-ui/src/core_screens.rs`, replacing the `<details class="stats-buckets">` block; removes `.stats-buckets` rules from `web-ui/public/styles.css`; updates `web-ui/scripts/capture-evidence.cjs` if a lane touches those selectors.
+Status: done — 2026-11-17 — delivered in wave 6; verification under `## Outcome`.
 
 *(Parent: issue 118.)*
 
@@ -28,3 +28,13 @@ Two facts constrain the design and must be respected rather than rediscovered: T
 ## Blocked by
 
 None — can start immediately.
+
+## Outcome (MEASURED, closed 2026-11-17)
+
+Delta landed in wave 6, commit `d36f491`.
+
+- `errors_badge_is_thaw_badge`: `<details><summary>` → Thaw Badge inside a zeroed Button (`.stats-errors-trigger`); resting row height 44.1875 px, Δ0 across the swap.
+- `errors_popover_no_reflow`: table `scrollHeight` and row height both Δ0 across activation.
+- `errors_popover_placement_scrolled`: panel fully visible at scroll 0 and at the bottom of a long page; `errors_popover_keyboard_and_escape` green (keyboard reachable, expanded state exposed, Escape and outside click dismiss).
+- "no errors" stays plain text; the panel names each error bucket with its count (`buckets_total` oracle, T+1).
+- Evidence: `docs/evidence/issue118-wave6/README.md` §Resting row height, §RED→GREEN.

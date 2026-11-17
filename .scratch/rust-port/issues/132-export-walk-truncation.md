@@ -1,6 +1,6 @@
 # 132 — the browser export silently truncates at 5000 memories
 
-Status: ready-for-agent — will create `EXPORT_MAX_PAGES`, `export_truncated()` and rewrite `should_continue()`/`export_preview_text()` in `web-ui/src/export_import.rs`; adds nine tests to `web-ui/tests/export_import.rs`; inverts nothing in `web-ui/scripts/capture-evidence.cjs`.
+Status: done — 2026-11-17 — delivered in wave 5; verification under `## Outcome`.
 
 *(Parent: issue 118.)*
 
@@ -28,3 +28,14 @@ The continuation decision should come from the server's own page count (already 
 ## Blocked by
 
 None — can start immediately.
+
+## Outcome (MEASURED, closed 2026-11-17)
+
+Delta landed in wave 5, commit `70fde7e` (review 2 APPROVED; review 1 had rejected one vacuous oracle, S1).
+
+- `export_walks_to_store_total`: `requests: 32`, `preview: "memories: 6227"`, `rows: 6227`, `truncated: false`; preview and blob row count come from one function and a test asserts equality.
+- `export_discloses_a_short_walk`: `requests: 3`, preview `"memories: 400 of 6227 — export limited"`, `rows: 400`, `truncated: true`.
+- Ceiling terminates for any `total_pages`; mutant M1 (restore `page >= 25`) fails `test_export_walk_reaches_the_store_total`; M5 (`count + 1`) fails `test_export_preview_states_no_limit_when_complete`.
+- S1 kill input now pinned: `!export_truncated(6229, Some(6227))` (mutant `<`→`!=` survived 25/25 before it).
+- Total read from the list response with `includePrompts=false`; no new server route.
+- Evidence: `docs/evidence/issue-118-wave5/README.md` §1 F1a/F1b, §2 M1/M5, §6; review `.tmp/progress/20261117-0825-issue-118-wave5-export-and-a11y-r6.review-2.md`.
