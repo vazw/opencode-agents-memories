@@ -760,18 +760,41 @@ body {
 
 
 .memories-search {
-  flex: 1 1 18rem;
+  width: 100%;
 }
 
 /* The Field wrapper around the search Input: the label is programmatic
- * (Field uuid), the input keeps its flex sizing. */
+ * (Field uuid), the input keeps its flex sizing. G3: the field no longer
+ * stretches (`flex-grow: 0`), it shrinks inside a bounded slot. */
 .memories-search-field {
-  flex: 1 1 18rem;
+  flex: 0 1 22rem;
+  max-inline-size: 22rem;
+  min-inline-size: 12rem;
 }
 
 
 .memories-reload {
   flex: 0 0 auto;
+}
+
+/* The reserved clear gutter: the slot is statically present so the inner
+ * input never moves when the button appears; the button is clipped to the
+ * slot's box until text exists. */
+.memories-search-clear-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 1.75rem;
+  inline-size: 1.75rem;
+  overflow: hidden;
+}
+
+/* `button` is a TYPE selector, so this adds no census token; the bound is
+ * scoped by our own slot class, not by a vendor class. */
+.memories-search-clear-slot > button {
+  min-inline-size: 0;
+  inline-size: 1.5rem;
+  padding: 0;
 }
 
 .memories-filters {
@@ -788,6 +811,7 @@ body {
 }
 
 .memories-range {
+  margin-inline-start: auto;
   color: var(--muted);
   font-size: 0.9rem;
   font-variant-numeric: tabular-nums;
@@ -1068,6 +1092,11 @@ body {
 }
 
 .stats-card {
+  /* G4: thaw's `.thaw-card` carries `margin: auto`; the auto block-axis
+   * margins absorb the grid track's free space and suppress the default
+   * stretch, so each card floats at its own content height. Zeroing the
+   * margin restores the stretch — this alone equalises the four cards. */
+  margin: 0;
   padding: 0.75rem 1rem;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -1169,8 +1198,25 @@ body {
   max-width: 14rem;
 }
 
-.stats-buckets summary {
-  cursor: pointer;
+/* G5: the trigger is a bare Thaw Badge inside a zeroed Button — the Badge is
+ * the affordance, the Button exists so the Popover decorates a real focusable
+ * `<button>` (thaw's PopoverTrigger adds only a click listener + node_ref). */
+.stats-errors-trigger {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+}
+
+/* The surface is the teleported PLATE (thaw's `thaw-popover-surface` padding,
+ * border, radius and shadow are ~34px of chrome around the child), so the
+ * bound belongs to it: bounding the inner div would leave the plate 34px
+ * wider than the cap. */
+.stats-errors-surface {
+  max-inline-size: 22rem;
+  max-block-size: 16rem;
+  overflow-y: auto;
 }
 
 .stats-bucket {
@@ -1228,19 +1274,9 @@ body {
 }
 
 .stats-profile-counts {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.1rem 0.5rem;
   margin: 0.25rem 0 0;
-  font-size: 0.85rem;
-}
-
-.stats-profile-counts dt {
   color: var(--muted);
-}
-
-.stats-profile-counts dd {
-  margin: 0;
+  font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
 }
 

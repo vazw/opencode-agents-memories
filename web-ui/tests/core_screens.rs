@@ -23,15 +23,17 @@ use web_ui::core_screens::{
     CleanupStep, cleanup_action_label, cleanup_disabled, cleanup_next, cleanup_status,
 };
 use web_ui::core_screens::{
-    DailyStatsView, HealthStatus, IdentityControl, MemoriesView, MemoryPage, ProfileRosterItem,
-    ProfileScreen, ProfileView, SettingsScreen, ShardStatsView, StatsView, TagsPage, TagsView,
-    active_shard_count, daily_peak, delete_memory_spec, error_buckets, get_user_profile_spec,
-    get_user_profile_spec_for, health_outcome, health_spec, hidden_tags, initial_tags,
-    list_memories_spec, list_tags_spec, list_user_profiles_spec, memories_empty_copy,
+    DailyStatsView, HealthStatus, IdentityControl, MemoriesView, MemoryPage, ProfileCountsView,
+    ProfileRosterItem, ProfileScreen, ProfileView, SearchDebounce, SearchDebounceEvent,
+    SettingsScreen, ShardStatsView, StatsView, TagsPage, TagsView, active_shard_count,
+    buckets_total, daily_peak, delete_memory_spec, error_buckets, generated_label,
+    get_user_profile_spec, get_user_profile_spec_for, health_outcome, health_spec, hidden_tags,
+    initial_tags, list_memories_spec, list_tags_spec, list_user_profiles_spec, memories_empty_copy,
     memories_request, memories_view, memory_body, memory_preview, memory_tag_more_label,
-    memory_toggle_label, page_after_shrink, pin_memory_spec, profile_identity_control,
-    profile_view, range_text, search_spec, settings_view, sorted_shards, stats_spec, tags_json,
-    tags_view, unpin_memory_spec, visible_tags,
+    memory_toggle_label, page_after_shrink, pin_memory_spec, profile_counts_line,
+    profile_identity_control, profile_view, range_text, search_debounce_step, search_spec,
+    settings_view, sorted_shards, stats_spec, tags_json, tags_view, unpin_memory_spec,
+    visible_tags,
 };
 use web_ui::paths::{ENDPOINTS, EndpointId, encode_component};
 
@@ -1604,4 +1606,164 @@ fn test_memory_tag_more_label_absent_at_zero() {
     assert_eq!(memory_tag_more_label(0), None);
     assert_eq!(memory_tag_more_label(1).as_deref(), Some("+1 more"));
     assert_eq!(memory_tag_more_label(6).as_deref(), Some("+6 more"));
+}
+
+// ---------------------------------------------------------------------------
+// Issue 118 wave 6 (G3): the search debounce machine
+// ---------------------------------------------------------------------------
+
+/// Fold a whole event sequence through [`search_debounce_step`], accumulating
+/// the RUNNING TOTAL of requests across the sequence — the same way the CDP
+/// harness counts `window.__requests`. A request of `Some("")` counts too: it
+/// is the "clear the filter" request, not "do nothing".
+fn debounce_total(events: &[SearchDebounceEvent]) -> (usize, Vec<String>) {
+    let mut state = SearchDebounce::default();
+    let mut total = 0usize;
+    let mut fired = Vec::new();
+    for event in events {
+        let (next, request) = search_debounce_step(&state, event.clone());
+        state = next;
+        if let Some(query) = request {
+            total += 1;
+            fired.push(query);
+        }
+    }
+    (total, fired)
+}
+
+#[wasm_bindgen_test]
+fn test_search_debounce_burst_fires_once() {
+    // Mutant: fire on every `Typed` — five keystrokes, five requests.
+    let events = [
+        SearchDebounceEvent::Typed("r".into()),
+        SearchDebounceEvent::Typed("ru".into()),
+        SearchDebounceEvent::Typed("rus".into()),
+        SearchDebounceEvent::Typed("rust".into()),
+        SearchDebounceEvent::Typed("rust ".into()),
+        SearchDebounceEvent::Elapsed,
+    ];
+    let (total, fired) = debounce_total(&events);
+    assert_eq!(total, 1, "a burst behind one timer fires exactly once");
+    assert_eq!(fired, ["rust"], "the timer fires the trimmed last text");
+}
+
+#[wasm_bindgen_test]
+fn test_search_debounce_skips_repeated_query() {
+    // Mutant: drop the `pending != fired` dedupe — the second `Elapsed`
+    // re-fires the same query.
+    let events = [
+        SearchDebounceEvent::Typed("rust".into()),
+        SearchDebounceEvent::Elapsed,
+        SearchDebounceEvent::Typed("rust".into()),
+        SearchDebounceEvent::Elapsed,
+    ];
+    let (total, fired) = debounce_total(&events);
+    assert_eq!(total, 1, "the same text must not fire twice");
+    assert_eq!(fired, ["rust"]);
+}
+
+#[wasm_bindgen_test]
+fn test_search_debounce_submit_fires_after_elapsed() {
+    // Mutant: route `Submit` through the dedupe — an explicit Enter after the
+    // debounce already fired would be swallowed.
+    let events = [
+        SearchDebounceEvent::Typed("rust".into()),
+        SearchDebounceEvent::Elapsed,
+        SearchDebounceEvent::Submit,
+    ];
+    let (total, fired) = debounce_total(&events);
+    assert_eq!(total, 2, "Elapsed fires once, then Submit fires again");
+    assert_eq!(fired, ["rust", "rust"]);
+}
+
+#[wasm_bindgen_test]
+fn test_search_debounce_trims_before_firing() {
+    // Mutant: drop `.trim()` — the fired query carries the padded spaces.
+    let events = [
+        SearchDebounceEvent::Typed("  rust  ".into()),
+        SearchDebounceEvent::Elapsed,
+    ];
+    let (total, fired) = debounce_total(&events);
+    assert_eq!(total, 1);
+    assert_eq!(fired, ["rust"], "the query is trimmed before it fires");
+}
+
+#[wasm_bindgen_test]
+fn test_search_debounce_empty_query_fires_clear() {
+    // Mutant: treat an empty `pending` as a no-op — clearing the box would
+    // never send `Some("")`, so the filter would stay active server-side.
+    let events = [
+        SearchDebounceEvent::Typed("rust".into()),
+        SearchDebounceEvent::Elapsed,
+        SearchDebounceEvent::Typed(String::new()),
+        SearchDebounceEvent::Elapsed,
+    ];
+    let (total, fired) = debounce_total(&events);
+    assert_eq!(total, 2, "the second Elapsed fires the CLEAR request");
+    assert_eq!(fired, ["rust", ""], "an empty query is Some(\"\")");
+}
+
+// ---------------------------------------------------------------------------
+// Issue 118 wave 6 (G4): the GENERATED card label and the profile counts line
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen_test]
+fn test_generated_label_shortens_iso_timestamp() {
+    // Mutant: `replace(T, " ")` only — seconds and milliseconds leak into
+    // the visible label and the instant wraps mid-token again.
+    assert_eq!(
+        generated_label("2026-11-17T06:24:10.003Z"),
+        "2026-11-17 06:24",
+        "the label is the instant cut at the minute"
+    );
+    // The empty timestamp keeps the em dash (upstream `date(value)`).
+    assert_eq!(generated_label(""), "—");
+}
+
+#[wasm_bindgen_test]
+fn test_generated_label_passes_unparseable_through() {
+    // Mutant: return "—" for anything unrecognised — a value the rule cannot
+    // parse must reach the user unchanged, never be blanked.
+    assert_eq!(generated_label("not-a-date"), "not-a-date");
+    assert_eq!(
+        generated_label("2026-11-17"),
+        "2026-11-17",
+        "no T, no guess"
+    );
+    assert_eq!(
+        generated_label("2026-11-17T06"),
+        "2026-11-17T06",
+        "a time part shorter than five characters is not truncated"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_profile_counts_line_condenses_three_counts() {
+    let counts = ProfileCountsView {
+        preferences: 3,
+        patterns: 5,
+        workflows: 2,
+    };
+    // Mutant: omit `workflows` — the third count vanishes from the card.
+    assert_eq!(
+        profile_counts_line(&counts),
+        "3 preferences · 5 patterns · 2 workflows",
+        "all three counts on one line"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Issue 118 wave 6 (G5): the errors badge count
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen_test]
+fn test_buckets_total_sums_all_buckets() {
+    // Mutant: return the FIRST bucket's count — the badge under-reports by
+    // every bucket after the first.
+    let buckets = vec![
+        ("fixture:timeout".to_string(), 3),
+        ("fixture:storage".to_string(), 4),
+    ];
+    assert_eq!(buckets_total(&buckets), 7, "the badge is the SUM");
+    assert_eq!(buckets_total(&[]), 0, "no buckets, no errors");
 }

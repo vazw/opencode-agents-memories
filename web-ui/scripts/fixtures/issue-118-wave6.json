@@ -1,0 +1,821 @@
+{
+  "health": {
+    "success": true,
+    "status": "ok",
+    "authEnabled": false
+  },
+  "stats": {
+    "total": 6221,
+    "byScope": {
+      "user": 4000,
+      "project": 2221
+    },
+    "byType": {
+      "fact": 4000,
+      "note": 2221
+    },
+    "generatedAt": "2026-11-17T06:24:10.003Z",
+    "daily": [
+      {
+        "date": "2026-11-08",
+        "captures": 4,
+        "captureSkipped": 0,
+        "profileInjections": 2,
+        "compactionInjections": 0,
+        "errors": {
+          "fixture:timeout": 3,
+          "fixture:storage": 1
+        }
+      },
+      {
+        "date": "2026-11-09",
+        "captures": 5,
+        "captureSkipped": 1,
+        "profileInjections": 3,
+        "compactionInjections": 1,
+        "errors": {}
+      },
+      {
+        "date": "2026-11-10",
+        "captures": 6,
+        "captureSkipped": 2,
+        "profileInjections": 4,
+        "compactionInjections": 2,
+        "errors": {
+          "fixture:timeout": 5,
+          "fixture:storage": 3
+        }
+      },
+      {
+        "date": "2026-11-11",
+        "captures": 7,
+        "captureSkipped": 3,
+        "profileInjections": 5,
+        "compactionInjections": 0,
+        "errors": {}
+      },
+      {
+        "date": "2026-11-12",
+        "captures": 8,
+        "captureSkipped": 4,
+        "profileInjections": 6,
+        "compactionInjections": 1,
+        "errors": {
+          "fixture:timeout": 7,
+          "fixture:storage": 5
+        }
+      },
+      {
+        "date": "2026-11-13",
+        "captures": 9,
+        "captureSkipped": 5,
+        "profileInjections": 7,
+        "compactionInjections": 2,
+        "errors": {}
+      },
+      {
+        "date": "2026-11-14",
+        "captures": 10,
+        "captureSkipped": 6,
+        "profileInjections": 8,
+        "compactionInjections": 0,
+        "errors": {
+          "fixture:timeout": 9,
+          "fixture:storage": 7
+        }
+      },
+      {
+        "date": "2026-11-15",
+        "captures": 11,
+        "captureSkipped": 7,
+        "profileInjections": 9,
+        "compactionInjections": 1,
+        "errors": {}
+      }
+    ],
+    "shards": [
+      {
+        "shardId": 0,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 0,
+        "fileName": "fixture-shard-00.db",
+        "fileExists": true,
+        "isActive": true,
+        "registeredVectorCount": 30,
+        "memoryCount": 200,
+        "error": null
+      },
+      {
+        "shardId": 1,
+        "scope": "user",
+        "scopeHash": "fixture",
+        "shardIndex": 1,
+        "fileName": "fixture-shard-01.db",
+        "fileExists": true,
+        "isActive": true,
+        "registeredVectorCount": 29,
+        "memoryCount": 197,
+        "error": null
+      },
+      {
+        "shardId": 2,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 2,
+        "fileName": "fixture-shard-02.db",
+        "fileExists": true,
+        "isActive": true,
+        "registeredVectorCount": 28,
+        "memoryCount": 194,
+        "error": null
+      },
+      {
+        "shardId": 3,
+        "scope": "user",
+        "scopeHash": "fixture",
+        "shardIndex": 3,
+        "fileName": "fixture-shard-03.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 27,
+        "memoryCount": 191,
+        "error": null
+      },
+      {
+        "shardId": 4,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 4,
+        "fileName": "fixture-shard-04.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 26,
+        "memoryCount": 188,
+        "error": null
+      },
+      {
+        "shardId": 5,
+        "scope": "user",
+        "scopeHash": "fixture",
+        "shardIndex": 5,
+        "fileName": "fixture-shard-05.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 25,
+        "memoryCount": 185,
+        "error": null
+      },
+      {
+        "shardId": 6,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 6,
+        "fileName": "fixture-shard-06.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 24,
+        "memoryCount": 182,
+        "error": null
+      },
+      {
+        "shardId": 7,
+        "scope": "user",
+        "scopeHash": "fixture",
+        "shardIndex": 7,
+        "fileName": "fixture-shard-07.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 23,
+        "memoryCount": 179,
+        "error": "Synthetic shard error"
+      },
+      {
+        "shardId": 8,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 8,
+        "fileName": "fixture-shard-08.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 22,
+        "memoryCount": 176,
+        "error": null
+      },
+      {
+        "shardId": 9,
+        "scope": "user",
+        "scopeHash": "fixture",
+        "shardIndex": 9,
+        "fileName": "fixture-shard-09.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 21,
+        "memoryCount": 173,
+        "error": null
+      },
+      {
+        "shardId": 10,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 10,
+        "fileName": "fixture-shard-10.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 20,
+        "memoryCount": 170,
+        "error": null
+      },
+      {
+        "shardId": 11,
+        "scope": "user",
+        "scopeHash": "fixture",
+        "shardIndex": 11,
+        "fileName": "fixture-shard-11.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 19,
+        "memoryCount": 167,
+        "error": null
+      },
+      {
+        "shardId": 12,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 12,
+        "fileName": "fixture-shard-12.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 18,
+        "memoryCount": 164,
+        "error": null
+      },
+      {
+        "shardId": 13,
+        "scope": "user",
+        "scopeHash": "fixture",
+        "shardIndex": 13,
+        "fileName": "fixture-shard-13.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 17,
+        "memoryCount": 161,
+        "error": null
+      },
+      {
+        "shardId": 14,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 14,
+        "fileName": "fixture-shard-14.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 16,
+        "memoryCount": 158,
+        "error": null
+      },
+      {
+        "shardId": 15,
+        "scope": "user",
+        "scopeHash": "fixture",
+        "shardIndex": 15,
+        "fileName": "fixture-shard-15.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 15,
+        "memoryCount": 155,
+        "error": null
+      },
+      {
+        "shardId": 16,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 16,
+        "fileName": "fixture-shard-16.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 14,
+        "memoryCount": 152,
+        "error": null
+      },
+      {
+        "shardId": 17,
+        "scope": "user",
+        "scopeHash": "fixture",
+        "shardIndex": 17,
+        "fileName": "fixture-shard-17.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 13,
+        "memoryCount": 149,
+        "error": null
+      },
+      {
+        "shardId": 18,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 18,
+        "fileName": "fixture-shard-18.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 12,
+        "memoryCount": 146,
+        "error": null
+      },
+      {
+        "shardId": 19,
+        "scope": "user",
+        "scopeHash": "fixture",
+        "shardIndex": 19,
+        "fileName": "fixture-shard-19.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 11,
+        "memoryCount": 143,
+        "error": null
+      },
+      {
+        "shardId": 20,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 20,
+        "fileName": "fixture-shard-20.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 10,
+        "memoryCount": 140,
+        "error": null
+      },
+      {
+        "shardId": 21,
+        "scope": "user",
+        "scopeHash": "fixture",
+        "shardIndex": 21,
+        "fileName": "fixture-shard-21.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 9,
+        "memoryCount": 137,
+        "error": null
+      },
+      {
+        "shardId": 22,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 22,
+        "fileName": "fixture-shard-22.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 8,
+        "memoryCount": 134,
+        "error": null
+      },
+      {
+        "shardId": 23,
+        "scope": "user",
+        "scopeHash": "fixture",
+        "shardIndex": 23,
+        "fileName": "fixture-shard-23.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 7,
+        "memoryCount": 131,
+        "error": null
+      },
+      {
+        "shardId": 24,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 24,
+        "fileName": "fixture-shard-24.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 6,
+        "memoryCount": 128,
+        "error": null
+      },
+      {
+        "shardId": 25,
+        "scope": "user",
+        "scopeHash": "fixture",
+        "shardIndex": 25,
+        "fileName": "fixture-shard-25.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 5,
+        "memoryCount": 125,
+        "error": null
+      },
+      {
+        "shardId": 26,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 26,
+        "fileName": "fixture-shard-26.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 4,
+        "memoryCount": 122,
+        "error": null
+      },
+      {
+        "shardId": 27,
+        "scope": "user",
+        "scopeHash": "fixture",
+        "shardIndex": 27,
+        "fileName": "fixture-shard-27.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 3,
+        "memoryCount": 119,
+        "error": null
+      },
+      {
+        "shardId": 28,
+        "scope": "project",
+        "scopeHash": "fixture",
+        "shardIndex": 28,
+        "fileName": "fixture-shard-28.db",
+        "fileExists": false,
+        "isActive": false,
+        "registeredVectorCount": 2,
+        "memoryCount": 116,
+        "error": null
+      },
+      {
+        "shardId": 29,
+        "scope": "user",
+        "scopeHash": "fixture",
+        "shardIndex": 29,
+        "fileName": "fixture-shard-29.db",
+        "fileExists": true,
+        "isActive": false,
+        "registeredVectorCount": 1,
+        "memoryCount": 113,
+        "error": null
+      }
+    ],
+    "profile": {
+      "exists": true,
+      "version": 4,
+      "counts": {
+        "preferences": 3,
+        "patterns": 5,
+        "workflows": 2
+      },
+      "lastAnalyzedAt": "2026-11-16T08:00:00.000Z",
+      "totalPromptsAnalyzed": 57,
+      "error": null
+    },
+    "dailyError": null
+  },
+  "memories": {
+    "items": [
+      {
+        "type": "memory",
+        "id": "mem_00",
+        "content": "Memory 0: the debounce lane fixture row with a readable body",
+        "memoryType": "insight",
+        "tags": [
+          "fixture"
+        ],
+        "createdAt": "2026-11-10T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "prompt",
+        "id": "prompt_01",
+        "sessionId": "session-1",
+        "content": "captured prompt 1",
+        "createdAt": "2026-11-15T09:00:00.000Z",
+        "projectPath": null,
+        "linkedMemoryId": null
+      },
+      {
+        "type": "memory",
+        "id": "mem_02",
+        "content": "Memory 2: the debounce lane fixture row with a readable body",
+        "memoryType": "note",
+        "tags": [],
+        "createdAt": "2026-11-12T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "prompt",
+        "id": "prompt_03",
+        "sessionId": "session-3",
+        "content": "captured prompt 3",
+        "createdAt": "2026-11-15T09:00:00.000Z",
+        "projectPath": null,
+        "linkedMemoryId": null
+      },
+      {
+        "type": "memory",
+        "id": "mem_04",
+        "content": "Memory 4: the debounce lane fixture row with a readable body",
+        "memoryType": "note",
+        "tags": [
+          "fixture"
+        ],
+        "createdAt": "2026-11-14T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "prompt",
+        "id": "prompt_05",
+        "sessionId": "session-5",
+        "content": "captured prompt 5",
+        "createdAt": "2026-11-15T09:00:00.000Z",
+        "projectPath": null,
+        "linkedMemoryId": null
+      },
+      {
+        "type": "memory",
+        "id": "mem_06",
+        "content": "Memory 6: the debounce lane fixture row with a readable body",
+        "memoryType": "insight",
+        "tags": [],
+        "createdAt": "2026-11-16T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "prompt",
+        "id": "prompt_07",
+        "sessionId": "session-7",
+        "content": "captured prompt 7",
+        "createdAt": "2026-11-15T09:00:00.000Z",
+        "projectPath": null,
+        "linkedMemoryId": null
+      },
+      {
+        "type": "memory",
+        "id": "mem_08",
+        "content": "Memory 8: the debounce lane fixture row with a readable body",
+        "memoryType": "note",
+        "tags": [
+          "fixture"
+        ],
+        "createdAt": "2026-11-10T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "prompt",
+        "id": "prompt_09",
+        "sessionId": "session-9",
+        "content": "captured prompt 9",
+        "createdAt": "2026-11-15T09:00:00.000Z",
+        "projectPath": null,
+        "linkedMemoryId": null
+      },
+      {
+        "type": "memory",
+        "id": "mem_10",
+        "content": "Memory 10: the debounce lane fixture row with a readable body",
+        "memoryType": "note",
+        "tags": [],
+        "createdAt": "2026-11-12T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "prompt",
+        "id": "prompt_11",
+        "sessionId": "session-11",
+        "content": "captured prompt 11",
+        "createdAt": "2026-11-15T09:00:00.000Z",
+        "projectPath": null,
+        "linkedMemoryId": null
+      },
+      {
+        "type": "memory",
+        "id": "mem_12",
+        "content": "Memory 12: the debounce lane fixture row with a readable body",
+        "memoryType": "insight",
+        "tags": [
+          "fixture"
+        ],
+        "createdAt": "2026-11-14T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "prompt",
+        "id": "prompt_13",
+        "sessionId": "session-13",
+        "content": "captured prompt 13",
+        "createdAt": "2026-11-15T09:00:00.000Z",
+        "projectPath": null,
+        "linkedMemoryId": null
+      },
+      {
+        "type": "memory",
+        "id": "mem_14",
+        "content": "Memory 14: the debounce lane fixture row with a readable body",
+        "memoryType": "note",
+        "tags": [],
+        "createdAt": "2026-11-16T12:00:00.000Z",
+        "isPinned": false
+      }
+    ],
+    "total": 6221,
+    "page": 1,
+    "pageSize": 8,
+    "totalPages": 778
+  },
+  "search": {
+    "items": [
+      {
+        "type": "memory",
+        "id": "mem_20",
+        "content": "Memory 20: the debounce lane fixture row with a readable body",
+        "memoryType": "note",
+        "tags": [
+          "fixture"
+        ],
+        "createdAt": "2026-11-14T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "memory",
+        "id": "mem_21",
+        "content": "Memory 21: the debounce lane fixture row with a readable body",
+        "memoryType": "insight",
+        "tags": [],
+        "createdAt": "2026-11-15T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "memory",
+        "id": "mem_22",
+        "content": "Memory 22: the debounce lane fixture row with a readable body",
+        "memoryType": "note",
+        "tags": [],
+        "createdAt": "2026-11-16T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "memory",
+        "id": "mem_23",
+        "content": "Memory 23: the debounce lane fixture row with a readable body",
+        "memoryType": "note",
+        "tags": [],
+        "createdAt": "2026-11-17T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "memory",
+        "id": "mem_24",
+        "content": "Memory 24: the debounce lane fixture row with a readable body",
+        "memoryType": "insight",
+        "tags": [
+          "fixture"
+        ],
+        "createdAt": "2026-11-10T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "memory",
+        "id": "mem_25",
+        "content": "Memory 25: the debounce lane fixture row with a readable body",
+        "memoryType": "note",
+        "tags": [],
+        "createdAt": "2026-11-11T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "memory",
+        "id": "mem_26",
+        "content": "Memory 26: the debounce lane fixture row with a readable body",
+        "memoryType": "note",
+        "tags": [],
+        "createdAt": "2026-11-12T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "memory",
+        "id": "mem_27",
+        "content": "Memory 27: the debounce lane fixture row with a readable body",
+        "memoryType": "insight",
+        "tags": [],
+        "createdAt": "2026-11-13T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "memory",
+        "id": "mem_28",
+        "content": "Memory 28: the debounce lane fixture row with a readable body",
+        "memoryType": "note",
+        "tags": [
+          "fixture"
+        ],
+        "createdAt": "2026-11-14T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "memory",
+        "id": "mem_29",
+        "content": "Memory 29: the debounce lane fixture row with a readable body",
+        "memoryType": "note",
+        "tags": [],
+        "createdAt": "2026-11-15T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "memory",
+        "id": "mem_30",
+        "content": "Memory 30: the debounce lane fixture row with a readable body",
+        "memoryType": "insight",
+        "tags": [],
+        "createdAt": "2026-11-16T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "memory",
+        "id": "mem_31",
+        "content": "Memory 31: the debounce lane fixture row with a readable body",
+        "memoryType": "note",
+        "tags": [],
+        "createdAt": "2026-11-17T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "memory",
+        "id": "mem_32",
+        "content": "Memory 32: the debounce lane fixture row with a readable body",
+        "memoryType": "note",
+        "tags": [
+          "fixture"
+        ],
+        "createdAt": "2026-11-10T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "memory",
+        "id": "mem_33",
+        "content": "Memory 33: the debounce lane fixture row with a readable body",
+        "memoryType": "insight",
+        "tags": [],
+        "createdAt": "2026-11-11T12:00:00.000Z",
+        "isPinned": false
+      },
+      {
+        "type": "memory",
+        "id": "mem_34",
+        "content": "Memory 34: the debounce lane fixture row with a readable body",
+        "memoryType": "note",
+        "tags": [],
+        "createdAt": "2026-11-12T12:00:00.000Z",
+        "isPinned": false
+      }
+    ],
+    "total": 42,
+    "page": 1,
+    "pageSize": 8,
+    "totalPages": 6
+  },
+  "tags": {
+    "project": [
+      {
+        "tag": "alpha",
+        "projectName": "Synthetic project"
+      }
+    ],
+    "user": [
+      {
+        "tag": "fixture-user",
+        "displayName": "Fixture User"
+      }
+    ],
+    "memoryTags": [
+      {
+        "tag": "fixture",
+        "count": 4
+      }
+    ]
+  },
+  "roster": [
+    {
+      "userId": "fixture-a",
+      "displayName": "Fixture A",
+      "isDefault": true
+    }
+  ],
+  "profile": {
+    "exists": true,
+    "userId": "fixture-a",
+    "displayName": "Fixture A",
+    "version": 4,
+    "profileData": {
+      "preferences": [
+        {
+          "description": "Use concise output"
+        }
+      ],
+      "patterns": [
+        {
+          "description": "Review evidence"
+        }
+      ],
+      "workflows": []
+    }
+  },
+  "projects": []
+}

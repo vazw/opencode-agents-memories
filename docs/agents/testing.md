@@ -16,7 +16,7 @@ The Memory Explorer's stylesheet must wire every class token its Rust can emit. 
 script, not a wasm test:
 
 ```sh
-cd web-ui && node scripts/check-class-coverage.mjs --self-test --min-emitted=187
+cd web-ui && node scripts/check-class-coverage.mjs --self-test --min-emitted=191
 ```
 
 - It classifies **every** `class=` site in `web-ui/src/**/*.rs` as literal / const / balanced
@@ -28,13 +28,18 @@ cd web-ui && node scripts/check-class-coverage.mjs --self-test --min-emitted=187
   fixture 9 is the *unresolvable identifier inside a block* discriminator — a block that yields one
   known token and one identifier the const map cannot resolve must still report 1 residue, or a known
   branch would buy an unknown one a silent pass.
-- Census and triple: `sites=207 literal=187 const=19 brace=1 residue=0` and
-  `emitted=187 hooks=187 missing=0 dead=0 unresolved=0` (web UI wave 2, issue 123, MEASURED 2026-11-04: 187 − 13 (`memory-row`, `memory-kind`, `memory-tags`, `memory-created`, `memory-pinned`, `memory-pin`, `memory-delete`, `memories-controls`, `memories-tag-filter`, `memories-list`, `memories-count`, `memories-prev`, `memories-next`) + 9 (`chip`, `memories-filters`, `memories-range`, `memory-card`, `memory-card-head`, `memory-card-foot`, `memory-card-tags`, `memory-list`, `memory-tag-more`) + 1 (`memories-tag-note`) + 3 (`tags-card`, `tags-scroll`, `tags-tag`) − 1 (`project-input`) + 1 (`theme-toggle` re-introduced on owner directive 2026-11-04 for icon-only toggle) = 187; before that, Thaw wave 1: 185 − 3 (`dark`, `app-nav`, `theme-toggle`) + 5 (`app-layout-row`, `app-sider`, `app-nav-drawer`, `app-body`, `app-brand`), measured as 184 after the stylesheet step and 187 after the shell step; `app-layout-row` is counted through `Layout`'s `content_class=` because the extractor's finder `/class\s*=/g` has no left boundary — tightening it re-derives this number).
+- Census and triple: `sites=232 literal=205 const=22 brace=5 residue=0` and
+  `emitted=191 hooks=191 missing=0 dead=0 unresolved=0` (issue-118 wave 6, MEASURED 2026-11-17 at
+  the wave-6 worktree on wave 5's landed `70fde7e` base: wave 5 left `emitted=189 hooks=189
+  sites=230 literal=203 const=22 brace=5`; wave 6 −1 (`stats-buckets`) +3 (`stats-errors-trigger`,
+  `stats-errors-surface`, `memories-search-clear-slot`) on emitted and +2 on sites (the clear-slot
+  span and the errors cell's trigger/surface pair minus the deleted `<details>` site) → 191/232;
+  before that, web UI wave 2, issue 123, MEASURED 2026-11-04: 187 − 13 (`memory-row`, `memory-kind`, `memory-tags`, `memory-created`, `memory-pinned`, `memory-pin`, `memory-delete`, `memories-controls`, `memories-tag-filter`, `memories-list`, `memories-count`, `memories-prev`, `memories-next`) + 9 (`chip`, `memories-filters`, `memories-range`, `memory-card`, `memory-card-head`, `memory-card-foot`, `memory-card-tags`, `memory-list`, `memory-tag-more`) + 1 (`memories-tag-note`) + 3 (`tags-card`, `tags-scroll`, `tags-tag`) − 1 (`project-input`) + 1 (`theme-toggle` re-introduced on owner directive 2026-11-04 for icon-only toggle) = 187; before that, Thaw wave 1: 185 − 3 (`dark`, `app-nav`, `theme-toggle`) + 5 (`app-layout-row`, `app-sider`, `app-nav-drawer`, `app-body`, `app-brand`), measured as 184 after the stylesheet step and 187 after the shell step; `app-layout-row` is counted through `Layout`'s `content_class=` because the extractor's finder `/class\s*=/g` has no left boundary — tightening it re-derives this number).
 - Arc: the baseline at `81ba4ca` was `sites=187 literal=173 const=13 brace=1 residue=0` /
   `emitted=175 hooks=58 missing=117 dead=0`. The repair wave closed all 117 and added six hooks
   (`skills-empty`, four `confirm-gate*`, `agents-prompt` — the last retired by issues 115/116), so
-  **175/58/117 → 181/181/0 at that wave** (187/187/0 today — see the census above). The `--min-emitted=187` floor is a ratchet: a
-  deleted rule is caught as `missing>0`, a wholesale stylesheet revert as `emitted<187`.
+  **175/58/117 → 181/181/0 at that wave** (191/191/0 today — see the census above). The `--min-emitted=191` floor is a ratchet: a
+  deleted rule is caught as `missing>0`, a wholesale stylesheet revert as `emitted<191`.
 - `.githooks/pre-commit` runs the same command whenever a `web-ui/` path is staged (missing `node`
   fails the commit — never a silent skip), and `scripts/test-pre-commit.sh` case 17 proves the gate
   names the unwired hook: a fixture carrying the real `web-ui/src` and the post-wave stylesheet with

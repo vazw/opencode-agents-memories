@@ -26,17 +26,20 @@
 //! rendered, logged or persisted.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use leptos::callback::Callable;
 use leptos::html;
+use leptos::leptos_dom::helpers::{TimeoutHandle, set_timeout_with_handle};
 use leptos::prelude::*;
 use leptos::reactive::wrappers::write::SignalSetter;
 use serde::Deserialize;
 use thaw::{
-    Badge, BadgeAppearance, Button, ButtonAppearance, ButtonSize, ButtonType, Card, CardFooter,
-    CardHeader, CardHeaderDescription, Dialog, DialogActions, DialogBody, DialogSurface,
-    DialogTitle, Field, Input, MessageBar, MessageBarBody, MessageBarIntent, Pagination, Table,
-    TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Tag,
+    Badge, BadgeAppearance, BadgeColor, Button, ButtonAppearance, ButtonRef, ButtonSize,
+    ButtonType, Card, CardFooter, CardHeader, CardHeaderDescription, ComponentRef, Dialog,
+    DialogActions, DialogBody, DialogSurface, DialogTitle, Field, Input, InputSuffix, MessageBar,
+    MessageBarBody, MessageBarIntent, Pagination, Popover, PopoverPosition, PopoverTrigger,
+    PopoverTriggerType, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Tag,
 };
 
 use crate::api::auth::{AuthContext, read_marker_token};
@@ -216,6 +219,65 @@ pub fn memories_request(
         search_spec(query.trim(), page, page_size)
     } else {
         list_memories_spec(page, page_size, &[], false)
+    }
+}
+
+/// Debounce state of the Memories search box. `pending` is the trimmed text
+/// last typed, `fired` the trimmed text last sent; trimming is the normaliser
+/// that stops a trailing space re-firing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SearchDebounce {
+    pub pending: Option<String>,
+    pub fired: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SearchDebounceEvent {
+    Typed(String),
+    Elapsed,
+    Submit,
+}
+
+/// One transition. `Some(q)` means a request is due, and `Some("")` means
+/// "clear the filter" — not "do nothing".
+pub fn search_debounce_step(
+    state: &SearchDebounce,
+    event: SearchDebounceEvent,
+) -> (SearchDebounce, Option<String>) {
+    match event {
+        SearchDebounceEvent::Typed(text) => (
+            SearchDebounce {
+                pending: Some(text.trim().to_string()),
+                fired: state.fired.clone(),
+            },
+            None,
+        ),
+        SearchDebounceEvent::Elapsed => {
+            if state.pending.is_some() && state.pending != state.fired {
+                let fired = state.pending.clone();
+                (
+                    SearchDebounce {
+                        pending: state.pending.clone(),
+                        fired,
+                    },
+                    state.pending.clone(),
+                )
+            } else {
+                (state.clone(), None)
+            }
+        }
+        // An explicit Enter must always act, even when the timer just fired
+        // the same text — the dedupe never swallows it.
+        SearchDebounceEvent::Submit => {
+            let fired = state.pending.clone();
+            (
+                SearchDebounce {
+                    pending: state.pending.clone(),
+                    fired: fired.clone(),
+                },
+                fired,
+            )
+        }
     }
 }
 
@@ -696,6 +758,73 @@ pub fn MemoriesPanel() -> impl IntoView {
         }
     });
 
+    // The search debounce (G3): keystrokes only record the text and re-arm a
+    // 300 ms timer; the timer applies `Elapsed`, which fires once per changed
+    // query. The handle lives in a StoredValue and is cleared on every
+    // keystroke, so a typing burst never leaves a stale timer behind.
+    const SEARCH_DEBOUNCE_MS: u64 = 300;
+    let debounce = StoredValue::new(SearchDebounce::default());
+    let timer = StoredValue::new(None::<TimeoutHandle>);
+    let cancel_timer = move || {
+        timer.update_value(|handle| {
+            if let Some(handle) = handle.take() {
+                handle.clear();
+            }
+        });
+    };
+    // Enter is explicit: it always fires, bypassing the dedupe.
+    let submit_search = Callback::new(move |_: ()| {
+        cancel_timer();
+        let (next, fire) = search_debounce_step(&debounce.get_value(), SearchDebounceEvent::Submit);
+        debounce.set_value(next);
+        if fire.is_some() {
+            refresh.run(());
+        }
+    });
+    // Clear resets the machine to `Some("")/Some("")` — one activation, one
+    // unfiltered request, and the watcher's later `Elapsed` is suppressed
+    // because `pending == fired`. thaw writes the empty string back into the
+    // input through the two-way binding, so the DOM is never touched here.
+    let clear_search = Callback::new(move |_: ()| {
+        cancel_timer();
+        query.set(String::new());
+        debounce.set_value(SearchDebounce {
+            pending: Some(String::new()),
+            fired: Some(String::new()),
+        });
+        refresh.run(());
+    });
+    // With `immediate = false` the handler does not run on the first
+    // invocation, so no `prev.is_none()` guard is needed.
+    Effect::watch(
+        move || query.get(),
+        move |text, _, _| {
+            let (next, _) = search_debounce_step(
+                &debounce.get_value(),
+                SearchDebounceEvent::Typed(text.clone()),
+            );
+            debounce.set_value(next);
+            cancel_timer();
+            // The handle API answers `Result`: a failure means no timer was
+            // armed (no window to schedule on), so nothing is stored and
+            // nothing later fires — never unwrapped, per the panic gate.
+            if let Ok(handle) = set_timeout_with_handle(
+                move || {
+                    let (next, fire) =
+                        search_debounce_step(&debounce.get_value(), SearchDebounceEvent::Elapsed);
+                    debounce.set_value(next);
+                    if fire.is_some() {
+                        refresh.run(());
+                    }
+                },
+                Duration::from_millis(SEARCH_DEBOUNCE_MS),
+            ) {
+                timer.set_value(Some(handle));
+            }
+        },
+        false,
+    );
+
     // The initial load and every page change. `reload` reads everything else
     // untracked, so this effect depends on `page` alone.
     Effect::new(move |_| {
@@ -780,10 +909,33 @@ pub fn MemoriesPanel() -> impl IntoView {
                         value=query
                         on:keydown=move |event: leptos::ev::KeyboardEvent| {
                             if event.key() == "Enter" {
-                                refresh.run(());
+                                submit_search.run(());
                             }
                         }
-                    />
+                    >
+                        // The suffix slot is statically present
+                        // (`InputSuffix.if_` is a plain bool, read outside any
+                        // reactive closure) — the gutter is reserved by the
+                        // slot; the BUTTON inside it is reactive via `then`.
+                        // Re-creating the `Input` on the empty/non-empty
+                        // transition would destroy focus.
+                        <InputSuffix slot>
+                            <span class="memories-search-clear-slot">
+                                {move || (!query.get().trim().is_empty()).then(|| view! {
+                                    <Button
+                                        appearance=ButtonAppearance::Subtle
+                                        size=Signal::derive(|| ButtonSize::Small)
+                                        button_type=ButtonType::Button
+                                        attr:aria-label="Clear search"
+                                        attr:data-testid="memories-search-clear"
+                                        on_click=move |_| clear_search.run(())
+                                    >
+                                        "×"
+                                    </Button>
+                                })}
+                            </span>
+                        </InputSuffix>
+                    </Input>
                 </Field>
                 {move || {
                     tags.get()
@@ -820,6 +972,11 @@ pub fn MemoriesPanel() -> impl IntoView {
                             }
                         })
                 }}
+                // The range sits BEFORE Reload with `margin-inline-start:
+                // auto`: free space collects before the range, so Reload's
+                // left edge stays pinned to the row's right edge regardless
+                // of how wide the range text is.
+                <span class="memories-range" data-testid="memories-range">{range}</span>
                 <span node_ref=row_fallback>
                     <Button
                         class="memories-reload"
@@ -829,7 +986,6 @@ pub fn MemoriesPanel() -> impl IntoView {
                         "Reload"
                     </Button>
                 </span>
-                <span class="memories-range" data-testid="memories-range">{range}</span>
             </div>
             {move || {
                 let has_text = !query.get().trim().is_empty();
@@ -1721,6 +1877,34 @@ pub struct ProfileCountsView {
     pub workflows: u64,
 }
 
+/// The GENERATED card's label: an ISO-8601 instant shortened to
+/// `YYYY-MM-DD HH:MM`. Anything without a `'T'`, or with a time part shorter
+/// than five characters, is passed through untouched rather than guessed at.
+///
+/// This is a display truncation — seconds and milliseconds leave the visible
+/// label (recorded, not hidden); the full instant stays reachable via the
+/// element's `title`.
+pub fn generated_label(generated_at: &str) -> String {
+    if generated_at.is_empty() {
+        return "—".to_string();
+    }
+    let Some((date, time)) = generated_at.split_once('T') else {
+        return generated_at.to_string();
+    };
+    if time.len() < 5 {
+        return generated_at.to_string();
+    }
+    format!("{date} {}", &time[..5])
+}
+
+/// `3 preferences · 5 patterns · 2 workflows` — the three counts on one line.
+pub fn profile_counts_line(counts: &ProfileCountsView) -> String {
+    format!(
+        "{} preferences · {} patterns · {} workflows",
+        counts.preferences, counts.patterns, counts.workflows
+    )
+}
+
 /// The profile summary section (upstream `ProfileStats`) — counts only, never
 /// the profile contents.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -1813,6 +1997,11 @@ pub fn error_buckets(day: &DailyStatsView) -> Vec<(String, u64)> {
 /// Upstream L105: the active-shards card counts `isActive` flags only.
 pub fn active_shard_count(shards: &[ShardStatsView]) -> usize {
     shards.iter().filter(|shard| shard.is_active).count()
+}
+
+/// The errors badge total: the SUM over the buckets, not their first entry.
+pub fn buckets_total(buckets: &[(String, u64)]) -> u64 {
+    buckets.iter().map(|(_, count)| count).sum()
 }
 
 /// The Settings screen's render shape.
@@ -1922,14 +2111,7 @@ fn stats_overview(stats: &StatsView, active_shards: usize) -> AnyView {
         Some(profile) => {
             let counts = profile.counts.as_ref().map(|counts| {
                 view! {
-                    <dl class="stats-profile-counts">
-                        <dt>"Preferences"</dt>
-                        <dd>{counts.preferences}</dd>
-                        <dt>"Patterns"</dt>
-                        <dd>{counts.patterns}</dd>
-                        <dt>"Workflows"</dt>
-                        <dd>{counts.workflows}</dd>
-                    </dl>
+                    <p class="stats-profile-counts">{profile_counts_line(counts)}</p>
                 }
             });
             let prompts = profile
@@ -1961,6 +2143,10 @@ fn stats_overview(stats: &StatsView, active_shards: usize) -> AnyView {
         stats.by_scope.user, stats.by_scope.project
     );
     let shards_len = stats.shards.len();
+    // The full instant lives on the element's `title`; the visible label is
+    // the shortened form. The local binding is required: `title=` cannot take
+    // an expression over the borrowed argument (E0521 borrowed data escapes).
+    let generated_title = stats.generated_at.clone();
 
     view! {
         <section class="stats-overview" aria-label="Stats overview">
@@ -1980,7 +2166,9 @@ fn stats_overview(stats: &StatsView, active_shards: usize) -> AnyView {
             </Card>
             <Card class="stats-card" attr:data-testid="stats-card-generated">
                 <h3>"Generated"</h3>
-                <p class="stats-card-value stats-generated">{generated}</p>
+                <p class="stats-card-value stats-generated" title=generated_title>
+                    {generated_label(&generated)}
+                </p>
                 <p class="stats-card-meta">"Snapshot of this answer"</p>
             </Card>
         </section>
@@ -2002,18 +2190,54 @@ fn stats_daily_table(daily: &[DailyStatsView]) -> AnyView {
             let errors_cell = if buckets.is_empty() {
                 view! { <span class="stats-no-errors">"no errors"</span> }.into_any()
             } else {
-                let total: u64 = buckets.iter().map(|(_, count)| count).sum();
+                let total = buckets_total(&buckets);
                 let items: Vec<_> = buckets
                     .into_iter()
                     .map(|(bucket, count)| {
                         view! { <li class="stats-bucket">{format!("{bucket} ×{count}")}</li> }
                     })
                     .collect();
+                let open = RwSignal::new(false);
+                let button_ref = ComponentRef::<ButtonRef>::default();
                 view! {
-                    <details class="stats-buckets">
-                        <summary>{total}</summary>
-                        <ul>{items}</ul>
-                    </details>
+                    <Popover
+                        class="stats-errors-surface"
+                        trigger_type=PopoverTriggerType::Click
+                        position=PopoverPosition::LeftStart
+                        on_open=move || open.set(true)
+                        on_close=move || open.set(false)
+                    >
+                        <PopoverTrigger slot>
+                            <Button
+                                comp_ref=button_ref
+                                appearance=ButtonAppearance::Subtle
+                                size=Signal::derive(|| ButtonSize::Small)
+                                button_type=ButtonType::Button
+                                class="stats-errors-trigger"
+                                attr:data-testid="stats-errors-trigger"
+                                attr:aria-expanded=move || open.get().to_string()
+                                on:keydown=move |event: leptos::ev::KeyboardEvent| {
+                                    // thaw 0.4.8 has no Escape path and
+                                    // exposes no close handle; the trigger's
+                                    // own click is the only way to flip the
+                                    // internal flag. The let-chain is
+                                    // required: nesting the `if let` inside
+                                    // the `if` trips collapsible_if.
+                                    if event.key() == "Escape"
+                                        && open.get_untracked()
+                                        && let Some(button) = button_ref.get_untracked()
+                                    {
+                                        button.click();
+                                    }
+                                }
+                            >
+                                <Badge appearance=BadgeAppearance::Tint color=BadgeColor::Warning>
+                                    {total}
+                                </Badge>
+                            </Button>
+                        </PopoverTrigger>
+                        <div data-testid="stats-errors-popover"><ul>{items}</ul></div>
+                    </Popover>
                 }
                 .into_any()
             };

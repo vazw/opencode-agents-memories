@@ -1,0 +1,285 @@
+'use strict';
+// Issue 118 wave 6 CDP lanes (G3 ×6, G4 ×2, G5 ×5 = 13 gate rows).
+// Bootstrap follows test-wave4-cdp.cjs: a dedicated CDP target (LANE_PAGE_ID),
+// Runtime.evaluate helper, Page.addScriptToEvaluateOnNewDocument fetch
+// override, serve-dist.mjs static server. The fixture answers /api/memories
+// (pinned total 6221 / pageSize 8 — the sourced range constant), /api/search
+// (total 42), /api/tags, /api/stats (8 daily rows + 30 shards), /api/projects,
+// /api/health and /api/user-profile; /api/user-profiles feeds the shell's
+// profile picker. window.__requests records {path, query, method} per /api/*.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const fixturePath = path.join(__dirname, 'fixtures/issue-118-wave6.json');
+const fixture = JSON.parse(fs.readFileSync(fixturePath));
+const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:49418';
+const selection = process.env.W6_TEST || 'all';
+const output = process.env.W6_OUTPUT_DIR || path.join('.tmp/artifacts/issue-118-wave6', new Date().toISOString().replace(/[:.]/g, '-'));
+const dist = process.env.WEBUI_DIST;
+const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+const q = id => `[data-testid="${id}"]`;
+const results = [];
+let call, evaluate, initId;
+// Pacing lives in Node, never in a Runtime.evaluate roundtrip: a slow CDP
+// roundtrip would stretch the "50 ms apart" keystrokes past the 300 ms
+// debounce window and turn the burst into N legitimate fires.
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const settleFrame = () => evaluate('new Promise(r=>requestAnimationFrame(()=>setTimeout(r,20)))');
+
+async function ready(selector) {
+  return evaluate(`new Promise((resolve,reject)=>{let clean=0;const samples=[];const start=Date.now();const timer=setInterval(()=>{const ok=!!document.querySelector(${JSON.stringify(selector)})&&!document.querySelector('.thaw-spinner,[data-testid$="-loading"]');samples.push({elapsed:Date.now()-start,clean});clean=ok?clean+1:0;if(clean===3){clearInterval(timer);resolve(samples)}else if(Date.now()-start>20000){clearInterval(timer);reject(Error('readiness timeout '+${JSON.stringify(selector)}+' | '+document.body.innerText.slice(0,120)))}},100)})`);
+}
+// The memories lanes gate on the pinned range text: the listing fetch has
+// answered and its projection rendered.
+async function readyMemories() {
+  return evaluate(`new Promise((resolve,reject)=>{const start=Date.now();const timer=setInterval(()=>{const el=document.querySelector('[data-testid="memories-range"]');if(el&&/of 6221$/.test(el.textContent.trim())){clearInterval(timer);resolve(Date.now()-start)}else if(Date.now()-start>20000){clearInterval(timer);reject(Error('memories readiness timeout | '+document.body.innerText.slice(0,120)))}},100)})`);
+}
+function install(scenario) {
+  return `(()=>{const f=${JSON.stringify(fixture)};window.__scenario=${JSON.stringify(scenario)};window.__requests=[];window.__OPENCODE_MEM_TOKEN__='synthetic-wave6-marker';const original=window.fetch.bind(window);window.fetch=async(input,options={})=>{const u=new URL(typeof input==='string'?input:input.url,location.href);if(!u.pathname.startsWith('/api/'))return original(input,options);const method=options.method||'GET';const headers=new Headers(options.headers);window.__requests.push({path:u.pathname,query:u.search,method,tokenPresent:headers.get('x-opencode-mem-token')==='synthetic-wave6-marker'});let data,status=200;if(u.pathname==='/api/memories')data=f.memories;else if(u.pathname==='/api/search')data=f.search;else if(u.pathname==='/api/tags')data=f.tags;else if(u.pathname==='/api/stats')data=f.stats;else if(u.pathname==='/api/projects')data=f.projects;else if(u.pathname==='/api/health')data=f.health;else if(u.pathname==='/api/user-profile')data=f.profile;else if(u.pathname==='/api/user-profiles')data=f.roster;else{status=404;data={success:false}}await new Promise(r=>setTimeout(r,30));return new Response(JSON.stringify(u.pathname==='/api/health'?data:{success:true,data}),{status,headers:{'Content-Type':'application/json'}})};})()`;
+}
+async function navigate(route, scenario = 'normal', width = 1280, theme = 'light') {
+  if (initId) await call('Page.removeScriptToEvaluateOnNewDocument', { identifier: initId });
+  ({ identifier: initId } = await call('Page.addScriptToEvaluateOnNewDocument', { source: install(scenario) + `;localStorage.setItem('opencode-mem-theme',${JSON.stringify(theme)});` }));
+  await call('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
+  await call('Page.navigate', { url: base + route });
+  await evaluate(`new Promise(r=>{if(document.readyState==='complete')r();else addEventListener('load',r,{once:true})})`);
+}
+async function realKey(key, code, vk, text) {
+  await call('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: vk, ...(text ? { text } : {}) });
+  await call('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: vk });
+}
+async function click(selector) {
+  await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('missing '+${JSON.stringify(selector)});e.click()})()`);
+}
+async function nested(selector) {
+  return evaluate(`(()=>{const root=document.querySelector(${JSON.stringify(selector)});if(!root)throw Error('missing '+${JSON.stringify(selector)});const el=root.matches('input,textarea')?root:root.querySelector('input,textarea');if(!el)throw Error('no control inside '+${JSON.stringify(selector)});return el.tagName})()`);
+}
+async function input(selector, value) {
+  await nested(selector);
+  await evaluate(`(()=>{const root=document.querySelector(${JSON.stringify(selector)});const el=root.matches('input,textarea')?root:root.querySelector('input,textarea');el.value=${JSON.stringify(value)};el.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+}
+const searchCalls = async from => evaluate(`window.__requests.slice(${from}).filter(r=>r.path==='/api/search')`);
+const errorsSurface = `.stats-errors-surface`;
+// The errors trigger lives in the first daily row that has buckets (the
+// fixture gives every even row one); the lane opens THAT popover.
+async function openErrorsPopover() {
+  await click(q('stats-errors-trigger'));
+  await sleep(120);
+}
+const cases = {
+  // --- G3: the search row -------------------------------------------------
+  async search_field_is_bounded() {
+    await navigate('/project-memories');
+    await readyMemories();
+    const rects = await evaluate(`(()=>{const f=document.querySelector('[data-testid="memories-search"]').getBoundingClientRect();const p=document.querySelector('[data-testid="memories-panel"]').getBoundingClientRect();return{field:f.width,panel:p.width}})()`);
+    assert.ok(rects.field <= 360, `field ${rects.field} > 360`);
+    assert.ok(rects.field <= 0.5 * rects.panel, `field ${rects.field} > half panel ${0.5 * rects.panel}`);
+    return rects;
+  },
+  async search_debounce_one_request() {
+    await navigate('/project-memories');
+    await readyMemories();
+    const before = await evaluate('window.__requests.length');
+    for (const value of ['r', 'ru', 'rus', 'rust', 'rust']) {
+      await input(q('memories-search'), value);
+      await sleep(50);
+    }
+    await sleep(700); // settle past the 300 ms timer
+    const calls = await searchCalls(before);
+    assert.equal(calls.length, 1, `expected exactly 1 search request, got ${calls.length}: ${JSON.stringify(await evaluate(`window.__requests.slice(${before})`))}`);
+    return calls;
+  },
+  async search_clear_affordance_is_reactive() {
+    await navigate('/project-memories');
+    await readyMemories();
+    const count = () => evaluate(`document.querySelectorAll('[data-testid="memories-search-clear"]').length`);
+    assert.equal(await count(), 0, 'empty box hides the clear button');
+    await input(q('memories-search'), 'rust');
+    await sleep(100);
+    assert.equal(await count(), 1, 'typed text shows the clear button');
+    await click(q('memories-search-clear'));
+    await sleep(100);
+    assert.equal(await count(), 0, 'cleared box hides the clear button again');
+  },
+  async search_clear_slot_is_reserved() {
+    await navigate('/project-memories');
+    await readyMemories();
+    const state = () => evaluate(`(()=>{const input=document.querySelector('[data-testid="memories-search"] input');const btn=document.querySelector('[data-testid="memories-search-clear"]');return{inputWidth:input?input.clientWidth:null,btn:btn?{width:btn.getBoundingClientRect().width}:null}})()`);
+    const empty = await state();
+    await input(q('memories-search'), 'rust');
+    await sleep(100);
+    const typed = await state();
+    assert.ok(typed.btn, 'clear button must exist once text is typed (today it does not)');
+    assert.equal(empty.inputWidth, typed.inputWidth, `input clientWidth must not move when the clear button appears (${empty.inputWidth} -> ${typed.inputWidth})`);
+    assert.ok(typed.btn.width <= 28, `clear button ${typed.btn.width} must fit the reserved 28px slot (the > button override)`);
+    return { empty, typed };
+  },
+  async search_clear_restores_list() {
+    await navigate('/project-memories');
+    await readyMemories();
+    await input(q('memories-search'), 'rust');
+    await sleep(500); // debounce fires once
+    const before = await evaluate('window.__requests.length');
+    await click(q('memories-search-clear'));
+    await sleep(400);
+    const added = await evaluate(`window.__requests.slice(${before})`);
+    assert.equal(added.length, 1, `one clear must mean one request, got ${added.length}`);
+    assert.equal(added[0].path, '/api/memories', 'the clear request is the unfiltered listing');
+    assert.ok(!added[0].query.includes('q='), `the clear request carries no q: ${added[0].query}`);
+    const range = await evaluate(`document.querySelector('[data-testid="memories-range"]').textContent`);
+    assert.equal(range.trim(), '1-8 of 6221', `range restored to the pinned constant, got "${range}"`);
+    return added;
+  },
+  async search_result_reflow_pinned() {
+    await navigate('/project-memories');
+    await readyMemories();
+    const reloadLeft = () => evaluate(`document.querySelector('[data-testid="memories-reload"]').getBoundingClientRect().left`);
+    const before = await reloadLeft();
+    const preRequests = await evaluate('window.__requests.length');
+    await input(q('memories-search'), 'rust');
+    await sleep(700);
+    const calls = await searchCalls(preRequests);
+    assert.equal(calls.length, 1, `exactly one search request, got ${calls.length}`);
+    const after = await reloadLeft();
+    assert.ok(Math.abs(after - before) <= 1, `Reload must stay pinned: ${before} -> ${after}`);
+    return { before, after };
+  },
+  // --- G4: the stats cards ------------------------------------------------
+  async stats_cards_equal_height_top() {
+    await navigate('/stats');
+    await ready(q('stats-card-total'));
+    const rects = await evaluate(`Array.from(document.querySelectorAll('[data-testid^="stats-card-"]'),c=>{const r=c.getBoundingClientRect();return{top:r.top,height:r.height}})`);
+    assert.equal(rects.length, 4, 'four overview cards');
+    const tops = rects.map(r => r.top);
+    const heights = rects.map(r => r.height);
+    assert.ok(Math.max(...tops) - Math.min(...tops) <= 1, `tops spread ${Math.max(...tops) - Math.min(...tops)}: ${tops}`);
+    assert.ok(Math.max(...heights) - Math.min(...heights) <= 1, `heights spread ${Math.max(...heights) - Math.min(...heights)}: ${heights}`);
+    return rects;
+  },
+  async stats_generated_single_line() {
+    await navigate('/stats');
+    await ready(q('stats-card-total'));
+    // Line count via a Range over the value's text node: distinct rounded
+    // rect.top values. getClientRects().length is structurally 1 on a block
+    // <p> and could never fail.
+    const lines = await evaluate(`(()=>{const p=document.querySelector('[data-testid="stats-card-generated"] .stats-generated');if(!p)return null;const node=p.firstChild;const range=document.createRange();range.selectNodeContents(node);const tops=new Set(Array.from(range.getClientRects(),r=>Math.round(r.top)));return{lines:tops.size,text:p.textContent,width:p.getBoundingClientRect().width}})()`);
+    assert.ok(lines, 'generated value exists');
+    assert.equal(lines.lines, 1, `generated label must be one line, got ${lines.lines} (${JSON.stringify(lines)})`);
+    return lines;
+  },
+  // --- G5: the errors badge + popover -------------------------------------
+  async errors_badge_is_thaw_badge() {
+    await navigate('/stats');
+    await ready(q('stats-card-total'));
+    const badge = await evaluate(`(()=>{const b=document.querySelector('[data-testid="stats-errors-trigger"] .thaw-badge');if(!b)return null;return{bg:getComputedStyle(b).backgroundColor,text:b.textContent}})()`);
+    assert.ok(badge, 'the trigger must carry a thaw Badge (a <details> summary has none)');
+    assert.notEqual(badge.bg, 'rgba(0, 0, 0, 0)', 'the badge is painted (tint), not transparent');
+    return badge;
+  },
+  async errors_popover_no_reflow() {
+    await navigate('/stats');
+    await ready(q('stats-card-total'));
+    const metrics = () => evaluate(`(()=>{const t=document.querySelector('[data-testid="stats-daily-table"]');const row=t.querySelector('tbody tr');const r=row.getBoundingClientRect();return{tableScroll:t.scrollHeight,rowHeight:r.height}})()`);
+    const before = await metrics();
+    await openErrorsPopover();
+    const after = await metrics();
+    assert.equal(after.tableScroll, before.tableScroll, `daily table scrollHeight must not move: ${before.tableScroll} -> ${after.tableScroll}`);
+    assert.equal(after.rowHeight, before.rowHeight, `daily row height must not move: ${before.rowHeight} -> ${after.rowHeight}`);
+    return { before, after };
+  },
+  async errors_popover_shows_buckets() {
+    await navigate('/stats');
+    await ready(q('stats-card-total'));
+    await openErrorsPopover();
+    const state = await evaluate(`(()=>{const s=document.querySelector('${errorsSurface}');if(!s)return null;return{display:getComputedStyle(s).display,text:s.textContent}})()`);
+    assert.ok(state, 'the errors surface must exist');
+    assert.notEqual(state.display, 'none', 'the plate must be visible after activation');
+    assert.ok(state.text.includes('fixture:timeout'), `bucket name rendered: ${state.text}`);
+    assert.ok(state.text.includes('×'), `bucket count rendered: ${state.text}`);
+    return state;
+  },
+  async errors_popover_keyboard_and_escape() {
+    await navigate('/stats');
+    await ready(q('stats-card-total'));
+    await evaluate(`document.querySelector('[data-testid="stats-errors-trigger"]').focus()`);
+    assert.equal(await evaluate(`document.activeElement.getAttribute('data-testid')`), 'stats-errors-trigger', 'focus reaches the trigger');
+    await realKey('Enter', 'Enter', 13, '\r');
+    await sleep(120);
+    assert.equal(await evaluate(`document.querySelector('[data-testid="stats-errors-trigger"]').getAttribute('aria-expanded')`), 'true', 'Enter opens the popover');
+    assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('${errorsSurface}')).display`), 'none', 'plate displayed after Enter');
+    await realKey('Escape', 'Escape', 27);
+    await settleFrame(); // the plate's display settles one frame after the keydown
+    assert.equal(await evaluate(`document.querySelector('[data-testid="stats-errors-trigger"]').getAttribute('aria-expanded')`), 'false', 'Escape closes the popover');
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector('${errorsSurface}')).display`), 'none', 'plate display none after Escape');
+    assert.equal(await evaluate(`document.querySelector('${errorsSurface}').getBoundingClientRect().height`), 0, 'plate rect height 0 after Escape');
+    // The plate stays mounted (thaw Teleport) — never assert node counts here.
+  },
+  async errors_popover_placement_scrolled() {
+    await navigate('/stats');
+    await ready(q('stats-card-total'));
+    await openErrorsPopover();
+    const dy = () => evaluate(`(()=>{const s=document.querySelector('${errorsSurface}').getBoundingClientRect();const b=document.querySelector('[data-testid="stats-errors-trigger"] .thaw-badge').getBoundingClientRect();return Math.abs(s.top-b.top)})()`);
+    const d0 = await dy();
+    assert.ok(d0 <= 8, `|dy| at scrollY 0 must be <= 8, got ${d0}`);
+    await evaluate('window.scrollTo(0,402)');
+    await sleep(120);
+    const scrollY = await evaluate('window.scrollY');
+    assert.equal(scrollY, 402, `fixture must scroll to exactly 402 (maxScroll >= 402), got ${scrollY}`);
+    const d1 = await dy();
+    assert.ok(d1 <= 8, `|dy| at scrollY 402 must be <= 8, got ${d1}`);
+    return { d0, d1 };
+  },
+};
+(async () => {
+  assert.ok(selection === 'all' || Object.hasOwn(cases, selection), 'unknown W6_TEST ' + selection);
+  assert.ok(process.env.LANE_PAGE_ID, 'LANE_PAGE_ID must be the dedicated CDP target id');
+  const pages = await (await fetch('http://127.0.0.1:9222/json')).json();
+  const page = pages.find(p => p.id === process.env.LANE_PAGE_ID && p.type === 'page');
+  assert.ok(page, 'dedicated target id not found; MCP ordinal is not a CDP target id');
+  const ws = new WebSocket(page.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
+  let serial = 0;
+  const pending = new Map();
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (pending.has(m.id)) { const { resolve, reject } = pending.get(m.id); pending.delete(m.id); m.error ? reject(Error(m.error.message)) : resolve(m.result); }
+  };
+  call = (method, params = {}) => new Promise((resolve, reject) => { const id = ++serial; pending.set(id, { resolve, reject }); ws.send(JSON.stringify({ id, method, params })); });
+  evaluate = async expression => { const r = await call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; };
+  fs.mkdirSync(output, { recursive: true });
+  await call('Page.enable');
+  await call('Runtime.enable');
+  let bundle = null;
+  try {
+    // Bundle provenance, every run: the served bytes must equal the disk
+    // dist. Extensionless entries (`.trunk-lock`) are skipped: the server's
+    // SPA fallback answers them with index.html by design.
+    if (dist) {
+      bundle = {};
+      for (const entry of fs.readdirSync(dist)) {
+        const full = path.join(dist, entry);
+        if (fs.statSync(full).isFile() && path.extname(entry) !== '') bundle[entry] = sha(fs.readFileSync(full));
+      }
+      for (const entry of Object.keys(bundle)) {
+        const response = await fetch(base + '/' + entry);
+        assert.ok(response.ok, 'served asset ' + entry);
+        assert.equal(sha(Buffer.from(await response.arrayBuffer())), bundle[entry], 'served bytes match disk for ' + entry);
+      }
+    }
+    for (const name of selection === 'all' ? Object.keys(cases) : [selection]) {
+      try { const extra = await cases[name](); results.push({ name, status: 'PASS', ...(extra || {}) }); console.log('PASS ' + name); }
+      catch (e) { results.push({ name, status: 'FAIL', error: e.stack }); console.error('FAIL ' + name + ': ' + e.message); }
+    }
+  } finally {
+    fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({
+      utc: new Date().toISOString(), page: page.id, base, bundle,
+      scriptSha256: sha(fs.readFileSync(__filename)),
+      fixtureSha256: sha(fs.readFileSync(fixturePath)),
+      results,
+    }, null, 2) + '\n');
+    if (initId) await call('Page.removeScriptToEvaluateOnNewDocument', { identifier: initId });
+    ws.close();
+  }
+  if (results.some(r => r.status === 'FAIL')) process.exitCode = 1;
+})().catch(e => { console.error(e); process.exitCode = 1; });
