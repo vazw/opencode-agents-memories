@@ -691,6 +691,12 @@ Class split recomputed from `rows.tsv` by `awk`: **41 asserted + 0 measured +
 > sheet's 501 assertions above — kept in the historical record, corrected
 > here.
 
+> **Addendum (issue 41, 2026-11-18):** the route surface is **43 rows**
+> (41 `/api/*`) — `crates/mem-web/src/api/mod.rs` `ROUTE_TABLE`; ten days after
+> the 2026-11-08 41-row baseline above (`docs/web-skeleton-smoke.md:623`), the
+> port gained `GET /api/cleanup/status`. The 2026-11-08 sheet is left verbatim:
+> it is a dated record of what ran that day, not a live count.
+
 ### Reproduction recipe
 
 The four values are declared in prose: **BIN** is the engine binary built

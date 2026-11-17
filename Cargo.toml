@@ -76,6 +76,10 @@ mem-skills = { workspace = true }
 mem-portability = { workspace = true }
 mem-web = { workspace = true }
 libc = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }
 
 # Dev/test profile tuning (owner directive, 2026-10-26). Debug info is the bulk
 # of what makes linking this workspace RAM-hungry, and `cargo test` inherits

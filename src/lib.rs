@@ -15,6 +15,7 @@
 //! and `mem-web` meet, and root integration tests can only link the lib
 //! target.
 
+pub mod cleanup_tick;
 pub mod portability_backend;
 #[cfg(feature = "shard-consolidation")]
 pub mod shard_consolidation;

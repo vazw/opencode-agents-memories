@@ -208,6 +208,41 @@ fn handshake_result(config: &EngineConfig, chat_message_enabled: bool) -> serde_
     })
 }
 
+/// The "a capture was accepted" hook (issue 41).
+///
+/// A bare `Fn()` rather than a tokio type, so the engine crate exposes the
+/// wake without the caller's retention tick leaking into this crate's API.
+pub type CaptureHook = Arc<dyn Fn() + Send + Sync>;
+
+/// The capture wake the composition root shares with the cleanup tick
+/// (issue 41): the engine holds a [`CaptureHook`], the tick task awaits
+/// [`CaptureSignal::notified`].
+///
+/// One `Notify`, so a burst of captures coalesces into at most one stored
+/// permit — "one sweep per wake", not one per capture.
+#[derive(Clone, Default)]
+pub struct CaptureSignal(Arc<tokio::sync::Notify>);
+
+impl CaptureSignal {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The hook the engine fires after a capture is durably queued.
+    pub fn notifier(&self) -> CaptureHook {
+        let notify = Arc::clone(&self.0);
+        Arc::new(move || notify.notify_one())
+    }
+
+    pub fn notify_one(&self) {
+        self.0.notify_one();
+    }
+
+    pub async fn notified(&self) {
+        self.0.notified().await;
+    }
+}
+
 /// The engine: dispatch and lifecycle state. Dispatching without I/O keeps
 /// [`Engine::dispatch`] directly testable — every fixture oracle runs
 /// through it.
@@ -237,6 +272,10 @@ pub struct Engine {
     /// emits. A flag-off engine would otherwise write a line per idle event —
     /// unbounded stderr in exactly the state the user asked for silence.
     chat_capture_refused: AtomicBool,
+    /// Issue 41: fired after a capture is durably queued, so the caller's
+    /// cleanup tick can wake. `None` in the fixture engine and in a composition
+    /// root that scheduled no tick — the hook is then simply never called.
+    capture_hook: Option<CaptureHook>,
 }
 
 /// The dependency-bearing runtime: composed ONCE by the engine root
@@ -266,7 +305,14 @@ impl Engine {
             startup_drain: None,
             startup_barrier_settled: AtomicBool::new(false),
             chat_capture_refused: AtomicBool::new(false),
+            capture_hook: None,
         }
+    }
+
+    /// Issue 41: installs the capture wake. `run_in_runtime` sets it from its
+    /// own argument, so no web-launch outcome can drop it.
+    pub fn set_capture_hook(&mut self, hook: Option<CaptureHook>) {
+        self.capture_hook = hook;
     }
 
     /// The production constructor: fixture fields + the runtime services.
@@ -629,6 +675,14 @@ impl Engine {
         self.spawn_tracked(async move {
             let _ = capture.drain_once().await;
         });
+
+        // Issue 41: the event is the accepted capture, so the wake comes after
+        // the enqueue result and before the ACK — a refused capture (the two
+        // `Err` arms above) and a draining engine (the `shutting_down` gate at
+        // the top of `dispatch`) never reach here.
+        if let Some(hook) = &self.capture_hook {
+            hook();
+        }
 
         Response::result(request.id.clone(), serde_json::json!({ "accepted": true }))
     }
@@ -1246,6 +1300,7 @@ pub fn run(
     core_config: mem_core::config::Config,
     launcher: Box<dyn WebLauncher>,
     portability: Option<Box<dyn crate::tools::portability::PortabilityFactory>>,
+    capture_hook: Option<CaptureHook>,
 ) -> i32 {
     // W7.1/M12 — the MCP refusal is the FIRST statement: a direct caller can
     // never fall through to a runtime, a lock or a config read.
@@ -1282,6 +1337,7 @@ pub fn run(
             launcher,
             graceful_signal_futures(mode),
             portability,
+            capture_hook,
         ))
         .unwrap_or_else(|error| {
             structured_stderr(
@@ -1506,6 +1562,7 @@ pub async fn run_in_runtime(
     launcher: Box<dyn WebLauncher>,
     shutdown_signal: Pin<Box<dyn Future<Output = ()> + Send>>,
     portability: Option<Box<dyn crate::tools::portability::PortabilityFactory>>,
+    capture_hook: Option<CaptureHook>,
 ) -> Result<i32, String> {
     // The maintenance reservation fence (ADR-0033) FIRST: a held reservation
     // refuses startup BEFORE the exclusive lifetime lock, hence before
@@ -1644,6 +1701,11 @@ pub async fn run_in_runtime(
         }
         None => Engine::new(engine_config),
     };
+
+    // Issue 41: installed UNCONDITIONALLY, and here rather than at a web-launch
+    // site — a failed launch (missing dist, an occupied port) must not disable
+    // the automatic cleanup tick.
+    engine.set_capture_hook(capture_hook);
 
     // The startup capture drain is SCHEDULED, never awaited before the stdio
     // loop: Step 7 requires durable replay to complete before the first

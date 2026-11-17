@@ -48,7 +48,14 @@
   // UTF-8 budget for the captured markdown context; integral, >= 16384.
   "autoCaptureMaxContextBytes": 131072,
 
-  "autoCleanupEnabled": true,
+  // Automatic retention cleanup is OPT-IN here (upstream defaults to true): this
+  // engine fires it from a successful capture, so on an unattended host a default
+  // of true would delete idle memories with no user action. `false` keeps the
+  // manual POST /api/cleanup endpoint fully live.
+  "autoCleanupEnabled": false,
+  // How often the capture-triggered cleanup may run. One string, units s|m|h,
+  // additive, any order: "90s", "30m", "24h", "2h30m".
+  "autoCleanupInterval": "24h",
   "deduplicationEnabled": true,
   "deduplicationSimilarityThreshold": 0.9,
 

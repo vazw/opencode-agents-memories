@@ -31,8 +31,8 @@ fn router_with_fakes() -> (std::sync::Arc<common::fakes::FakeBackend>, axum::Rou
 async fn test_the_pinned_route_table_lists_every_upstream_endpoint() {
     assert_eq!(
         ROUTE_TABLE.len(),
-        42,
-        "the pinned table is 42 rows (issue 43 W6c adds the erasure status read)"
+        43,
+        "the pinned table is 43 rows (issue 41 adds `GET /api/cleanup/status`)"
     );
 
     let mut keys: Vec<(&str, &str)> = ROUTE_TABLE
@@ -52,8 +52,8 @@ async fn test_the_pinned_route_table_lists_every_upstream_endpoint() {
         .filter(|row| row.path.starts_with("/api/"))
         .count();
     assert_eq!(
-        api_rows, 40,
-        "33 upstream API entries + 2 session stubs + 1 port-only row + the W6.6 milestone row          + the 2 port-only rows of issues 115 (`GET /api/user-profiles`) and 116          (`GET /api/projects`) + issue 43 W6c's `GET /api/prompts/{{id}}/erasure`"
+        api_rows, 41,
+        "33 upstream API entries + 2 session stubs + 1 port-only row + the W6.6 milestone row          + the 2 port-only rows of issues 115 (`GET /api/user-profiles`) and 116          (`GET /api/projects`) + issue 43 W6c's `GET /api/prompts/{{id}}/erasure`          + issue 41's `GET /api/cleanup/status`"
     );
 
     let catalog_rows = ROUTE_TABLE
@@ -81,6 +81,7 @@ async fn test_the_pinned_route_table_lists_every_upstream_endpoint() {
         stub_rows,
         vec![
             ("POST", "/api/cleanup"),
+            ("GET", "/api/cleanup/status"),
             ("POST", "/api/deduplicate"),
             ("GET", "/api/projects/{project_id}/sessions"),
             ("DELETE", "/api/projects/{project_id}/sessions/{session_id}"),

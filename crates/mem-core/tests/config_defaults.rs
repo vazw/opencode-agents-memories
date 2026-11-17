@@ -8,7 +8,7 @@ use std::path::Path;
 use mem_core::config::{
     AutoCaptureProviderSettings, Config, ConfigPaths, DEFAULT_INJECTION_MARKERS,
     get_auto_capture_provider_status, normalize_auto_capture_max_context_bytes,
-    normalize_auto_cleanup_retention_days,
+    normalize_auto_cleanup_interval, normalize_auto_cleanup_retention_days,
 };
 use mem_core::config::{EmbeddingPooling, InjectOn, MemoryDefaultScope};
 use mem_core::error::ConfigError;
@@ -155,7 +155,9 @@ fn test_boolean_toggle_defaults() {
     assert!(config.auto_capture_enabled);
     assert!(config.inject_profile);
     assert!(config.web_server_enabled);
-    assert!(config.auto_cleanup_enabled);
+    // Issue 41: a boot-time trigger on an unattended host would delete idle
+    // memories with no user action, so the automatic sweep ships opt-in.
+    assert!(!config.auto_cleanup_enabled);
     assert!(config.deduplication_enabled);
 }
 
@@ -324,4 +326,85 @@ fn test_config_paths_project_files_extend_global_files() {
     // Both extension files keep the parsed-wins candidate order.
     let second = project.join(".opencode").join("opencode-mem.json");
     assert_eq!(extended.project_files.get(1).unwrap(), &second);
+}
+
+#[test]
+fn test_auto_cleanup_interval_defaults_to_24h() {
+    let config = default_config("defaults-cleanup-interval");
+    assert_eq!(config.auto_cleanup_interval_seconds, 86_400);
+}
+
+/// Issue 41: units are seconds/minutes/hours, additive, in any order.
+/// `"2h30m"` must be 9000 — a sum that ignores the unit answers 32.
+#[test]
+fn test_auto_cleanup_interval_grammar() {
+    for (raw, expected) in [
+        ("90s", 90u64),
+        ("30m", 1800),
+        ("1h", 3600),
+        ("2h30m", 9000),
+        ("24h", 86_400),
+        ("1s", 1),
+        ("30m2h", 9000),
+    ] {
+        assert_eq!(
+            normalize_auto_cleanup_interval(raw).expect("a well-formed duration"),
+            expected,
+            "{raw}"
+        );
+    }
+}
+
+/// Issue 41: the whole string must be consumed and each unit may appear once.
+#[test]
+fn test_auto_cleanup_interval_rejects_unknown_grammar() {
+    for raw in [
+        "",
+        "1",
+        "h",
+        "1x",
+        "1H",
+        "1d",
+        " 1h",
+        "1h ",
+        "1.5h",
+        "-1h",
+        "1h30",
+        "1h 30m",
+        "0s",
+        "0h0m",
+        "1h1h",
+        "99999999999999999999s",
+    ] {
+        assert!(
+            normalize_auto_cleanup_interval(raw).is_err(),
+            "{raw:?} must be rejected"
+        );
+    }
+}
+
+#[test]
+fn test_auto_cleanup_interval_error_names_the_key() {
+    let error = normalize_auto_cleanup_interval("1x").expect_err("1x must be rejected");
+    let ConfigError::InvalidValue { key, value } = &error else {
+        panic!("expected InvalidValue, got: {error:?}")
+    };
+    assert_eq!(*key, "autoCleanupInterval");
+    assert_eq!(value, "1x");
+    assert!(error.to_string().contains("autoCleanupInterval"));
+}
+
+/// Campaign policy keys stay global: a project file cannot shorten the interval.
+#[test]
+fn test_project_config_cannot_set_auto_cleanup_interval() {
+    let home = common::unique_temp_dir("defaults-cleanup-interval-project");
+    let project = common::unique_temp_dir("defaults-cleanup-interval-project-cfg");
+    common::write_file(
+        &project,
+        ".opencode/opencode-mem.jsonc",
+        "{\"autoCleanupInterval\": \"2h\"}",
+    );
+    let paths = ConfigPaths::for_project(&project, home);
+    let config = Config::load(&paths, &Env::new()).expect("the project file is droppable");
+    assert_eq!(config.auto_cleanup_interval_seconds, 86_400);
 }

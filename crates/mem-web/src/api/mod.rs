@@ -1,11 +1,11 @@
 //! The REST surface: the pinned route table and the router that registers it.
 //!
 //! Upstream `web-server.ts` dispatches 33 API method+path entries; the pinned
-//! table holds **41 rows** (39 of them `/api/*`, 2 OpenCode catalog paths).
+//! table holds **43 rows** (41 of them `/api/*`, 2 OpenCode catalog paths).
 //! `/api/health` is row 1 and is registered by
-//! [`crate::server::build_router`] (W6.1 shipped it); [`api_router`] makes 33
+//! [`crate::server::build_router`] (W6.1 shipped it); [`api_router`] makes 35
 //! `.route(…)` calls in this file (`grep -c '^\s*\.route('
-//! crates/mem-web/src/api/mod.rs` = 33), plus the two route-layer `DELETE`
+//! crates/mem-web/src/api/mod.rs` = 35), plus the two route-layer `DELETE`
 //! branches on the static `bulk-delete` paths (upstream's `"Invalid ID"`
 //! branch — see the static-shadowing note below).
 //!
@@ -26,6 +26,7 @@
 // would obscure that seam for no runtime gain.
 #![allow(clippy::result_large_err)]
 
+pub mod cleanup_sweep;
 pub mod client;
 pub mod deduplication;
 pub mod dto;
@@ -88,11 +89,11 @@ pub struct RouteSpec {
     pub expectation: RouteExpectation,
 }
 
-/// The pinned REST surface (41 rows): upstream's rows plus the port's own
+/// The pinned REST surface (43 rows): upstream's rows plus the port's own
 /// additions.
 ///
 /// Both the contract test and the auth walk iterate this constant.
-pub const ROUTE_TABLE: [RouteSpec; 42] = [
+pub const ROUTE_TABLE: [RouteSpec; 43] = [
     RouteSpec {
         method: "GET",
         path: "/api/health",
@@ -182,6 +183,15 @@ pub const ROUTE_TABLE: [RouteSpec; 42] = [
         path: "/api/cleanup",
         upstream_line: ":596",
         module: "api/maintenance.rs",
+        expectation: RouteExpectation::Stub,
+    },
+    RouteSpec {
+        method: "GET",
+        path: "/api/cleanup/status",
+        upstream_line: "(port-only, issue 41)",
+        module: "api/maintenance.rs",
+        // Real handler; the contract fixture's port is `Unavailable`, so the
+        // documented answer in that wiring is the 501.
         expectation: RouteExpectation::Stub,
     },
     RouteSpec {
@@ -433,6 +443,7 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/api/memories/{id}/pin", post(memories::pin_memory))
         .route("/api/memories/{id}/unpin", post(memories::unpin_memory))
         .route("/api/cleanup", post(maintenance::cleanup))
+        .route("/api/cleanup/status", get(maintenance::cleanup_status))
         .route("/api/deduplicate", post(maintenance::deduplicate))
         .route("/api/migration/detect", get(maintenance::detect_migration))
         .route(

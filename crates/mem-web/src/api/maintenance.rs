@@ -39,8 +39,8 @@ use axum::response::Response;
 use serde::Deserialize;
 
 use super::dto::{
-    CleanupDto, DedupDto, MigrationDetectDto, MigrationRunDto, TagMigrationBatchDto,
-    TagMigrationDetectDto, TagMigrationProgressDto,
+    CleanupDto, CleanupStatusDto, DedupDto, MigrationDetectDto, MigrationRunDto,
+    TagMigrationBatchDto, TagMigrationDetectDto, TagMigrationProgressDto,
 };
 use super::envelope;
 use super::ports::PortError;
@@ -236,6 +236,14 @@ pub async fn cleanup(State(state): State<Arc<AppState>>) -> Response {
     match state.api.maintenance.cleanup().await {
         Ok(report) => envelope::ok(&CleanupDto::from(report)),
         Err(error) => maintenance_failure("POST /api/cleanup", error),
+    }
+}
+
+/// `GET /api/cleanup/status` — the automatic sweep's four facts (issue 41).
+pub async fn cleanup_status(State(state): State<Arc<AppState>>) -> Response {
+    match state.api.maintenance.cleanup_status().await {
+        Ok(status) => envelope::ok(&CleanupStatusDto::from(status)),
+        Err(error) => maintenance_failure("GET /api/cleanup/status", error),
     }
 }
 

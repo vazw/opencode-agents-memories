@@ -9,8 +9,9 @@ pub use normalize::{
     DEFAULT_INJECTION_MARKERS, OPENCODE_TIMEOUT_MS_DEFAULT, OPENCODE_TIMEOUT_MS_MAX,
     OPENCODE_TIMEOUT_MS_MIN, OPENCODE_TIMEOUT_OUTER_MARGIN_MS, QWEN3_EMBEDDING_QUERY_PREFIX,
     embedding_dimensions_for_model, embedding_model_preset, expand_path,
-    normalize_auto_capture_max_context_bytes, normalize_auto_cleanup_retention_days,
-    normalize_embedding_dimensions, normalize_embedding_dtype, normalize_embedding_max_tokens,
+    normalize_auto_capture_max_context_bytes, normalize_auto_cleanup_interval,
+    normalize_auto_cleanup_retention_days, normalize_embedding_dimensions,
+    normalize_embedding_dtype, normalize_embedding_max_tokens,
     normalize_episodic_consolidation_age_days, normalize_injection_markers,
     normalize_memory_temperature, normalize_opencode_base_url, normalize_opencode_timeout_ms,
     normalize_opencode_variant, normalize_ttl_fallback_days,
@@ -173,7 +174,11 @@ const GLOBAL_ONLY_REMOTE_PROVIDER_FIELDS: [&str; 5] = [
 
 /// Campaign-level policy keys project files may carry but whose values
 /// never take effect — cleanup stays a global/defaults decision.
-const PROJECT_DROPPED_FIELDS: [&str; 2] = ["autoCleanupEnabled", "autoCleanupRetentionDays"];
+const PROJECT_DROPPED_FIELDS: [&str; 3] = [
+    "autoCleanupEnabled",
+    "autoCleanupRetentionDays",
+    "autoCleanupInterval",
+];
 
 // -------------------------------------------------------------------------
 // Build + load API
@@ -498,6 +503,11 @@ impl Config {
             auto_cleanup_retention_days: normalize_auto_cleanup_retention_days(
                 file.auto_cleanup_retention_days
                     .unwrap_or(DEFAULTS.auto_cleanup_retention_days),
+            )?,
+            auto_cleanup_interval_seconds: normalize_auto_cleanup_interval(
+                file.auto_cleanup_interval
+                    .as_deref()
+                    .unwrap_or(DEFAULTS.auto_cleanup_interval),
             )?,
             deduplication_enabled: file
                 .deduplication_enabled

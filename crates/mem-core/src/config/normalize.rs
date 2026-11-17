@@ -137,6 +137,55 @@ pub fn normalize_auto_cleanup_retention_days(value: f64) -> Result<u32, ConfigEr
     }
 }
 
+/// `autoCleanupInterval` (issue 41): a duration string such as `"24h"`,
+/// `"30m"`, `"90s"` or `"2h30m"`, resolved to seconds.
+///
+/// Invariant: the whole string is consumed, each unit appears at most once, and
+/// the total is positive. Overflow is rejected (`checked_*`) rather than
+/// saturated — there is no arbitrary upper cap; the port saturates at `i64`.
+pub fn normalize_auto_cleanup_interval(raw: &str) -> Result<u64, ConfigError> {
+    let invalid = || ConfigError::InvalidValue {
+        key: "autoCleanupInterval",
+        value: raw.to_owned(),
+    };
+    let bytes = raw.as_bytes();
+    let mut index = 0usize;
+    let mut total: u64 = 0;
+    let mut seen: [bool; 3] = [false; 3];
+    while index < bytes.len() {
+        let digits_start = index;
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        if digits_start == index {
+            return Err(invalid());
+        }
+        let amount: u64 = raw[digits_start..index].parse().map_err(|_| invalid())?;
+        let Some(&unit) = bytes.get(index) else {
+            return Err(invalid());
+        };
+        let (slot, factor) = match unit {
+            b's' => (0usize, 1u64),
+            b'm' => (1usize, 60u64),
+            b'h' => (2usize, 3600u64),
+            _ => return Err(invalid()),
+        };
+        if seen[slot] {
+            return Err(invalid());
+        }
+        seen[slot] = true;
+        index += 1;
+        total = amount
+            .checked_mul(factor)
+            .and_then(|scaled| total.checked_add(scaled))
+            .ok_or_else(invalid)?;
+    }
+    if total == 0 {
+        return Err(invalid());
+    }
+    Ok(total)
+}
+
 /// Embedding vector dimension: integral and within `1..=65_536`.
 pub fn normalize_embedding_dimensions(value: f64) -> Result<u32, ConfigError> {
     if value.is_finite() && value.fract() == 0.0 && (1.0..=65_536.0).contains(&value) {

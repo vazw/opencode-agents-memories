@@ -38,17 +38,19 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use mem_profile::decay::sweep_is_due;
 use mem_profile::prompt::UserPromptManager;
 use mem_store::shard_manager::ShardManager;
 
+use super::cleanup_sweep::{load_stamp_fail_safe, save_stamp};
 use super::ports::{
-    CleanupReport, DedupDuplicate, DedupMemoryRef, DedupReport, MaintenancePort, MigrationReport,
-    MigrationRunReport, NearDuplicateGroup, NearDuplicateScanReport, PortError,
-    TagMigrationProgressView, TagMigrationReport,
+    CleanupReport, CleanupStatus, CleanupTick, DedupDuplicate, DedupMemoryRef, DedupReport,
+    MaintenancePort, MigrationReport, MigrationRunReport, NearDuplicateGroup,
+    NearDuplicateScanReport, PortError, TagMigrationProgressView, TagMigrationReport,
 };
 
 pub mod engine;
@@ -424,6 +426,36 @@ pub struct ProductionDeduplication {
     prompts: Option<Arc<UserPromptManager>>,
     retention_days: u32,
     cleanup_running: Arc<AtomicBool>,
+    /// `None` keeps issue 39's shape: the manual endpoint works, the automatic
+    /// tick answers `Disabled` (issue 41).
+    cleanup: Option<CleanupSweepConfig>,
+    /// The in-memory gate, seeded from the sidecar at construction: memory is
+    /// the gate, the sidecar the durability channel (D-4).
+    cleanup_last_run: Mutex<Option<i64>>,
+    /// Keeps the future-stamp warning to one line per process (C-2).
+    stamp_future_warned: AtomicBool,
+}
+
+/// The automatic cleanup surface the composition root hands the port (issue 41).
+///
+/// `enabled` is checked by `cleanup_tick` alone — `cleanup()` never reads it, so
+/// `POST /api/cleanup` keeps working on a host that opted out of the tick.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CleanupSweepConfig {
+    pub enabled: bool,
+    pub interval_seconds: u64,
+    pub sweep_path: PathBuf,
+}
+
+/// Why a sweep did not produce a report (issue 41).
+///
+/// `Busy` is typed so the tick never string-matches the manual endpoint's
+/// message (D-5); `Failed` carries the store error unchanged, so `cleanup()`'s
+/// wire answers stay byte-identical to issue 39's.
+enum CleanupRunError {
+    Busy,
+    Unavailable,
+    Failed(PortError),
 }
 
 struct CleanupRunGuard<'a> {
@@ -452,6 +484,9 @@ impl ProductionDeduplication {
             prompts: Some(prompts),
             retention_days,
             cleanup_running: Arc::new(AtomicBool::new(false)),
+            cleanup: None,
+            cleanup_last_run: Mutex::new(None),
+            stamp_future_warned: AtomicBool::new(false),
         }
     }
 
@@ -463,6 +498,9 @@ impl ProductionDeduplication {
             prompts: None,
             retention_days: 30,
             cleanup_running: Arc::new(AtomicBool::new(false)),
+            cleanup: None,
+            cleanup_last_run: Mutex::new(None),
+            stamp_future_warned: AtomicBool::new(false),
         }
     }
 
@@ -470,6 +508,98 @@ impl ProductionDeduplication {
     pub fn with_cancellation(mut self, cancel: Arc<AtomicBool>) -> Self {
         self.service = self.service.with_cancellation(cancel);
         self
+    }
+
+    /// Arms the capture-triggered cleanup tick (issue 41), seeding the in-memory
+    /// gate from the sidecar so a restart inside the interval is not due.
+    pub fn with_cleanup(mut self, cleanup: CleanupSweepConfig) -> Self {
+        self.cleanup_last_run = Mutex::new(load_stamp_fail_safe(&cleanup.sweep_path));
+        self.cleanup = Some(cleanup);
+        self
+    }
+
+    /// The one serializer for the manual endpoint and the tick (D-5).
+    fn try_acquire_cleanup(&self) -> Result<CleanupRunGuard<'_>, CleanupRunError> {
+        if self.shards.is_none() || self.prompts.is_none() {
+            return Err(CleanupRunError::Unavailable);
+        }
+        if self
+            .cleanup_running
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(CleanupRunError::Busy);
+        }
+        Ok(CleanupRunGuard {
+            running: &self.cleanup_running,
+        })
+    }
+
+    fn cleanup_gate(&self) -> Result<Option<i64>, PortError> {
+        self.cleanup_last_run
+            .lock()
+            .map(|gate| *gate)
+            .map_err(|_| PortError::Store("cleanup gate lock poisoned".to_string()))
+    }
+
+    /// One retention sweep: issue 39's `cleanup()` body, behind the typed guard
+    /// so the manual endpoint and the tick share one serializer (D-5).
+    async fn run_sweep(&self) -> Result<CleanupReport, CleanupRunError> {
+        let _guard = self.try_acquire_cleanup()?;
+        tokio::task::yield_now().await;
+        let (Some(shards), Some(prompts)) = (&self.shards, &self.prompts) else {
+            return Err(CleanupRunError::Unavailable);
+        };
+
+        let now = now_millis();
+        let retention_ms = i64::from(self.retention_days).saturating_mul(86_400_000);
+        let cutoff = now.saturating_sub(retention_ms);
+        let two_retention_ms = retention_ms.saturating_mul(2);
+
+        // Phase 1: Read expired prompt facts
+        let facts = prompts
+            .expired_prompt_facts(cutoff)
+            .await
+            .map_err(|e| CleanupRunError::Failed(PortError::Store(e.to_string())))?;
+
+        let mut grace_ids = HashSet::new();
+        for fact in facts {
+            if fact.created_at.saturating_add(two_retention_ms) > cutoff
+                && let Some(linked_id) = fact.linked_memory_id
+            {
+                grace_ids.insert(linked_id);
+            }
+        }
+
+        // Phase 2: Sweep per shard
+        let sweep_outcome = shards
+            .run_retention_sweep(cutoff, retention_ms, two_retention_ms, &grace_ids)
+            .await
+            .map_err(|e| CleanupRunError::Failed(PortError::Store(e.message())))?;
+
+        // Phase 3: Erase + delete prompts + clear dangling links
+        let prompts_deleted = prompts
+            .delete_expired_prompts(cutoff)
+            .await
+            .map_err(|e| CleanupRunError::Failed(PortError::Store(e.to_string())))?;
+
+        let _links_cleared = prompts
+            .clear_links(&sweep_outcome.deleted_ids)
+            .await
+            .map_err(|e| CleanupRunError::Failed(PortError::Store(e.to_string())))?;
+
+        // Phase 4: Best-effort VACUUM
+        if let Err(e) = prompts.vacuum().await {
+            tracing::warn!(error = %e, "cleanup: vacuum skipped (DB busy)");
+        }
+
+        Ok(CleanupReport {
+            deleted_count: sweep_outcome.deleted_count,
+            user_count: sweep_outcome.user_count,
+            project_count: sweep_outcome.project_count,
+            prompts_deleted,
+            protected_memories_skipped: sweep_outcome.protected_memories_skipped,
+        })
     }
 }
 
@@ -515,72 +645,81 @@ impl MaintenancePort for ProductionDeduplication {
     }
 
     async fn cleanup(&self) -> Result<CleanupReport, PortError> {
-        let (shards, prompts) = match (&self.shards, &self.prompts) {
-            (Some(s), Some(p)) => (s, p),
-            _ => return Err(PortError::Unavailable),
-        };
-
-        if self
-            .cleanup_running
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return Err(PortError::Invalid("cleanup is already running".to_string()));
-        }
-        let _guard = CleanupRunGuard {
-            running: &self.cleanup_running,
-        };
-        tokio::task::yield_now().await;
-
-        let now = now_millis();
-        let retention_ms = i64::from(self.retention_days).saturating_mul(86_400_000);
-        let cutoff = now.saturating_sub(retention_ms);
-        let two_retention_ms = retention_ms.saturating_mul(2);
-
-        // Phase 1: Read expired prompt facts
-        let facts = prompts
-            .expired_prompt_facts(cutoff)
-            .await
-            .map_err(|e| PortError::Store(e.to_string()))?;
-
-        let mut grace_ids = HashSet::new();
-        for fact in facts {
-            if fact.created_at.saturating_add(two_retention_ms) > cutoff
-                && let Some(linked_id) = fact.linked_memory_id
-            {
-                grace_ids.insert(linked_id);
-            }
-        }
-
-        // Phase 2: Sweep per shard
-        let sweep_outcome = shards
-            .run_retention_sweep(cutoff, retention_ms, two_retention_ms, &grace_ids)
-            .await
-            .map_err(|e| PortError::Store(e.message()))?;
-
-        // Phase 3: Erase + delete prompts + clear dangling links
-        let prompts_deleted = prompts
-            .delete_expired_prompts(cutoff)
-            .await
-            .map_err(|e| PortError::Store(e.to_string()))?;
-
-        let _links_cleared = prompts
-            .clear_links(&sweep_outcome.deleted_ids)
-            .await
-            .map_err(|e| PortError::Store(e.to_string()))?;
-
-        // Phase 4: Best-effort VACUUM
-        if let Err(e) = prompts.vacuum().await {
-            tracing::warn!(error = %e, "cleanup: vacuum skipped (DB busy)");
-        }
-
-        Ok(CleanupReport {
-            deleted_count: sweep_outcome.deleted_count,
-            user_count: sweep_outcome.user_count,
-            project_count: sweep_outcome.project_count,
-            prompts_deleted,
-            protected_memories_skipped: sweep_outcome.protected_memories_skipped,
+        self.run_sweep().await.map_err(|error| match error {
+            CleanupRunError::Busy => PortError::Invalid("cleanup is already running".to_string()),
+            CleanupRunError::Unavailable => PortError::Unavailable,
+            CleanupRunError::Failed(error) => error,
         })
+    }
+
+    async fn cleanup_status(&self) -> Result<CleanupStatus, PortError> {
+        let Some(config) = &self.cleanup else {
+            return Err(PortError::Unavailable);
+        };
+        Ok(CleanupStatus {
+            enabled: config.enabled,
+            interval_seconds: config.interval_seconds,
+            last_run_ms: self.cleanup_gate()?,
+            running: self.cleanup_running.load(Ordering::Acquire),
+        })
+    }
+
+    async fn cleanup_tick(&self, now: i64) -> Result<CleanupTick, PortError> {
+        let Some(config) = &self.cleanup else {
+            return Ok(CleanupTick::Disabled);
+        };
+        // The switch is read HERE and nowhere else: `cleanup()` never consults
+        // it, so `POST /api/cleanup` stays live on a host that opted out.
+        if !config.enabled {
+            return Ok(CleanupTick::Disabled);
+        }
+
+        let interval_millis = i64::try_from(config.interval_seconds)
+            .unwrap_or(i64::MAX)
+            .saturating_mul(1000);
+        let due = match self.cleanup_gate()? {
+            // A stamp in the future is corrupt evidence, and corrupt evidence is
+            // due (C-2); `sweep_is_due` alone would disable cleanup forever.
+            Some(stamp) if stamp > now => {
+                if !self.stamp_future_warned.swap(true, Ordering::Relaxed) {
+                    tracing::warn!(
+                        target: "cleanup",
+                        "cleanup.stamp_future: the sweep stamp is in the future; treating it as due"
+                    );
+                }
+                true
+            }
+            last => sweep_is_due(last, now, interval_millis),
+        };
+        if !due {
+            return Ok(CleanupTick::NotDue);
+        }
+
+        match self.run_sweep().await {
+            Ok(report) => {
+                // The stamp is written only after a COMPLETE successful sweep,
+                // so a failed run stays retryable.
+                {
+                    let mut gate = self
+                        .cleanup_last_run
+                        .lock()
+                        .map_err(|_| PortError::Store("cleanup gate lock poisoned".to_string()))?;
+                    *gate = Some(now);
+                }
+                if let Err(error) = save_stamp(&config.sweep_path, now) {
+                    tracing::warn!(
+                        target: "cleanup",
+                        path = %config.sweep_path.display(),
+                        error = %error,
+                        "cleanup.stamp_write_failed: the sweep ran but its stamp could not be persisted"
+                    );
+                }
+                Ok(CleanupTick::Ran(report))
+            }
+            Err(CleanupRunError::Busy) => Ok(CleanupTick::Busy),
+            Err(CleanupRunError::Unavailable) => Err(PortError::Unavailable),
+            Err(CleanupRunError::Failed(error)) => Err(error),
+        }
     }
 }
 
@@ -629,6 +768,27 @@ pub fn production_deduplication_port_with_cancel(
     Arc::new(
         ProductionDeduplication::new(store, shards, prompts, retention_days, enabled, threshold)
             .with_cancellation(cancel),
+    )
+}
+
+/// [`production_deduplication_port_with_cancel`] with the automatic cleanup
+/// surface armed (issue 41): the composition root passes the resolved
+/// `autoCleanupEnabled` / `autoCleanupInterval` and the sidecar path.
+#[allow(clippy::too_many_arguments)]
+pub fn production_deduplication_port_with_cleanup(
+    shards: ShardManager,
+    prompts: Arc<UserPromptManager>,
+    retention_days: u32,
+    enabled: bool,
+    threshold: f64,
+    cleanup: CleanupSweepConfig,
+    cancel: Arc<AtomicBool>,
+) -> Arc<dyn MaintenancePort> {
+    let store = Arc::new(store::ShardDedupStore::new(shards.clone()));
+    Arc::new(
+        ProductionDeduplication::new(store, shards, prompts, retention_days, enabled, threshold)
+            .with_cancellation(cancel)
+            .with_cleanup(cleanup),
     )
 }
 

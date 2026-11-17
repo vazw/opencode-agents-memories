@@ -44,12 +44,14 @@ use mem_skills::SkillsManager;
 use mem_store::CRATE_NAME as MEM_STORE;
 use mem_vault::CRATE_NAME as MEM_VAULT;
 use mem_web::CRATE_NAME as MEM_WEB;
-use mem_web::api::deduplication::production_deduplication_port_with_cancel;
+use mem_web::api::cleanup_sweep;
+use mem_web::api::deduplication::{CleanupSweepConfig, production_deduplication_port_with_cleanup};
 use mem_web::api::ports::ApiServices;
 use mem_web::api::store_adapter::{
     ProductionDeps, ProductionEmbed, episodic_milestone_port, episodic_session_port,
     production_skill_port,
 };
+use opencode_agents_memory::cleanup_tick::CleanupTrigger;
 use opencode_agents_memory::portability_backend::ProductionPortabilityFactory;
 #[cfg(feature = "shard-consolidation")]
 use opencode_agents_memory::shard_consolidation;
@@ -147,6 +149,10 @@ struct RootWebLauncher {
     /// directory, not the per-call session directory inject resolves; reading
     /// it inside the async launch would let the two disagree.
     cwd: PathBuf,
+    /// Issue 41: the wake the launcher's cleanup tick awaits. The engine holds
+    /// the matching [`mem_bridge::engine::CaptureHook`], so an accepted capture
+    /// is the only thing that fires it.
+    capture_signal: mem_bridge::engine::CaptureSignal,
 }
 
 impl WebLauncher for RootWebLauncher {
@@ -163,7 +169,34 @@ impl WebLauncher for RootWebLauncher {
         let dist = self.dist.clone();
         let core_config = self.config.clone();
         let cwd = self.cwd.clone();
+        let capture_signal = self.capture_signal.clone();
         Box::pin(async move {
+            // Issue 41: the maintenance port and its cleanup tick are built
+            // BEFORE the dist check — a missing dist directory or an occupied
+            // port degrades the web surface, never the automatic sweep. The one
+            // flag has three readers now: the deduplication port, the cleanup
+            // tick, and the stop closure.
+            let deduplication_cancelled = Arc::new(AtomicBool::new(false));
+            let maintenance = deps.as_ref().map(|deps| {
+                production_deduplication_port_with_cleanup(
+                    deps.shards.clone(),
+                    deps.prompts.clone(),
+                    core_config.auto_cleanup_retention_days,
+                    core_config.deduplication_enabled,
+                    core_config.deduplication_similarity_threshold,
+                    CleanupSweepConfig {
+                        enabled: core_config.auto_cleanup_enabled,
+                        interval_seconds: core_config.auto_cleanup_interval_seconds,
+                        sweep_path: cleanup_sweep::cleanup_sweep_path(&storage_root),
+                    },
+                    Arc::clone(&deduplication_cancelled),
+                )
+            });
+            if let Some(port) = &maintenance {
+                // `spawn` spawns; dropping the handle detaches the task.
+                let _tick = CleanupTrigger::new(capture_signal.clone())
+                    .spawn(Arc::clone(port), Arc::clone(&deduplication_cancelled));
+            }
             let dist_dir = match &dist {
                 ResolvedDist::Ready { dir } => dir.clone(),
                 ResolvedDist::Missing { .. } => {
@@ -202,45 +235,31 @@ impl WebLauncher for RootWebLauncher {
                     store_config,
                 )))
             };
-            // One flag, two readers: the deduplication port (a running or
-            // queued near scan returns at its next check) and the stop
-            // closure below (which sets it before stopping the server). It is
-            // declared above the `match deps` so both arms can see it; the
-            // `None` arm has no deduplication port to cancel.
-            let deduplication_cancelled = Arc::new(AtomicBool::new(false));
             let api = match deps {
                 Some(deps) => {
                     let service = EmbeddingService::new(
                         EmbeddingServiceOptions::from_config(&core_config),
                         deps.embedder.clone(),
                     );
-                    Arc::new(
-                        ApiServices::production(ProductionDeps {
-                            shards: deps.shards.clone(),
-                            prompts: deps.prompts.clone(),
-                            profile: deps.profile.clone(),
-                            embed: Arc::new(ProductionEmbed::new(Arc::new(service))),
-                        })
-                        .with_skills(skills_port)
-                        .with_sessions(episodic_session_port(deps.episodic.clone()))
-                        // W6.6: the milestone projection joins the same
-                        // `facts.db` the cross-tier task writes through;
-                        // `None` when the promotion pipeline is off.
-                        .with_milestones(episodic_milestone_port(
-                            deps.episodic.clone(),
-                            deps.facts.clone(),
-                        ))
-                        .with_maintenance(
-                            production_deduplication_port_with_cancel(
-                                deps.shards.clone(),
-                                deps.prompts.clone(),
-                                core_config.auto_cleanup_retention_days,
-                                core_config.deduplication_enabled,
-                                core_config.deduplication_similarity_threshold,
-                                Arc::clone(&deduplication_cancelled),
-                            ),
-                        ),
-                    )
+                    let builder = ApiServices::production(ProductionDeps {
+                        shards: deps.shards.clone(),
+                        prompts: deps.prompts.clone(),
+                        profile: deps.profile.clone(),
+                        embed: Arc::new(ProductionEmbed::new(Arc::new(service))),
+                    })
+                    .with_skills(skills_port)
+                    .with_sessions(episodic_session_port(deps.episodic.clone()))
+                    // W6.6: the milestone projection joins the same `facts.db`
+                    // the cross-tier task writes through; `None` when the
+                    // promotion pipeline is off.
+                    .with_milestones(episodic_milestone_port(
+                        deps.episodic.clone(),
+                        deps.facts.clone(),
+                    ));
+                    Arc::new(match maintenance.as_ref() {
+                        Some(port) => builder.with_maintenance(Arc::clone(port)),
+                        None => builder,
+                    })
                 }
                 // The documented degrade path: no composed stores means the
                 // endpoints answer `PortError::Unavailable`, exactly as before
@@ -267,6 +286,7 @@ impl WebLauncher for RootWebLauncher {
                 user_id: opencode_agents_memory::web_identity::resolve_user_id(&core_config, &cwd),
                 bind_host: host.clone(),
             };
+            let stop_signal = capture_signal.clone();
             match mem_web::server::start(&settings, state).await {
                 Ok(Some(handle)) => {
                     // `WebServerHandle::stop` is
@@ -278,9 +298,11 @@ impl WebLauncher for RootWebLauncher {
                             Box::pin(async move {
                                 // FIRST, before the server is stopped: a near
                                 // scan running or queued on the blocking pool
-                                // returns at its next check, so the graceful
-                                // drain does not wait for detached CPU work.
+                                // returns at its next check, and the cleanup
+                                // tick parks on `notified()` — the wake below
+                                // lets it observe the cancel flag and exit.
                                 deduplication_cancelled.store(true, Ordering::SeqCst);
+                                stop_signal.notify_one();
                                 let _ = handle.stop().await;
                             })
                                 as Pin<Box<dyn Future<Output = ()> + Send>>
@@ -1023,6 +1045,10 @@ fn main() {
         );
     }
 
+    // Issue 41: one `Notify`, two owners — the engine fires it after an
+    // accepted capture, the launcher's cleanup tick awaits it.
+    let capture_signal = mem_bridge::engine::CaptureSignal::new();
+
     let exit = engine_run(
         config.mode,
         config,
@@ -1032,10 +1058,12 @@ fn main() {
             config: core_config,
             log_dir,
             cwd,
+            capture_signal: capture_signal.clone(),
         }),
         // Issue 70 wave 1: the ONE portability factory the engine seam
         // consults; export/import degrade (-32001) only if it builds none.
         Some(Box::new(ProductionPortabilityFactory)),
+        Some(capture_signal.notifier()),
     );
     std::process::exit(exit);
 }

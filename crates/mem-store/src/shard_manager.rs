@@ -40,6 +40,17 @@ use crate::sqlite_files::{
     FILE_LOCK_RETRY_DELAYS_MS, rename_sqlite_database, with_sqlite_file_lock_retry,
 };
 
+/// Rows deleted per batch inside the retention sweep (issue 41).
+///
+/// A live shard can hold hundreds of idle rows and one unbounded
+/// `delete_memories` batch measured 54 ms (246 rows, release, on a live-store
+/// copy) — more than `0.10 ×` the whole 264 ms sweep. Chunking at 50 rows plus
+/// a yield keeps the longest single-poll body at a few milliseconds and changes
+/// nothing about what the sweep deletes. The per-shard `yield_now` bounds a
+/// queued capture's wait to one shard's slice **on a sweep that deletes
+/// nothing**; a shard that does delete is bounded by this chunk loop instead.
+const RETENTION_DELETE_CHUNK: usize = 50;
+
 /// Upstream `rowToShardInfo` target shape.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShardInfo {
@@ -1677,8 +1688,9 @@ impl ShardManager {
     ///
     /// Migrates each touched shard (v4 migrate-on-touch), selects candidates using
     /// [`RETENTION_CANDIDATES_SELECT`], filters in Rust (skips pinned, stamped grace,
-    /// and NULL-stamp grace via `grace_ids`), and deletes survivors in one batch
-    /// per shard before adopting the stored count into the registry.
+    /// and NULL-stamp grace via `grace_ids`), and deletes survivors in row
+    /// chunks (yielding between them, so a queued task is never held for a whole
+    /// shard's delete) before adopting the stored count into the registry.
     pub async fn run_retention_sweep(
         &self,
         cutoff: i64,
@@ -1702,6 +1714,16 @@ impl ShardManager {
         let cutoff_sub_retention = cutoff.saturating_sub(retention_ms);
 
         for shard in shards {
+            // The sweep is the longest single-poll body on the engine's `current_thread`
+            // runtime. Its awaits do not park: measured by counting probe polls that land
+            // inside the sweep window, the sweep is scheduled exactly once per explicit
+            // `yield_now` and never otherwise (36 x 100: 108 polls = 36 shard yields + 72
+            // chunk yields; 1 x 2000: 41 = 1 + 40). With no yield it holds the executor for
+            // its whole run — 2689 ms debug, 174 ms release on 36 x 100, ratio 1.0000 — and
+            // a queued capture waits all of it. This one bounds a sweep that deletes
+            // nothing (the steady state) to one shard's slice; the chunk loop below bounds
+            // a shard that does delete.
+            tokio::task::yield_now().await;
             let db = self.open_shard(&shard.db_path).await?;
             self.ensure_shard_schema(db.as_ref(), self.config.embedding_dimensions)
                 .await?;
@@ -1751,10 +1773,13 @@ impl ShardManager {
             }
 
             if !shard_to_delete.is_empty() {
-                crate::vector::delete_memories(db.as_ref(), &shard_to_delete).await?;
+                for chunk in shard_to_delete.chunks(RETENTION_DELETE_CHUNK) {
+                    crate::vector::delete_memories(db.as_ref(), chunk).await?;
+                    outcome.deleted_count += chunk.len() as u64;
+                    outcome.deleted_ids.extend_from_slice(chunk);
+                    tokio::task::yield_now().await;
+                }
                 self.adopt_stored_count(db.as_ref(), shard.id).await?;
-                outcome.deleted_count += shard_to_delete.len() as u64;
-                outcome.deleted_ids.extend(shard_to_delete);
             }
         }
 

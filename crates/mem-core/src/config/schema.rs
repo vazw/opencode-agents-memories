@@ -489,6 +489,11 @@ define_file_config! {
     pub auto_cleanup_enabled: Option<bool>,
     #[inert]
     pub auto_cleanup_retention_days: Option<f64>,
+    /// Issue 41: `autoCleanupInterval`, a duration string such as `"24h"`,
+    /// `"30m"`, `"90s"` or `"2h30m"`. Deliberately NOT `#[inert]` — the
+    /// composition root's cleanup tick reads it through
+    /// `Config::auto_cleanup_interval_seconds`.
+    pub auto_cleanup_interval: Option<String>,
     pub deduplication_enabled: Option<bool>,
     pub deduplication_similarity_threshold: Option<f64>,
     pub user_profile_analysis_interval: Option<u32>,
@@ -632,6 +637,9 @@ pub struct Defaults {
     pub max_vectors_per_shard: u32,
     pub auto_cleanup_enabled: bool,
     pub auto_cleanup_retention_days: f64,
+    /// Issue 41: default `autoCleanupInterval` (`"24h"`), normalized into
+    /// `Config::auto_cleanup_interval_seconds`.
+    pub auto_cleanup_interval: &'static str,
     pub deduplication_enabled: bool,
     pub deduplication_similarity_threshold: f64,
     pub user_profile_analysis_interval: u32,
@@ -699,8 +707,9 @@ pub static DEFAULTS: Defaults = Defaults {
     web_server_port: 4747,
     web_server_host: "127.0.0.1",
     max_vectors_per_shard: 50_000,
-    auto_cleanup_enabled: true,
+    auto_cleanup_enabled: false,
     auto_cleanup_retention_days: 30.0,
+    auto_cleanup_interval: "24h",
     deduplication_enabled: true,
     deduplication_similarity_threshold: 0.9,
     user_profile_analysis_interval: 10,
@@ -824,6 +833,8 @@ pub struct Config {
     pub max_vectors_per_shard: u32,
     pub auto_cleanup_enabled: bool,
     pub auto_cleanup_retention_days: u32,
+    /// Issue 41: `autoCleanupInterval` resolved from its duration string.
+    pub auto_cleanup_interval_seconds: u64,
     pub deduplication_enabled: bool,
     pub deduplication_similarity_threshold: f64,
 

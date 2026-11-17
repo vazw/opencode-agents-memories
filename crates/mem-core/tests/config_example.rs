@@ -81,6 +81,7 @@ struct ExampleFile {
     max_vectors_per_shard: Option<u32>,
     auto_cleanup_enabled: Option<bool>,
     auto_cleanup_retention_days: Option<f64>,
+    auto_cleanup_interval: Option<String>,
     deduplication_enabled: Option<bool>,
     deduplication_similarity_threshold: Option<f64>,
     user_profile_analysis_interval: Option<u32>,
@@ -335,8 +336,8 @@ fn test_every_shipped_key_exists_in_the_production_schema() {
     leaf_paths(&parsed, &mut Vec::new(), &mut paths);
     assert_eq!(
         paths.len(),
-        35,
-        "the example's leaf-key count changed (24 flat + 11 nested = 35) — update the census and the README table"
+        36,
+        "the example's leaf-key count changed (25 flat + 11 nested = 36) — update the census and the README table"
     );
 
     let home = common::unique_temp_dir("key-existence");

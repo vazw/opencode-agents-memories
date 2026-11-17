@@ -628,6 +628,30 @@ impl From<super::ports::CleanupReport> for CleanupDto {
     }
 }
 
+/// `GET /api/cleanup/status` data (issue 41).
+///
+/// `lastRunMs` has NO `skip_serializing_if`: an absent stamp must serialize as
+/// `null`, so a client can tell "never ran" from "this build does not say".
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupStatusDto {
+    pub enabled: bool,
+    pub interval_seconds: u64,
+    pub last_run_ms: Option<i64>,
+    pub running: bool,
+}
+
+impl From<super::ports::CleanupStatus> for CleanupStatusDto {
+    fn from(status: super::ports::CleanupStatus) -> Self {
+        Self {
+            enabled: status.enabled,
+            interval_seconds: status.interval_seconds,
+            last_run_ms: status.last_run_ms,
+            running: status.running,
+        }
+    }
+}
+
 /// `POST /api/deduplicate` data.
 ///
 /// Served whenever a `MaintenancePort` with a real `deduplicate()` is

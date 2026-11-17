@@ -343,6 +343,31 @@ pub struct CleanupReport {
     pub protected_memories_skipped: u64,
 }
 
+/// `GET /api/cleanup/status` answer (issue 41).
+///
+/// `running` is the live 'is a sweep in flight' flag, so a client can tell
+/// "nothing due" from "one is already going".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CleanupStatus {
+    pub enabled: bool,
+    pub interval_seconds: u64,
+    pub last_run_ms: Option<i64>,
+    pub running: bool,
+}
+
+/// What one capture-triggered cleanup tick did (issue 41).
+///
+/// The tick asks the port once per capture wake; `Disabled` and `NotDue` are
+/// silent, `Busy` means another sweep (manual or an earlier tick) held the
+/// guard, and `Ran` carries the report the sweep produced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CleanupTick {
+    Disabled,
+    NotDue,
+    Busy,
+    Ran(CleanupReport),
+}
+
 /// `POST /api/deduplicate` answer (upstream `IDeduplicationResult`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DedupReport {
@@ -691,6 +716,21 @@ pub trait MaintenancePort: Send + Sync {
     ) -> Result<mem_core::tags::migration::BatchOutcome, PortError>;
 
     async fn cleanup(&self) -> Result<CleanupReport, PortError> {
+        Err(PortError::Unavailable)
+    }
+
+    /// The four facts `GET /api/cleanup/status` reports (issue 41): whether the
+    /// automatic sweep is enabled, its configured interval, when it last
+    /// completed, and whether one is running right now.
+    async fn cleanup_status(&self) -> Result<CleanupStatus, PortError> {
+        Err(PortError::Unavailable)
+    }
+
+    /// One capture-triggered cleanup tick (issue 41): decide from `now_ms`
+    /// whether the configured interval has elapsed, and run exactly one sweep
+    /// if it has. `Disabled` and `NotDue` are silent; `Busy` means another
+    /// sweep already held the guard.
+    async fn cleanup_tick(&self, _now_ms: i64) -> Result<CleanupTick, PortError> {
         Err(PortError::Unavailable)
     }
 
