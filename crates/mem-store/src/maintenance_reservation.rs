@@ -297,14 +297,35 @@ fn comm_is_sshd_session(proc: &Path, pid_text: &str) -> bool {
 /// True when the task state parsed from an ALREADY-read `/proc/<pid>/status`
 /// string is `Z` (zombie).
 ///
-/// The parser anchors on the LAST `State:`-keyed line: task state is
-/// kernel-owned and not settable by any `prctl`, while the only
-/// user-controlled text in `status` is `comm` on the first `Name:` line
-/// (`PR_SET_NAME` permits an embedded `\n`). A forged `State:` line injected
-/// through `comm` therefore precedes the kernel's real one, and last-match
-/// ignores it. A zombie's descriptor table was destroyed at exit, so this is
-/// evidence it holds no descriptor — unlike the [`comm_is_sshd_session`]
-/// name heuristic.
+/// Task state is kernel-owned and not settable by any `prctl`, and a zombie's
+/// descriptor table was destroyed at exit, so this is evidence it holds no
+/// descriptor — unlike the [`comm_is_sshd_session`] name heuristic.
+///
+/// The parser anchors on the LAST `State:`-keyed line. That anchoring is
+/// structural, not a fix for an attack: the kernel emits `State:` in a fixed
+/// field order after `Name:`, and every field it renders after `State:` is
+/// kernel-formatted, so the kernel's own `State:` line is the last
+/// `State:`-keyed line in `status` whatever the `Name:` line renders as, and
+/// last-match selects the kernel's value under any rendering.
+///
+/// The forgery channel is narrower than it looks, and that is measured rather
+/// than argued: `comm` is the only user-controlled text in `status`, and
+/// `prctl(PR_SET_NAME)` does accept an embedded `\n` (any non-NUL byte,
+/// 15-byte cap), but on kernel 6.18.39_1 the kernel escapes newlines when
+/// rendering `Name:` (`seq_escape`): `PR_SET_NAME` of `"\nState:\tZ (forged)"`
+/// appears in `/proc/self/status` as one line in which the newline is the two
+/// characters backslash and `n`, and the only `State:`-keyed line is the
+/// kernel's own. No forged `State:` line is constructible there, so last-match
+/// is defence in depth, not a fix for a live hole. What would reopen it: a
+/// kernel or `/proc` renderer that emits `Name:` unescaped (`/proc/<pid>/stat`
+/// already renders `comm` raw, so escaping is per-file, not kernel-wide), or a
+/// `status` string from a non-`/proc` source. Keep the anchoring either way —
+/// it costs nothing, it is correct under any rendering, and dropping it would
+/// make this parser depend on that escaping instead, a worse dependency than
+/// the anchoring.
+///
+/// `test_status_is_zombie_parses_proc_status_state_line` pins the anchoring
+/// with a synthetic vector, so dropping it reds that test.
 #[cfg(target_os = "linux")]
 fn status_is_zombie(status: &str) -> bool {
     status
