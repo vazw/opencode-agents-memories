@@ -10,7 +10,8 @@ use web_ui::agents::{
     AGENTS_EMPTY_TESTID, AGENTS_ERROR_CLASS, AGENTS_ERROR_TESTID, AGENTS_FACT_CLASS,
     AGENTS_FACT_TESTID, AGENTS_LOADING_CLASS, AGENTS_LOADING_TESTID, AGENTS_MILESTONE_CLASS,
     AGENTS_MILESTONE_TESTID, AGENTS_NO_PROJECTS_CLASS, AGENTS_NO_PROJECTS_TESTID,
-    AGENTS_PROJECT_SELECT_CLASS, AGENTS_PROJECT_SELECT_TESTID, AGENTS_ROSTER_CLASS,
+    AGENTS_PROJECT_SELECT_CLASS, AGENTS_PROJECT_SELECT_ID, AGENTS_PROJECT_SELECT_LABEL,
+    AGENTS_PROJECT_SELECT_LABEL_CLASS, AGENTS_PROJECT_SELECT_TESTID, AGENTS_ROSTER_CLASS,
     AGENTS_ROSTER_TESTID, AGENTS_ROW_CLASS, AGENTS_ROW_TESTID, AGENTS_UNAVAILABLE_CLASS,
     AGENTS_UNAVAILABLE_MESSAGE, AGENTS_UNAVAILABLE_TESTID, AgentSummary, AgentsOutcome, AgentsView,
     ContributorDto, MilestoneDto, ProjectRow, ProjectsOutcome, ProjectsView, PromotedFactDto,
@@ -712,4 +713,23 @@ fn project(id: &str, last_activity_at: i64) -> ProjectRow {
         milestone_count: 0,
         last_activity_at,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Issue 118 wave 5 (F2): the project picker has an accessible name
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen_test]
+fn test_project_select_id_is_the_labelled_testid() {
+    // The `<label for>` and the `<select id>` are one constant, and that constant
+    // IS the live testid contract — the label cannot drift off its control. The
+    // behavioural proof is the CDP case `agents_select_has_accessible_name`.
+    // Mutant: rename AGENTS_PROJECT_SELECT_ID away from the testid contract.
+    assert_eq!(AGENTS_PROJECT_SELECT_ID, AGENTS_PROJECT_SELECT_TESTID);
+    assert_eq!(AGENTS_PROJECT_SELECT_ID, "agents-project-select");
+    assert_eq!(AGENTS_PROJECT_SELECT_LABEL, "Project");
+    assert_eq!(
+        AGENTS_PROJECT_SELECT_LABEL_CLASS,
+        "agents-project-select-label"
+    );
 }

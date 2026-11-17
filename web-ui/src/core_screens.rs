@@ -319,6 +319,26 @@ pub fn memory_preview(content: &str) -> (String, Option<String>) {
     (content[..cut].to_string(), Some(content[cut..].to_string()))
 }
 
+/// The body a card shows: the preview alone when collapsed, the WHOLE body when
+/// expanded. Never `preview` and `rest` in two elements — that split is what put
+/// the toggle inside a sentence (the details/summary pair this replaced).
+pub fn memory_body(expanded: bool, preview: &str, rest: Option<&str>) -> String {
+    if expanded {
+        format!("{preview}{}", rest.unwrap_or(""))
+    } else {
+        preview.to_string()
+    }
+}
+
+/// The toggle's label. A `'static` pair, so the CDP assertion and the view
+/// cannot drift.
+pub fn memory_toggle_label(expanded: bool) -> &'static str {
+    if expanded { "Show less" } else { "Show more" }
+}
+
+pub const MEMORY_TOGGLE_TESTID: &str = "memory-toggle";
+pub const MEMORY_TOGGLE_CLASS: &str = "memory-toggle";
+
 /// The Memories screen's fixed page size.
 ///
 /// Decided by the step-6 CDP `docHeight` measurement (MEASURED, 2026-11-06,
@@ -375,6 +395,21 @@ pub fn visible_tags(tags: &[String]) -> (&[String], usize) {
     (&tags[..shown], tags.len() - shown)
 }
 
+/// The tags a collapsed card does not render: the tail of the same slice
+/// [`visible_tags`] takes its prefix from, so the two cannot disagree.
+pub fn hidden_tags(tags: &[String]) -> &[String] {
+    &tags[visible_tags(tags).0.len()..]
+}
+
+/// The `+N more` control's text, `None` when nothing is hidden — a card with
+/// four tags must never grow a `+0 more` control.
+pub fn memory_tag_more_label(hidden: usize) -> Option<String> {
+    (hidden > 0).then(|| format!("+{hidden} more"))
+}
+
+pub const MEMORY_TAG_MORE_TESTID: &str = "memory-tag-more";
+pub const MEMORY_TAG_MORE_CLASS: &str = "memory-tag-more";
+
 /// A card's whole tag set as a JSON array (the `data-tags` attribute). Built by
 /// `serde_json`, so a tag containing `"` or `\` cannot break the attribute.
 pub fn tags_json(tags: &[String]) -> String {
@@ -395,6 +430,25 @@ pub fn range_text(page: usize, page_size: usize, total: usize) -> String {
     let start = page.max(1).saturating_sub(1).saturating_mul(page_size) + 1;
     let end = page.max(1).saturating_mul(page_size).min(total);
     format!("{start}-{end} of {total}")
+}
+
+/// One filter chip. The visible four and the revealed remainder are the same
+/// constructor, so a revealed chip cannot lack the handler or the label.
+fn tag_chip(tag: String, on_tag: Callback<String>) -> impl IntoView {
+    let label = format!("Filter by tag: {tag}");
+    let value = tag.clone();
+    view! {
+        <Button
+            appearance=ButtonAppearance::Subtle
+            size=Signal::derive(|| ButtonSize::Small)
+            button_type=ButtonType::Button
+            attr:aria-label=label
+            attr:data-testid="memory-tag-pill"
+            on_click=move |_| on_tag.run(value.clone())
+        >
+            <Tag>{tag}</Tag>
+        </Button>
+    }
 }
 
 /// One rendered memory row with its pin/unpin/delete controls.
@@ -461,11 +515,25 @@ fn memory_row(
 
     let kind = if is_prompt { "prompt" } else { "memory" };
     let data_tags = tags_json(&row.tags);
-    let (shown, hidden) = visible_tags(&row.tags);
+    let (shown, _hidden) = visible_tags(&row.tags);
     let shown: Vec<String> = shown.to_vec();
-    let more_label =
-        (hidden > 0).then(|| format!("{hidden} more tags: {}", row.tags[shown.len()..].join(", ")));
+    let revealed: Vec<String> = hidden_tags(&row.tags).to_vec();
+    let hidden_count = revealed.len();
+    let tags_open = RwSignal::new(false);
+    // Today's accessible name, preserved: the hidden tag NAMES, not just a count.
+    // `if/else`, not `.then(..).unwrap_or_default()` — the chain is
+    // clippy::obfuscated_if_else and fails Step 7's -D warnings.
+    let more_aria = if hidden_count > 0 {
+        format!("{hidden_count} more tags: {}", revealed.join(", "))
+    } else {
+        String::new()
+    };
     let (preview, rest) = memory_preview(&row.content);
+    let expanded = RwSignal::new(false);
+    let has_rest = rest.is_some();
+    let preview_body = preview.clone();
+    let rest_body = rest.clone();
+    let body = move || memory_body(expanded.get(), &preview_body, rest_body.as_deref());
 
     view! {
         <li data-testid="memory-row" data-tags=data_tags>
@@ -483,46 +551,60 @@ fn memory_row(
                         <span data-testid="memory-created">{row.created_at}</span>
                     </CardHeaderDescription>
                 </CardHeader>
-                <div class="memory-content" data-testid="memory-content">
-                    {preview}
-                </div>
-                {rest
-                    .map(|rest| {
+                <div class="memory-content" data-testid="memory-content">{body}</div>
+                {has_rest
+                    .then(move || {
                         view! {
-                            <details>
-                                <summary>"Show more"</summary>
-                                {rest}
-                            </details>
+                            <Button
+                                class=MEMORY_TOGGLE_CLASS
+                                appearance=ButtonAppearance::Subtle
+                                size=Signal::derive(|| ButtonSize::Small)
+                                button_type=ButtonType::Button
+                                attr:data-testid=MEMORY_TOGGLE_TESTID
+                                attr:aria-expanded=move || if expanded.get() { "true" } else { "false" }
+                                on_click=move |_| expanded.update(|open| *open = !*open)
+                            >
+                                {move || memory_toggle_label(expanded.get())}
+                            </Button>
                         }
                     })}
                 <div class="memory-card-tags" data-testid="memory-tags">
                     {shown
-                        .into_iter()
-                        .map(|tag| {
-                            let label = format!("Filter by tag: {tag}");
-                            let value = tag.clone();
-                            view! {
-                                <Button
-                                    appearance=ButtonAppearance::Subtle
-                                    size=Signal::derive(|| ButtonSize::Small)
-                                    button_type=ButtonType::Button
-                                    attr:aria-label=label
-                                    attr:data-testid="memory-tag-pill"
-                                    on_click=move |_| on_tag.run(value.clone())
-                                >
-                                    <Tag>{tag}</Tag>
-                                </Button>
-                            }
-                        })
+                        .iter()
+                        .map(|tag| tag_chip(tag.clone(), on_tag))
                         .collect_view()}
-                    {more_label
-                        .map(|label| {
-                            view! {
-                                <span class="memory-tag-more" aria-label=label>
-                                    {format!("+{hidden} more")}
-                                </span>
-                            }
-                        })}
+                    {move || {
+                        if !tags_open.get() {
+                            return ().into_any();
+                        }
+                        view! {
+                            <>{revealed
+                                .iter()
+                                .map(|tag| tag_chip(tag.clone(), on_tag))
+                                .collect_view()}</>
+                        }
+                            .into_any()
+                    }}
+                    {move || {
+                        if tags_open.get() || hidden_count == 0 {
+                            return ().into_any();
+                        }
+                        view! {
+                            <Button
+                                class=MEMORY_TAG_MORE_CLASS
+                                appearance=ButtonAppearance::Subtle
+                                size=Signal::derive(|| ButtonSize::Small)
+                                button_type=ButtonType::Button
+                                attr:data-testid=MEMORY_TAG_MORE_TESTID
+                                attr:aria-label=more_aria.clone()
+                                attr:aria-expanded="false"
+                                on_click=move |_| tags_open.set(true)
+                            >
+                                {memory_tag_more_label(hidden_count).unwrap_or_default()}
+                            </Button>
+                        }
+                            .into_any()
+                    }}
                 </div>
                 {(!is_prompt)
                     .then(move || {

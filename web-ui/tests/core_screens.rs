@@ -26,11 +26,12 @@ use web_ui::core_screens::{
     DailyStatsView, HealthStatus, IdentityControl, MemoriesView, MemoryPage, ProfileRosterItem,
     ProfileScreen, ProfileView, SettingsScreen, ShardStatsView, StatsView, TagsPage, TagsView,
     active_shard_count, daily_peak, delete_memory_spec, error_buckets, get_user_profile_spec,
-    get_user_profile_spec_for, health_outcome, health_spec, initial_tags, list_memories_spec,
-    list_tags_spec, list_user_profiles_spec, memories_empty_copy, memories_request, memories_view,
-    memory_preview, page_after_shrink, pin_memory_spec, profile_identity_control, profile_view,
-    range_text, search_spec, settings_view, sorted_shards, stats_spec, tags_json, tags_view,
-    unpin_memory_spec, visible_tags,
+    get_user_profile_spec_for, health_outcome, health_spec, hidden_tags, initial_tags,
+    list_memories_spec, list_tags_spec, list_user_profiles_spec, memories_empty_copy,
+    memories_request, memories_view, memory_body, memory_preview, memory_tag_more_label,
+    memory_toggle_label, page_after_shrink, pin_memory_spec, profile_identity_control,
+    profile_view, range_text, search_spec, settings_view, sorted_shards, stats_spec, tags_json,
+    tags_view, unpin_memory_spec, visible_tags,
 };
 use web_ui::paths::{ENDPOINTS, EndpointId, encode_component};
 
@@ -1544,4 +1545,63 @@ fn test_tags_link_round_trips_a_space_bearing_tag() {
         .map(|(_, q)| format!("?{q}"))
         .unwrap_or_default();
     assert_eq!(initial_tags(&search), vec![tag.to_string()]);
+}
+
+// ---------------------------------------------------------------------------
+// Issue 118 wave 5 (G1): the body is one contiguous element
+// ---------------------------------------------------------------------------
+
+#[wasm_bindgen_test]
+fn test_memory_body_is_contiguous_when_expanded() {
+    // 26 chars × 16 = 416 characters; the cut lands at 318, so rest = 98.
+    let content: String = "alpha bravo charlie delta ".repeat(16);
+    let (preview, rest) = memory_preview(&content);
+    // `as_deref`, never `Some(rest.expect(..).as_str())`: that borrows a String
+    // that dies at the end of the statement (E0716).
+    let rest = rest.as_deref();
+    assert!(rest.is_some(), "a 416-char body splits");
+    let collapsed = memory_body(false, &preview, rest);
+    let expanded = memory_body(true, &preview, rest);
+    assert_eq!(collapsed, preview, "collapsed is the preview");
+    // Second mutant hole: `collapsed` returning the whole body must die too.
+    assert!(
+        collapsed.len() < content.len(),
+        "the collapsed body is STRICTLY shorter than the content"
+    );
+    assert_eq!(
+        expanded, content,
+        "expanded is the whole body, in one piece"
+    );
+    assert!(
+        expanded.starts_with(&collapsed),
+        "expanded begins with the collapsed body"
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_memory_toggle_label_swaps() {
+    // Mutant: always "Show more" — a toggle that never names its own state.
+    assert_eq!(memory_toggle_label(false), "Show more");
+    assert_eq!(memory_toggle_label(true), "Show less");
+}
+
+#[wasm_bindgen_test]
+fn test_hidden_tags_complete_the_visible_prefix() {
+    let tags: Vec<String> = (0..5).map(|i| format!("t{i}")).collect();
+    // Mutant: re-slice from index 0 — duplicates the first four, drops the tail.
+    let (shown, more) = visible_tags(&tags);
+    assert_eq!((shown.len(), more), (4, 1));
+    let hidden = hidden_tags(&tags);
+    assert_eq!(hidden, &tags[4..], "the tail after the visible prefix");
+    let mut joined = shown.to_vec();
+    joined.extend_from_slice(hidden);
+    assert_eq!(joined, tags, "visible + hidden is the whole slice");
+}
+
+#[wasm_bindgen_test]
+fn test_memory_tag_more_label_absent_at_zero() {
+    // Mutant: `Some` unconditionally — a `+0 more` control on a four-tag card.
+    assert_eq!(memory_tag_more_label(0), None);
+    assert_eq!(memory_tag_more_label(1).as_deref(), Some("+1 more"));
+    assert_eq!(memory_tag_more_label(6).as_deref(), Some("+6 more"));
 }

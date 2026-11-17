@@ -597,6 +597,14 @@ pub const AGENTS_PROJECT_SELECT_TESTID: &str = "agents-project-select";
 /// The class of the project picker.
 pub const AGENTS_PROJECT_SELECT_CLASS: &str = "agents-project-select";
 
+/// The picker's id, shared by the `<select id>` and the `<label for>` so the two
+/// cannot drift. Equal to the live testid contract by construction.
+pub const AGENTS_PROJECT_SELECT_ID: &str = "agents-project-select";
+/// The picker's visible label — the word Sessions already uses for the same
+/// control (`web-ui/src/screens.rs:732-734`).
+pub const AGENTS_PROJECT_SELECT_LABEL: &str = "Project";
+pub const AGENTS_PROJECT_SELECT_LABEL_CLASS: &str = "agents-project-select-label";
+
 /// The `data-testid` of the empty-roster note.
 pub const AGENTS_NO_PROJECTS_TESTID: &str = "agents-no-projects";
 
@@ -841,8 +849,11 @@ pub fn AgentsPanel() -> impl IntoView {
                     .into_any(),
                 ProjectsView::Ready(rows) => view! {
                     <div class="agents-controls">
+                        <label class=AGENTS_PROJECT_SELECT_LABEL_CLASS for=AGENTS_PROJECT_SELECT_ID>
+                            {AGENTS_PROJECT_SELECT_LABEL}
+                        </label>
                         <select
-                            id="agents-project-select"
+                            id=AGENTS_PROJECT_SELECT_ID
                             class=AGENTS_PROJECT_SELECT_CLASS
                             data-testid=AGENTS_PROJECT_SELECT_TESTID
                             prop:value=move || selected.get().unwrap_or_default()

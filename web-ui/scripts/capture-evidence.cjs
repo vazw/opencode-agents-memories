@@ -607,7 +607,7 @@ const get = url => new Promise((resolve, reject) => http.get(url, r => { let bod
       return settled;
     };
 
-    await laneRun('pill_is_thaw_button', 'RED', 'card + filter pills', async () => {
+    await laneRun('pill_is_thaw_button', 'CONTROL', 'card + filter pills', async () => {
       // The card pills are counted on the UNFILTERED list (a filter narrows it to
       // one record, one pill); the active filter pill is counted after the click.
       await laneGoto('/project-memories', memoryReady);
@@ -629,14 +629,14 @@ const get = url => new Promise((resolve, reject) => http.get(url, r => { let bod
       return `card=${cards.count} filter=1 all thaw-button`;
     });
 
-    await laneRun('pill_no_chip_class', 'RED', 'card + filter pills', async () => {
+    await laneRun('pill_no_chip_class', 'CONTROL', 'card + filter pills', async () => {
       await openFiltered();
       const chip = await evaluate(`document.querySelectorAll('.chip').length`);
       if (chip !== 0) throw Error(`${chip} element(s) still carry class \"chip\"`);
       return 'no .chip element in the document';
     });
 
-    await laneRun('pill_no_chip_selector', 'RED', 'stylesheet text', async () => {
+    await laneRun('pill_no_chip_selector', 'CONTROL', 'stylesheet text', async () => {
       // Scope: the BUNDLE under test (`WEBUI_DIST` or the working build), so a
       // re-run against a preserved pre bundle greps THAT bundle's stylesheet
       // and not the working tree (review-1 MEDIUM: the source-scoped read
@@ -653,10 +653,12 @@ const get = url => new Promise((resolve, reject) => http.get(url, r => { let bod
       return `grep -c '\\.chip' prints 0 in ${scope}`;
     });
 
-    await laneRun('pill_has_stable_testid', 'RED', 'card + filter pills', async () => {
+    await laneRun('pill_has_stable_testid', 'CONTROL', 'card + filter pills', async () => {
       await laneGoto('/project-memories', memoryReady);
+      // Wave 5 (G2): the `+N more` control is a button too, so the FILTER-pill
+      // count must exclude it — it is a control, not a filter pill.
       const cards = await evaluate(`(() => ({
-        card: ${cardPills}.length,
+        card: document.querySelectorAll('[data-testid="memory-tags"] button:not([data-testid="memory-tag-more"])').length,
         stable: document.querySelectorAll('[data-testid="memory-tag-pill"]').length,
       }))()`);
       if (cards.card < 5) throw Error(`FIXTURE: only ${cards.card} card pills rendered`);
@@ -730,22 +732,45 @@ const get = url => new Promise((resolve, reject) => http.get(url, r => { let bod
       return `filters=0 rows=${state.rows} unfiltered requests=${unfiltered.length}`;
     });
 
-    await laneRun('pill_overflow_survives', 'CONTROL', 'six-tag record', async () => {
+    await laneRun('pill_overflow_survives', 'RED', 'six-tag record', async () => {
+      // Wave 5 (G2) inverts this contract: the overflow control is no longer an
+      // inert span but a real Button that reveals the hidden chips in place.
+      // Pre-change this row FAILS on `the overflow control is a SPAN`, post-change
+      // it must PASS — the one RED row the pre lane still expects to fail.
       await laneGoto('/project-memories', memoryReady);
-      const overflow = await evaluate(`(() => {
+      const before = await evaluate(`(() => {
         const row = [...document.querySelectorAll('[data-testid="memory-row"]')]
           .find(li => (li.getAttribute('data-tags') || '').includes('epsilon'));
         if (!row) return null;
-        const pills = row.querySelectorAll('[data-testid="memory-tags"] button').length;
-        const span = [...row.querySelectorAll('[data-testid="memory-tags"] span')]
-          .find(el => el.textContent.trim() === '+2 more');
-        return {pills, overflow: Boolean(span), overflowTag: span ? span.tagName : null};
+        const pills = row.querySelectorAll('[data-testid="memory-tag-pill"]').length;
+        const more = row.querySelector('[data-testid="memory-tag-more"]') ||
+          [...row.querySelectorAll('[data-testid="memory-tags"] span')]
+            .find(el => el.textContent.trim() === '+2 more') || null;
+        return {pills, tag: more ? more.tagName : null,
+                expanded: more ? more.getAttribute('aria-expanded') : null,
+                label: more ? more.getAttribute('aria-label') : null,
+                text: more ? more.textContent.trim() : null};
       })()`);
-      if (!overflow) throw Error('FIXTURE: the six-tag record never rendered');
-      if (overflow.pills !== 4) throw Error(`${overflow.pills} pills on the six-tag record, expected 4`);
-      if (!overflow.overflow) throw Error('the \"+2 more\" overflow label is missing');
-      if (overflow.overflowTag === 'BUTTON') throw Error('the overflow label is a button');
-      return `pills=${overflow.pills} overflow=<${overflow.overflowTag.toLowerCase()}>`;
+      if (!before) throw Error('FIXTURE: the six-tag record never rendered');
+      if (before.pills !== 4) throw Error(`${before.pills} filter pills on the six-tag record, expected 4`);
+      if (!before.tag) throw Error('the "+2 more" overflow control is missing');
+      if (before.tag !== 'BUTTON') throw Error(`the overflow control is a ${before.tag}, not a BUTTON`);
+      if (before.expanded !== 'false') throw Error(`the overflow aria-expanded is ${JSON.stringify(before.expanded)}, not "false"`);
+      if (before.label !== '2 more tags: epsilon, zeta') throw Error(`the overflow aria-label is ${JSON.stringify(before.label)}`);
+      if (before.text !== '+2 more') throw Error(`the overflow text is ${JSON.stringify(before.text)}`);
+      await clickAt('[data-testid="memory-tag-more"]');
+      const after = await waitFor(`(() => {
+        const row = [...document.querySelectorAll('[data-testid="memory-row"]')]
+          .find(li => (li.getAttribute('data-tags') || '').includes('epsilon'));
+        if (!row) return null;
+        const more = row.querySelectorAll('[data-testid="memory-tag-more"]').length;
+        const pills = [...row.querySelectorAll('[data-testid="memory-tag-pill"]')];
+        return (more === 0 && pills.length === 6)
+          ? {more, pills: pills.length, last: pills.at(-1).getAttribute('aria-label')} : null;
+      })()`, 3000);
+      if (!after) throw Error('FIXTURE: the one-way reveal never settled');
+      if (after.last !== 'Filter by tag: zeta') throw Error(`the revealed last chip is ${JSON.stringify(after.last)}`);
+      return `pills=${before.pills}->${after.pills} more=BUTTON then removed, last="Filter by tag: zeta"`;
     });
 
     await laneRun('pill_keyboard_activation', 'CONTROL', 'Enter on the focused rust pill', async () => {

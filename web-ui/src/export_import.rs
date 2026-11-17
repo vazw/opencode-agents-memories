@@ -180,16 +180,34 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
+/// Whether the file falls short of what the store reported. Derived from the two
+/// counts, never set by a branch: the ceiling, a mid-walk error and a page-1
+/// failure all land here. `None` is "no page ever arrived" — unknown, and
+/// therefore short.
+pub fn export_truncated(exportable: usize, total: Option<usize>) -> bool {
+    match total {
+        None => true,
+        Some(total) => exportable < total,
+    }
+}
+
 /// The export preview line.
 ///
-/// The walk pages up to 25×200 memories, so a count rendered before the walk
-/// settles is a lie that also enables the Download button (U7): an early click
-/// exported an almost-empty file.
-pub fn export_preview_text(loaded: bool, count: usize) -> String {
-    if loaded {
-        format!("memories: {count}")
-    } else {
-        "Loading export…".to_string()
+/// The walk follows the server's own page count up to the named work ceiling
+/// [`EXPORT_MAX_PAGES`], so a count rendered before the walk settles is a lie
+/// that also enables the Download button (U7): an early click exported an
+/// almost-empty file. The count is the document's own row count
+/// ([`exportable_memories`] over the same slice), so it can never disagree with
+/// the file; when the file is short of the store total, the line says so.
+/// `None` is stated explicitly, never left to fall through to the bare count.
+pub fn export_preview_text(loaded: bool, count: usize, total: Option<usize>) -> String {
+    if !loaded {
+        return "Loading export…".to_string();
+    }
+    match total {
+        None => format!("memories: {count} — store total unavailable; export may be incomplete"),
+        Some(total) if count < total => format!("memories: {count} of {total} — export limited"),
+        Some(_) => format!("memories: {count}"),
     }
 }
 
@@ -211,6 +229,16 @@ pub fn export_pages_spec(page: usize, page_size: usize) -> RequestSpec {
         .with_query("includePrompts", "false")
 }
 
+/// The export walk's page size. 200 is the server's own ceiling
+/// (`crates/mem-web/src/api/mod.rs:550` refuses a larger `pageSize`).
+pub const EXPORT_PAGE_SIZE: usize = 200;
+
+/// The walk's work ceiling: 250 pages × 200 rows = 50 000 rows. A bound on work
+/// and heap, never a correctness rule — when it binds, the preview says so.
+/// INFERRED at ≈8× the derived 32-page store; raise it with a measurement,
+/// never by deleting the disclosure.
+pub const EXPORT_MAX_PAGES: usize = 250;
+
 pub fn should_continue(page: usize, page_size: usize, received: usize, total_pages: usize) -> bool {
     if received < page_size {
         return false;
@@ -218,7 +246,7 @@ pub fn should_continue(page: usize, page_size: usize, received: usize, total_pag
     if page >= total_pages {
         return false;
     }
-    if page >= 25 {
+    if page >= EXPORT_MAX_PAGES {
         return false;
     }
     true
@@ -348,7 +376,7 @@ pub fn ExportImportPanel() -> impl IntoView {
         memory_tag_total: 0,
     });
     let profile = RwSignal::new(None::<ProfileView>);
-    let truncated = RwSignal::new(false);
+    let total = RwSignal::new(None::<usize>);
     // U7: `loaded` is derived from three settled tasks; the generation counter
     // keeps a superseded reload from publishing a half-filled export.
     let settled = RwSignal::new(0u8);
@@ -370,37 +398,33 @@ pub fn ExportImportPanel() -> impl IntoView {
             leptos::task::spawn_local(async move {
                 let mut all: Vec<MemoryItem> = Vec::new();
                 let mut page = 1usize;
-                let page_size = 200usize;
-                let mut trunc = false;
+                let mut store_total: Option<usize> = None;
                 loop {
-                    let spec = export_pages_spec(page, page_size);
+                    let spec = export_pages_spec(page, EXPORT_PAGE_SIZE);
                     match api_request::request::<MemoryPage>(&spec, &auth_m).await {
                         Ok(p) => {
-                            all.extend(p.items.clone());
+                            let received = p.items.len();
+                            store_total = Some(p.total);
+                            all.extend(p.items);
                             if !should_continue(
                                 page,
-                                page_size,
-                                p.items.len(),
+                                EXPORT_PAGE_SIZE,
+                                received,
                                 p.total_pages.max(1),
                             ) {
-                                if page >= 25 {
-                                    trunc = true;
-                                }
                                 break;
                             }
                             page += 1;
-                            if page > 25 {
-                                trunc = true;
-                                break;
-                            }
                         }
                         Err(_) => break,
                     }
                 }
-                memories.set(all);
-                truncated.set(trunc);
+                // Publish inside the generation guard: a superseded walk must not
+                // overwrite a newer walk's rows while the newer one's count stands.
                 // Exactly once per task, on every exit path.
                 if generation.get_untracked() == generation_now {
+                    memories.set(all);
+                    total.set(store_total);
                     settled.update(|count| *count += 1);
                 }
             });
@@ -433,11 +457,12 @@ pub fn ExportImportPanel() -> impl IntoView {
         let mems = memories.get_untracked();
         let tgs = tags.get_untracked();
         let prof = profile.get_untracked();
+        let truncated = export_truncated(exportable_memories(&mems).len(), total.get_untracked());
         let input = ExportInputs {
             memories: &mems,
             tags: &tgs,
             profile: prof.as_ref(),
-            truncated: truncated.get_untracked(),
+            truncated,
         };
         let exported_at = export_stamp_now();
         let doc = export_document(&input, &exported_at);
@@ -495,10 +520,11 @@ pub fn ExportImportPanel() -> impl IntoView {
     view! {
         <section class="export-import-panel" data-testid="export-import-panel">
             <h2>"Export / Import"</h2>
-            <div class="export-preview" data-testid="export-preview">
+            <div class="export-preview" data-testid="export-preview" role="status">
                 {move || export_preview_text(
                     loaded.get(),
                     exportable_memories(&memories.get()).len(),
+                    total.get(),
                 )}
             </div>
             <Button
