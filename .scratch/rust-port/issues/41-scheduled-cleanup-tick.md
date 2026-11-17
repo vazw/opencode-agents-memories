@@ -1,6 +1,6 @@
 # 41 — W8.3 · Scheduled retention cleanup (capture-triggered tick)
 
-Status: ready-for-agent — 2026-11-18. All open decisions settled in the grill of 2026-11-18 (below); endpoint `GET /api/cleanup/status` ships here, the Settings row that renders it is issue 141.
+Status: done — 2026-11-18 (commit `abf2bce`) — capture-triggered retention tick and `GET /api/cleanup/status` shipped; the Settings row that renders the status is issue 141.
 
 ## What to build
 
@@ -36,15 +36,15 @@ Upstream (`example/opencode-mem/src/services/cleanup-service.ts`) consults `shou
 
 ## Acceptance criteria
 
-- [ ] `DEFAULTS.auto_cleanup_enabled` is `false`, the shipped `opencode-mem.example.jsonc` shows `autoCleanupEnabled: false`, and `crates/mem-core/tests/config_defaults.rs` asserts it. The divergence from upstream's `true` is recorded with its reason.
-- [ ] `autoCleanupInterval` accepts `"90s"`, `"30m"`, `"1h"`, `"2h30m"` and converts to the correct second count; any other string fails the load with `InvalidValue { key: "autoCleanupInterval" }`; a project config file cannot set it; the key appears in the shipped example and its mirror.
-- [ ] With cleanup enabled and the stamp due, a **successful `capture` request** leads to exactly one cleanup run; a second capture inside the interval leads to none. With cleanup disabled, no capture ever triggers a run — while `POST /api/cleanup` still runs.
-- [ ] Restart inside the interval produces no run; a restart after the interval produces exactly one. A missing or corrupt `cleanup-sweep.json` is treated as due.
-- [ ] A capture-triggered run colliding with a manual `POST /api/cleanup` results in exactly one execution and an observable skip for the other.
-- [ ] A failing tick emits exactly one `cleanup.tick_failed` line, never aborts the engine, and leaves the stamp retryable on the next due check.
-- [ ] **Capture latency is measured both ways and gated**: the blueprint and the evidence README carry before/after capture-response latency with cleanup due versus not due, produced by a named instrument (a scripted capture burst over the stdio protocol, not an estimate). A regression is a defect, not a note.
-- [ ] `GET /api/cleanup/status` returns `{enabled, intervalSeconds, lastRunMs|null, running}`, is token-gated like every other `/api` route, and has a contract test in the Rust suite. No UI change in this issue.
-- [ ] No new dependencies; production panic-free (no `unwrap`/`expect`); issue 39's suite stays green; targeted test runs only.
+- [x] `DEFAULTS.auto_cleanup_enabled` is `false`, the shipped `opencode-mem.example.jsonc` shows `autoCleanupEnabled: false`, and `crates/mem-core/tests/config_defaults.rs` asserts it. The divergence from upstream's `true` is recorded with its reason.
+- [x] `autoCleanupInterval` accepts `"90s"`, `"30m"`, `"1h"`, `"2h30m"` and converts to the correct second count; any other string fails the load with `InvalidValue { key: "autoCleanupInterval" }`; a project config file cannot set it; the key appears in the shipped example and its mirror.
+- [x] With cleanup enabled and the stamp due, a **successful `capture` request** leads to exactly one cleanup run; a second capture inside the interval leads to none. With cleanup disabled, no capture ever triggers a run — while `POST /api/cleanup` still runs.
+- [x] Restart inside the interval produces no run; a restart after the interval produces exactly one. A missing or corrupt `cleanup-sweep.json` is treated as due.
+- [x] A capture-triggered run colliding with a manual `POST /api/cleanup` results in exactly one execution and an observable skip for the other.
+- [x] A failing tick emits exactly one `cleanup.tick_failed` line, never aborts the engine, and leaves the stamp retryable on the next due check.
+- [x] **Capture latency is measured both ways and gated**: the blueprint and the evidence README carry before/after capture-response latency with cleanup due versus not due, produced by a named instrument (a scripted capture burst over the stdio protocol, not an estimate). A regression is a defect, not a note.
+- [x] `GET /api/cleanup/status` returns `{enabled, intervalSeconds, lastRunMs|null, running}`, is token-gated like every other `/api` route, and has a contract test in the Rust suite. No UI change in this issue.
+- [x] No new dependencies; production panic-free (no `unwrap`/`expect`); issue 39's suite stays green; targeted test runs only.
 
 ## Blocked by
 
@@ -59,3 +59,13 @@ Nothing. Issue 39 is done; 43 is closed. The Settings row that consumes the stat
 - **2026-10-27 — re-verified at `8023dd8`.** The 501 was real (`maintenance.rs:235`), the port default `Err(PortError::Unavailable)`. This file's own config claim was falsified in three places: `auto_cleanup_enabled` defaults to `true`, not `false`.
 
 - **2026-11-18 — grilled to closure (owner, one question at a time).** Ten decisions settled, listed above. Two facts reshaped the design: upstream's trigger is the session-idle event, which our capture path **already carries** (`plugin.js:1463` → `engine.rs:350`), so no scheduler or endpoint is needed; and `updated_at < cutoff` means the sweep deletes *idle* memories, so a boot-time trigger on an untouched config would delete without any user action. The default therefore flips, and the trigger becomes activity-bound. Owner additionally asked for the status value to be *used*, which is why the endpoint ships here and 141 renders it.
+
+- **2026-11-18 — CLOSED at `abf2bce`.** Blueprint `20261117-1926-cleanup-tick-r6` (`sha256=2206bf07c276`), SYS-APPROVED 2026-11-17T19:30Z after six gate rounds. Evidence: `docs/evidence/issue-41-cleanup-tick/README.md`. Five review rounds and five reworks, all of them about the instrument rather than the behaviour: review 2 said the code was sound and rejected on evidence, and reviews 3–5 rejected gate integrity and prose while every rework left production code untouched.
+
+  **The final instrument.** The sweep yields once per shard and once per delete chunk, and both are pinned by **poll counts**, not wall clock: `test_a_sweep_with_nothing_to_delete_still_yields_once_per_shard` (`polls_in_sweep` 36 → 0 on the no-delete path) and `test_a_sweep_that_deletes_polls_once_per_shard_and_chunk` (`polls_in_sweep=1 < 2` when the chunk yield goes). The two guards are independent — each reds only its own shape. `GAP_RATIO` and `GAP_CEILING_MS` survive as printed evidence only, labelled `evidence(not asserted)` in the test's own output, because a wall-clock bound here measures CPU work rather than scheduling: correct code reads `18–97 ms` per 36-shard body with `run_delay_ms=0.00` on tmpfs, so the old ratio gate red 4 of 47 correct runs while `polls_in_sweep` stayed 108/108. The shipped gate ran **0 false reds in 76 runs at loadavg 1.02–9.16**.
+
+  A 100 ms ceiling was proposed by the debugger and **refused by the executor with a measurement** (`max_gap 185.97` at loadavg 8.67 with polls 108) — upheld independently by review 4 (`137.80 > 100` at loadavg 9.16, polls 41) and unreachable as a discriminator in any case, since no ceiling that clears correct code's `185.97` separates the release zero-yield mutant at `211.75`. It is the second time the executor disputed an unsound gate rather than following it, and both times the dispute was correct.
+
+  **Gates on the reviewer's own runs**: gap suite 6/6 both profiles with `Compiling mem-store`, `retention_sweep` 11, `cleanup_tick` 8, `cleanup_status` 6, `retention` 12, `api_endpoint_contract` 20, `api_route_auth` 8, both clippy gates 0, `fmt --all --check` 0, `cargo audit` 0 with 2 allowed, security gate clean across 10 mandates. `grep -c 'yield_now().await'` = 2, `shard_manager.rs` sha `a55cd901…`.
+
+  **Six gate-integrity failures were found and fixed across this wave**, each by measurement rather than argument: a `truncate(len-1)` that discarded the one sample spanning the sweep, letting a blocking 173 ms body pass at 0.06 ms; a pre-truncation number that withdrew a correct step; an idle-jitter threshold 0.9 ms wide that red correct code 6/6 and green the mutant; an evidence table asserting G2/G3 verdicts for runs that panicked before reaching them; three mutant attempts that measured stale binaries (`Finished in 0.15 s`, no `Compiling mem-store`) and reported false greens; and a release ratio gate that red 3 of 7 correct runs at loadavg 1.10 plus a comment number with no provenance. The stale-binary pattern is recorded as `bug-pattern` `mem_1794948258564_05df8013a`: a mutant row without a `Compiling <crate>` line is unrun.
