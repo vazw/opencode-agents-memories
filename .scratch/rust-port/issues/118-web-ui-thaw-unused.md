@@ -1,6 +1,6 @@
 # 118 — the web UI draws 1 of 58 Thaw components: a hand-rolled design system sits beside the framework
 
-Status: ready-for-human — **waves 1 (theme + shell), 2 (controls + states), 3 (the three worst
+Status: done — 2026-11-17 — **waves 1 (theme + shell), 2 (controls + states), 3 (the three worst
 screens) and the wave-4 polish sweep are built and live-verified; wave 4 merged to main at fa8d62c on
 2026-11-10 (review 4 APPROVED after reviews 1–3 caught measurable defects and hygiene gaps, each fixed
 via debugger prescription and re-verified on the rebuilt bundle; independent opsec APPROVED, 0
@@ -182,3 +182,12 @@ disclosure (`before/extra.json`) needs a separately bounded approval; the accept
 `tags_unchanged_matrix` single-Tab assertion proves less than its name claims (actual tag focus was
 established by the validation-local corrected probe; script hash `923d0558…` binds the shipped assertion).
 
+
+
+## Wave 5 and 6 outcome (closed 2026-11-17)
+
+- Wave 5 landed `70fde7e` on `origin/main`: server-truth export walk (`EXPORT_MAX_PAGES = 250`, truncation derived from counts), memory-card reading flow, reachable `+N more` tags, `/agents` picker labelled `Project`. Review chain: review-1 REJECTED on one vacuous oracle (S1, `export_truncated` `<`→`!=`), debug-1 → rework → review-2 APPROVED (kill assert `!export_truncated(6229, Some(6227))`, pristine 25/25 → mutant 24/1).
+- Wave 6 landed `d36f491` on `origin/main`: debounced search with clear affordance and reflow guard, stats card parity, errors badge + popover. Review-1 APPROVED on blueprint r7 (`77b5028db9ab`, gate round 7); 264 wasm tests, 13/13 CDP lanes fail on pristine and pass on final, census floor 191.
+- Served to the live engine (127.0.0.1:3742, pid 20227, not restarted) as the bundle wasm `web-ui-a0b6f95350a233c6`. Rollback bundle: `.tmp/backup/served-wave4-20261117T132238Z`.
+- Evidence: `docs/evidence/issue-118-wave5/README.md`, `docs/evidence/issue118-wave6/README.md`.
+- Open, non-blocking: `generated_label` byte-slices `&time[..5]`; `time.get(..5)` as follow-up. Previously disclosed residuals (skill-delete erasure disclosure approval; acceptance script single-Tab assertion) unchanged.
