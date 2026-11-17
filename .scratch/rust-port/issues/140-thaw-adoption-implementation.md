@@ -18,7 +18,9 @@ No dependency bump: the stack is frozen at Thaw 0.4.8, and `Icon` stays out beca
 
 ## Acceptance criteria
 
-- [ ] The raw-element census drops to exactly the floor the ruling names; every remaining raw element is `keep-native` or `no-equivalent`.
+- [ ] The six `replace` kinds are no longer authored in `web-ui/src`, and every remaining raw element there is `keep-native` or `no-equivalent`. Operative evidence is the walk (`/stats` contains no raw `table|thead|tbody|tr|td|progress`; `th` stays 21) plus the census reporting exactly `kinds=25 unclassified=0 stale=13 replace=6 worklist=6 violations=0 drift=13 harness=0 exit=3`, recorded in `docs/evidence/issue-140/README.md`.
+
+  **Amended 2026-11-18, gate round 1.** The original wording — "the raw-element census drops to exactly the floor the ruling names" — is unsatisfiable without editing `ruling.md`, which this issue consumes rather than regenerates. The census is a drift detector against a *dated* artifact: after a complete swap it reports the six kinds `stale` and the six worklist rows `overstated`, because `replace` counts ruling rows (`thaw-adoption-census.mjs:682`) and `kinds` counts source kinds (`:679`). Both options were put to the gate — amend this criterion, or append an applied-in-140 addendum to the ruling — and amending here was chosen so the approved ruling stays the fixed point 139 established.
 - [ ] Each screen reached by the change renders with no console error, no WASM panic and no failed request.
 - [ ] Behavioural oracles remain pure functions the Node runner can execute without a DOM; rendering evidence is the browser lane.
 - [ ] The class census moves only as declared, `dead=0`, `unresolved=0`, at or above the pre-commit floor.
