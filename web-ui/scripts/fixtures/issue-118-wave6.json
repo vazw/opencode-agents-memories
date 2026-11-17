@@ -796,6 +796,11 @@
       "userId": "fixture-a",
       "displayName": "Fixture A",
       "isDefault": true
+    },
+    {
+      "userId": "fixture-b",
+      "displayName": "Fixture B",
+      "isDefault": false
     }
   ],
   "profile": {
@@ -817,5 +822,12 @@
       "workflows": []
     }
   },
-  "projects": []
+  "projects": [
+    {
+      "projectId": "/home/opencode/Code/Personal/Rust/opencode-agents-memory",
+      "sessionCount": 4,
+      "milestoneCount": 2,
+      "lastActivityAt": 1763510400000
+    }
+  ]
 }

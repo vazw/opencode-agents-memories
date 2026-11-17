@@ -1,12 +1,15 @@
 'use strict';
-// Issue 118 wave 6 CDP lanes (G3 ×6, G4 ×2, G5 ×5 = 13 gate rows).
+// Issue 118 wave 6 CDP lanes (G3 ×6, G4 ×2, G5 ×5 = 13 gate rows), plus issue
+// 140's thaw-adoption rows in G6 (5 cases: table geometry, table identity,
+// progress contracts, native selects, clean render).
 // Bootstrap follows test-wave4-cdp.cjs: a dedicated CDP target (LANE_PAGE_ID),
 // Runtime.evaluate helper, Page.addScriptToEvaluateOnNewDocument fetch
 // override, serve-dist.mjs static server. The fixture answers /api/memories
 // (pinned total 6221 / pageSize 8 — the sourced range constant), /api/search
 // (total 42), /api/tags, /api/stats (8 daily rows + 30 shards), /api/projects,
 // /api/health and /api/user-profile; /api/user-profiles feeds the shell's
-// profile picker. window.__requests records {path, query, method} per /api/*.
+// profile picker. window.__requests records {path, query, method, status} per
+// /api/*; console errors and uncaught exceptions land in `pageErrors`.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -21,6 +24,9 @@ const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const q = id => `[data-testid="${id}"]`;
 const results = [];
 let call, evaluate, initId;
+// Console errors and uncaught exceptions seen since the last navigate(). Fed by
+// the Runtime.* events below; `stats_renders_clean` asserts it stays empty.
+let pageErrors = [];
 // Pacing lives in Node, never in a Runtime.evaluate roundtrip: a slow CDP
 // roundtrip would stretch the "50 ms apart" keystrokes past the 300 ms
 // debounce window and turn the burst into N legitimate fires.
@@ -36,9 +42,10 @@ async function readyMemories() {
   return evaluate(`new Promise((resolve,reject)=>{const start=Date.now();const timer=setInterval(()=>{const el=document.querySelector('[data-testid="memories-range"]');if(el&&/of 6221$/.test(el.textContent.trim())){clearInterval(timer);resolve(Date.now()-start)}else if(Date.now()-start>20000){clearInterval(timer);reject(Error('memories readiness timeout | '+document.body.innerText.slice(0,120)))}},100)})`);
 }
 function install(scenario) {
-  return `(()=>{const f=${JSON.stringify(fixture)};window.__scenario=${JSON.stringify(scenario)};window.__requests=[];window.__OPENCODE_MEM_TOKEN__='synthetic-wave6-marker';const original=window.fetch.bind(window);window.fetch=async(input,options={})=>{const u=new URL(typeof input==='string'?input:input.url,location.href);if(!u.pathname.startsWith('/api/'))return original(input,options);const method=options.method||'GET';const headers=new Headers(options.headers);window.__requests.push({path:u.pathname,query:u.search,method,tokenPresent:headers.get('x-opencode-mem-token')==='synthetic-wave6-marker'});let data,status=200;if(u.pathname==='/api/memories')data=f.memories;else if(u.pathname==='/api/search')data=f.search;else if(u.pathname==='/api/tags')data=f.tags;else if(u.pathname==='/api/stats')data=f.stats;else if(u.pathname==='/api/projects')data=f.projects;else if(u.pathname==='/api/health')data=f.health;else if(u.pathname==='/api/user-profile')data=f.profile;else if(u.pathname==='/api/user-profiles')data=f.roster;else{status=404;data={success:false}}await new Promise(r=>setTimeout(r,30));return new Response(JSON.stringify(u.pathname==='/api/health'?data:{success:true,data}),{status,headers:{'Content-Type':'application/json'}})};})()`;
+  return `(()=>{const f=${JSON.stringify(fixture)};window.__scenario=${JSON.stringify(scenario)};window.__requests=[];window.__OPENCODE_MEM_TOKEN__='synthetic-wave6-marker';const original=window.fetch.bind(window);window.fetch=async(input,options={})=>{const u=new URL(typeof input==='string'?input:input.url,location.href);if(!u.pathname.startsWith('/api/'))return original(input,options);const method=options.method||'GET';const headers=new Headers(options.headers);let data,status=200;if(u.pathname==='/api/memories')data=f.memories;else if(u.pathname==='/api/search')data=f.search;else if(u.pathname==='/api/tags')data=f.tags;else if(u.pathname==='/api/stats')data=f.stats;else if(u.pathname==='/api/projects')data=f.projects;else if(u.pathname==='/api/health')data=f.health;else if(u.pathname==='/api/user-profile')data=f.profile;else if(u.pathname==='/api/user-profiles')data=f.roster;else{status=404;data={success:false}}window.__requests.push({path:u.pathname,query:u.search,method,tokenPresent:headers.get('x-opencode-mem-token')==='synthetic-wave6-marker',status});await new Promise(r=>setTimeout(r,30));return new Response(JSON.stringify(u.pathname==='/api/health'?data:{success:true,data}),{status,headers:{'Content-Type':'application/json'}})};})()`;
 }
 async function navigate(route, scenario = 'normal', width = 1280, theme = 'light') {
+  pageErrors = [];
   if (initId) await call('Page.removeScriptToEvaluateOnNewDocument', { identifier: initId });
   ({ identifier: initId } = await call('Page.addScriptToEvaluateOnNewDocument', { source: install(scenario) + `;localStorage.setItem('opencode-mem-theme',${JSON.stringify(theme)});` }));
   await call('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
@@ -230,6 +237,92 @@ const cases = {
     assert.ok(d1 <= 8, `|dy| at scrollY 402 must be <= 8, got ${d1}`);
     return { d0, d1 };
   },
+  // --- G6: thaw adoption, /stats (issue 140) ------------------------------
+  // Every post-navigate query opens on `ready()`: at the instant `navigate()`
+  // resolves the stats landmarks are null 15/15, and an empty page would
+  // otherwise satisfy the request assertions vacuously.
+  async stats_table_geometry() {
+    await navigate('/stats');
+    await ready(q('stats-card-total'));
+    // The scroll pairs are RETURNED, never asserted: under thaw's
+    // `table-layout: fixed` the columns clip instead of widening, so a
+    // scrollWidth diff cannot red the mutant, and it would red the wanted
+    // `auto` (a long shard cell widens the table). `tableLayout` is the oracle.
+    const geom = await evaluate(`(()=>{const pair=el=>({scrollWidth:el.scrollWidth,clientWidth:el.clientWidth});const daily=document.querySelector('.stats-daily');const shards=document.querySelector('.stats-shards');const region=document.querySelector('.stats-shards-region');const ths=el=>Array.from(el.querySelectorAll('th'),t=>Math.round(t.getBoundingClientRect().width));return{layout:{daily:daily?getComputedStyle(daily).tableLayout:null,shards:shards?getComputedStyle(shards).tableLayout:null},daily:daily?pair(daily):null,shards:shards?pair(shards):null,shardRegion:region?pair(region):null,thWidths:{daily:daily?ths(daily):null,shards:shards?ths(shards):null}}})()`);
+    assert.ok(geom.daily, 'the .stats-daily root must exist');
+    assert.ok(geom.shards, 'the .stats-shards root must exist');
+    assert.deepEqual(geom.layout, { daily: 'auto', shards: 'auto' }, `tableLayout ${JSON.stringify(geom.layout)}`);
+    return { daily: geom.daily, shards: geom.shards, shardRegion: geom.shardRegion, thWidths: geom.thWidths, tableLayout: geom.layout };
+  },
+  async stats_tables_are_thaw_tables() {
+    await navigate('/stats');
+    await ready(q('stats-card-total'));
+    const state = await evaluate(`(()=>{const read=el=>({tag:el.tagName,thawTable:el.classList.contains('thaw-table'),cells:el.querySelectorAll('.thaw-table-cell').length,rows:el.querySelectorAll('tbody tr').length});const daily=document.querySelector('[data-testid="stats-daily-table"]');const shards=document.querySelector('[data-testid="stats-shards-table"]');return{daily:daily?read(daily):null,shards:shards?read(shards):null,th:document.querySelectorAll('th').length,headerCells:document.querySelectorAll('.thaw-table-header-cell, .thaw-table-header-cell__button').length}})()`);
+    assert.ok(state.daily, 'the daily testid must resolve (to the TABLE root, not a wrapper)');
+    assert.ok(state.shards, 'the shards testid must resolve (to the TABLE root, not a wrapper)');
+    for (const [label, t] of [['daily', state.daily], ['shards', state.shards]]) {
+      assert.equal(t.tag, 'TABLE', `${label} root is ${t.tag}, not TABLE`);
+      assert.ok(t.thawTable, `${label} root lacks thaw-table`);
+    }
+    assert.equal(state.daily.cells, 40, `.thaw-table-cell in the daily table: ${state.daily.cells}`);
+    assert.equal(state.shards.cells, 210, `.thaw-table-cell in the shards table: ${state.shards.cells}`);
+    assert.equal(state.daily.rows, 8, `daily tbody rows: ${state.daily.rows}`);
+    assert.equal(state.shards.rows, 30, `shards tbody rows: ${state.shards.rows}`);
+    assert.equal(state.th, 21, `th stays native at 21, got ${state.th}`);
+    // TableHeaderCell renders a <th> too, so a th count cannot detect the swap:
+    // the zero-count of its wrapper classes is the assertion.
+    assert.equal(state.headerCells, 0, `thaw header-cell wrappers: ${state.headerCells}`);
+    return state;
+  },
+  async stats_progress_contracts() {
+    await navigate('/stats');
+    await ready(q('stats-card-total'));
+    await settleFrame(); // the inner bar's width transition (0.3s) must be done
+    const state = await evaluate(`(()=>{const row=Array.from(document.querySelectorAll('.stats-day')).find(r=>r.querySelector('th')&&r.querySelector('th').textContent.trim()==='2026-11-08');if(!row)return{error:'no daily row for 2026-11-08'};const bars=Array.from(row.querySelectorAll('.stats-counter [role="progressbar"]'),b=>{const inner=b.querySelector('.thaw-progress-bar__bar');const r=b.getBoundingClientRect();return{label:b.getAttribute('aria-label'),now:b.getAttribute('aria-valuenow'),max:b.getAttribute('aria-valuemax'),height:r.height,width:r.width,innerWidth:inner?inner.getBoundingClientRect().width:null,innerStyle:inner?inner.getAttribute('style'):null}});return{bars,fontSize:parseFloat(getComputedStyle(document.documentElement).fontSize)}})()`);
+    assert.ok(!state.error, state.error);
+    assert.equal(state.bars.length, 4, `four progress bars in the 2026-11-08 row, got ${state.bars.length}`);
+    assert.deepEqual(state.bars.map(b => b.label), ['2026-11-08 Captures', '2026-11-08 Skipped', '2026-11-08 Profile', '2026-11-08 Compaction'], `aria-label: ${JSON.stringify(state.bars.map(b => b.label))}`);
+    const now = state.bars.map(b => Number(b.now));
+    const max = state.bars.map(b => Number(b.max));
+    // raw counts, never percentages: a screen reader announces these.
+    assert.deepEqual(now, [4, 0, 2, 0], `aria-valuenow: ${JSON.stringify(state.bars.map(b => b.now))}`);
+    assert.deepEqual(max, [11, 11, 11, 11], `aria-valuemax: ${JSON.stringify(state.bars.map(b => b.max))}`);
+    const expectedHeight = 0.75 * state.fontSize;
+    for (const [i, b] of state.bars.entries()) {
+      assert.ok(Math.abs(b.height - expectedHeight) <= 0.5, `bar ${i} height ${b.height} != ${expectedHeight} (the .stats-progress cascade was lost)`);
+      assert.ok(Math.abs(b.width - 128) <= 2, `bar ${i} width ${b.width} != 128`);
+      assert.ok(Math.abs(b.innerWidth / b.width - now[i] / max[i]) <= 0.02, `bar ${i} inner ratio ${b.innerWidth}/${b.width} != ${now[i]}/${max[i]} (style ${b.innerStyle})`);
+    }
+    return { bars: state.bars, fontSize: state.fontSize };
+  },
+  async native_select_contracts() {
+    // All three controls exist only because the shared fixture carries one
+    // project and two roster rows; as shipped (projects: [], one-row roster)
+    // the app mounts zero <select> on all three routes.
+    const routes = [['/agents', 'agents-project-select'], ['/sessions', 'sessions-project-select'], ['/user-profile', 'profile-identity-select']];
+    const selects = [];
+    for (const [route, testid] of routes) {
+      await navigate(route);
+      await ready(q(testid)); // the testid is its own readiness landmark
+      const state = await evaluate(`(()=>{const el=document.querySelector(${JSON.stringify(`select[data-testid="${testid}"]`)});return el?{tag:el.tagName,options:el.options.length}:null})()`);
+      assert.ok(state, `no select[data-testid="${testid}"] on ${route}`);
+      assert.equal(state.tag, 'SELECT', `${route} ${testid} is ${state.tag}`);
+      selects.push({ route, testid, options: state.options });
+    }
+    return { selects };
+  },
+  async stats_renders_clean() {
+    await navigate('/stats');
+    await ready(q('stats-card-total'));
+    const state = await evaluate(`({requests:window.__requests.slice(),rows:document.querySelectorAll('.stats-day').length})`);
+    assert.equal(pageErrors.length, 0, `console errors/panics: ${pageErrors.join(' | ')}`);
+    // The positive record and the row count are what stop a blank page from
+    // passing: `every` over an empty array is true.
+    assert.ok(state.requests.some(r => r.path === '/api/stats'), `no /api/stats request: ${JSON.stringify(state.requests)}`);
+    assert.ok(state.requests.every(r => r.status < 400), `non-2xx request(s): ${JSON.stringify(state.requests.filter(r => !(r.status < 400)))}`);
+    assert.ok(state.rows > 0, `no .stats-day rows rendered (rows=${state.rows})`);
+    return { n: state.requests.length, stats: state.requests.filter(r => r.path === '/api/stats').map(r => r.status), rows: state.rows, pageErrors: pageErrors.length };
+  },
 };
 (async () => {
   assert.ok(selection === 'all' || Object.hasOwn(cases, selection), 'unknown W6_TEST ' + selection);
@@ -244,6 +337,10 @@ const cases = {
   ws.onmessage = e => {
     const m = JSON.parse(e.data);
     if (pending.has(m.id)) { const { resolve, reject } = pending.get(m.id); pending.delete(m.id); m.error ? reject(Error(m.error.message)) : resolve(m.result); }
+    // Console errors / uncaught exceptions belong to the case that navigated;
+    // without this branch `pageErrors` could never leave zero.
+    else if (m.method === 'Runtime.exceptionThrown') pageErrors.push(m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'exception');
+    else if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') pageErrors.push(m.params.args.map(a => a.value ?? a.description ?? '').join(' '));
   };
   call = (method, params = {}) => new Promise((resolve, reject) => { const id = ++serial; pending.set(id, { resolve, reject }); ws.send(JSON.stringify({ id, method, params })); });
   evaluate = async expression => { const r = await call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; };

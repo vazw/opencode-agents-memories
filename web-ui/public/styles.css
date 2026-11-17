@@ -1053,8 +1053,8 @@ body {
  * Stats (this wave)
  *
  * The tables are what make the collapsed columns readable (padding + collapse);
- * `.stats-progress` is a native `<progress>` whose max is the shared daily
- * peak — the replaced `.stats-bar` span had no accessible value semantics.
+ * `.stats-progress` is the thaw ProgressBar root — `value` a raw count and
+ * `max` the shared daily peak, so the accessible value semantics are intact.
  * The five panels above must not change: no rule here overrides them.
  * ------------------------------------------------------------------------- */
 
@@ -1134,6 +1134,8 @@ body {
 .stats-daily,
 .stats-shards {
   width: 100%;
+  /* thaw ships `.thaw-table { table-layout: fixed }`; auto is the contract. */
+  table-layout: auto;
   border-collapse: collapse;
   font-size: 0.9rem;
   font-variant-numeric: tabular-nums;

@@ -39,7 +39,8 @@ use thaw::{
     ButtonType, Card, CardFooter, CardHeader, CardHeaderDescription, ComponentRef, Dialog,
     DialogActions, DialogBody, DialogSurface, DialogTitle, Field, Input, InputSuffix, MessageBar,
     MessageBarBody, MessageBarIntent, Pagination, Popover, PopoverPosition, PopoverTrigger,
-    PopoverTriggerType, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Tag,
+    PopoverTriggerType, ProgressBar, Table, TableBody, TableCell, TableHeader, TableHeaderCell,
+    TableRow, Tag,
 };
 
 use crate::api::auth::{AuthContext, read_marker_token};
@@ -2252,42 +2253,45 @@ fn stats_daily_table(daily: &[DailyStatsView]) -> AnyView {
                 .map(|(label, count)| {
                     let name = format!("{} {label}", day.date);
                     view! {
-                        <td class="stats-counter">
+                        <TableCell class="stats-counter">
                             <span class="stats-count">{count}</span>
-                            <progress
+                            <ProgressBar
                                 class="stats-progress"
-                                value={count.to_string()}
-                                max={peak.to_string()}
-                                aria-label=name
-                            ></progress>
-                        </td>
+                                value={count as f64}
+                                max={Signal::from(peak as f64)}
+                                attr:aria-label=name
+                            />
+                        </TableCell>
                     }
                 })
                 .collect();
+            // E0521 guard: thaw's `Children` is `Box<dyn FnOnce() -> AnyView + 'static>`,
+            // so nothing borrowing `daily` may sit inside a thaw component's children.
+            let date = day.date.clone();
             view! {
-                <tr class="stats-day">
-                    <th scope="row">{day.date.clone()}</th>
+                <TableRow class="stats-day">
+                    <th scope="row">{date}</th>
                     {cells}
-                    <td class="stats-errors-cell">{errors_cell}</td>
-                </tr>
+                    <TableCell class="stats-errors-cell">{errors_cell}</TableCell>
+                </TableRow>
             }
         })
         .collect();
 
     view! {
-        <table class="stats-daily" data-testid="stats-daily-table">
-            <thead>
-                <tr>
+        <Table class="stats-daily" attr:data-testid="stats-daily-table">
+            <TableHeader>
+                <TableRow>
                     <th scope="col">"Date"</th>
                     <th scope="col">"Captures"</th>
                     <th scope="col">"Skipped"</th>
                     <th scope="col">"Profile"</th>
                     <th scope="col">"Compaction"</th>
                     <th scope="col">"Errors"</th>
-                </tr>
-            </thead>
-            <tbody>{rows}</tbody>
-        </table>
+                </TableRow>
+            </TableHeader>
+            <TableBody>{rows}</TableBody>
+        </Table>
     }
     .into_any()
 }
@@ -2312,38 +2316,38 @@ fn stats_shards_table(shards: &[ShardStatsView]) -> AnyView {
                 view! { <p class="stats-shard-error">{error}</p> }
             });
             view! {
-                <tr class="stats-shard-row">
-                    <td>
+                <TableRow class="stats-shard-row">
+                    <TableCell>
                         <p>{shard.scope.clone()}</p>
                         <p class="stats-hash">{hash}</p>
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                         <p>{shard.file_name.clone()}</p>
                         <p class={if shard.file_exists { "stats-file-ok" } else { "stats-file-missing" }}>
                             {file_state}
                         </p>
                         {error}
-                    </td>
-                    <td>{shard.shard_index}</td>
-                    <td>{active}</td>
-                    <td>
+                    </TableCell>
+                    <TableCell>{shard.shard_index}</TableCell>
+                    <TableCell>{active}</TableCell>
+                    <TableCell>
                         {format!("{} / {}", shard.memory_count, shard.registered_vector_count)}
                         {mismatch}
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                         <p>{format!("oldest: {}", stats_date_or_dash(shard.oldest_created_at.as_ref()))}</p>
                         <p>{format!("newest: {}", stats_date_or_dash(shard.newest_created_at.as_ref()))}</p>
-                    </td>
-                    <td>{shard.duplicate_tag_count}</td>
-                </tr>
+                    </TableCell>
+                    <TableCell>{shard.duplicate_tag_count}</TableCell>
+                </TableRow>
             }
         })
         .collect();
 
     view! {
-        <table class="stats-shards" data-testid="stats-shards-table">
-            <thead>
-                <tr>
+        <Table class="stats-shards" attr:data-testid="stats-shards-table">
+            <TableHeader>
+                <TableRow>
                     <th scope="col">"Scope"</th>
                     <th scope="col">"File"</th>
                     <th scope="col">"Index"</th>
@@ -2351,10 +2355,10 @@ fn stats_shards_table(shards: &[ShardStatsView]) -> AnyView {
                     <th scope="col">"Memories / vectors"</th>
                     <th scope="col">"Dates"</th>
                     <th scope="col">"Duplicate tags"</th>
-                </tr>
-            </thead>
-            <tbody>{rows}</tbody>
-        </table>
+                </TableRow>
+            </TableHeader>
+            <TableBody>{rows}</TableBody>
+        </Table>
     }
     .into_any()
 }
