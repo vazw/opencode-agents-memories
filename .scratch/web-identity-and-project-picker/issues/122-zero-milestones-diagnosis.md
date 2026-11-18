@@ -3,7 +3,7 @@
 *(Renumbered from 117 on 2026-11-03 — see the note in issue 120. The rust-port 117 is the engine stderr
 drain, which `docs/adr/0013` cites; that citation is correct for its own issue and was never this one.)*
 
-Status: measured — the age window alone explains the empty table on this host (2026-11-03T06:16:41Z,
+Status: done — measurement, not a deliverable. The age window alone explains the empty table on this host (2026-11-03T06:16:41Z,
 read-only); no code change indicated. The run is recorded under **Measurement** below; nothing here
 asks a human to do anything.
 

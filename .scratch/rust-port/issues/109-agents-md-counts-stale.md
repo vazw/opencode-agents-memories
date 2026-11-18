@@ -1,6 +1,6 @@
 # 109 — `AGENTS.md`'s counts had drifted from the tree, and the orchestrator is who let them
 
-Status: closed — fixed in the commit that carries this file. This is a correction record, not a work item.
+Status: done — 2026-11-19 (correction record, not a work item; the fix landed in the commit that carries this file)
 
 ## What was wrong
 
