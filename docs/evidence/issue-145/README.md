@@ -15,11 +15,19 @@ only inside the block, and action recall by whether it can name its own last act
 interrogated for block content — see trap A for the measurement that removed that reading. Q9 remains a log reading,
 because the wrapper's own log is where the engine's answer is written.
 
-**Shell half is unmet.** `crates/mem-bridge/src/inject.rs` has no background-shell section, so a child cannot be told which
-shell it left running. That is issue 146. Q8 is not run while the block has no shell section. Nothing in this runbook
-measures the shell half.
+**The recent-actions half is measured by the render, not by this runbook alone.** Issue 149 adds a `## Recent actions`
+section to the engine block for the requesting session. The render half is captured by the owner with
+`docs/evidence/issue-149/render-capture.md`; this runbook supplies the delivery half (Q6 and Q9). Issue 146 closes as
+covered by 149. Liveness of a background shell remains an unmeasured limit: the wrapper has no tool hook, so the section
+reports the last idle-time tool calls, not what is running now.
 
 ## R0 — schema check, calibration, compaction boundary (one existing child, read-only)
+
+**Delivery precondition (issue 149).** Record the resolved `chatMessage.injectOn` with every reading. The built-in default
+is `first` (`crates/mem-core/src/config/schema.rs:749`, pinned by `crates/mem-core/tests/config_defaults.rs:122`). Under
+`first` the turn-0 block is cached and replayed, and the issue-149 invalidation (`plugin/src/v2/adapter.js`, the `stale`
+set) makes the first prompt after a compaction refresh the block regardless of `injectOn`. The refresh therefore does not
+depend on the policy setting; `always` and unknown policies already refresh every prompt.
 
 Run S0 first. A missing column stops the runbook. Record `uncalibrated (schema drift: <missing columns>)` and do not run Q0.
 
@@ -134,7 +142,7 @@ is the nonce's only possible source.
 answered from the child's own still-resident pre-compaction window, which would measure nothing. Written after the
 boundary, the post-compaction block is its only possible source.
 
-Q6 (block delivered after compaction):
+Q6 (block delivered after compaction; corroboration only — the captured render is the authority):
 
 1. Write a fresh nonce to memory, project scope: `PROBE-NONCE-<8 hex>`.
 2. Send the child one follow-up: end its wait, then ask it to quote any string matching `PROBE-NONCE-<8 hex>` it can
@@ -142,21 +150,20 @@ Q6 (block delivered after compaction):
 3. Record the child's answer verbatim. Echo ⇒ Q6 ≥ 1. `NONE` ⇒ Q6 = 0.
 4. Delete the memory entry.
 
-Q7 (last action named by the child):
+Q7 (last action named by the child; corroboration only — the captured render is the authority):
 
 Ask the same follow-up, in the same turn, what the child's last action before compaction was — the file it read, the
 command it ran — **without stating it**. Compare with the owner's `<action-token>` from R2. Q7 ≥ 1 on a match, Q7 = 0
-otherwise. Do not read action presence out of the block's text: with M1 deferred the block carries no recent-action
-section, and asking the child is the behaviour the complaint is about.
+otherwise. Q7 is corroboration only: the captured render in `docs/evidence/issue-149/render-capture.md` is the authority for whether
+the block carries the child's actions.
 
 The question must be about an action that **predates the boundary**. Asked "what did you just do", a child answers from
 its own retained post-compaction window and is right for no reason connected to the block — MEASURED 2026-11-19, where
 such an answer matched the recorded tool call and still proved nothing (`run-20261118T215648Z`, Q7, recorded
 inconclusive). For the same reason the nonce in Q6 must be written **after** the boundary, never before.
 
-Q8 (running shell present): not run while the block has no shell section
-(`grep -c -i 'shell' crates/mem-bridge/src/inject.rs` = 0 at the wave's Step 0 item 7). If a later build adds one, ask
-the child to name the shell it left running and compare with R2's `<shell-name>`.
+Q8 (running shell present): not measured. The wrapper cannot observe live shells, so the section records idle-time tool
+calls only. Ask the child about its running shell only as a separate, labelled question; it is not a reading here.
 
 Q9 (engine answer):
 
@@ -164,6 +171,7 @@ Q9 (engine answer):
 date -u +%FT%TZ; grep -n '"session_id":"<child>"' ~/.opencode-mem/opencode-mem.log | grep 'inject.received'; echo rc=$?
 ```
 
+The render half of the reading is captured by `docs/evidence/issue-149/render-capture.md`, not by this query.
 Keep only the last two lines and compare them with the boundary time, not with `<seq>` — the log is not sequenced. The
 log timestamp is ISO-8601 with a `+07:00` offset, for example `[2026-11-19T01:16:26.707+07:00]`. Normalise it to UTC by
 subtracting the offset, then compare against the Q0 `time.created` string. Comparing raw milliseconds against a string
@@ -189,9 +197,10 @@ all precede the boundary: `no-inject-after-compaction`, reading 3 below — a re
    block is dropped at compaction. Inverted world: a post-compaction `inject.requested` line, which would mean the
    refresh path ran and the child belongs to reading 4 or 5 instead.
 4. `stale`: Q6 ≥ 1 — the block demonstrably reached the child after compaction — and Q7 = 0. The child received the
-   block and still could not name its last action. This was the predicted reading before the 2026-11-19 baseline and
-   did not survive it; it becomes reachable again only once the cached block is invalidated at compaction. The
-   inverted world is a `recent-action-delivered`, which would refute the deferral's premise and is a finding, not a pass.
+   block and still could not name its last action. A `stale` reading is a real failure, not a pass: with issue 149's
+   invalidation in place the post-compaction block must be refreshed, so a `stale` reading means the refreshed block
+   lacks the child's actions or the child did not use it. The inverted world is a `recent-action-delivered`, which is
+   the expected outcome once the render captures the section.
 5. `recent-action-delivered`: Q6 ≥ 1 and Q7 ≥ 1. The block was delivered after compaction and the child named its last
    action. This reading makes no claim about background shells.
 
@@ -201,11 +210,11 @@ verbatim. This opens issue 146. It is not a per-child reading.
 
 ## Expected shape and sample size
 
-Expected per child, as of the 2026-11-19 baseline (`run-20261118T215648Z`): **`no-inject-after-compaction`** — the block
-arrives before the boundary and nothing arrives after it. `stale` (Q6 ≥ 1 and Q7 = 0) was the pre-baseline prediction and
-did not survive it; it returns only once the cached block is invalidated at compaction (issue 149, amendment 2026-11-19).
-The shell half is not expected while the block has no shell section. A `recent-action-delivered` is the surprise, not the
-target — record it and re-derive what produced it.
+Expected per child, once issue 149 is deployed and the engine restarted: a post-compaction `inject.received` with
+`status:"ok"` (delivery), and the render carrying `## Recent actions` for that session. The 2026-11-19 baseline
+(`run-20261118T215648Z`, before issue 149) read **`no-inject-after-compaction`**: the block arrived before the boundary and
+nothing arrived after it. A `stale` reading is a failure to record, not an expected outcome. A `recent-action-delivered`
+reading requires both captures, per `docs/evidence/issue-149/render-capture.md`.
 
 Sample size N = 5. Any `miss-engine` or `miss-host` at N = 5 extends to N = 10. A failure that survives N = 10 is an
 open item in the issue. `stale` and `no-inject-after-compaction` need no extension — the latter is the predicted reading
@@ -231,7 +240,7 @@ Recorded in the issue, not decided in advance.
 - `miss-host`: the engine returned a block and the child could not produce a token that exists only inside it.
 - `no-inject-after-compaction`: the engine produced a block earlier in the session and produced none after the boundary,
   because the cached turn-0 block is replayed rather than refreshed.
-- `stale`: the block reached the child and it still could not name its last action.
+- `stale`: the block reached the child after compaction and it still could not name its last action. A real failure.
 
 Each opens a new item in the issue. None reopens the scratch-root closure.
 
