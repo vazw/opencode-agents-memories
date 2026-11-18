@@ -1,0 +1,159 @@
+# 152 — true background-shell liveness needs a host capability the wrapper does not have
+
+Status: ready-for-agent — 2026-11-19 (tier-1 host read is executable now; tier-2 live instrument needs owner approval)
+
+*Scope note. Issue 149 decision 4 reports the last shell **action** and refuses to claim liveness; 146 records liveness as
+a known limit. This issue asks what capability a true liveness answer would need, and what would have to be measured to
+know it exists. It does not propose an API.*
+
+## The gap
+
+149's decision 4 (`.scratch/rust-port/issues/149-inject-recent-actions-section.md`) and the 146 limit: the engine cannot
+say whether a background shell is still running. Its only source is the idle-time capture (`toolCalls` in
+`metadata.autoCaptureContext`), which records what the agent did, not what is alive now.
+
+Measured on this tree:
+
+- `grep -rn 'tool\.execute' plugin/src` returns no match (MEASURED 2026-11-19, exit 1). The wrapper's only hooks are
+  `chat.message`, `experimental.session.compacting` and `event` (`plugin/src/plugin.js:1398-1462`), plus the
+  non-enumerable `shouldRefresh` (`:1504`). READ.
+- The `tool` parts the wrapper does read are the message parts in its own capture path (`plugin/src/plugin.js:1775`).
+
+The host SDK type file in the local install declares `tool.execute.before` and `tool.execute.after`
+(`/home/opencode/.config/opencode/node_modules/@opencode-ai/plugin/dist/index.d.ts:235-256`, READ). That SDK is version
+1.19.0 (READ from its `package.json`). The host runs `opencode v2.3.2` (REPORTED by `opencode --version`). **Whether the
+V2 host delivers those hooks to this plugin is unverified.** The SDK file is a declaration, not evidence of delivery.
+
+## Why it matters, in the owner's terms
+
+A resumed child should be told which shell it left running and whether it is still alive. Without liveness the answer is
+"the agent ran `bash (background): dev`", which is history. The owner's case is a child that re-checks or re-starts a
+server it already has.
+
+## Consequence of leaving it
+
+149 ships an action line. A child can still act on a dead shell, and a line stating "running" would be a guess encoded as
+fact. Keeping it out is correct until a source exists.
+
+## Capability that would be needed (not an API)
+
+Two independent things, and the issue must keep them apart:
+
+1. **An event for shell lifecycle delivered to the wrapper** while the shell is live, and when it exits. Without it there
+   is no truth to store, and idle-time capture cannot provide one.
+2. **A way to tie a shell to a process the engine can observe.** The engine already has a /proc-based liveness observer
+   (`crates/mem-store/src/platform.rs:345`, `observe_process`, Linux only) that answers for a PID. It needs a PID from
+   somewhere, and that PID has to come from the host. Whether the host exposes it is unknown.
+
+## What would have to be measured to know the capability exists
+
+- Start a background shell in a live child and log every hook or event the wrapper receives during the shell's life and
+  after its exit. Check whether any event names the shell, its PID, or its status.
+- Check whether the V2 host (not the SDK declaration) calls `tool.execute.before` / `tool.execute.after` into this plugin.
+  A single logged call would show delivery; no call shows the capability is absent in this host.
+- If an event exists, check whether it fires on exit, not only on start, and whether a crash (no clean exit) produces one.
+
+## Known limits
+
+- Even a perfect host event tells the wrapper what the host saw, not what the OS sees. A PID-level check would be a second
+  instrument.
+- The `event` hook is the existing path for bus events; whether it carries shell lifecycle is unverified.
+- This issue does not change 149's action line. It is a separate capability, and it must not be folded into 149.
+
+## What it would touch, if the capability exists
+
+- `plugin/src/plugin.js` — a new hook registration beside `chat.message` / `event` (`:1398-1462`).
+- `crates/mem-bridge/src/capture.rs` and the engine store: a liveness field the capture path can write. Not designed here.
+- `crates/mem-store/src/platform.rs:345` if the PID route is used.
+
+## Inverted world
+
+If the V2 host delivers no shell or tool event to the plugin in a live run, the capability does not exist in this host,
+and the issue closes as "not available; 149's action line is the ceiling" — a measurement, not a deliverable.
+
+## Open questions for the planner
+
+1. Is true liveness worth a host dependency, given the owner's cases can be met by the action line plus an honest
+   "last action" statement?
+2. Which measurement settles the host question first: the logged hook run, or a check of the host's own event list?
+3. If a PID is available, is the engine's /proc observer the right instrument, given it is Linux-only
+   (`platform.rs:343-344` is `cfg(target_os = "linux")`)?
+
+## Comments
+
+> *This was generated by AI during triage.*
+
+### Triage notes — 2026-11-19, owner picked this as track 152
+
+**Established so far** (each re-derived at `60c90f6`, not inherited from the filing):
+
+- `grep -rn 'tool\.execute' plugin/src` → no match, exit 1. MEASURED.
+- The wrapper returns exactly four hooks: `const hooks = {` at `plugin/src/plugin.js:1398`, `chat.message` at `:1399`,
+  `experimental.session.compacting` at `:1439`, `event` at `:1462`; plus the non-enumerable `shouldRefresh` at `:1504`.
+  READ.
+- The `event` hook branches on exactly one type — `event.type === "session.compacted"` at `plugin/src/plugin.js:1467` —
+  and logs only `event.failed` (`:1495`) when its handler throws. It does not log the events it receives. READ.
+- The only tool parts the wrapper touches are message parts in its own capture path,
+  `if (!part || part.type !== "tool") continue;` at `plugin/src/plugin.js:1775`. READ.
+- The local SDK declares the hook shape: `tool.execute.before` at
+  `/home/opencode/.config/opencode/node_modules/@opencode-ai/plugin/dist/index.d.ts:235` and `tool.execute.after` at
+  `:249`. READ. A declaration is not delivery.
+- The host is `opencode v2.3.2`. MEASURED (`opencode --version`). The SDK package is 1.19.0, so the declaration and the
+  host are different versions — a second reason the declaration proves nothing.
+- The engine's process observer exists and is Linux-gated: `observe_process(pid: u32) -> ObservedProcess` at
+  `crates/mem-store/src/platform.rs:345`, under `#[cfg(target_os = "linux")]` at `:343`. READ. It answers for a PID and
+  computes nothing without one.
+
+**What this issue actually is.** Not a feature request yet — a capability question with a binary answer, and the answer
+decides whether there is anything to build. Two independent unknowns, and the brief keeps them apart:
+
+1. Does the host deliver any tool or shell lifecycle event to a plugin at all?
+2. Even if it does, does anything carry a PID the engine could hand to `observe_process`?
+
+Both must be yes for liveness. Either alone is not enough, and an event with no PID gives a status the wrapper cannot
+verify — which is the guess-as-fact this issue exists to avoid.
+
+### Brief — two tiers, and only tier 1 is executable today
+
+**Tier 1 — read-only, no repo change, no live config change. Do this first.**
+
+The question is answerable from the host's own code, without instrumenting anything:
+
+- Locate the installed host (`command -v opencode`, then resolve the real path) and read the bridge that dispatches
+  plugin hooks. Search it for `tool.execute`, `tool.execute.before`, `tool.execute.after` and for the event-envelope
+  type strings it publishes. A hook name present in the SDK *declaration* but absent from the host's dispatch is the
+  clear answer: the capability does not exist in v2.3.2.
+- Read the same dispatch for the event bus: enumerate every envelope `type` the host emits to a plugin subscription.
+  If shell lifecycle is not among them, question 1 is answered no.
+- Check whether any envelope, or any hook input, carries a PID or a shell id. If none does, question 2 is answered no
+  regardless of question 1.
+
+Deliverable, and the reason this tier needs no code: a findings file with the commands, verbatim output, file and line
+for each claim, and a one-line verdict per question. **If both answers are no, the issue closes as measurement — the
+inverted world at `:69-72` of this file, not a deliverable.** Do not proceed to tier 2 to "confirm" a no.
+
+**Tier 2 — instrumented, and it needs the owner's explicit word before it runs.** Only if tier 1 leaves the question
+open or answers yes:
+
+- A throwaway probe plugin that logs every event envelope `type` it receives to a file, registered in the host's own
+  config. This is a live config change plus a host restart, so it is the owner's call, not a worktree task. Say so in the
+  report rather than doing it.
+- The probe session starts a background shell, lets it run, lets it exit, and — separately — lets one crash without a
+  clean exit. The log must show what arrived at start, at exit, and at crash. A start-only event is not liveness.
+
+### Acceptance — what closes this issue
+
+- Tier 1 findings recorded with verbatim output, and a per-question verdict naming the file and line that settles it.
+- If either question is no: `Status: done — measurement, not a deliverable`, with the closing line pointing at this
+  file. No code.
+- If both are yes: this file gains a `ready-for-agent` brief for the implementation, and *then* a planner writes a
+  blueprint. Not before.
+
+### Out of scope, stated so it is not quietly absorbed
+
+- Any change to 149's action line. 146 records liveness as a known limit; the line stays a history statement until a
+  source exists.
+- Designing an API, a config key or an engine field. Tier 1 answers yes/no; a design needs a measured yes.
+- `plugin/dist/`. Tier 1 writes no repo file at all.
+- Any PID-based liveness on non-Linux hosts. `observe_process` is `#[cfg(target_os = "linux")]`; on other targets there
+  is no instrument, and saying so is part of the answer.
