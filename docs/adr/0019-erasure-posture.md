@@ -182,6 +182,14 @@ delete paths stay `PendingErase` (`:165-167`). A stamp read that fails answers `
 `notYetSwept`: a failed read is not evidence that no sweep ran, and `Unknown` is scoped to the vault
 tier by D-19-9.
 
+**Amended (issue 143):** `state` gains a third value, `deleted`, after `pending` and `erased`. It is the
+`410 Gone` answer of the status read for an id whose prompt row is gone and whose tombstone is on record
+(D-19-12): "the prompt row is gone; the residue is what `sweepState` says". `erased` keeps its meaning above
+and is never produced by this read: a per-id read cannot speak for the tier's sweep, so the response carries
+that separately in `sweepState`. On a `410`, `sweepState: swept` means the last sweep is **at or after** this
+id's deletion (equal included); a stamp strictly older than the deletion is `notYetSwept`, because it cannot
+have covered that residue. The `sweep_state` label set is unchanged.
+
 **D-19-4 — No queue; `PendingErase` may persist indefinitely; `--mode=sweep` is the operator lever (planned).**
 
 A queue is refused. It would store prompt ids — itself an erasure artefact — and its only worked-out
@@ -262,6 +270,41 @@ it until you purge the session". (3) This ADR's own statement of the default con
 limits in the same section.
 
 **Rejected:** API-only disclosure; a count rendered `0` when unknown.
+
+**D-19-12 — The tombstone: post-delete per-id state, for the prompts tier only (issue 143).**
+
+A deleted prompt id answers `410 Gone` with `state: "deleted"`; an id that never existed keeps `404`. The
+evidence is a `user-prompts.db` table, `prompt_tombstones`, at schema v4, with two columns only: `id` and
+`deleted_at_unix_ms`. No text, no summary, no embedding, no metadata. It is written in the delete's own
+`BatchMode::Write` transaction, beside the hard `DELETE`, so a crash leaves both or neither. The erase still
+runs first (E2): a failed erase writes no tombstone. `INSERT OR IGNORE` keeps the first deletion time.
+
+The tombstone is consulted **only** by the status read, after the live row lookup misses. The delete answer
+is unchanged: a double delete stays `Absent`, and `PromptDeletion`, `DeletedPromptDto` and the route are
+untouched.
+
+The tombstone stores a prompt **id** — the artefact D-19-4 refused as a queue. The refusal does not bind here:
+a queue holds ids of prompts **not yet erased**, an outstanding target list the sweep could select; the
+tombstone holds ids **already erased**, a record with no target, which nothing can select, so D-19-5 is intact.
+The sweep never reads `prompt_tombstones`.
+
+Remaining limits, recorded rather than fixed:
+
+- one row per deletion, unbounded growth; there is no reaper, because a TTL would silently turn `410` back into `404`;
+- the id itself is retained information after the text is gone;
+- the model-level `PromptDeletion::Deleted.erasure.profiles_deleted` counts that call only and is never on the
+  prompts wire (`DeletedPromptDto` carries `deleted_memory` and `erasure` only, `dto.rs:317-321`);
+- post-delete per-id state is observable **for the prompts tier only**; memories and episodic keep `404`.
+
+The `410` body is the `ErasureStateDto` of the 200 read with `state: "deleted"`, and `success: true`: the
+request was well formed and the server answers about an id it remembers. The status code carries "gone"; the
+body carries the labels. Do not change it to `success: false` without the payload.
+
+**Rejected:** a `204 No Content` (reads as success on a wrong id); a soft-delete column on `user_prompts` (every
+read path would need the filter, and a missed one returns a gutted prompt); keeping `404` (post-delete state
+stays unobservable); a `PromptDeletion::AlreadyDeleted` variant (changes the DELETE answer for no reader); a
+`tier` column (one table is one tier, so the column would be a constant); reusing `sweep_state` as the
+tombstone (its `tier` is the primary key, one row per tier, so it cannot remember an id).
 
 ## The inventory
 

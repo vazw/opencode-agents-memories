@@ -347,8 +347,11 @@ pub struct NotErasedEntryDto {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ErasureStateDto {
-    /// `"pending"` on both HTTP paths in W6: `Erased` is the sweep report's
-    /// answer after a completed pass, never the delete DTO's (ADR-0019 :165-167).
+    /// `"pending"` on the delete answer and the live status read. `"deleted"`
+    /// on the `410 Gone` status read (issue 143, ADR-0019 D-19-3 amended): the
+    /// prompt row is gone and `sweepState` names the residue. `"erased"` is the
+    /// sweep report's answer after a completed pass, never this DTO's
+    /// (ADR-0019 :165-167).
     pub state: &'static str,
     /// `"user-prompts" | "memories"` — never `"milestones"` on a delete answer.
     pub tier: &'static str,

@@ -48,6 +48,8 @@ pub const MEMORY_ID: &str = "mem_probe_1";
 pub const USER_MEMORY_ID: &str = "mem_user_scope_1";
 /// The seeded prompt id.
 pub const PROMPT_ID: &str = "prompt_probe_1";
+/// The fixed deletion time the fake stamps on a tombstone (issue 143).
+pub const FAKE_DELETED_AT: i64 = 1_700_000_500_000;
 /// The seeded skill id (GET/PUT/DELETE and the catalog file).
 pub const SKILL_ID: &str = "ship-it";
 /// The fresh id `POST /api/skills` uses (the seed keeps `ship-it` intact).
@@ -108,6 +110,10 @@ struct FakeState {
     sweep_stamp: Option<i64>,
     /// Makes `sweep_state` answer a store failure (the `sweepFailed` arm).
     sweep_read_fails: bool,
+    /// The prompt tombstones (issue 143): `(prompt id, deletion time)`.
+    tombstones: Vec<(String, i64)>,
+    /// Makes `prompt_tombstone` answer a store failure (the D-9 500 arm).
+    tombstone_read_fails: bool,
 }
 
 /// The shared fake backend.
@@ -255,6 +261,8 @@ impl FakeBackend {
                 pending_user: None,
                 sweep_stamp: None,
                 sweep_read_fails: false,
+                tombstones: Vec::new(),
+                tombstone_read_fails: false,
             }),
             migrator: Arc::new(Mutex::new(TagMigrator::new())),
             calls: Mutex::new(Vec::new()),
@@ -358,6 +366,14 @@ impl FakeBackend {
     /// Makes `sweep_state` answer a store failure (the D-19-3 `sweepFailed` arm).
     pub fn set_sweep_read_failure(&self, fails: bool) {
         self.state.lock().expect("fake state lock").sweep_read_fails = fails;
+    }
+
+    /// Makes `prompt_tombstone` answer a store failure (the D-9 `500` arm).
+    pub fn set_tombstone_read_failure(&self, fails: bool) {
+        self.state
+            .lock()
+            .expect("fake state lock")
+            .tombstone_read_fails = fails;
     }
 
     /// Replaces the seeded profile's `profile_data` (a test-only seed, never
@@ -896,6 +912,12 @@ impl PromptPort for FakeBackend {
             .map_err(|_| PortError::Store("lock".into()))?;
         let existed = state.prompts.iter().any(|prompt| prompt.id == id);
         state.prompts.retain(|prompt| prompt.id != id);
+        if existed {
+            // Issue 143: a delete of a live prompt leaves a tombstone. The fixed
+            // stamp keeps the fake deterministic; the real clock is pinned by
+            // `prompt_tombstone.rs`.
+            state.tombstones.push((id.to_string(), FAKE_DELETED_AT));
+        }
         Ok(PromptErasure {
             existed,
             ..PromptErasure::default()
@@ -912,6 +934,22 @@ impl PromptPort for FakeBackend {
             return Err(PortError::Store("sweep_state read failed".into()));
         }
         Ok(state.sweep_stamp)
+    }
+
+    async fn prompt_tombstone(&self, id: &str) -> Result<Option<i64>, PortError> {
+        self.record(format!("prompt_tombstone:{id}"));
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| PortError::Store("lock".into()))?;
+        if state.tombstone_read_fails {
+            return Err(PortError::Store("prompt_tombstone read failed".into()));
+        }
+        Ok(state
+            .tombstones
+            .iter()
+            .find(|(tombstone_id, _)| tombstone_id == id)
+            .map(|(_, at)| *at))
     }
 }
 

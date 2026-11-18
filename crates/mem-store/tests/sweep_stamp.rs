@@ -17,12 +17,14 @@ use mem_store::config::StoreConfig;
 use mem_store::db::{Db, Value, query_one};
 use mem_store::error::StoreError;
 use mem_store::schema_migrations::{
-    EPISODIC_MAX_KNOWN, MigrationOptions, USER_PROFILES_MAX_KNOWN, USER_PROMPTS_MAX_KNOWN,
-    apply_episodic_schema, apply_schema_migrations, apply_user_prompts_schema,
-    user_profiles_migrations,
+    EPISODIC_MAX_KNOWN, MigrationOptions, USER_PROFILES_MAX_KNOWN, apply_episodic_schema,
+    apply_schema_migrations, apply_user_prompts_schema, user_profiles_migrations,
 };
 
 const DIMS: u32 = 2;
+/// The `user_prompts` version these W6c cases stamp: pinned here so the v4 bump
+/// (issue 143) does not move them. v4 is pinned by `prompt_tombstone_schema.rs`.
+const USER_PROMPTS_V3: i64 = 3;
 
 async fn user_version(db: &dyn Db) -> i64 {
     query_one(db, "PRAGMA user_version", Vec::new())
@@ -112,15 +114,14 @@ async fn test_user_prompts_v3_creates_the_sweep_state_table() {
 
     let version = apply_user_prompts_schema(
         db.as_ref(),
-        &prompts_options(&config, USER_PROMPTS_MAX_KNOWN),
+        &prompts_options(&config, USER_PROMPTS_V3),
         Some(exclusive_root(&config.storage_path).as_ref()),
     )
     .await
     .expect("the prompts fold reaches its maximum");
 
-    assert_eq!(USER_PROMPTS_MAX_KNOWN, 3, "the constant moved WITH the leg");
-    assert_eq!(version, 3);
-    assert_eq!(user_version(db.as_ref()).await, 3);
+    assert_eq!(version, USER_PROMPTS_V3);
+    assert_eq!(user_version(db.as_ref()).await, USER_PROMPTS_V3);
     assert_sweep_state_table(db.as_ref()).await;
 
     drop(db);
@@ -153,7 +154,7 @@ async fn test_user_prompts_v3_is_a_no_op_for_the_prompt_rows() {
 
     let version = apply_user_prompts_schema(
         db.as_ref(),
-        &prompts_options(&config, USER_PROMPTS_MAX_KNOWN),
+        &prompts_options(&config, USER_PROMPTS_V3),
         Some(exclusive_root(&config.storage_path).as_ref()),
     )
     .await
@@ -190,7 +191,7 @@ async fn test_user_prompts_v3_stamp_is_refused_by_a_two_only_build() {
         .expect("open");
     apply_user_prompts_schema(
         db.as_ref(),
-        &prompts_options(&config, USER_PROMPTS_MAX_KNOWN),
+        &prompts_options(&config, USER_PROMPTS_V3),
         Some(exclusive_root(&config.storage_path).as_ref()),
     )
     .await

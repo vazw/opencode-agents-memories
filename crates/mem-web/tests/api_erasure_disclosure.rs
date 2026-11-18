@@ -14,7 +14,7 @@ mod common;
 
 use std::path::PathBuf;
 
-use common::fakes::{MEMORY_ID, PROMPT_ID, USER_ID, fake_services};
+use common::fakes::{FAKE_DELETED_AT, MEMORY_ID, PROMPT_ID, USER_ID, fake_services};
 use common::{api_request, app_state_with_api};
 use mem_web::api::dto::not_erased_map;
 use mem_web::server::build_router;
@@ -201,6 +201,182 @@ async fn test_status_read_answers_pending_and_404_for_an_unknown_id() {
         response.body_string().contains(r#""success":false"#),
         "an unknown id uses the envelope"
     );
+}
+
+/// Issue 143: a deleted prompt answers `410 Gone` with `state: "deleted"`, and an
+/// id that never existed keeps `404`. Both halves share ONE router, so a mutant
+/// that answers 410 for everything fails the same test that a mutant keeping
+/// 404 fails: neither half can pass alone.
+#[tokio::test]
+async fn test_a_deleted_prompt_answers_gone_and_an_unknown_id_still_answers_404() {
+    let router = router();
+    let deleted = api_request(
+        router.clone(),
+        "DELETE",
+        &format!("/api/prompts/{PROMPT_ID}"),
+        Some(API_TOKEN),
+        None,
+    )
+    .await;
+    assert_eq!(deleted.status, 200, "{deleted:?}");
+
+    let gone = api_request(
+        router.clone(),
+        "GET",
+        &format!("/api/prompts/{PROMPT_ID}/erasure"),
+        Some(API_TOKEN),
+        None,
+    )
+    .await;
+    assert_eq!(gone.status, 410, "a deleted id answers 410: {gone:?}");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&gone.body_string()).expect("the 410 body is JSON");
+    assert_eq!(parsed["data"]["state"], serde_json::json!("deleted"));
+    assert_eq!(parsed["data"]["tier"], serde_json::json!("user-prompts"));
+    assert_labels_not_paths(&parsed["data"], "GET /api/prompts/{id}/erasure (410)");
+
+    let unknown = api_request(
+        router,
+        "GET",
+        "/api/prompts/does-not-exist/erasure",
+        Some(API_TOKEN),
+        None,
+    )
+    .await;
+    assert_eq!(
+        unknown.status, 404,
+        "a never-existed id keeps 404: {unknown:?}"
+    );
+    assert!(unknown.body_string().contains(r#""success":false"#));
+}
+
+/// Deletes `PROMPT_ID` through the real route, so the fake records the
+/// tombstone exactly as a live delete does (no seeded shortcut).
+async fn delete_probe_prompt(router: &axum::Router) {
+    let deleted = api_request(
+        router.clone(),
+        "DELETE",
+        &format!("/api/prompts/{PROMPT_ID}"),
+        Some(API_TOKEN),
+        None,
+    )
+    .await;
+    assert_eq!(deleted.status, 200, "{deleted:?}");
+}
+
+/// Issue 143: the 410 body is the erasure DTO, and it carries no prompt text.
+/// The positive assertions run first: the pre-change `404 {"success":false}`
+/// satisfies every absence below, so the absences alone would pass on the old tree.
+#[tokio::test]
+async fn test_the_gone_answer_carries_no_prompt_text() {
+    let router = router();
+    delete_probe_prompt(&router).await;
+    let response = api_request(
+        router,
+        "GET",
+        &format!("/api/prompts/{PROMPT_ID}/erasure"),
+        Some(API_TOKEN),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status, 410, "{response:?}");
+    let body = response.body_string();
+    assert!(body.contains(r#""success":true"#), "{body}");
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("the 410 body is JSON");
+    assert_eq!(parsed["data"]["state"], serde_json::json!("deleted"));
+
+    assert!(
+        !body.contains("probe prompt content"),
+        "the 410 must never echo the deleted prompt's text: {body}"
+    );
+    for forbidden in ["content", "summary", "embedding", "metadata"] {
+        assert!(
+            !body.contains(&format!(r#""{forbidden}""#)),
+            "the 410 carries no `{forbidden}` key: {body}"
+        );
+    }
+}
+
+/// Issue 143, Step 6: on the `410` read, a stamp older than the deletion is
+/// `notYetSwept`; a stamp equal to it or newer is `swept`. The three stamps pin
+/// the boundary: a `<=` comparison fails the equal arm, an unconditional
+/// `swept` fails the older arm.
+#[tokio::test]
+async fn test_a_stamp_older_than_the_deletion_is_not_yet_swept() {
+    // The deletion time is the fake's stamp, so the three sweep stamps are
+    // measured against the real tombstone time, not a hand-picked one.
+    const T: i64 = FAKE_DELETED_AT;
+    let cases = [(T - 1, "notYetSwept"), (T, "swept"), (T + 1, "swept")];
+    for (stamp, expected) in cases {
+        let (backend, services) = fake_services();
+        backend.set_sweep_stamp(Some(stamp));
+        let router = router_for(services);
+        delete_probe_prompt(&router).await;
+        let data = data_of_gone(router, &format!("/api/prompts/{PROMPT_ID}/erasure")).await;
+        assert_eq!(
+            data["sweepState"],
+            serde_json::json!(expected),
+            "stamp {stamp} against deletion {T}: {data}"
+        );
+    }
+}
+
+/// Issue 143 (D-9): a failed tombstone read answers the `500`, never `404` or `200`.
+/// The exact pair is the requirement; "not 404" alone would pass on a 200.
+#[tokio::test]
+async fn test_a_failed_tombstone_read_answers_the_d9_500() {
+    let (backend, services) = fake_services();
+    backend.set_tombstone_read_failure(true);
+    let response = api_request(
+        router_for(services),
+        "GET",
+        "/api/prompts/does-not-exist/erasure",
+        Some(API_TOKEN),
+        None,
+    )
+    .await;
+
+    assert_eq!(response.status, 500, "{response:?}");
+    let body = response.body_string();
+    assert!(body.contains(r#""success":false"#), "{body}");
+    assert!(body.contains("Internal Server Error"), "{body}");
+}
+
+/// Issue 143: the 410 `data` uses the erasure vocabulary, the same five keys as
+/// the 200 read, so "one DTO" is pinned rather than asserted in prose.
+#[tokio::test]
+async fn test_the_gone_answer_uses_the_erasure_vocabulary() {
+    let router = router();
+    delete_probe_prompt(&router).await;
+    let data = data_of_gone(router, &format!("/api/prompts/{PROMPT_ID}/erasure")).await;
+    let mut keys: Vec<String> = data
+        .as_object()
+        .expect("data is an object")
+        .keys()
+        .cloned()
+        .collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "notErased",
+            "state",
+            "survivingDerived",
+            "sweepState",
+            "tier"
+        ],
+        "the 410 carries the ErasureStateDto keys and nothing else"
+    );
+}
+
+/// A 410 `data` object, read off a `410` envelope.
+async fn data_of_gone(router: axum::Router, path: &str) -> serde_json::Value {
+    let response = api_request(router, "GET", path, Some(API_TOKEN), None).await;
+    assert_eq!(response.status, 410, "{path}: {response:?}");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&response.body_string()).expect("the 410 body is JSON");
+    parsed["data"].clone()
 }
 
 /// (h) F2: a seeded stamp answers `swept` on the status read — the M1 killer.

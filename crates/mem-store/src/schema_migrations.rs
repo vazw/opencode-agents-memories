@@ -61,11 +61,12 @@ pub struct MigrationOptions {
 
 /// Highest `metadata.db` schema version this build knows.
 pub const METADATA_MAX_KNOWN: i64 = 2;
-/// Highest `user_prompts` schema version this build knows: 3 because
-/// [`apply_user_prompts_schema`] applies v2 and v3 itself, so the migration
+/// Highest `user_prompts` schema version this build knows: 4 because
+/// [`apply_user_prompts_schema`] applies v2, v3 and v4 itself, so the migration
 /// slice (`user_prompts_migrations`) stays v1 — the same split
-/// [`EPISODIC_MAX_KNOWN`]` = 8` records.
-pub const USER_PROMPTS_MAX_KNOWN: i64 = 3;
+/// [`EPISODIC_MAX_KNOWN`]` = 8` records. v4 is the issue-143 prompt tombstone
+/// (`prompt_tombstones`, see [`PROMPT_TOMBSTONE_DDL`]).
+pub const USER_PROMPTS_MAX_KNOWN: i64 = 4;
 /// Highest `user_profiles` schema version this build knows: v2 is the sweep
 /// stamp's `sweep_state` table (issue 43 W6c).
 pub const USER_PROFILES_MAX_KNOWN: i64 = 2;
@@ -82,6 +83,12 @@ pub const EPISODIC_MAX_KNOWN: i64 = 8;
 /// time. No column changes, no row rewrite — `CREATE TABLE IF NOT EXISTS`
 /// only, which is what makes the three bumps data-migration-free.
 pub const SWEEP_STATE_DDL: &str = "CREATE TABLE IF NOT EXISTS sweep_state (tier TEXT PRIMARY KEY, last_swept_unix_ms INTEGER NOT NULL)";
+
+/// The prompt tombstone's table (issue 143, `user-prompts` v4): one row per
+/// deleted prompt id, written in the delete's own transaction. Id and deletion
+/// time only — no text, no summary, no embedding, no metadata. `id` is the
+/// primary key so a re-created id can never add a second row.
+pub const PROMPT_TOMBSTONE_DDL: &str = "CREATE TABLE IF NOT EXISTS prompt_tombstones (id TEXT PRIMARY KEY, deleted_at_unix_ms INTEGER NOT NULL)";
 
 /// Upstream `getUserVersion`.
 async fn get_user_version(db: &dyn Db) -> Result<i64, StoreError> {
@@ -808,7 +815,37 @@ pub async fn apply_user_prompts_schema(
         }
         version = 3;
     }
+
+    // The v4 leg (issue 143): the prompt tombstone. Same shape as v3 — one
+    // additive `CREATE TABLE IF NOT EXISTS`, one pragma, no backup. The delete
+    // path WRITES this table inside its batch, so the bump is what makes that
+    // write legal on a v3 file.
+    if options.max_known >= 4 && version < 4 {
+        db.batch(user_prompts_v4_migration().statements, BatchMode::Write)
+            .await?;
+        db.execute(&set_user_version_statement(4).sql, Vec::new())
+            .await?;
+        let stamped = get_user_version(db).await?;
+        if stamped != 4 {
+            return Err(StoreError::Internal {
+                message: format!(
+                    "user_prompts v4 apply did not stamp user_version = 4 (found {stamped})"
+                ),
+            });
+        }
+        version = 4;
+    }
     Ok(version)
+}
+
+/// The v4 migration step (issue 143): the prompt tombstone table. Applied ONLY
+/// by [`apply_user_prompts_schema`], like v3.
+pub fn user_prompts_v4_migration() -> SchemaMigration {
+    SchemaMigration {
+        version: 4,
+        description: "user-prompts-v4: the prompt tombstone (issue 143)",
+        statements: vec![Statement::new(PROMPT_TOMBSTONE_DDL, Vec::new())],
+    }
 }
 
 /// The v3 migration step (issue 43 W6c): the sweep stamp's `sweep_state`

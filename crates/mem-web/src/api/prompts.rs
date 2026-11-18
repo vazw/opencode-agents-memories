@@ -53,17 +53,31 @@ pub async fn delete_prompt(
     }
 }
 
-/// `GET /api/prompts/{id}/erasure` — the disclosure status read (ADR-0019 H9).
+/// `GET /api/prompts/{id}/erasure` — the disclosure status read (ADR-0019 H9,
+/// D-19-12 for the deleted arm).
 ///
-/// Answers from the prompt's existence and the tier's `sweep_state` row: an
-/// unknown id is the 404 envelope, and a prompt that still exists is `pending`.
+/// Four answers, `prompt_by_id` first:
+/// - the prompt exists → `200`, `state: "pending"`;
+/// - no prompt, a tombstone exists → `410 Gone`, `state: "deleted"` (issue 143);
+/// - no prompt, no tombstone → `404`, the envelope;
+/// - a failed read (prompt or tombstone) → the D-9 `500`, never `404`.
+///
+/// An unknown id is never `410`: the tombstone is the only evidence of a
+/// deletion, and an absent record is not evidence of a never-existed id.
 pub async fn erasure(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     if id.is_empty() {
         return envelope::business_error("id is required");
     }
     match state.api.prompts.prompt_by_id(&id).await {
-        Ok(Some(_)) => envelope::ok(&status_erasure(&state, "user-prompts").await),
-        Ok(None) => envelope::json(StatusCode::NOT_FOUND, envelope::error("Prompt not found")),
+        Ok(Some(_)) => envelope::ok(&status_erasure(&state, "user-prompts", "pending", None).await),
+        Ok(None) => match state.api.prompts.prompt_tombstone(&id).await {
+            Ok(Some(deleted_at)) => envelope::ok_with(
+                StatusCode::GONE,
+                &status_erasure(&state, "user-prompts", "deleted", Some(deleted_at)).await,
+            ),
+            Ok(None) => envelope::json(StatusCode::NOT_FOUND, envelope::error("Prompt not found")),
+            Err(error) => port_failure("GET /api/prompts/{id}/erasure", error),
+        },
         Err(error) => port_failure("GET /api/prompts/{id}/erasure", error),
     }
 }
@@ -106,17 +120,30 @@ pub(super) fn delete_erasure(tier: &'static str) -> ErasureStateDto {
 /// The status read (H9): the tier's stamp, mapped through D-19-3. A stamp is
 /// `swept`, its absence `notYetSwept`, and a failed read `sweepFailed` — never
 /// `notYetSwept`, which would claim a sweep never ran when the tool cannot look.
-pub(super) async fn status_erasure(state: &Arc<AppState>, tier: &'static str) -> ErasureStateDto {
+///
+/// `deleted_at_unix_ms` is `Some` only on the `410` read (issue 143). There a
+/// stamp older than the deletion cannot have covered that id's residue, so it is
+/// `notYetSwept`; a stamp at or after the deletion is `swept`, equal included:
+/// a sweep stamped in the same millisecond is not older than the deletion.
+pub(super) async fn status_erasure(
+    state: &Arc<AppState>,
+    tier: &'static str,
+    lifecycle: &'static str,
+    deleted_at_unix_ms: Option<i64>,
+) -> ErasureStateDto {
     let sweep_state = if tier == "memories" {
         "noSweepForTier"
     } else {
         match state.api.prompts.sweep_state(tier).await {
-            Ok(Some(_)) => "swept",
+            Ok(Some(stamp)) => match deleted_at_unix_ms {
+                Some(at) if stamp < at => "notYetSwept",
+                _ => "swept",
+            },
             Ok(None) => "notYetSwept",
             Err(_) => "sweepFailed",
         }
     };
-    erasure_dto(tier, "pending", sweep_state)
+    erasure_dto(tier, lifecycle, sweep_state)
 }
 
 /// `POST /api/prompts/bulk-delete` — upstream `handleBulkDeletePrompts`.

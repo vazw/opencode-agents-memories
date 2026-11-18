@@ -393,6 +393,25 @@ async fn test_profile_erase_failure_keeps_the_prompt() {
             .is_some(),
         "E2: the source row must survive a failed erase so a retry can fire"
     );
+    assert_eq!(
+        tombstone_rows(&manager).await,
+        0,
+        "issue 143: a failed erase must not record a deletion"
+    );
+}
+
+/// The tombstone count, read through the manager's own connection.
+async fn tombstone_rows(manager: &UserPromptManager) -> i64 {
+    let db = manager.ready().await.expect("prompts ready");
+    mem_store::db::query_one(
+        db.as_ref(),
+        "SELECT COUNT(*) AS count FROM prompt_tombstones",
+        Vec::new(),
+    )
+    .await
+    .expect("count the tombstones")
+    .and_then(|row| row.i64("count"))
+    .unwrap_or(-1)
 }
 
 /// Performs the **real** erase, then sabotages the manager's own prompt DELETE
@@ -471,4 +490,12 @@ async fn test_prompt_delete_failure_after_erase_reports_a_partial_outcome() {
             "{table} must be empty after the real erase"
         );
     }
+    // (3) issue 143: the sabotaged batch rolled back, so no tombstone was
+    // committed. Non-vacuous only because the two statements share a
+    // transaction: a split into two `execute` calls leaves the tombstone.
+    assert_eq!(
+        tombstone_rows(&manager).await,
+        0,
+        "issue 143: a failed prompt DELETE must roll the tombstone back"
+    );
 }

@@ -771,6 +771,26 @@ impl PromptPort for ProductionPrompts {
         .map_err(store_failure)?;
         Ok(row.map(|row| row.i64("last_swept_unix_ms").unwrap_or_default()))
     }
+
+    async fn prompt_tombstone(&self, id: &str) -> Result<Option<i64>, PortError> {
+        let db = self.manager.ready().await.map_err(profile_failure)?;
+        // Idempotent create, as `sweep_state` does: a build whose file predates
+        // the v4 leg still answers honestly instead of failing the status read.
+        db.execute(
+            mem_store::schema_migrations::PROMPT_TOMBSTONE_DDL,
+            Vec::new(),
+        )
+        .await
+        .map_err(store_failure)?;
+        let row = query_one(
+            db.as_ref(),
+            "SELECT deleted_at_unix_ms FROM prompt_tombstones WHERE id = ?",
+            vec![Value::Text(id.to_string())],
+        )
+        .await
+        .map_err(store_failure)?;
+        Ok(row.map(|row| row.i64("deleted_at_unix_ms").unwrap_or_default()))
+    }
 }
 
 // ---------------------------------------------------------------------------

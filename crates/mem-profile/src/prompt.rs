@@ -17,7 +17,9 @@ use std::sync::Arc;
 
 use mem_store::config::StoreConfig;
 use mem_store::connection::ConnectionManager;
-use mem_store::db::{ConnectFactory, DbHandle, Value, query_one, turso_connect_factory};
+use mem_store::db::{
+    BatchMode, ConnectFactory, DbHandle, Statement, Value, query_one, turso_connect_factory,
+};
 use mem_store::error::StoreError;
 use mem_store::platform::Platform;
 use mem_store::schema_migrations::{
@@ -337,10 +339,15 @@ impl UserPromptManager {
     ///    **erase before delete**). If the erase fails the prompt is kept, so
     ///    a retry still has an event that re-fires erasure — deleting the
     ///    source anyway would silently break the promise;
-    /// 3. delete the prompt. A failure here is reported as a typed partial
-    ///    outcome (`PromptDeleteAfterErasure`) carrying the real erase count.
-    ///    A concurrent peer deleting the row first makes this DELETE change 0
-    ///    rows — idempotent success, not an error.
+    /// 3. delete the prompt and record its tombstone (issue 143) in the same
+    ///    transaction. A failure here is reported as a typed partial outcome
+    ///    (`PromptDeleteAfterErasure`) carrying the real erase count. A
+    ///    concurrent peer deleting the row first makes this DELETE change 0
+    ///    rows — idempotent success, not an error. Crash window: a crash
+    ///    before the batch leaves the row and no tombstone (the status read
+    ///    answers `pending`, and a retry re-fires the erase, which finds
+    ///    nothing and returns `Ok(0)`); a crash after the commit leaves both.
+    ///    The retry's `profiles_deleted` counts that call only, never a total.
     ///
     /// D-6: an existing row whose `created_at` is unreadable / non-integer must
     /// NOT fall toward retention. `i64::MIN` satisfies `could_have_contributed`
@@ -374,9 +381,25 @@ impl UserPromptManager {
             None => None,
         };
 
-        db.execute(
-            "DELETE FROM user_prompts WHERE id = ?",
-            vec![Value::Text(prompt_id.to_string())],
+        // Issue 143: the tombstone and the DELETE share one `Immediate`
+        // transaction, so a crash leaves both or neither. `INSERT OR IGNORE`
+        // keeps a re-created id from aborting the batch and keeps the first
+        // deletion time, the evidence.
+        db.batch(
+            vec![
+                Statement::new(
+                    "INSERT OR IGNORE INTO prompt_tombstones (id, deleted_at_unix_ms) VALUES (?, ?)",
+                    vec![
+                        Value::Text(prompt_id.to_string()),
+                        Value::Integer(now_millis()),
+                    ],
+                ),
+                Statement::new(
+                    "DELETE FROM user_prompts WHERE id = ?",
+                    vec![Value::Text(prompt_id.to_string())],
+                ),
+            ],
+            BatchMode::Write,
         )
         .await
         .map_err(|error| ProfileError::PromptDeleteAfterErasure {

@@ -101,8 +101,14 @@ pub fn success_with_flag(flag: bool, data: &impl serde::Serialize) -> Option<Str
 /// A `200` success envelope carrying `data`, or the D-9 `500` when the DTO
 /// cannot be serialized.
 pub fn ok<T: serde::Serialize + ?Sized>(data: &T) -> Response<Body> {
+    ok_with(StatusCode::OK, data)
+}
+
+/// A `success:true` envelope carrying `data` under `status` (issue 143: the
+/// `410 Gone` status read). The D-9 `500` when the DTO cannot be serialized.
+pub fn ok_with<T: serde::Serialize + ?Sized>(status: StatusCode, data: &T) -> Response<Body> {
     match success_body(data) {
-        Some(body) => json(StatusCode::OK, body),
+        Some(body) => json(status, body),
         None => internal_error(),
     }
 }

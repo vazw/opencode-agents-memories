@@ -596,6 +596,17 @@ pub trait PromptPort: Send + Sync {
     async fn sweep_state(&self, _tier: &str) -> Result<Option<i64>, PortError> {
         Ok(None)
     }
+
+    /// The tombstone's deletion time for a prompt id (issue 143), or `None`
+    /// when no tombstone is on record. A failed read is `Err`, never `None`:
+    /// absence of a record is not evidence that the id never existed.
+    ///
+    /// Default `Ok(None)`: a compile seam so a new impl still builds. It is not
+    /// a behavioural promise. Every in-tree impl that can reach this read
+    /// overrides it; `UnavailablePort` fails earlier at `prompt_by_id`.
+    async fn prompt_tombstone(&self, _id: &str) -> Result<Option<i64>, PortError> {
+        Ok(None)
+    }
 }
 
 /// What one prompt delete erased, for the disclosure DTO.

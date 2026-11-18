@@ -39,7 +39,7 @@ maximum. The maximum is a constant **beside the set**, not derived from the migr
 |---|---|---|
 | `metadata.db` | `METADATA_MAX_KNOWN` | 2 (W4) |
 | memory shards | `MEMORY_SHARD_MAX_KNOWN` | 3 (W2's v3) |
-| `user_prompts` | `USER_PROMPTS_MAX_KNOWN` | 3 (issue 43 W6c's sweep stamp) |
+| `user_prompts` | `USER_PROMPTS_MAX_KNOWN` | 4 (issue 43 W6c's sweep stamp; issue 143's prompt tombstone, v4) |
 | `user_profiles` | `USER_PROFILES_MAX_KNOWN` | 2 (issue 43 W6c's sweep stamp) |
 | episodic | `EPISODIC_MAX_KNOWN` | 8 (issue 43 W6c's sweep stamp) |
 | `facts.db` | `FACTS_MAX_KNOWN` | 1 |
