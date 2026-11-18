@@ -42,7 +42,7 @@ async function readyMemories() {
   return evaluate(`new Promise((resolve,reject)=>{const start=Date.now();const timer=setInterval(()=>{const el=document.querySelector('[data-testid="memories-range"]');if(el&&/of 6221$/.test(el.textContent.trim())){clearInterval(timer);resolve(Date.now()-start)}else if(Date.now()-start>20000){clearInterval(timer);reject(Error('memories readiness timeout | '+document.body.innerText.slice(0,120)))}},100)})`);
 }
 function install(scenario) {
-  return `(()=>{const f=${JSON.stringify(fixture)};window.__scenario=${JSON.stringify(scenario)};window.__requests=[];window.__OPENCODE_MEM_TOKEN__='synthetic-wave6-marker';const original=window.fetch.bind(window);window.fetch=async(input,options={})=>{const u=new URL(typeof input==='string'?input:input.url,location.href);if(!u.pathname.startsWith('/api/'))return original(input,options);const method=options.method||'GET';const headers=new Headers(options.headers);let data,status=200;if(u.pathname==='/api/memories')data=f.memories;else if(u.pathname==='/api/search')data=f.search;else if(u.pathname==='/api/tags')data=f.tags;else if(u.pathname==='/api/stats')data=f.stats;else if(u.pathname==='/api/projects')data=f.projects;else if(u.pathname==='/api/health')data=f.health;else if(u.pathname==='/api/user-profile')data=f.profile;else if(u.pathname==='/api/user-profiles')data=f.roster;else{status=404;data={success:false}}window.__requests.push({path:u.pathname,query:u.search,method,tokenPresent:headers.get('x-opencode-mem-token')==='synthetic-wave6-marker',status});await new Promise(r=>setTimeout(r,30));return new Response(JSON.stringify(u.pathname==='/api/health'?data:{success:true,data}),{status,headers:{'Content-Type':'application/json'}})};})()`;
+  return `(()=>{const f=${JSON.stringify(fixture)};window.__scenario=${JSON.stringify(scenario)};window.__requests=[];window.__OPENCODE_MEM_TOKEN__='synthetic-wave6-marker';const original=window.fetch.bind(window);window.fetch=async(input,options={})=>{const u=new URL(typeof input==='string'?input:input.url,location.href);if(!u.pathname.startsWith('/api/'))return original(input,options);const method=options.method||'GET';const headers=new Headers(options.headers);let data,status=200;if(u.pathname==='/api/memories')data=f.memories;else if(u.pathname==='/api/search')data=f.search;else if(u.pathname==='/api/tags')data=f.tags;else if(u.pathname==='/api/stats')data=f.stats;else if(u.pathname==='/api/projects')data=f.projects;else if(u.pathname==='/api/health')data=f.health;else if(u.pathname==='/api/user-profile')data=f.profile;else if(u.pathname==='/api/user-profiles')data=f.roster;else if(u.pathname==='/api/cleanup/status'&&method==='GET'){if(window.__scenario==='degraded'){status=501;data={success:false,error:'the endpoint is not available in this build'}}else data=window.__ranOnce?f.cleanupStatus:window.__scenario==='never'?f.cleanupStatusNever:window.__scenario==='auto-running'?f.cleanupStatusRunning:f.cleanupStatus}else if(u.pathname==='/api/cleanup'&&method==='POST'){window.__ranOnce=true;data=f.cleanupReport}else{status=404;data={success:false}}window.__requests.push({path:u.pathname,query:u.search,method,tokenPresent:headers.get('x-opencode-mem-token')==='synthetic-wave6-marker',status});await new Promise(r=>setTimeout(r,30));return new Response(JSON.stringify(u.pathname==='/api/health'?data:{success:true,data}),{status,headers:{'Content-Type':'application/json'}})};})()`;
 }
 async function navigate(route, scenario = 'normal', width = 1280, theme = 'light') {
   pageErrors = [];
@@ -310,6 +310,76 @@ const cases = {
       selects.push({ route, testid, options: state.options });
     }
     return { selects };
+  },
+  // --- G7: the maintenance section's auto-cleanup status row (issue 141) ---
+  async maintenance_status_renders_four_values() {
+    // Mutant: the view renders empty cells or collapses the four facts.
+    await navigate('/settings', 'normal');
+    await ready(q('maintenance-section'));
+    await ready(q('maintenance-auto-running'));
+    const v = await evaluate(`(()=>{const t=id=>{const e=document.querySelector('[data-testid="'+id+'"]');return e?e.textContent.trim():null};return {enabled:t('maintenance-auto-enabled'),interval:t('maintenance-auto-interval'),last:t('maintenance-auto-last'),running:t('maintenance-auto-running')}})()`);
+    assert.equal(v.enabled, 'on', `enabled=${v.enabled}`);
+    assert.equal(v.interval, '86400 s', `interval=${v.interval}`);
+    assert.notEqual(v.last, 'never', 'last must be a date for a stamped run');
+    assert.ok(v.last && v.last.length > 0, 'last is empty');
+    assert.equal(v.running, 'no', `running=${v.running}`);
+    return { values: v };
+  },
+  async maintenance_status_never_ran() {
+    // Mutant: `null` lastRunMs renders as "" or the epoch year.
+    await navigate('/settings', 'never');
+    await ready(q('maintenance-auto-last'));
+    const last = await evaluate(`document.querySelector('[data-testid="maintenance-auto-last"]').textContent.trim()`);
+    assert.equal(last, 'never', `last=${last}`);
+    assert.ok(!/1970/.test(last), 'an absent stamp must not read as 1970');
+    return { last };
+  },
+  async maintenance_status_unavailable_not_off() {
+    // Mutant: the 501 renders as a silent `off`, or disables the action.
+    await navigate('/settings', 'degraded');
+    await ready(q('maintenance-auto-unavailable'));
+    const state = await evaluate(`(()=>{const note=document.querySelector('[data-testid="maintenance-auto-unavailable"]');const enabled=document.querySelector('[data-testid="maintenance-auto-enabled"]');const action=document.querySelector('[data-testid="maintenance-action"]');return {note:note?note.textContent.trim():null,enabledPresent:!!enabled,actionDisabled:action?action.disabled:null}})()`);
+    assert.ok(state.note && state.note.includes('not available in this build'), `note=${state.note}`);
+    assert.equal(state.enabledPresent, false, 'no enabled value may render on 501');
+    assert.equal(state.actionDisabled, false, 'an unavailable status must not disable the action');
+    return state;
+  },
+  async maintenance_server_running_disables_action() {
+    // Mutant: relabel-only — the control stays enabled while the server runs.
+    await navigate('/settings', 'auto-running');
+    await ready(q('maintenance-auto-running'));
+    const state = await evaluate(`(()=>{const r=document.querySelector('[data-testid="maintenance-auto-running"]').textContent.trim();const action=document.querySelector('[data-testid="maintenance-action"]');return {running:r,disabled:action?action.disabled:null}})()`);
+    assert.equal(state.running, 'yes', `running=${state.running}`);
+    assert.equal(state.disabled, true, 'the action must be disabled while the server reports running');
+    return state;
+  },
+  async cleanup_run_refreshes_status() {
+    // Mutant: refetch unwired — status GET stays at one and `last` never flips.
+    await navigate('/settings', 'never');
+    await ready(q('maintenance-auto-last'));
+    await click(q('maintenance-action'));
+    await ready(q('maintenance-dialog-confirm'));
+    await click(q('maintenance-dialog-confirm'));
+    // Non-empty discriminator: the report row exists only after a Ran outcome.
+    await ready(q('maintenance-report'));
+    await sleep(150);
+    const reqs = await evaluate(`window.__requests.map(r=>({path:r.path,method:r.method}))`);
+    const posts = reqs.map((r,i)=>[r,i]).filter(([r])=>r.path==='/api/cleanup'&&r.method==='POST').map(([,i])=>i);
+    const gets = reqs.map((r,i)=>[r,i]).filter(([r])=>r.path==='/api/cleanup/status'&&r.method==='GET').map(([,i])=>i);
+    assert.ok(posts.length >= 1, `no POST /api/cleanup: ${JSON.stringify(reqs)}`);
+    assert.ok(gets.some(i => i > posts[0]), `no status GET after the POST (stale status after a run): ${JSON.stringify(reqs)}`);
+    const last = await evaluate(`document.querySelector('[data-testid="maintenance-auto-last"]').textContent.trim()`);
+    assert.notEqual(last, 'never', 'last must flip from never after the run');
+    return { posts, gets, last };
+  },
+  async settings_renders_clean() {
+    // Mutant: a render panic or console error once the status row mounts. The
+    // readiness gate waits for the new row, so an unwired bundle reds here too.
+    await navigate('/settings', 'normal');
+    await ready(q('maintenance-section'));
+    await ready(q('maintenance-auto-running'));
+    assert.equal(pageErrors.length, 0, `console errors/panics: ${pageErrors.join(' | ')}`);
+    return { pageErrors: pageErrors.length };
   },
   async stats_renders_clean() {
     await navigate('/stats');

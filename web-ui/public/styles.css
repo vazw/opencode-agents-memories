@@ -534,6 +534,22 @@ body {
   font-size: 0.85em;
 }
 
+/* Issue 141: the automatic cleanup status row, laid out like the report. */
+.maintenance-auto {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0.75rem 0 0;
+}
+
+.maintenance-auto dt {
+  color: var(--muted);
+}
+
+.maintenance-auto dd {
+  margin: 0;
+}
+
 /* ---------------------------------------------------------------------------
    Agents (W6.6)
 

@@ -829,5 +829,30 @@
       "milestoneCount": 2,
       "lastActivityAt": 1763510400000
     }
-  ]
+  ],
+  "cleanupStatus": {
+    "enabled": true,
+    "intervalSeconds": 86400,
+    "lastRunMs": 1763360000000,
+    "running": false
+  },
+  "cleanupStatusNever": {
+    "enabled": true,
+    "intervalSeconds": 86400,
+    "lastRunMs": null,
+    "running": false
+  },
+  "cleanupStatusRunning": {
+    "enabled": true,
+    "intervalSeconds": 86400,
+    "lastRunMs": 1763360000000,
+    "running": true
+  },
+  "cleanupReport": {
+    "deletedCount": 3,
+    "userCount": 1,
+    "projectCount": 2,
+    "promptsDeleted": 0,
+    "protectedMemoriesSkipped": 1
+  }
 }

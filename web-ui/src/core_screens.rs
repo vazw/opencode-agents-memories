@@ -2486,6 +2486,73 @@ pub fn cleanup_spec() -> RequestSpec {
     RequestSpec::post(endpoint(EndpointId::Cleanup).template)
 }
 
+/// `GET /api/cleanup/status` (issue 141): the maintenance section's read of the
+/// automatic sweep's four facts. Bodyless by design, like its POST sibling:
+/// the server owns the answer, the client only asks for it.
+pub fn cleanup_status_spec() -> RequestSpec {
+    RequestSpec::get(endpoint(EndpointId::CleanupStatus).template)
+}
+
+/// The four facts the status endpoint answers (issue 41's wire DTO, mirrored).
+///
+/// Every non-`Option` field is **required**: no `#[serde(default)]` anywhere,
+/// so a partial body classifies as a malformed answer instead of rendering a
+/// zero the server never sent. The one deliberate `Option` is `last_run_ms` —
+/// an absent stamp decodes `None` and renders "never" (`dto.rs:633-634` makes
+/// the server serialize absent as `null`; explicit `null` and absent decode
+/// alike, the same mechanism `test_stats_view_defaults_a_legacy_payload` pins).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupAutoStatus {
+    pub enabled: bool,
+    pub interval_seconds: u64,
+    pub last_run_ms: Option<i64>,
+    pub running: bool,
+}
+
+/// What one `/api/cleanup/status` answer classified as.
+///
+/// `Unavailable` (the `501` build) is informational; only `Failed` means the
+/// endpoint could not answer at all. "Endpoint said disabled" is
+/// `Answered { enabled: false }` — a real answer, never folded into
+/// `Unavailable`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CleanupAutoOutcome {
+    Answered(CleanupAutoStatus),
+    Unavailable,
+    Failed(String),
+}
+
+/// The "last run" cell: `never` for an absent stamp, otherwise the browser's
+/// local rendering of the epoch-milliseconds instant. `None` is `never`, never
+/// the epoch: an absent stamp must not read as a run in 1970.
+pub fn cleanup_last_run_label(last_run_ms: Option<i64>) -> String {
+    match last_run_ms {
+        None => "never".to_string(),
+        Some(ms) => js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ms as f64))
+            .to_locale_string("default", &wasm_bindgen::JsValue::UNDEFINED)
+            .into(),
+    }
+}
+
+/// Classify one `/api/cleanup/status` answer.
+///
+/// Mirrors [`cleanup_outcome`]'s D-2 pattern: `501` is checked **first**,
+/// before a single body byte is decoded (the documented degraded-server answer
+/// can arrive with any body — a proxy page must never render). A `2xx`
+/// success envelope decodes to [`CleanupAutoOutcome::Answered`]; every other
+/// status or a malformed body maps to [`CleanupAutoOutcome::Failed`] with a
+/// bounded message.
+pub fn cleanup_auto_outcome(status: u16, bytes: &[u8]) -> CleanupAutoOutcome {
+    if status == 501 {
+        return CleanupAutoOutcome::Unavailable;
+    }
+    match parse_envelope::<CleanupAutoStatus>(status, bytes) {
+        Ok(answer) => CleanupAutoOutcome::Answered(answer),
+        Err(failure) => CleanupAutoOutcome::Failed(failure.to_string()),
+    }
+}
+
 /// The frozen five-field cleanup report (issue 39).
 ///
 /// Every field is **required** on purpose: no `#[serde(default)]` anywhere, so
@@ -2636,7 +2703,13 @@ pub fn cleanup_action_label(status: CleanupStatus) -> &'static str {
 }
 
 /// Whether the action button is disabled (in flight, nothing else).
-pub fn cleanup_disabled(state: &CleanupState) -> bool {
+pub fn cleanup_disabled(state: &CleanupState, auto_running: bool) -> bool {
+    // `auto_running` is the server's `running` flag from the last Answered
+    // status; the caller passes `false` for any non-Answered state, so an
+    // Unavailable or Failed status never disables the action.
+    if auto_running {
+        return true;
+    }
     state.running
 }
 
@@ -2775,6 +2848,24 @@ async fn run_cleanup(auth: &AuthContext) -> CleanupOutcome {
     }
 }
 
+/// The status row's answer, as the panel holds it. `Loading` until the first
+/// fetch lands; the last answer stays on screen while a refetch is in flight.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CleanupAutoState {
+    Loading,
+    Ready(CleanupAutoOutcome),
+}
+
+/// One status read. Returns whatever the server answered, `Failed` included;
+/// the caller stores that outcome as the new state, so a failed refetch
+/// replaces the previous answer rather than keeping it.
+async fn fetch_cleanup_status(auth: &AuthContext) -> CleanupAutoOutcome {
+    match fetch_status_and_bytes(&cleanup_status_spec(), auth).await {
+        Ok((status, bytes)) => cleanup_auto_outcome(status, &bytes),
+        Err(failure) => CleanupAutoOutcome::Failed(failure.to_string()),
+    }
+}
+
 /// The W6.7 Settings screen.
 ///
 /// It reads `/api/health` and `/api/stats` on every mount, and adds the
@@ -2790,6 +2881,21 @@ pub fn SettingsPanel() -> impl IntoView {
         basic: None,
     };
     let state = RwSignal::new(SettingsScreen::Loading);
+    let auto_status = RwSignal::new(CleanupAutoState::Loading);
+
+    // The status row's only network path (Decision 1): the mount effect, the
+    // Reload button, and the continuation after a cleanup run. No timer, no
+    // poll, no call from the reducer.
+    let refresh_status = Callback::new({
+        let auth = auth.clone();
+        move |_: ()| {
+            let auth = auth.clone();
+            leptos::task::spawn_local(async move {
+                let outcome = fetch_cleanup_status(&auth).await;
+                auto_status.set(CleanupAutoState::Ready(outcome));
+            });
+        }
+    });
 
     let reload = Callback::new({
         let auth = auth.clone();
@@ -2809,6 +2915,7 @@ pub fn SettingsPanel() -> impl IntoView {
         }
     });
     Effect::new(move |_| reload.run(()));
+    Effect::new(move |_| refresh_status.run(()));
 
     // The Maintenance section's only path to the network: this callback is
     // reachable from the dialog's Confirm handler below and from nowhere else
@@ -2829,6 +2936,8 @@ pub fn SettingsPanel() -> impl IntoView {
                 cleanup.update(|current| {
                     *current = cleanup_next(current, CleanupEvent::Finished(outcome)).state;
                 });
+                // Site 3 of 3: a finished run changes what the status row reads.
+                refresh_status.run(());
             });
         }
     });
@@ -2850,7 +2959,10 @@ pub fn SettingsPanel() -> impl IntoView {
             <Button
                 class="settings-reload"
                 attr:data-testid="settings-reload"
-                on_click=move |_| reload.run(())
+                on_click=move |_| {
+                    reload.run(());
+                    refresh_status.run(());
+                }
             >
                 "Reload"
             </Button>
@@ -2994,6 +3106,45 @@ pub fn SettingsPanel() -> impl IntoView {
                             </Dialog>
                         }
                     });
+                let auto_view = match auto_status.get() {
+                    CleanupAutoState::Loading => ().into_any(),
+                    CleanupAutoState::Ready(CleanupAutoOutcome::Answered(answer)) => {
+                        let label = cleanup_last_run_label(answer.last_run_ms);
+                        view! {
+                            <dl class="maintenance-auto" data-testid="maintenance-auto">
+                                <dt>"Automatic cleanup"</dt>
+                                <dd data-testid="maintenance-auto-enabled">
+                                    {if answer.enabled { "on" } else { "off" }}
+                                </dd>
+                                <dt>"Interval"</dt>
+                                <dd data-testid="maintenance-auto-interval">
+                                    {format!("{} s", answer.interval_seconds)}
+                                </dd>
+                                <dt>"Last run"</dt>
+                                <dd data-testid="maintenance-auto-last">{label}</dd>
+                                <dt>"Running"</dt>
+                                <dd data-testid="maintenance-auto-running">
+                                    {if answer.running { "yes" } else { "no" }}
+                                </dd>
+                            </dl>
+                        }
+                        .into_any()
+                    }
+                    CleanupAutoState::Ready(CleanupAutoOutcome::Unavailable) => {
+                        view! {
+                            <p class="maintenance-unavailable" data-testid="maintenance-auto-unavailable">
+                                "Automatic cleanup status is not available in this build."
+                            </p>
+                        }
+                        .into_any()
+                    }
+                    CleanupAutoState::Ready(CleanupAutoOutcome::Failed(message)) => {
+                        view! {
+                            <p class="maintenance-error" data-testid="maintenance-auto-failed">{message}</p>
+                        }
+                        .into_any()
+                    }
+                };
                 let outcome_view = match outcome {
                     CleanupOutcomeView::Nothing => ().into_any(),
                     CleanupOutcomeView::Report(rows) => {
@@ -3054,6 +3205,7 @@ pub fn SettingsPanel() -> impl IntoView {
                         <p>
                             "Cleanup deletes memories older than the retention window. It is never run automatically."
                         </p>
+                        {auto_view}
                         {armed_notice}
                         <span node_ref=action_ref>
                             <Button
@@ -3061,7 +3213,17 @@ pub fn SettingsPanel() -> impl IntoView {
                                 class="maintenance-action"
                                 attr:data-testid="maintenance-action"
                                 disabled=Signal::derive(move || {
-                                    cleanup_disabled(&cleanup.get()) || cleanup.get().armed
+                                    // Only an Answered `running: true` disables on
+                                    // the server's word; Unavailable, Failed and
+                                    // Loading pass `false` and never disable.
+                                    let server_running = matches!(
+                                        auto_status.get(),
+                                        CleanupAutoState::Ready(CleanupAutoOutcome::Answered(
+                                            CleanupAutoStatus { running: true, .. }
+                                        ))
+                                    );
+                                    cleanup_disabled(&cleanup.get(), server_running)
+                                        || cleanup.get().armed
                                 })
                                 loading=Signal::derive(move || cleanup.get().running)
                                 on_click=move |_| dispatch.run(CleanupAction::Arm)

@@ -54,6 +54,8 @@ fn test_pinned_endpoints_are_the_exact_rest_set() {
         // Issues 115/116: the port-only rosters.
         ("GET", "/api/user-profiles"),
         ("GET", "/api/projects"),
+        // Issue 141: the maintenance section's auto-cleanup status row.
+        ("GET", "/api/cleanup/status"),
     ]
     .into_iter()
     .collect();
@@ -111,8 +113,8 @@ fn test_agents_route_consumes_the_project_and_milestone_endpoints() {
     // milestone template (the pre-picker screen).
     assert_eq!(
         ENDPOINTS.len(),
-        37,
-        "the pinned REST table grew by the project-roster row"
+        38,
+        "the pinned REST table grew by the project-roster row and the issue-141 cleanup-status row"
     );
     let expected: &[&str] = &["/api/projects", "/api/projects/{project_id}/milestones"];
     assert_eq!(

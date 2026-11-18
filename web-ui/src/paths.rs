@@ -52,6 +52,7 @@ pub enum EndpointId {
     ListProjectMilestones,
     ListUserProfiles,
     ListProjects,
+    CleanupStatus,
 }
 
 /// One pinned endpoint: its identity, its HTTP method and its path template.
@@ -251,6 +252,12 @@ pub const ENDPOINTS: &[EndpointSpec] = &[
         method: "GET",
         template: "/api/projects",
     },
+    // Issue 141: the maintenance section's auto-cleanup status row.
+    EndpointSpec {
+        id: EndpointId::CleanupStatus,
+        method: "GET",
+        template: "/api/cleanup/status",
+    },
 ];
 
 /// Compile-time totality: one row per `EndpointId`, in declaration order.
@@ -298,9 +305,10 @@ const _: () = {
         | EndpointId::DeleteProjectSession
         | EndpointId::ListProjectMilestones
         | EndpointId::ListUserProfiles
-        | EndpointId::ListProjects => {}
+        | EndpointId::ListProjects
+        | EndpointId::CleanupStatus => {}
     }
-    assert!(ENDPOINTS.len() == EndpointId::ListProjects as usize + 1);
+    assert!(ENDPOINTS.len() == EndpointId::CleanupStatus as usize + 1);
     let mut i: usize = 0;
     while i < ENDPOINTS.len() {
         assert!(ENDPOINTS[i].id as usize == i);

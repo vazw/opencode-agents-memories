@@ -11,7 +11,9 @@
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_ui::api::envelope::ApiError;
 use web_ui::api_request::build_url;
+use web_ui::core_screens::cleanup_last_run_label;
 use web_ui::core_screens::cleanup_spec;
+use web_ui::core_screens::cleanup_status_spec;
 use web_ui::core_screens::{
     CLEANUP_ARMED_TESTID, CLEANUP_ERROR_CLASS, CLEANUP_ERROR_TESTID, CLEANUP_REFUSED_CLASS,
     CLEANUP_REFUSED_TESTID, CLEANUP_REPORT_CLASS, CLEANUP_REPORT_TESTID, CLEANUP_UNAVAILABLE_CLASS,
@@ -19,8 +21,9 @@ use web_ui::core_screens::{
     cleanup_outcome, cleanup_outcome_view, cleanup_report_rows,
 };
 use web_ui::core_screens::{
-    CleanupAction, CleanupEvent, CleanupOutcome, CleanupReport, CleanupState, CleanupStatus,
-    CleanupStep, cleanup_action_label, cleanup_disabled, cleanup_next, cleanup_status,
+    CleanupAction, CleanupAutoOutcome, CleanupAutoStatus, CleanupEvent, CleanupOutcome,
+    CleanupReport, CleanupState, CleanupStatus, CleanupStep, cleanup_action_label,
+    cleanup_auto_outcome, cleanup_disabled, cleanup_next, cleanup_status,
 };
 use web_ui::core_screens::{
     DailyStatsView, HealthStatus, IdentityControl, MemoriesView, MemoryPage, ProfileCountsView,
@@ -917,6 +920,20 @@ fn test_cleanup_spec_is_a_bodyless_post_to_the_pinned_template() {
     assert!(spec.body.is_none());
 }
 
+#[wasm_bindgen_test]
+fn test_cleanup_status_spec_is_a_get_to_the_pinned_template() {
+    // Issue 141: the maintenance section's status row reads the status
+    // endpoint. Mutant: the destructive sibling (POST /api/cleanup) or a
+    // re-typed path.
+    let spec = cleanup_status_spec();
+    assert_eq!(spec.method, method(EndpointId::CleanupStatus));
+    assert_eq!(spec.method, "GET");
+    assert_eq!(spec.path, template(EndpointId::CleanupStatus));
+    assert_eq!(spec.path, "/api/cleanup/status");
+    assert!(spec.query.is_empty());
+    assert!(spec.body.is_none());
+}
+
 /// A report with distinct, memorable counts.
 fn cleanup_report() -> CleanupReport {
     CleanupReport {
@@ -1043,7 +1060,7 @@ fn test_cleanup_next_re_enables_after_every_outcome() {
         assert!(!step.state.running, "every outcome re-enables the action");
         assert!(!step.state.armed, "every outcome drops the arm");
         assert_eq!(step.state.last, Some(outcome));
-        assert!(!cleanup_disabled(&step.state));
+        assert!(!cleanup_disabled(&step.state, false));
     }
 }
 
@@ -1087,21 +1104,46 @@ fn test_cleanup_action_label_and_status_show_the_armed_step() {
 }
 
 #[wasm_bindgen_test]
-fn test_cleanup_disabled_tracks_the_in_flight_state() {
-    assert!(!cleanup_disabled(&CleanupState::default()));
+fn test_cleanup_disabled_carries_the_server_running_flag() {
+    // Mutant: `auto_running` dropped from the predicate. A cleanup the server
+    // is already running (the sweep, or a run from another tab) must disable
+    // the action even with the local state idle.
+    let idle = CleanupState::default();
+    assert!(cleanup_disabled(&idle, true), "server running disables");
     assert!(
-        !cleanup_disabled(&CleanupState {
-            armed: true,
-            running: false,
-            last: None,
-        }),
-        "arming alone must not disable the confirmation button"
+        !cleanup_disabled(&idle, false),
+        "idle and not running enables"
     );
-    assert!(cleanup_disabled(&CleanupState {
+    let in_flight = CleanupState {
         armed: false,
         running: true,
         last: None,
-    }));
+    };
+    assert!(cleanup_disabled(&in_flight, false), "local run disables");
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_disabled_tracks_the_in_flight_state() {
+    assert!(!cleanup_disabled(&CleanupState::default(), false));
+    assert!(
+        !cleanup_disabled(
+            &CleanupState {
+                armed: true,
+                running: false,
+                last: None,
+            },
+            false
+        ),
+        "arming alone must not disable the confirmation button"
+    );
+    assert!(cleanup_disabled(
+        &CleanupState {
+            armed: false,
+            running: true,
+            last: None,
+        },
+        false
+    ));
 
     for outcome in [
         CleanupOutcome::Ran(cleanup_report()),
@@ -1116,10 +1158,78 @@ fn test_cleanup_disabled_tracks_the_in_flight_state() {
             CleanupEvent::Finished(outcome),
         );
         assert!(
-            !cleanup_disabled(&finished.state),
+            !cleanup_disabled(&finished.state, false),
             "the action re-enables after success and after failure"
         );
     }
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_auto_outcome_parses_the_four_fields() {
+    // Whole-struct equality: a field mapped to the wrong slot, renamed off the
+    // wire, or dropped (decode `Malformed` -> `Failed`) reds here.
+    let body = br#"{"success":true,"data":{"enabled":true,"intervalSeconds":86400,"lastRunMs":1763360000000,"running":false}}"#;
+    assert_eq!(
+        cleanup_auto_outcome(200, body),
+        CleanupAutoOutcome::Answered(CleanupAutoStatus {
+            enabled: true,
+            interval_seconds: 86400,
+            last_run_ms: Some(1763360000000),
+            running: false,
+        })
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_auto_outcome_501_is_unavailable() {
+    // D-2 sibling: the 501 is classified BEFORE the body, so a proxy page is
+    // never decoded and can never render (the arms must not collapse).
+    let proxy = b"<!doctype html><html><body>proxy</body></html>";
+    assert_eq!(
+        cleanup_auto_outcome(501, proxy),
+        CleanupAutoOutcome::Unavailable
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_auto_outcome_500_is_failed() {
+    // A real server failure is Failed with a bounded message, never the
+    // permanent "not available in this build" state.
+    let body = br#"{"success":false,"error":"status query failed"}"#;
+    assert_eq!(
+        cleanup_auto_outcome(500, body),
+        CleanupAutoOutcome::Failed("server error 500: status query failed".to_string())
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_auto_outcome_missing_field_is_malformed() {
+    // No `#[serde(default)]` on a required field: a body without `running`
+    // classifies Failed, never Answered with a silent zero. `lastRunMs` is the
+    // one deliberate exception (Option -> None -> "never").
+    let body = br#"{"success":true,"data":{"enabled":true,"intervalSeconds":86400,"lastRunMs":1763360000000}}"#;
+    assert_eq!(
+        cleanup_auto_outcome(200, body),
+        CleanupAutoOutcome::Failed("malformed request or response body".to_string())
+    );
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_last_run_label_none_reads_never() {
+    // Mutant: `None` rendered as the epoch (`1970…`) or as a blank line. The
+    // server serializes an absent stamp as `null`; that is "never", exactly.
+    assert_eq!(cleanup_last_run_label(None), "never");
+}
+
+#[wasm_bindgen_test]
+fn test_cleanup_last_run_label_some_is_a_date() {
+    // Mutant: `Some` collapsed to "never" (the label ignores the stamp), or an
+    // empty string. A wall-clock string is not asserted; only that it is a
+    // real date rendering distinct from the never-ran label.
+    let label = cleanup_last_run_label(Some(1763360000000));
+    assert_ne!(label, "never");
+    assert!(!label.is_empty());
+    assert_ne!(label, "1970-01-01T00:00:00.000Z");
 }
 
 #[wasm_bindgen_test]
