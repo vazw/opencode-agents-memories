@@ -333,7 +333,7 @@ pub struct TagMigrationBatchReport {
     pub errors: usize,
 }
 
-/// `POST /api/cleanup` answer (issue 39).
+/// `POST /api/cleanup` answer (issue 39, widened by issue 32).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CleanupReport {
     pub deleted_count: u64,
@@ -341,6 +341,10 @@ pub struct CleanupReport {
     pub project_count: u64,
     pub prompts_deleted: u64,
     pub protected_memories_skipped: u64,
+    /// Issue 32: dead-lettered staging rows retained (never purged — ADR-0033).
+    /// `None` means the episodic store is absent, i.e. unknown; `Some(0)` is a
+    /// true zero. A count error is a run failure, never `None`.
+    pub inbox_dead_retained: Option<u64>,
 }
 
 /// `GET /api/cleanup/status` answer (issue 41).

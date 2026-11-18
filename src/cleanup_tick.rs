@@ -69,6 +69,7 @@ impl CleanupTrigger {
                             "project_count": report.project_count,
                             "prompts_deleted": report.prompts_deleted,
                             "protected_memories_skipped": report.protected_memories_skipped,
+                            "inbox_dead_retained": report.inbox_dead_retained,
                             "duration_ms": started.elapsed().as_millis() as u64,
                         }),
                     ),

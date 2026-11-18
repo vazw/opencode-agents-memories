@@ -1,6 +1,6 @@
 # 32 — W4.4 · Hard delete & milestone scrub (retention semantics)
 
-Status: ready-for-human — 2026-11-10: AC1/AC2/AC3 landed; AC4 complete (smoke doc created at `docs/evidence/issue-32-hard-delete/README.md`); AC5/AC6 deferred to issue 41 scheduled retention tick; residuals 1/2/3/4 settled, 5/6 open.
+Status: ready-for-human — 2026-11-18: AC1/AC2/AC3 landed; AC4 complete (smoke doc created at `docs/evidence/issue-32-hard-delete/README.md`); **AC5 rewritten** (2026-11-18) to what an owner ruling and a measurement support — dead staging rows are counted and reported, and the deletion rule is written down; no purge ships, because no digest or provenance link exists on this schema. Issue 41 is closed (`abf2bce`) and did not satisfy AC5 (its sweep never opens `episodic.db`), so the deferral is retired rather than renewed. AC6 lands with ADR-0033. Residuals 1/2/3/4/5 settled, 6 open.
 
 ## What to build
 
@@ -8,14 +8,14 @@ Make deletion mean what it says. Under the thesis adopted on 2026-10-21, the epi
 
 Today it is not true: `Contributor.summary` retains the source session's summary **verbatim (D-27)** (`crates/mem-episodic/src/milestone.rs`), so a deleted session's text survives inside a consolidated milestone; and the only delete path is W4.2's `soft_delete_session` (tombstone + `MARK_CHILDREN_ORPHANED` in one atomic batch), which keeps the row's text and embedding on disk.
 
-This wave delivers: the hard-delete path, the milestone scrub, and the age-based purge of staging rows that uses the same machinery.
+This wave delivers: the hard-delete path and the milestone scrub. The third item — the age-based purge of staging rows — was **measured unprovable and does not ship** (2026-11-18, AC5 below; ADR-0033): dead staging rows are counted and reported instead.
 
 **Open residuals this wave must settle or record (the user's ruling covered the row + the contributors' text; the rest is still open):**
 1. **The milestone's own merged `summary` and its embedding — RESOLVED (user, 2026-10-21): KEPT.** The merged summary is a separate durable artifact and survives; only the contributors' retained summaries are scrubbed. No re-summarization, no re-embed, no loss of the consolidated recap.
 2. **Tier-1 facts promoted from that session — RESOLVED (user, 2026-10-21): KEPT.** A promoted fact is durable knowledge the user never deleted, and it carries no session link today (the fact id is `sha256(project_id + "\x1f" + key)`), so there is no provenance to act on. The distinction "the session is gone; the knowledge it produced remains" is the product's stated semantic.
 3. **The delete path must state that distinction** — the UI (and the delete response) must not imply that deleting a session removes the promoted facts or the consolidated milestone recap. Make it explicit where the user acts.
 4. **Orphan semantics under a hard delete:** `agent_sessions.parent_session_id` carries `ON DELETE SET NULL`, so a hard delete severs the children's parent link while their `orphaned` flag (set by the same atomic batch) survives — consistent with D-12 ("the parent link was severed by a delete"). Confirm and prove it.
-5. **The age threshold** for purging staging rows, and the interaction with the W4.3 consolidation pipeline (a row must not be purged before it is consolidated into a milestone, or its content is lost rather than promoted).
+5. **The age threshold** for purging staging rows, and the interaction with the W4.3 consolidation pipeline (a row must not be purged before it is consolidated into a milestone, or its content is lost rather than promoted). — **SETTLED 2026-11-18: no age threshold ships, and none can.** The owner ruled a dead row dies only on proof its text reached memory; the measurement proved the proof unprovable on this schema, so nothing is purged and the consolidation interaction is moot (ADR-0033; residual 5 of the smoke doc).
 6. **The stale-vector interaction:** compaction strips a row's text to a bounded form (`stripped_source_summary`) but nothing re-embeds episodic rows, so an aged row's vector describes text it no longer contains — the semantic leg of the injection (W5.3) can retrieve such a row on a stale vector.
 
 Wave detail: `.scratch/rust-port/roadmap.md` §W4.4.
@@ -31,8 +31,14 @@ Wave detail: `.scratch/rust-port/roadmap.md` §W4.4.
       `contributors[i].summary = ""` in place and keeps the row.
 - [x] The children of a deleted session stay visible in the timeline, flagged `orphaned: true`, with the parent link severed per the FK's `ON DELETE SET NULL` — the W4.2 orphan guarantee is preserved, not weakened.
 - [x] The residuals above are each settled or explicitly recorded as open (with the user's ruling quoted), and any accepted residue is documented in the smoke doc and the issue's `## Comments`.
-- [ ] An age-based purge of staging rows exists, is bounded, and never purges a row that has not been consolidated into a milestone (no silent content loss) — with the threshold in the store config, not hard-coded.
-- [ ] The D-8 decision is closed in the tracker and in the ADR trail: the canonical triage/retention rule for episodic rows is written down, and `docs/agents/` and the smoke doc agree with it.
+- [ ] **AC5 (rewritten 2026-11-18 — the age-based purge was measured unprovable and does not ship).** Dead-lettered staging rows are counted and reported, and the deletion rule
+      is written down (ADR-0033): a dead row may be deleted only on proof its text reached memory, never on
+      triple identity, never otherwise. No digest or provenance link exists on this schema. On the 2026-11-18
+      snapshot, exact-text containment fully matches 28 of the 603 triple-matched rows (24 same-session, 4
+      cross-session-only), and 0 of the 603 lie above the 200-character floor (observed verbatim ceiling 118).
+      The never-landed population is 463 rows across 341 `(project_id, session_id)` pairs (339 distinct
+      `session_id`s), and is reported by count.
+- [x] The D-8 decision is closed in the tracker and in the ADR trail: the canonical triage/retention rule for episodic rows is written down in ADR-0033, and `docs/agents/testing.md` and the smoke doc agree with it.
 
 ## Blocked by
 
@@ -90,6 +96,53 @@ Wave detail: `.scratch/rust-port/roadmap.md` §W4.4.
     flipped REST assertion (`test_sessions_delete_is_orphan_safe`).
   - **Residuals 5 and 6 remain OPEN** (age threshold / consolidation interaction; stale vectors after
     compaction) — untouched by this wave.
+
+- **2026-11-18 — AC5 rewritten: measurement, not deliverable. Report-only count ships; no purge does.**
+  - **Owner ruling (2026-11-18):** a dead staging row may be deleted only on proof that its own text
+    reached memory later — never on triple identity, never otherwise; if such proof is unprovable, the
+    rule degrades to purging nothing. The rule is ADR-0033.
+  - **The measurement then proved it unprovable on this schema.** `memories.content` is the LLM summary
+    (`crates/mem-bridge/src/capture.rs:309` sets `content: input.summary.clone()`), the raw-text tables
+    are empty on this root (`episodic_raw_context` 0 rows, `episodic_segments` 0 rows), and no payload
+    key among the 1,066 dead payloads is `sha256`/`digest`/`content_hash`/`payload_hash`; `capture_inbox`
+    and `memories` share no hash column and no column ties a dead row to a memory row.
+  - **Population reconciliation (1,066 dead rows):** **603** rows whose `(project_id, session_id)` pair
+    matches a landed `agent_sessions` row; **463** rows whose pair has none (never-landed), spanning
+    **341 distinct pairs** and **339 distinct `session_id`s** — two sessions span two projects. A
+    triple (`project`, `session`, `agent`) join matches 434, a strict subset, so triple identity is not
+    the rule either.
+  - **Finding 1 — what a memory row stores:** the provider's structured summary, not the captured
+    transcript. Comparison a proof needs is transcript-vs-summary.
+  - **Finding 2 — exact-text containment (measured, positive control passed):** 28 of the 603 dead rows
+    are fully contained in some memory's content — 24 same-session, 4 only in other sessions' memories
+    (transcripts `done`, `your rec`, `ping pass`, `try again`; capture-id suffixes `…ba1d8486`,
+    `…12046848`, `…69f08518`, `…583b75d9`). Prefix ladder (length-gated): 50 → 5, 80 → 3, 100 → 1,
+    118 → 1, **120 → 0, 200 → 0**. Observed verbatim ceiling 118 characters. The 200-character floor is
+    a **stated policy**, not a wall: sub-120 rows stay unpurged even when contained, because a short
+    string matching by coincidence is not identity. Short-prefix counts (126/35/15 at N=5/10/20) are
+    not used for any decision.
+  - **Finding 3 — no digest or provenance link:** containment is a string relation; provenance is what
+    is missing, and the 4 cross-only rows are the ambiguity observed, not a hypothetical.
+  - **Finding 4 — the outcome:** 0 candidates lie above the stated floor on the 2026-11-18 snapshot, so
+    the ruling's own fallback fires: nothing is purged; dead rows are counted and reported.
+  - **Finding 5 — the never-landed population:** 463 rows have no comparison target under any rule;
+    they survive and are reported by count.
+  - **What shipped:** `CaptureInbox::count_dead` (`crates/mem-episodic/src/inbox.rs`, SQL const
+    `COUNT_CAPTURE_INBOX_DEAD` in `crates/mem-store/src/episodic_sql.rs`),
+    `CleanupReport.inbox_dead_retained: Option<u64>` on `POST /api/cleanup` (wire `inboxDeadRetained`;
+    `null` = store absent, a count error = run failure, never `null`), and the `cleanup.tick` log field.
+    `GET /api/cleanup/status` is unchanged (issue 141). No config key: `captureInboxRetentionDays` is
+    dropped, because with no delete path there is no clock.
+  - **What explicitly does not ship:** any `DELETE`, any retention window, any purge predicate. The
+    enforcement mutant `triple_match_delete_added` is red by two assertions of
+    `test_report_never_deletes_dead_rows` (`crates/mem-web/tests/cleanup_retention.rs`), and it stays in
+    the plan as the mutant a future proof predicate must reject.
+  - **AC5 is rewritten, not ticked:** the checkbox records that the original purge AC was measured
+    unprovable; the replacement text above is what shipped.
+  - **Artifacts:** `docs/adr/0033-episodic-staging-retention.md` (the rule, the grounds, the rejected
+    alternatives, the D-8/D-9 collision note);
+    `docs/evidence/issue-32-hard-delete/README.md` (residual 5 rewritten to Finding 4, residual 6 open);
+    `docs/agents/testing.md:270` (`6-field CleanupReport`, `cleanup_retention.rs` 12 → 17).
 
 ## Agent Brief
 

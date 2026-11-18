@@ -190,6 +190,9 @@ impl WebLauncher for RootWebLauncher {
                         sweep_path: cleanup_sweep::cleanup_sweep_path(&storage_root),
                     },
                     Arc::clone(&deduplication_cancelled),
+                    // Issue 32: the same composed store capture writes through,
+                    // so the reported dead-row count is the live one.
+                    Some(deps.episodic.clone()),
                 )
             });
             if let Some(port) = &maintenance {

@@ -42,6 +42,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use mem_episodic::inbox::CaptureInbox;
+use mem_episodic::store::EpisodicStore;
 use mem_profile::decay::sweep_is_due;
 use mem_profile::prompt::UserPromptManager;
 use mem_store::shard_manager::ShardManager;
@@ -434,6 +436,9 @@ pub struct ProductionDeduplication {
     cleanup_last_run: Mutex<Option<i64>>,
     /// Keeps the future-stamp warning to one line per process (C-2).
     stamp_future_warned: AtomicBool,
+    /// Issue 32: the episodic store whose dead staging rows are COUNTED (never
+    /// purged — ADR-0033). `None` = not wired, so the report answers `null`.
+    episodic: Option<Arc<EpisodicStore>>,
 }
 
 /// The automatic cleanup surface the composition root hands the port (issue 41).
@@ -487,6 +492,7 @@ impl ProductionDeduplication {
             cleanup: None,
             cleanup_last_run: Mutex::new(None),
             stamp_future_warned: AtomicBool::new(false),
+            episodic: None,
         }
     }
 
@@ -501,6 +507,7 @@ impl ProductionDeduplication {
             cleanup: None,
             cleanup_last_run: Mutex::new(None),
             stamp_future_warned: AtomicBool::new(false),
+            episodic: None,
         }
     }
 
@@ -515,6 +522,13 @@ impl ProductionDeduplication {
     pub fn with_cleanup(mut self, cleanup: CleanupSweepConfig) -> Self {
         self.cleanup_last_run = Mutex::new(load_stamp_fail_safe(&cleanup.sweep_path));
         self.cleanup = Some(cleanup);
+        self
+    }
+
+    /// Issue 32: arms the dead-staging-row count. The store is only ever read
+    /// (`CaptureInbox::count_dead`); no purge path exists on this schema.
+    pub fn with_episodic(mut self, episodic: Option<Arc<EpisodicStore>>) -> Self {
+        self.episodic = episodic;
         self
     }
 
@@ -593,12 +607,28 @@ impl ProductionDeduplication {
             tracing::warn!(error = %e, "cleanup: vacuum skipped (DB busy)");
         }
 
+        // Issue 32: a read in the report build, not a phase. An absent store is
+        // `None` (unknown); a count FAILURE is a run failure, never `None` —
+        // folding it would report "no store" for a store that is merely ill.
+        let inbox_dead_retained = match &self.episodic {
+            Some(episodic) => Some(
+                CaptureInbox::new(Arc::clone(episodic))
+                    .count_dead()
+                    .await
+                    .map_err(|error| {
+                        CleanupRunError::Failed(PortError::Store(error.to_string()))
+                    })?,
+            ),
+            None => None,
+        };
+
         Ok(CleanupReport {
             deleted_count: sweep_outcome.deleted_count,
             user_count: sweep_outcome.user_count,
             project_count: sweep_outcome.project_count,
             prompts_deleted,
             protected_memories_skipped: sweep_outcome.protected_memories_skipped,
+            inbox_dead_retained,
         })
     }
 }
@@ -783,12 +813,14 @@ pub fn production_deduplication_port_with_cleanup(
     threshold: f64,
     cleanup: CleanupSweepConfig,
     cancel: Arc<AtomicBool>,
+    episodic: Option<Arc<EpisodicStore>>,
 ) -> Arc<dyn MaintenancePort> {
     let store = Arc::new(store::ShardDedupStore::new(shards.clone()));
     Arc::new(
         ProductionDeduplication::new(store, shards, prompts, retention_days, enabled, threshold)
             .with_cancellation(cancel)
-            .with_cleanup(cleanup),
+            .with_cleanup(cleanup)
+            .with_episodic(episodic),
     )
 }
 

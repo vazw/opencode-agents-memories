@@ -605,7 +605,7 @@ pub struct TagMigrationBatchDto {
     pub errors: usize,
 }
 
-/// `POST /api/cleanup` data (issue 39).
+/// `POST /api/cleanup` data (issue 39, widened by issue 32).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CleanupDto {
@@ -614,6 +614,9 @@ pub struct CleanupDto {
     pub project_count: u64,
     pub prompts_deleted: u64,
     pub protected_memories_skipped: u64,
+    /// Issue 32: `null` when the episodic store is absent (unknown), never a
+    /// substitute for a `0` that was not measured.
+    pub inbox_dead_retained: Option<u64>,
 }
 
 impl From<super::ports::CleanupReport> for CleanupDto {
@@ -624,6 +627,7 @@ impl From<super::ports::CleanupReport> for CleanupDto {
             project_count: report.project_count,
             prompts_deleted: report.prompts_deleted,
             protected_memories_skipped: report.protected_memories_skipped,
+            inbox_dead_retained: report.inbox_dead_retained,
         }
     }
 }

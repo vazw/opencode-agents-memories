@@ -284,6 +284,16 @@ impl CaptureInbox {
         Ok(row.and_then(|row| row.i64("count")).unwrap_or(0).max(0) as u64)
     }
 
+    /// Issue 32 — the dead-row count (reported, never purged; no purge path
+    /// exists on this schema, see ADR-0033).
+    pub async fn count_dead(&self) -> Result<u64, EpisodicError> {
+        let db = self.store.ready().await?;
+        let row = query_one(db.as_ref(), sql::COUNT_CAPTURE_INBOX_DEAD, Vec::new())
+            .await
+            .map_err(EpisodicError::Store)?;
+        Ok(row.and_then(|row| row.i64("count")).unwrap_or(0).max(0) as u64)
+    }
+
     /// Test/diagnostic seam: the attempts counter of one row.
     pub async fn attempts(&self, capture_id: &str) -> u32 {
         match self.store.ready().await {

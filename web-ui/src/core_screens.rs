@@ -2553,7 +2553,8 @@ pub fn cleanup_auto_outcome(status: u16, bytes: &[u8]) -> CleanupAutoOutcome {
     }
 }
 
-/// The frozen five-field cleanup report (issue 39).
+/// The cleanup report as the web UI reads it (issue 39); the server also sends
+/// `inboxDeadRetained` (issue 32), which this struct ignores.
 ///
 /// Every field is **required** on purpose: no `#[serde(default)]` anywhere, so
 /// a partial or `null` body classifies as a malformed response instead of

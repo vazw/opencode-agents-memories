@@ -322,3 +322,54 @@ async fn test_inbox_schedule_saturates_on_an_absurd_hint() {
     let batch = inbox.dequeue(10).await.expect("dequeue");
     assert!(batch.is_empty(), "an i64::MAX row is never due: {batch:?}");
 }
+
+// ---------------------------------------------------------------------------
+// Issue 32 — the dead-row count (report-only; no purge)
+// ---------------------------------------------------------------------------
+
+/// Issue 32: the count selects `dead` rows only.
+///
+/// Target mutant: the predicate counts `queued` (or every row) instead of
+/// `dead`, which answers 2 (or 5) where the dead population is 3.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_count_dead_counts_only_dead_rows() {
+    let (_dir, _store, inbox) = fixture().await;
+    for i in 0..5u64 {
+        inbox
+            .enqueue(entry(&format!("019a0000-0000-7f00-8000-00000000010{i}"), i))
+            .await
+            .expect("enqueue");
+    }
+    for i in 2..5u64 {
+        inbox
+            .dead_letter(&format!("019a0000-0000-7f00-8000-00000000010{i}"))
+            .await
+            .expect("dead-letter");
+    }
+    assert_eq!(
+        inbox.queued_count().await.expect("count"),
+        2,
+        "the fixture holds two queued rows"
+    );
+    assert_eq!(
+        inbox.count_dead().await.expect("count dead"),
+        3,
+        "only the three dead-lettered rows are counted"
+    );
+}
+
+/// Issue 32: an empty inbox is a true zero, never an error.
+///
+/// Target mutant: an error (or a panic) on the empty table instead of `Ok(0)`.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_count_dead_is_zero_on_empty_inbox() {
+    let (_dir, _store, inbox) = fixture().await;
+    assert_eq!(
+        inbox
+            .count_dead()
+            .await
+            .expect("count dead on an empty inbox"),
+        0,
+        "an empty inbox counts zero, not unknown"
+    );
+}

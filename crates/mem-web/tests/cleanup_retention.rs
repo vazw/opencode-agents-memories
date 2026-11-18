@@ -7,18 +7,27 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use common::real_store::{RealStore, create_shard, new_store, row_ids};
-use common::{api_request, app_state_with_api};
+use common::{TempDir, api_request, app_state_with_api};
 use mem_core::scope::Scope;
+use mem_embed::embedder::{BoxFuture, Embedder};
+use mem_embed::error::EmbedError;
+use mem_episodic::inbox::{CaptureInbox, InboxNewEntry};
+use mem_episodic::record::NewAgentSession;
+use mem_episodic::store::EpisodicStore;
 use mem_profile::prompt::UserPromptManager;
 use mem_store::db::Value;
 use mem_store::shard_manager::{ShardInfo, ShardManager};
 use mem_store::vector::{self, MemoryInsert};
-use mem_web::api::deduplication::production_deduplication_port;
+use mem_web::api::deduplication::{
+    CleanupSweepConfig, production_deduplication_port, production_deduplication_port_with_cleanup,
+};
 use mem_web::api::ports::{ApiServices, MaintenancePort, PortError};
 use mem_web::server::build_router;
 use mem_web::web_auth::WebAuth;
 
 const TOKEN: &str = "test-token";
+/// The retention window the issue-32 cases sweep with.
+const RETENTION_DAYS: u32 = 30;
 const USER_HASH: &str = "0123456789abcdef";
 const USER_TAG: &str = "opencode_user_0123456789abcdef";
 const PROJ_HASH: &str = "fedcba9876543210";
@@ -681,4 +690,338 @@ async fn cleanup_answers_200_with_report_on_seeded_store() {
     assert_eq!(val["data"]["userCount"], 0);
     assert_eq!(val["data"]["promptsDeleted"], 0);
     assert_eq!(val["data"]["protectedMemoriesSkipped"], 0);
+}
+
+// ---------------------------------------------------------------------------
+// Issue 32 tests: the dead-inbox count (reported, never purged)
+// ---------------------------------------------------------------------------
+
+/// The hermetic 8-dim episodic store config for the issue-32 cases.
+fn episodic_config(root: PathBuf) -> mem_store::config::StoreConfig {
+    mem_store::config::StoreConfig {
+        storage_path: root,
+        embedding_dimensions: 8,
+        embedding_model: "test".to_string(),
+        max_vectors_per_shard: 100,
+        container_tag_prefix: "opencode".to_string(),
+        database_encryption_enabled: false,
+        database_encryption_cipher: "aes256gcm".to_string(),
+        database_encryption_key: None,
+        allow_unguarded_open: false,
+    }
+}
+
+/// A fixed 8-dimension embedding (the store's dimension check passes, no
+/// provider is involved).
+struct FixedEmbedder;
+
+impl Embedder for FixedEmbedder {
+    fn warmup(&self) -> BoxFuture<'_, Result<(), EmbedError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn embed(&self, _text: &str) -> BoxFuture<'_, Result<Vec<f32>, EmbedError>> {
+        Box::pin(async { Ok(vec![0.1; 8]) })
+    }
+}
+
+/// A real `episodic.db` under its own temp dir, plus its inbox handle.
+async fn episodic_fixture(label: &str) -> (TempDir, Arc<EpisodicStore>, CaptureInbox) {
+    let dir = TempDir::new(label);
+    let root = dir.path().clone();
+    let store = Arc::new(EpisodicStore::new(root.clone(), episodic_config(root)));
+    store.ready().await.expect("the episodic store must open");
+    let inbox = CaptureInbox::new(Arc::clone(&store));
+    (dir, store, inbox)
+}
+
+/// Enqueues one dead-lettered row for `(project, session, agent)`.
+async fn dead_row(
+    inbox: &CaptureInbox,
+    capture_id: &str,
+    project: &str,
+    session: &str,
+    agent: &str,
+) {
+    inbox
+        .enqueue(InboxNewEntry {
+            capture_id: capture_id.to_string(),
+            project_id: project.to_string(),
+            session_id: session.to_string(),
+            agent_id: agent.to_string(),
+            payload: serde_json::json!({ "transcript": "dead" }),
+        })
+        .await
+        .expect("enqueue");
+    inbox.dead_letter(capture_id).await.expect("dead-letter");
+}
+
+/// The cleanup-armed port with an injected episodic store (`None` = no store).
+fn port_with_episodic(
+    store: &RealStore,
+    prompts: Arc<UserPromptManager>,
+    retention_days: u32,
+    episodic: Option<Arc<EpisodicStore>>,
+) -> Arc<dyn MaintenancePort> {
+    production_deduplication_port_with_cleanup(
+        store.manager.clone(),
+        prompts,
+        retention_days,
+        true,
+        0.9,
+        CleanupSweepConfig {
+            enabled: false,
+            interval_seconds: 3600,
+            sweep_path: store.config.storage_path.join("cleanup-sweep.json"),
+        },
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        episodic,
+    )
+}
+
+/// The owner's ruling, pinned: `cleanup()` never deletes a dead staging row.
+///
+/// Fixture: (a) a dead row whose `(project, session, agent)` triple matches a
+/// landed `agent_sessions` row, (b) a never-landed dead row.
+///
+/// Target mutant `triple_match_delete_added`: a `DELETE` of dead rows keyed on
+/// the triple match. Assertion 1 (both rows still present) and assertion 2
+/// (`Some(2)`) each fail against it — (a) is joined away and the count drops
+/// to 1.
+#[tokio::test]
+async fn test_report_never_deletes_dead_rows() {
+    let store = new_store("cleanup_never_deletes_dead");
+    let prompts = Arc::new(UserPromptManager::new(
+        store.config.storage_path.clone(),
+        store.config.clone(),
+        3,
+    ));
+    let _shard = create_shard(&store, Scope::Project, PROJ_HASH, 0).await;
+    let (_episodic_dir, episodic, inbox) = episodic_fixture("cleanup-never-delete").await;
+
+    // (a) A landed session: the triple below matches it exactly.
+    episodic
+        .insert_session(
+            NewAgentSession {
+                project_id: "proj-landed".to_string(),
+                session_id: "sess-landed".to_string(),
+                agent_id: "agent-landed".to_string(),
+                summary: "a landed session".to_string(),
+                ..Default::default()
+            },
+            &FixedEmbedder,
+        )
+        .await
+        .expect("the landed session must insert");
+    dead_row(
+        &inbox,
+        "019a0000-0000-7f00-8000-0000000002a1",
+        "proj-landed",
+        "sess-landed",
+        "agent-landed",
+    )
+    .await;
+    // (b) A never-landed row: no `agent_sessions` row for its pair.
+    dead_row(
+        &inbox,
+        "019a0000-0000-7f00-8000-0000000002a2",
+        "proj-never",
+        "sess-never",
+        "agent-never",
+    )
+    .await;
+
+    let port = port_with_episodic(&store, prompts, RETENTION_DAYS, Some(Arc::clone(&episodic)));
+    let report = port.cleanup().await.expect("cleanup succeeds");
+
+    assert_eq!(
+        inbox.count_dead().await.expect("count dead"),
+        2,
+        "assertion 1: both dead rows survive cleanup()"
+    );
+    assert_eq!(
+        report.inbox_dead_retained,
+        Some(2),
+        "assertion 2: the report counts both dead rows"
+    );
+}
+
+/// `queued` rows are load-bearing (D-48 enqueue-before-ack): the count and
+/// the report see `dead` only.
+///
+/// Target mutant: the count includes `queued` rows (answers 3, not 2).
+#[tokio::test]
+async fn test_report_count_excludes_queued_rows() {
+    let store = new_store("cleanup_count_excludes_queued");
+    let prompts = Arc::new(UserPromptManager::new(
+        store.config.storage_path.clone(),
+        store.config.clone(),
+        3,
+    ));
+    let _shard = create_shard(&store, Scope::Project, PROJ_HASH, 0).await;
+    let (_episodic_dir, episodic, inbox) = episodic_fixture("cleanup-excludes-queued").await;
+
+    dead_row(
+        &inbox,
+        "019a0000-0000-7f00-8000-0000000002b1",
+        "proj-q",
+        "sess-q",
+        "agent-q",
+    )
+    .await;
+    dead_row(
+        &inbox,
+        "019a0000-0000-7f00-8000-0000000002b2",
+        "proj-q",
+        "sess-q",
+        "agent-q",
+    )
+    .await;
+    inbox
+        .enqueue(InboxNewEntry {
+            capture_id: "019a0000-0000-7f00-8000-0000000002b3".to_string(),
+            project_id: "proj-q".to_string(),
+            session_id: "sess-q".to_string(),
+            agent_id: "agent-q".to_string(),
+            payload: serde_json::json!({ "transcript": "queued" }),
+        })
+        .await
+        .expect("enqueue the queued row");
+
+    let port = port_with_episodic(&store, prompts, RETENTION_DAYS, Some(Arc::clone(&episodic)));
+    let report = port.cleanup().await.expect("cleanup succeeds");
+
+    assert_eq!(
+        report.inbox_dead_retained,
+        Some(2),
+        "only the two dead rows are counted"
+    );
+    assert_eq!(
+        inbox.queued_count().await.expect("count queued"),
+        1,
+        "the queued row is untouched"
+    );
+}
+
+/// R7: an absent store is `null` (unknown), never `0` (a false true-zero).
+///
+/// Target mutant: an absent store reported as `Some(0)`, which serialises as
+/// `0` where the contract says `null`.
+#[tokio::test]
+async fn test_report_absent_store_is_null_not_zero() {
+    let store = new_store("cleanup_absent_store");
+    let prompts = Arc::new(UserPromptManager::new(
+        store.config.storage_path.clone(),
+        store.config.clone(),
+        3,
+    ));
+    let _shard = create_shard(&store, Scope::Project, PROJ_HASH, 0).await;
+
+    let port = port_with_episodic(&store, prompts, RETENTION_DAYS, None);
+    let report = port.cleanup().await.expect("cleanup succeeds");
+    assert_eq!(
+        report.inbox_dead_retained, None,
+        "an absent store is unknown, not zero"
+    );
+
+    let services = ApiServices::unavailable().with_maintenance(port_with_episodic(
+        &store,
+        Arc::new(UserPromptManager::new(
+            store.config.storage_path.clone(),
+            store.config.clone(),
+            3,
+        )),
+        RETENTION_DAYS,
+        None,
+    ));
+    let res = post_cleanup(router_with(services)).await;
+    assert_eq!(res.status, 200, "cleanup must answer 200");
+    let val: serde_json::Value = serde_json::from_str(&res.body_string()).unwrap();
+    assert!(
+        val["data"]["inboxDeadRetained"].is_null(),
+        "the wire carries null, not 0: {}",
+        res.body_string()
+    );
+}
+
+/// N6: a count failure fails the run; it is never folded into `None`
+/// (which means "store absent").
+///
+/// Target mutant: the count error is swallowed into `inbox_dead_retained:
+/// None`, so `cleanup()` answers `Ok`.
+#[tokio::test]
+async fn test_report_count_failure_is_run_failure_not_null() {
+    let store = new_store("cleanup_count_failure");
+    let prompts = Arc::new(UserPromptManager::new(
+        store.config.storage_path.clone(),
+        store.config.clone(),
+        3,
+    ));
+    let _shard = create_shard(&store, Scope::Project, PROJ_HASH, 0).await;
+
+    // A store whose root cannot be created: the count's `ready()` fails.
+    let dir = TempDir::new("cleanup-count-failure");
+    let blocker = dir.path().join("blocked");
+    std::fs::write(&blocker, b"not a directory").expect("write the blocker file");
+    let broken_root = blocker.join("nested");
+    let broken = Arc::new(EpisodicStore::new(
+        broken_root.clone(),
+        episodic_config(broken_root),
+    ));
+
+    let port = port_with_episodic(&store, prompts, RETENTION_DAYS, Some(broken));
+    match port.cleanup().await {
+        Ok(report) => panic!("a count failure must fail the run, not answer a report: {report:?}"),
+        Err(error) => assert!(
+            matches!(error, PortError::Store(_)),
+            "the count error surfaces as a store failure: {error:?}"
+        ),
+    }
+}
+
+/// The wire key is camelCase on `POST /api/cleanup`.
+///
+/// Target mutant: the key is serialised snake_case or omitted.
+#[tokio::test]
+async fn test_cleanup_dto_emits_inbox_dead_retained_camelcase() {
+    let store = new_store("cleanup_camelcase");
+    let prompts = Arc::new(UserPromptManager::new(
+        store.config.storage_path.clone(),
+        store.config.clone(),
+        3,
+    ));
+    let _shard = create_shard(&store, Scope::Project, PROJ_HASH, 0).await;
+    let (_episodic_dir, episodic, inbox) = episodic_fixture("cleanup-camelcase").await;
+    dead_row(
+        &inbox,
+        "019a0000-0000-7f00-8000-0000000002c1",
+        "proj-w",
+        "sess-w",
+        "agent-w",
+    )
+    .await;
+    dead_row(
+        &inbox,
+        "019a0000-0000-7f00-8000-0000000002c2",
+        "proj-w",
+        "sess-w",
+        "agent-w",
+    )
+    .await;
+
+    let services = ApiServices::unavailable().with_maintenance(port_with_episodic(
+        &store,
+        prompts,
+        RETENTION_DAYS,
+        Some(episodic),
+    ));
+    let res = post_cleanup(router_with(services)).await;
+    assert_eq!(res.status, 200, "cleanup must answer 200");
+    let val: serde_json::Value = serde_json::from_str(&res.body_string()).unwrap();
+    assert_eq!(
+        val["data"]["inboxDeadRetained"],
+        2,
+        "the camelCase key carries the dead-row count: {}",
+        res.body_string()
+    );
 }

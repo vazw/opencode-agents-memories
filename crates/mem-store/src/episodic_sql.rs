@@ -270,6 +270,13 @@ pub const DEADLETTER_CAPTURE_INBOX: &str =
 pub const COUNT_CAPTURE_INBOX_QUEUED: &str =
     "SELECT COUNT(*) AS count FROM capture_inbox WHERE status = 'queued'";
 
+/// Dead-row count (issue 32: reported, never purged).
+///
+/// `queued` rows are load-bearing (D-48 enqueue-before-ack), so the predicate
+/// is `dead` alone.
+pub const COUNT_CAPTURE_INBOX_DEAD: &str =
+    "SELECT COUNT(*) AS count FROM capture_inbox WHERE status = 'dead'";
+
 /// Disambiguates a zero-change conditional insert: does the capture_id
 /// already exist?
 pub const SELECT_CAPTURE_INBOX_COUNT_FOR_ID: &str =
