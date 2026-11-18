@@ -1,6 +1,6 @@
 # 142 — `legacyPeerLive` is declared vocabulary but unreachable from the HTTP DTO
 
-Status: ready-for-agent — filed 2026-11-18 from issue 43 residual 6 (`docs/evidence/issue-43-w6/REPORT.md:146`).
+Status: done — 2026-11-18 (commit `1fed372`) — retired the value instead of making it reachable: `legacyPeerLive` is gone from `ErasureStateDto`'s doc and from ADR-0019 D-19-3, the ADR records that no answer could ever carry it, and `sweep_state_vocabulary.rs` reds if it is re-added. Filed 2026-11-18 from issue 43 residual 6 (`docs/evidence/issue-43-w6/REPORT.md:146`).
 
 *(Parent: issue 43.)*
 
