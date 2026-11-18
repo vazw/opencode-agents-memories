@@ -1,6 +1,6 @@
 # 43 — W9.0 · Database base hardening (review findings)
 
-Status: landed — residual (A3/A4 owned by issue 131; named validation/platform limits retained) — 2026-11-09; W6a `4878834`, W6c final `df6c744` / main merge `24552db`; see dated outcome under Comments.
+Status: landed — residuals tracked not closed — 2026-11-18: A3/A4 discharged by issue 131 (`7dfa639`); REPORT residuals 6–8 filed as **issues 142** (`legacyPeerLive` unreachable from HTTP), **143** (status 404s for a deleted prompt) and **144** (residual 8's F4–F7 ranking is defined in no tracked document). Named validation/platform limits retained. W6a `4878834`, W6c final `df6c744` / main merge `24552db`; see dated outcome under Comments.
 
 Historical landing summary (2026-10-27 onward; umbrella, not a single wave): **W0** `af01156`, **W1 write side**
 `3d5e940` and the **liveness blocker** `aa0dcc4` are landed; **W2 is landed on `main` at `e0bbd37`**
@@ -938,3 +938,26 @@ Counts: `mem-store` **411/0/16**, `mem-core` **234/0/2**, workspace **2113/0/26*
 `raw/baseline_metrics.tsv`, `machine.txt`, 9 × `raw/<cell>.jsonl` + `.summary.json`, `raw/driver.log`);
 ADR-0024 (`docs/adr/0024-brute-force-scan-cost-measured.md`) **Proposed**. The merge commit SHA is added
 by the orchestrator at ff-merge.
+
+### 2026-11-18 — residuals 6–8 split into their own issues; A3/A4 confirmed discharged
+
+**MEASURED:** issue 131's status is `done — 2026-11-09; landed 7dfa639…`, and its title names both riders
+("liveness probe: hidepid=2 ENOENT reads as death (A3) + parser hard-case test (A4)"). The umbrella's A3/A4 fence is
+therefore discharged by that issue's landing, not re-adjudicated here.
+
+Residuals 6–8 are opened as their own trackers rather than carried inside an umbrella whose Status already reads
+`landed`:
+
+- **Issue 142** — `legacyPeerLive` is declared vocabulary at `dto.rs:355` and ADR-0019 `:157` but unreachable from
+  any code path (the stamp table stores successes only; the sweep's block record is report-only). The issue forces a
+  choice: make it reachable, or retire the value. Probing at answer time stays refused, as recorded here.
+- **Issue 143** — the status read 404s for a deleted prompt, so post-delete per-id state is unobservable and a
+  deleted id is indistinguishable from a fabricated one. A contract decision (tombstone / tier-scoped read / keep
+  404 and write it down), not a bug fix.
+- **Issue 144** — residual 8's own defect: `F4/F5/F6/F7 stay P3 as ranked` names four findings that **no tracked
+  document defines**. A repo-wide search finds the letters only in that sentence plus unrelated same-named findings
+  in other waves. The issue recovers the ranking into a tracked document or retires the reference.
+
+**Unchanged and still open here:** residual 1 (the pre-drop binary blind spot, accepted by ADR-0025), residual 2
+(`vacuum-under-legacy-holder` needs a purpose-built binary), residual 3 (Windows post-drop opens untested), and the
+native-platform limits (Windows, macOS) that no runner in this tree can prove.
