@@ -10,6 +10,17 @@ Purpose: this is the durable home for the probe figures. The wave ledger lives u
 there is one `rm -rf` from gone. Figures also do not belong in the blueprint — a plan
 that pins a live count contradicts its own "no count is pinned" rule.
 
+**Historical reading — do not follow it as procedure.** This file records a probe run on
+2026-11-18 whose delivery discriminator was a `type='synthetic'` row of injected shape. By
+2026-11-19 that reading was measured dead on the current host build: it returns rows only
+from mid-October and nothing since, so it cannot distinguish delivery from a miss. See issue
+148 (`../../../.scratch/rust-port/issues/148-runbook-delivery-reading-dead-on-current-host.md`)
+and the current runbook `README.md` beside this file, whose instrument is a nonce the child
+must quote back. The figures below remain valid as one child's rows at one moment; the
+*classification* they were used for is superseded. The behavioural finding — a compacted
+child kept its token and shell id but forgot the nine files it had read — stands and does
+not depend on the dead query.
+
 ## Subject
 
 The probe child of this wave: `ses_e11216314ffe32Ksh7sE4QE7OX`. It was asked to write a
