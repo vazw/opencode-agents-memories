@@ -1,6 +1,6 @@
 // Issue 145 Step 8 probe: scratch-root block delivery through the V2 entry.
-// Run DIRECTLY (not via runDriver): cd plugin && env -i PATH=... HOME=<.tmp/home-145>
-//   DRIVER_STORAGE_ROOT=<.tmp/root-145> OPENCODE_MEM_WEB_PORT=<web-port>
+// Run DIRECTLY (not via runDriver): cd plugin && env -i PATH=... HOME=<repo .tmp/home-145>
+//   DRIVER_STORAGE_ROOT=<repo .tmp/root-145> OPENCODE_MEM_WEB_PORT=<web-port>
 //   PROBE_LEDGER=<ledger> node tests/harness/probe-145.mjs
 // Engine argv: copied from engineArguments() (plugin/src/plugin.js:158):
 //   --storage-root <root> --web-port <port>; the wrapper spawns the engine via
@@ -10,10 +10,13 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import path, { resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const utc = () => new Date().toISOString().replace(/\.\d+Z$/, "Z");
+// Module-anchored: here is plugin/tests/harness; three `..` reach the repo root.
+const here = path.dirname(fileURLToPath(import.meta.url));
+const REPO_TMP = resolve(here, "..", "..", "..", ".tmp");
 
 // REAP-GUARD-BEGIN
 {
@@ -57,9 +60,24 @@ if (!existsSync(DB)) {
   process.exit(4);
 }
 const SES_SEED_ID = "ses-seed-" + SEED_NONCE;
-const count = execFileSync("sqlite3", ["-readonly", DB,
-  `SELECT COUNT(*) FROM agent_sessions WHERE session_id='${SES_SEED_ID}' AND project_id='/work/proj' AND deleted_at IS NULL;`],
-  { encoding: "utf8" }).trim();
+let countText = null;
+let lastErr = "";
+// ponytail: three immediate attempts, no backoff. Ceiling: lock contention longer than three back-to-back reads returns OPEN. Upgrade path: add `-cmd ".timeout 5000"` to the sqlite3 argv.
+for (let attempt = 1; attempt <= 3 && countText === null; attempt++) {
+  try {
+    countText = execFileSync("sqlite3", ["-readonly", DB,
+      `SELECT COUNT(*) FROM agent_sessions WHERE session_id='${SES_SEED_ID}' AND project_id='/work/proj' AND deleted_at IS NULL;`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  } catch (e) {
+    lastErr = String(e.stderr ?? "").trim() || String(e.message).split("\n")[0];
+  }
+}
+if (countText === null) {
+  ledger(`- probe OPEN — inbox state unreadable: ${lastErr} ${utc()}`);
+  process.stdout.write(`OPEN — inbox state unreadable: ${lastErr}\n`);
+  process.exit(8);
+}
+const count = countText;
 ledger(`- probe seed COUNT=${count} rc=0 ${utc()} (Step 8 item 5, expect 1)`);
 if (count !== "1") {
   process.stdout.write(`OPEN — seed row not persisted (COUNT ${count})\n`);
@@ -87,12 +105,12 @@ for (const n of [1, 2, 3]) {
   const system = [];
   await contextHook({ sessionID: sid, system });
   const block = system.map((p) => p.text ?? "").join("\n");
-  const blockPath = resolve(`.tmp/progress/probe-145-block-${n}.txt`);
-  mkdirSync(resolve(".tmp/progress"), { recursive: true });
+  const blockPath = resolve(REPO_TMP, "progress", `probe-145-block-${n}.txt`);
+  mkdirSync(resolve(REPO_TMP, "progress"), { recursive: true });
   writeFileSync(blockPath, block);
   const nonceHits = block.split(SEED_NONCE).length - 1;
   const sha = createHash("sha256").update(block).digest("hex");
-  const heading = ["## Recent sessions", "## Project facts", "## Captured session summaries"].find((h) => block.includes(h)) ?? "";
+  const heading = ["## Recent sessions", "## Project facts", "## Captured session summaries", "## Related older sessions"].find((h) => block.includes(h)) ?? "";
   const hasNonce = nonceHits >= 1;
   if (!hasNonce) failures++;
   if (!heading) failures++;
