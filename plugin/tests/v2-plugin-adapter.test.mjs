@@ -564,3 +564,57 @@ test(
     );
   }
 );
+
+// Issue 149: after a compaction, the NEXT prompt refreshes the block. In
+// `first` mode a session replays its cached block until a refresh; the
+// compaction hook marks the session stale and the next prompt drops the cache.
+// The `shouldRefresh` stub is first-mode (`!hasCache || turnIndex === 0`), so
+// without the stale mark this prompt replays `ses-1-1` and `calls` stays 1.
+test("test_v2_adapter_next_prompt_refreshes_after_compaction", { timeout: 5000 }, async () => {
+  const { registerV2Adapter } = await import(ADAPTER_MODULE);
+  const harness = createHarness();
+  let revision = 1;
+  let calls = 0;
+  const legacy = {
+    "chat.message": async (input, output) => {
+      calls += 1;
+      output.message.parts.push({ type: "text", text: `${input.sessionID}-${revision}` });
+    },
+  };
+  // Non-enumerable so it is not mistaken for a hook entry.
+  Object.defineProperty(legacy, "shouldRefresh", {
+    value: ({ turnIndex, hasCache }) => !hasCache || turnIndex === 0,
+    enumerable: false,
+  });
+  const cleanup = await registerV2Adapter(harness.ctx, legacy);
+
+  const prompt = (sessionID) =>
+    harness.hooks.get("prompt")({
+      sessionID,
+      messageID: `msg-${sessionID}`,
+      prompt: { text: "prompt" },
+    });
+  const context = async (sessionID) => {
+    const event = { sessionID, system: [] };
+    await harness.hooks.get("context")(event);
+    return event.system.map((part) => part.text);
+  };
+
+  await prompt("ses-1");
+  assert.equal(calls, 1);
+  assert.deepEqual(await context("ses-1"), ["ses-1-1"]);
+
+  await harness.hooks.get("compaction")({ sessionID: "ses-1", system: [] });
+  assert.deepEqual(
+    await context("ses-1"),
+    ["ses-1-1"],
+    "issue 124: the compaction hook itself must not drop the block mid-turn"
+  );
+
+  revision += 1;
+  await prompt("ses-1");
+  assert.equal(calls, 2, "the prompt after compaction must refresh, not replay");
+  assert.deepEqual(await context("ses-1"), ["ses-1-2"]);
+
+  await cleanup();
+});

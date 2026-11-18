@@ -36,6 +36,11 @@ export async function registerV2Adapter(ctx, legacyHooks) {
   // in this adapter lifetime — the `turnIndex` the wrapper's `shouldRefresh`
   // receives (plugin/src/plugin.js). Cleared on cleanup.
   const turns = new Map();
+  // Issue 149: sessions that compacted since their last prompt. The compaction
+  // hook only marks; the mark is consumed at the top of the next `onPrompt`
+  // (inside the per-session chain), so a refresh already in flight is never
+  // lost. `first` mode keeps replaying a cache that a compaction has made stale.
+  const stale = new Set();
   // Same-session prompts run one after another (a promise chain per session),
   // so an older completion can never overwrite a newer prompt's cache.
   // Different sessions never wait on each other.
@@ -60,6 +65,10 @@ export async function registerV2Adapter(ctx, legacyHooks) {
   async function onPrompt(event) {
     const turnIndex = turns.get(event.sessionID) ?? 0;
     turns.set(event.sessionID, turnIndex + 1);
+    // ponytail: the mark is consumed only by a prompt. A session that compacts
+    // and never prompts again keeps its entry until adapter cleanup, which is
+    // harmless (no prompt, no replay). Upgrade: drop marks on session delete.
+    if (stale.delete(event.sessionID)) contexts.delete(event.sessionID);
     const hasCache = contexts.has(event.sessionID);
     // `first` mode keeps a nonempty cache; the cache lives until a refresh,
     // a compaction-location cleanup or adapter cleanup (staleness is the
@@ -95,6 +104,7 @@ export async function registerV2Adapter(ctx, legacyHooks) {
   // back. Never `event.messages` (a user-role transcript message), never
   // `event.result` (it skips the model call and replaces the host's summary).
   await ctx.session.hook("compaction", async (event) => {
+    if (typeof event?.sessionID === "string" && event.sessionID) stale.add(event.sessionID);
     try {
       const handler = legacyHooks["experimental.session.compacting"];
       if (typeof handler !== "function") return;
@@ -136,5 +146,6 @@ export async function registerV2Adapter(ctx, legacyHooks) {
     contexts.clear();
     turns.clear();
     queues.clear();
+    stale.clear();
   };
 }
