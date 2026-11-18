@@ -1,6 +1,6 @@
 # 32 — W4.4 · Hard delete & milestone scrub (retention semantics)
 
-Status: ready-for-human — 2026-11-18: AC1/AC2/AC3 landed; AC4 complete (smoke doc created at `docs/evidence/issue-32-hard-delete/README.md`); **AC5 rewritten** (2026-11-18) to what an owner ruling and a measurement support — dead staging rows are counted and reported, and the deletion rule is written down; no purge ships, because no digest or provenance link exists on this schema. Issue 41 is closed (`abf2bce`) and did not satisfy AC5 (its sweep never opens `episodic.db`), so the deferral is retired rather than renewed. AC6 lands with ADR-0033. Residuals 1/2/3/4/5 settled, 6 open.
+Status: done — 2026-11-18. AC1/AC2/AC3 landed; AC4 complete (smoke doc at `docs/evidence/issue-32-hard-delete/README.md`); AC5 rewritten to what an owner ruling and a measurement support — dead staging rows are counted and reported, the deletion rule is written down in ADR-0033, and **no purge ships** because no digest or provenance link exists on this schema; AC6 done with ADR-0033. Issue 41 is closed (`abf2bce`) and did not satisfy AC5 (its sweep never opens `episodic.db`), so the deferral is retired rather than renewed. Residuals 1/2/3/4/5 settled, 6 open and recorded as a follow-up rather than a blocker.
 
 ## What to build
 
@@ -31,7 +31,7 @@ Wave detail: `.scratch/rust-port/roadmap.md` §W4.4.
       `contributors[i].summary = ""` in place and keeps the row.
 - [x] The children of a deleted session stay visible in the timeline, flagged `orphaned: true`, with the parent link severed per the FK's `ON DELETE SET NULL` — the W4.2 orphan guarantee is preserved, not weakened.
 - [x] The residuals above are each settled or explicitly recorded as open (with the user's ruling quoted), and any accepted residue is documented in the smoke doc and the issue's `## Comments`.
-- [ ] **AC5 (rewritten 2026-11-18 — the age-based purge was measured unprovable and does not ship).** Dead-lettered staging rows are counted and reported, and the deletion rule
+- [x] **AC5 (rewritten 2026-11-18 — the age-based purge was measured unprovable and does not ship).** Dead-lettered staging rows are counted and reported, and the deletion rule
       is written down (ADR-0033): a dead row may be deleted only on proof its text reached memory, never on
       triple identity, never otherwise. No digest or provenance link exists on this schema. On the 2026-11-18
       snapshot, exact-text containment fully matches 28 of the 603 triple-matched rows (24 same-session, 4
@@ -168,7 +168,43 @@ purges an unconsolidated row.
 **Key interfaces:** `EpisodicStore::soft_delete_session`, the new hard-delete path, `purge_session`'s
 milestone branch, `Contributor`, `EpisodicPurgeReport`, the store's retention config.
 
+> **Superseded 2026-11-18 — the age-based purge in this brief does not ship.** The owner ruled that a dead
+> staging row may be deleted only on proof its text reached memory later, and the measurement proved no such
+> proof exists on this schema. Read AC5 and ADR-0033 instead of this paragraph.
+
 **Acceptance criteria:** the issue's six ACs, with AC 2 as amended by the ruling above.
 
 **Out of scope:** the REST contract's 404 semantics; tier-1 facts promoted from the session (kept); the
 consolidated milestone's own summary (kept).
+
+**Closed 2026-11-18 at commit `fbdc74e`.** Blueprint `blueprint-20261117-2220-issue-32-staging-purge-r1`
+(`sha256=7c0da640db84`), SYS-APPROVED 2026-11-18T12:58Z after six gate rounds. Reviewer verdict `APPROVED`,
+reached by its own runs rather than by reading the handoff: 7 suites green (`capture_inbox` 10,
+`cleanup_retention` **17**, `cleanup_tick` 8, `cleanup_status` 6, `purge_cli` 1 of 31 filtered,
+`api_endpoint_contract` 20), `fmt` and both clippy gates exit 0, **six evidence rows re-executed with values
+and exit codes matching**, and three scratch-copy mutants all killed and reverted with `diff -r crates` empty
+and 17/17 green on a fresh build (triple-identity DELETE; count error folded into `None`; absent store reported
+as `Some(0)`).
+
+What ships: `CaptureInbox::count_dead` (`pub async fn`, mirroring `queued_count`), `CleanupReport.inbox_dead_retained`
+as `Option<u64>` — wire `null` when the episodic store is absent, so a missing store cannot read as a true zero —
+serialised as `inboxDeadRetained` on the **`POST /api/cleanup`** answer only (`GET /api/cleanup/status` is
+unchanged; issue 141 shipped against that shape at `1fc1f8a`), and logged by `cleanup.tick`. A count error maps
+to `CleanupRunError::Failed` and never to `null`. `with_episodic` is applied inside
+`production_deduplication_port_with_cleanup` before the `Arc<dyn MaintenancePort>` coercion; the two call sites
+are `main.rs:181` (`Some(deps.episodic.clone())`) and `cleanup_tick.rs:105` (`None`). **No `DELETE`, no retention
+config key, no `captureInboxRetentionDays`** anywhere executable — the reviewer checked.
+
+Enforcement is `test_report_never_deletes_dead_rows`, killed by two assertions that say different things: row
+survival (`left: 1` vs `right: 2`) and the reported count (`left: Some(1)` vs `right: Some(2)`). The mutant is
+`triple_match_delete_added` — exactly the triple-identity rule the owner rejected.
+
+Two reviewer judgments recorded rather than fixed: a mutant row citing `Compiled 2 packages` (custom cargo
+progress) **satisfies** the compile-line rule, since the row's distinguishing output is only producible by the
+mutated predicate — with the caveat that this form must not be used where the RED is not mutant-identifying;
+and the AI-generated triage brief above still promised an age-based purge, now marked superseded in place rather
+than left as a second, stale voice.
+
+Residual 6 (stale vectors after compaction) remains open and is a follow-up, not a blocker: this issue closed on
+the six acceptance criteria, and the residual is recorded here so the next reader does not treat the table as
+fully swept.
