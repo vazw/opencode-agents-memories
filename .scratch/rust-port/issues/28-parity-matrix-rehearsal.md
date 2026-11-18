@@ -64,3 +64,12 @@ Phase-7 gate is "closed-or-confirmed"; this is the confirmed branch.
 
 **Order:** after the W3 wave (issue 43) and the ADR-0019 text. The copy-first run may be executed by a subagent;
 the live repeat is the owner's.
+
+## Runbook (2026-11-18)
+
+Written, not executed: `docs/runbooks/parity-drop-in-rehearsal.md`, with the transcript scaffold at
+`docs/evidence/issue-28-dropin-rehearsal/TRANSCRIPT.md`. Every transcript cell is `NOT RUN` until the run.
+The copy-first phase (§2–§8) is safe with the live engine alive: port **3749** against a copy at
+`.tmp/rehearsal-28/<stamp>/store`, the live root read-only, pid 4719 never signalled. The live repeat is
+§11 and is what closes AC2.
+
