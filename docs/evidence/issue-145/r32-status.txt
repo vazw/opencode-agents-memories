@@ -1,0 +1,13 @@
+ M .scratch/rust-port/issues/145-memory-context-missing-in-subagents.md
+ M plugin/dist/plugin.js
+ M plugin/dist/v2/plugin.js
+ M plugin/src/plugin.js
+ M plugin/src/v2/plugin.js
+ M plugin/tests/harness/bridge.mjs
+ M plugin/tests/v2-inject-delivery.test.mjs
+?? .scratch/rust-port/issues/146-inject-block-lacks-shell-section.md
+?? docs/evidence/issue-145/
+?? plugin/tests/failure-toast-145.test.mjs
+?? plugin/tests/harness/probe-145.mjs
+?? plugin/tests/log-sink.test.mjs
+?? plugin/tests/probe-145-guard.test.mjs

@@ -1,0 +1,8 @@
+ .../145-memory-context-missing-in-subagents.md     | 16 ++++++++
+ plugin/dist/plugin.js                              | 48 +++++++++++++++++-----
+ plugin/dist/v2/plugin.js                           |  1 +
+ plugin/src/plugin.js                               | 48 +++++++++++++++++-----
+ plugin/src/v2/plugin.js                            |  1 +
+ plugin/tests/harness/bridge.mjs                    | 23 ++++++++---
+ plugin/tests/v2-inject-delivery.test.mjs           |  2 +-
+ 7 files changed, 112 insertions(+), 27 deletions(-)

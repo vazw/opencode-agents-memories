@@ -28,7 +28,7 @@
 import pkg from "../package.json" with { type: "json" };
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { accessSync, appendFile, constants, existsSync, mkdir, statSync, writeFileSync } from "node:fs";
+import { accessSync, appendFile, appendFileSync, constants, existsSync, mkdir, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -211,12 +211,36 @@ function childEnvironment() {
 
 // ── structured stderr (§1, D-38) ────────────────────────────────────────
 
+// Issue 145: the host discards stderr, so each structured line is also appended
+// to the engine log. `logSink` is "dir" (directory not yet proven, or the last
+// write failed: the next event runs mkdir again) or "ready" (last append ok).
+// The sink never disables itself; a failed write warns once per process.
+let logSink = "dir";
+let logSinkWarned = false;
 function writeStructured(level, event, fields) {
+  let text = null;
   try {
     const line = { level, component: "opencode-mem-plugin", event, ...fields };
-    process.stderr.write(JSON.stringify(line) + "\n");
+    text = JSON.stringify(line) + "\n";
+    process.stderr.write(text);
   } catch {
     // never throw to the host
+  }
+  if (text === null) return;
+  try {
+    const file = engineLogPath();
+    if (logSink === "dir") mkdirSync(path.dirname(file), { recursive: true });
+    appendFileSync(file, engineStderrLogLine(text));
+    logSink = "ready";
+  } catch (err) {
+    logSink = "dir";
+    if (logSinkWarned) return;
+    logSinkWarned = true;
+    try {
+      process.stderr.write(JSON.stringify({ level: "warn", component: "opencode-mem-plugin", event: "log_sink_unwritable", message: shortError(err) }) + "\n");
+    } catch {
+      // never throw to the host
+    }
   }
 }
 
@@ -1097,13 +1121,15 @@ export async function readSkillCatalogue(projectId) {
 // Fire-and-forget capture (§3): the ack carries no durability guarantee in
 // W5.1; an error is logged once and never blindly retried. pendingCaptures is
 // the counter the shutdown drain waits on.
-function fireCapture(state, payload) {
+function fireCapture(state, payload, client) {
   state.pendingCaptures += 1;
   void (async () => {
     try {
-      await sendRequestIn(state, "capture", payload, 10000);
+      const reply = await sendRequestIn(state, "capture", payload, 10000);
+      if (reply?.accepted !== true) notifyHost(client, "capture_failed", "Memory capture failed.");
     } catch (err) {
       logWarn("capture.failed", { message: shortError(err) });
+      notifyHost(client, "capture_failed", "Memory capture failed.");
     } finally {
       state.pendingCaptures = Math.max(0, state.pendingCaptures - 1);
     }
@@ -1124,7 +1150,7 @@ function fireCapture(state, payload) {
 
 const NOTIFIED = new Set();
 
-function notifyHost(client, reason) {
+function notifyHost(client, reason, text = "Memory injection failed; memory may be disabled.") {
   if (NOTIFIED.has(reason)) return;
   NOTIFIED.add(reason);
   let showToast;
@@ -1142,7 +1168,7 @@ function notifyHost(client, reason) {
       showToast.call(client.tui, {
         body: {
           title: "opencode-mem",
-          message: "Memory injection failed; memory may be disabled.",
+          message: text,
           variant: "warning",
         },
       })
@@ -1363,6 +1389,8 @@ export const server = async function server(input) {
       ? input.directory
       : null;
   const hostInputRef = () => input;
+  // Issue 145: which host graph called server(). The V2 entry passes "setup".
+  const hostContract = input?.hostContract === "setup" ? "setup" : "server";
   // Prompt id → capture_id: one UUIDv7 per prompt; a replayed idle delivery
   // of the same prompt reuses the SAME capture_id (idempotent upsert key).
   const captureIdByPrompt = new Map();
@@ -1379,7 +1407,7 @@ export const server = async function server(input) {
         let block = null;
         const query = queryFromParts(output);
         const session_id = typeof hookInput?.sessionID === "string" && hookInput.sessionID.length > 0 ? hookInput.sessionID : "oc-bridge-" + process.pid;
-        writeStructured("info", "inject.requested", { session_id, query_chars: typeof query === "string" ? Array.from(query).length : 0 });
+        writeStructured("info", "inject.requested", { session_id, query_chars: typeof query === "string" ? Array.from(query).length : 0, host_contract: hostContract });
         try {
           const state = bridge();
           await ensureStartedIn(state);
@@ -1389,9 +1417,9 @@ export const server = async function server(input) {
           }
           const block_bytes = block !== null ? Buffer.byteLength(block, "utf8") : 0;
           const handling_ms = typeof result?.handling_ms === "number" ? result.handling_ms : 0;
-          writeStructured("info", "inject.received", { session_id, block_bytes, handling_ms, status: block_bytes > 0 ? "ok" : "empty" });
+          writeStructured("info", "inject.received", { session_id, block_bytes, handling_ms, status: block_bytes > 0 ? "ok" : "empty", host_contract: hostContract });
         } catch (err) {
-          writeStructured("info", "inject.received", { session_id, block_bytes: 0, handling_ms: 0, status: "error" });
+          writeStructured("info", "inject.received", { session_id, block_bytes: 0, handling_ms: 0, status: "error", host_contract: hostContract });
           logWarn("inject.failed", { message: shortError(err) });
           notifyHost(hostInputRef()?.client, "inject.failed");
         }
@@ -1696,7 +1724,7 @@ export const server = async function server(input) {
         transcript: userPrompt,
         metadata,
       };
-      fireCapture(state, payload);
+      fireCapture(state, payload, client);
     } catch (err) {
       logWarn("session.idle.capture_failed", { message: shortError(err) });
     }

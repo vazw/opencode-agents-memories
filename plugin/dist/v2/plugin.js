@@ -45,6 +45,7 @@ export async function setup(ctx) {
   const legacyClient = createLegacyClient(ctx, toastRpc);
   const v1 = await server({
     client: legacyClient,
+    hostContract: "setup",
     directory: ctx?.location?.directory ?? null,
     project: ctx?.location?.project ?? null,
     worktree: ctx?.location?.project?.directory ?? null,

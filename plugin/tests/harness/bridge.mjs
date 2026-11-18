@@ -98,11 +98,17 @@ export function stageStubEngine(pkgDir, {
   // existing raw-log readers keep seeing wire messages only; the shared-bridge
   // driver points this AT the request log (the plan's literal shape).
   lifecycleLogPath = null,
+  // Issue 145 knobs (additive; unset keeps every existing request log identical):
+  // "refused" answers capture with {accepted:false}; default answers {accepted:true}.
+  captureMode = "accepted",
+  // when set, each answered request appends {"answered":<method>,"id":<id>} here
+  // from the stdout write callback (the reply has been handed to the pipe).
+  answerLogPath = null,
 }) {
   const dir = path.join(pkgDir, "engine", `${process.platform}-${process.arch}`);
   fs.mkdirSync(dir, { recursive: true });
   const binPath = path.join(dir, "opencode-agents-memory");
-  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath: lifecycleLogPath ?? (requestLogPath ? requestLogPath + ".lifecycle" : null) }), {
+  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath: lifecycleLogPath ?? (requestLogPath ? requestLogPath + ".lifecycle" : null), captureMode, answerLogPath }), {
     mode: 0o755,
   });
   fs.chmodSync(binPath, 0o755);
@@ -112,8 +118,8 @@ export function stageStubEngine(pkgDir, {
 // Static body (no template interpolation inside the script beyond CONFIG):
 // answers the canned protocol-1.0.0 results, records its own pid, exits on
 // SIGTERM or stdin EOF.
-function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath }) {
-  const config = JSON.stringify({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath });
+function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath, captureMode, answerLogPath }) {
+  const config = JSON.stringify({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath, captureMode, answerLogPath });
   const blocks = JSON.stringify({
     restore:
       "## Restored Session Memory\n\n### Memory 1\nRetries are capped at three\n\nTags: project, opencode-mem\n\n### Memory 2\nDeploys go through the staging gate first\n\nTags: project, opencode-mem\n\n",
@@ -126,12 +132,17 @@ function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabiliti
 const CONFIG = ${config};
 const BLOCKS = ${blocks};
 import fs from "node:fs";
-const { injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath } = CONFIG;
+const { injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath, captureMode, answerLogPath } = CONFIG;
 // Issue 70 wave 1's nine wire methods; appended to the hello's advertised set
 // only when the capability object advertises the same key.
 const TOOL_METHODS = ["add", "search", "forget", "list", "profile", "list-shards", "migrate", "export", "import"];
 function logLine(object) {
   try { fs.appendFileSync(requestLogPath, JSON.stringify(object) + "\\n"); } catch {}
+}
+// Issue 145: the reply-side marker, written from the stdout write callback.
+function logAnswer(parsed) {
+  if (!answerLogPath) return;
+  try { fs.appendFileSync(answerLogPath, JSON.stringify({ answered: parsed && parsed.method, id: parsed && parsed.id }) + "\\n"); } catch {}
 }
 function lifecycleLine(object) {
   if (lifecycleLogPath) {
@@ -186,7 +197,7 @@ process.stdin.on("data", (chunk) => {
         continue;
       }
     }
-    process.stdout.write(out);
+    process.stdout.write(out, () => logAnswer(parsed));
   }
 });
 process.stdin.on("end", () => exitNow(0));
@@ -243,7 +254,7 @@ function respond(parsed) {
     }
     result = { skills: answer };
   } else if (method === "capture") {
-    result = { accepted: true };
+    result = captureMode === "refused" ? { accepted: false, reason: "chat_message_disabled" } : { accepted: true };
   } else if (method === "recall") {
     result = { items: [], count: 0 };
   } else if (method === "add") {

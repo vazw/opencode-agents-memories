@@ -275,7 +275,7 @@ test("test_wrapper_telemetry_requested_and_received_events", async (t) => {
 test("test_wrapper_telemetry_captures_zero_bytes_and_excludes_content", async (t) => {
   const empty = await telemetryCase(t, "empty", "QUERY_SENTINEL_SECRET");
   assert.deepEqual(empty.events.find(e => e.event === "inject.received"),
-    { level: "info", component: "opencode-mem-plugin", event: "inject.received", session_id: "ses-1", block_bytes: 0, handling_ms: 0, status: "empty" });
+    { level: "info", component: "opencode-mem-plugin", event: "inject.received", session_id: "ses-1", block_bytes: 0, handling_ms: 0, status: "empty", host_contract: "server" });
   const err = await telemetryCase(t, "error", "QUERY_SENTINEL_SECRET");
   assert.equal(err.events.find(e => e.event === "inject.received")?.status, "error");
   assert.equal(err.events.find(e => e.event === "inject.received")?.block_bytes, 0);

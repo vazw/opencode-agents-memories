@@ -1,6 +1,6 @@
 # 43 — W9.0 · Database base hardening (review findings)
 
-Status: landed — residuals tracked not closed — 2026-11-18: A3/A4 discharged by issue 131 (`7dfa639`); REPORT residuals 6–8 filed as **issues 142** (`legacyPeerLive` unreachable from HTTP), **143** (status 404s for a deleted prompt) and **144** (residual 8's F4–F7 ranking is defined in no tracked document). Named validation/platform limits retained. W6a `4878834`, W6c final `df6c744` / main merge `24552db`; see dated outcome under Comments.
+Status: landed — residuals discharged — 2026-11-18: A3/A4 by issue 131 (`7dfa639`); REPORT residuals 6–8 by **issue 142** (`1fed372`, retired `legacyPeerLive` rather than making it reachable), **issue 143** (deleted prompt ids answer `410 Gone` with a minimal tombstone) and **issue 144** (recovered what was recoverable of residual 8's F4–F7 ranking), all `done` 2026-11-18. Named validation/platform limits retained. W6a `4878834`, W6c final `df6c744` / main merge `24552db`; see dated outcome under Comments.
 
 Historical landing summary (2026-10-27 onward; umbrella, not a single wave): **W0** `af01156`, **W1 write side**
 `3d5e940` and the **liveness blocker** `aa0dcc4` are landed; **W2 is landed on `main` at `e0bbd37`**

@@ -1,0 +1,6 @@
+ plugin/dist/plugin.js                    | 34 +++++++++++++++++++++++++++-----
+ plugin/dist/v2/plugin.js                 |  1 +
+ plugin/src/plugin.js                     | 34 +++++++++++++++++++++++++++-----
+ plugin/src/v2/plugin.js                  |  1 +
+ plugin/tests/v2-inject-delivery.test.mjs |  2 +-
+ 5 files changed, 61 insertions(+), 11 deletions(-)
