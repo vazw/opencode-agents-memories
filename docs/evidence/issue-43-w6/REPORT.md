@@ -150,7 +150,20 @@ measured. File restored from `.tmp/scratch/prompts.rs.bak`.
 7. The status read 404s for a deleted prompt, so it cannot report post-delete
    state. Pre-existing blueprint rule (Step 18(f): unknown id ⇒ 404), not part of
    F1/F2. A tombstone or tier-scoped read is a separate decision.
-8. F4/F5/F6/F7 stay P3 as ranked; F4 (Windows) needs an owner decision, not code.
+8. ~~F4/F5/F6/F7 stay P3 as ranked~~ — **retired 2026-11-18 (issue 144): the ranking is unrecoverable.**
+   No tracked document defines any of F4–F7; the sentence survived the W6c rework
+   (`df6c744`) as a pointer to a table that was never committed. The W6 blueprint that
+   would have ranked them (`blueprint-20261108-w6-erasure-r1.md`, `sha256=1c8ab8d40e11`,
+   cited in `README.md`) and its review are gone from the gitignored `.tmp/blueprints/`,
+   which held 90 blueprints and no `w6` entry when searched on 2026-11-18.
+   **F4 is identified by its own parenthetical, not by memory (INFERRED, and the only reading
+   available): it is residual 3 above** — (Windows post-drop opens untested), which needs the
+   platform decision named there, not
+   code. F5, F6 and F7 are **unidentified and unrecoverable** — they are not claimed to be
+   residuals 1/2/6/7, and the same letters in other waves
+   (`20261111-1304-lossless-shard-consolidation.opsec-1.md`,
+   `20261113-rev14.review-9.md`) are **different findings**. Nothing follows from this row,
+   which is the point: a residual that cannot name its finding cannot schedule one.
 
 ## Follow-up 2026-11-09 — owner acceptance and deployment correction
 
