@@ -80,3 +80,46 @@ The post-restart runbook `docs/evidence/issue-145/README.md` (post-issue-148 rew
 that still carries the section — which would mean the tier order was not applied.
 
 Unit-level: the section renders when the summariser skipped, and does not render for a session with no captured row.
+
+## Amendment 2026-11-19 — Decision 2's premise is falsified by measurement; one `plugin/` change is now forced
+
+Measured during the issue-145 baseline run (`docs/evidence/issue-145/run-20261118T215648Z.md`, reading
+`no-inject-after-compaction`). Live child `ses_e0f5602b3ffeeWae0X4cbfgm7n`: **one** `inject.requested`/
+`inject.received` pair for the whole session, both before its compaction boundary; **zero** after it. A nonce
+written after the boundary came back `NONE`, and no row in the host DB carries it except my own prompt.
+
+Mechanism, each line READ at HEAD:
+
+- `plugin/src/v2/adapter.js:67` — `if (!shouldRefresh({ turnIndex, hasCache })) return;` returns *before* the
+  cache delete at `:70` and before `chat.message` at `:76`.
+- `plugin/src/plugin.js:1507` — `!hasCache || turnIndex === 0 || bridge().engineInjectOn !== "first"`.
+- `crates/mem-core/src/config/schema.rs:749` — `chat_message_inject_on: InjectOn::First` is the built-in
+  default, asserted at `crates/mem-core/tests/config_defaults.rs:122`; no override in `~/.opencode-mem/*.json*`.
+
+So in `first` mode a session caches its turn-0 block and the `context` hook (`adapter.js:86-89`) replays that
+same block on every later turn. Compaction deletes nothing — `adapter.js:122` says "retain context until policy
+refresh/cleanup". There is no next-prompt refresh for the actions to ride: **as designed, this section would be
+captured, stored, and never delivered to a compacted child.**
+
+**Decision 2 stands as intent and gains a precondition.** Restore still happens on the next prompt and still
+needs no new trigger — but only if the cache is invalidated when the session compacts, so that prompt is a
+refreshing one. Required change, now in scope for this work:
+
+- In the `compaction` hook, where `event?.sessionID` is already read (`plugin/src/v2/adapter.js:97-113`, `:102`),
+  delete that session's cached block. One line.
+- Pinned contracts are unaffected: `plugin/tests/v2-plugin-adapter.test.mjs:178` ("a session with no cached
+  injection gets nothing") and `:397` ("cleanup drops the cached block") both describe an empty cache, which is
+  what invalidation produces.
+- New criterion: a session that compacts and then takes another prompt logs a second `inject.requested` pair
+  carrying the actions section. It fails today, because it logs none.
+- Not done: M1's never-prompted case. An empty cache still means the `context` hook injects nothing until a
+  prompt arrives — that is the pinned contract and this change does not relax it.
+
+**Second correction, same cause:** the blueprint r1 claim "zero `plugin/` change" is no longer true, and
+`plugin/dist/` byte-identity now applies to `adapter.js` too. The reviewer should treat that as part of the
+scope rather than as an untracked edit.
+
+**Inverted world for this amendment:** if a post-compaction turn still logs no `inject.requested` after the
+invalidation lands, the child is seeing the `context`-hook replay rather than a refresh, and the section belongs
+on the compaction leg (the `experimental.session.compacting` output pushed onto `event.system` at
+`adapter.js:99-106`) instead of the prompt path.

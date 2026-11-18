@@ -149,6 +149,11 @@ command it ran — **without stating it**. Compare with the owner's `<action-tok
 otherwise. Do not read action presence out of the block's text: with M1 deferred the block carries no recent-action
 section, and asking the child is the behaviour the complaint is about.
 
+The question must be about an action that **predates the boundary**. Asked "what did you just do", a child answers from
+its own retained post-compaction window and is right for no reason connected to the block — MEASURED 2026-11-19, where
+such an answer matched the recorded tool call and still proved nothing (`run-20261118T215648Z`, Q7, recorded
+inconclusive). For the same reason the nonce in Q6 must be written **after** the boundary, never before.
+
 Q8 (running shell present): not run while the block has no shell section
 (`grep -c -i 'shell' crates/mem-bridge/src/inject.rs` = 0 at the wave's Step 0 item 7). If a later build adds one, ask
 the child to name the shell it left running and compare with R2's `<shell-name>`.
@@ -164,34 +169,47 @@ log timestamp is ISO-8601 with a `+07:00` offset, for example `[2026-11-19T01:16
 subtracting the offset, then compare against the Q0 `time.created` string. Comparing raw milliseconds against a string
 misclassifies every child as `miss-engine`.
 
-Record verbatim the lines at or after the boundary, with `date`, `status`, `block_bytes` and `host_contract`. No such
-line: `OPEN — engine answer not recorded`. That is not a reading.
+Record verbatim the lines at or after the boundary, with `date`, `status`, `block_bytes` and `host_contract`. A session
+with no inject line at all: `OPEN — engine answer not recorded`. That is not a reading. A session whose inject lines
+all precede the boundary: `no-inject-after-compaction`, reading 3 below — a real outcome with a named mechanism.
 
 ## Reading rule — one reading per child, first match wins
 
 1. `miss-engine`: Q9 shows `status != "ok"`, or `block_bytes` is 0. The engine answered nothing or timed out.
 2. `miss-host`: Q9 shows `status:"ok"` and `block_bytes > 0`, and Q6 = 0 — the engine returned a block and the child
    could not produce a token that exists only inside it. Delivery failed downstream of the engine.
-3. `stale`: Q6 ≥ 1 — the block demonstrably reached the child after compaction — and Q7 = 0. The child received the
-   block and still could not name its last action. **This is the expected reading for every child while M1 is deferred**,
-   because the block carries no recent-action section; the inverted world is a `recent-action-delivered`, which would
-   refute the deferral's premise and is a finding, not a pass.
-4. `recent-action-delivered`: Q6 ≥ 1 and Q7 ≥ 1. The block was delivered after compaction and the child named its last
+3. `no-inject-after-compaction`: Q9 shows at least one `inject.received` with `status:"ok"` and `block_bytes > 0`, all
+   strictly **before** the Q0 boundary, and none at or after it. The session got a block at some point and got nothing
+   once it compacted. MEASURED 2026-11-19 (`run-20261118T215648Z`): with `inject_on: "first"` — the built-in default
+   (`crates/mem-core/src/config/schema.rs:749`, asserted at `crates/mem-core/tests/config_defaults.rs:122`) — the
+   turn-0 block is cached and the adapter's `context` hook replays it every turn
+   (`plugin/src/v2/adapter.js:86-89`), while `:67` returns before the refresh when the cache is non-empty
+   (`plugin/src/plugin.js:1507`). Nothing invalidates the cache at compaction (`adapter.js:122`). This reading
+   neither refutes nor confirms a recent-actions section: it says the section cannot be measured until the cached
+   block is dropped at compaction. Inverted world: a post-compaction `inject.requested` line, which would mean the
+   refresh path ran and the child belongs to reading 4 or 5 instead.
+4. `stale`: Q6 ≥ 1 — the block demonstrably reached the child after compaction — and Q7 = 0. The child received the
+   block and still could not name its last action. This was the predicted reading before the 2026-11-19 baseline and
+   did not survive it; it becomes reachable again only once the cached block is invalidated at compaction. The
+   inverted world is a `recent-action-delivered`, which would refute the deferral's premise and is a finding, not a pass.
+5. `recent-action-delivered`: Q6 ≥ 1 and Q7 ≥ 1. The block was delivered after compaction and the child named its last
    action. This reading makes no claim about background shells.
 
-Run-level gap, outside the four readings: while the block has no shell section, record once
+Run-level gap, outside the five readings: while the block has no shell section, record once
 `OPEN — block carries no background-shell section`, with the `grep -c -i 'shell' crates/mem-bridge/src/inject.rs` output
 verbatim. This opens issue 146. It is not a per-child reading.
 
 ## Expected shape and sample size
 
-Expected per child while M1 is deferred: **Q6 ≥ 1 and Q7 = 0**, i.e. `stale`. The block reaches the child and the
-child still cannot name its last action. The shell half is not expected while the block has no shell section.
-A `recent-action-delivered` is the surprise, not the target — record it and re-derive what produced it.
+Expected per child, as of the 2026-11-19 baseline (`run-20261118T215648Z`): **`no-inject-after-compaction`** — the block
+arrives before the boundary and nothing arrives after it. `stale` (Q6 ≥ 1 and Q7 = 0) was the pre-baseline prediction and
+did not survive it; it returns only once the cached block is invalidated at compaction (issue 149, amendment 2026-11-19).
+The shell half is not expected while the block has no shell section. A `recent-action-delivered` is the surprise, not the
+target — record it and re-derive what produced it.
 
 Sample size N = 5. Any `miss-engine` or `miss-host` at N = 5 extends to N = 10. A failure that survives N = 10 is an
-open item in the issue. `stale` needs no extension — it is the predicted reading, and its count at N = 5 is the R3
-result. Issue 145 stays `OPEN` until issue 146 closes.
+open item in the issue. `stale` and `no-inject-after-compaction` need no extension — the latter is the predicted reading
+as of the 2026-11-19 baseline, and its count at N = 5 is the R3 result. Issue 145 stays `OPEN` until issue 146 closes.
 
 ## Arm naming, from R3 readings only
 
@@ -200,14 +218,19 @@ Recorded in the issue, not decided in advance.
 - `miss-engine` with `status:"error"`: the chat-path timeout (arm (a)). `CHAT_INJECT_REQUEST_TIMEOUT_MS` is a separate design.
 - `miss-host`: attach/deliver (arm (b) candidate) — the engine returned a block that never reached the child.
 - `miss-engine` with `status:"ok"`: neither arm; opens a new item.
-- `stale`: the M1 gap, as predicted; feeds issue 146's sibling rather than opening a new arm. A `stale` count above zero
+- `stale`: the M1 gap; feeds issue 146's sibling rather than opening a new arm. A `stale` count above zero
   is evidence for building recent-action memory, not a defect in what shipped.
+- `no-inject-after-compaction`: a delivery-path gap upstream of any section the block carries, measured at
+  `adapter.js:67`/`plugin.js:1507`. Opens its own item — it is why a recent-actions section cannot be measured until the
+  cached block is dropped at compaction. Not evidence for or against the section itself.
 - Block-content gap: opens issue 146.
 
 ## Failure meaning
 
 - `miss-engine`: the engine gave no block or timed out after compaction.
 - `miss-host`: the engine returned a block and the child could not produce a token that exists only inside it.
+- `no-inject-after-compaction`: the engine produced a block earlier in the session and produced none after the boundary,
+  because the cached turn-0 block is replayed rather than refreshed.
 - `stale`: the block reached the child and it still could not name its last action.
 
 Each opens a new item in the issue. None reopens the scratch-root closure.
@@ -215,7 +238,7 @@ Each opens a new item in the issue. None reopens the scratch-root closure.
 ## Records
 
 Every row, count, timestamp and rc goes in the issue's evidence section. The tracker status line gets the R3 totals for the
-four reading classes, with N, and the run-level issue 146 gap stated beside them.
+five reading classes, with N, and the run-level issue 146 gap stated beside them.
 
 Per-run reading record, mandatory, one file per run: `docs/evidence/issue-145/run-<UTC-stamp>.md`. Creation is enforced:
 
@@ -228,6 +251,6 @@ same stamp is refused rather than silently overwriting. A refused creation is re
 the intended path) and that run records no result; choose a new stamp and start a new record. After a successful creation,
 append the per-child lines with `>>`, one stamped line per child: `date -u +%FT%TZ`, `<child>`, the boundary `<seq>` from Q0,
 the child's verbatim Q6 answer (the nonce it quoted, or `NONE`), its verbatim Q7 answer (the action it named, or `NONE`),
-the Q9 `status`, `block_bytes` and `host_contract`, and that child's single four-reading classification. Also append the
+the Q9 `status`, `block_bytes` and `host_contract`, and that child's single five-reading classification. Also append the
 Q1b calibration child's verbatim answer once per run — a run whose calibration failed records no per-child readings at
 all. A run that writes no such file has no auditable outcome and records no result.
