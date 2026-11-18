@@ -1,10 +1,16 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertReaped, runDriver, stagePackageTree, stageStubEngine } from "./harness/bridge.mjs";
+
+// Module-anchored scratch: here is plugin/tests; two `..` reach the repo root.
+const here = path.dirname(fileURLToPath(import.meta.url));
+const scratchRoot = path.resolve(here, "..", "..", ".tmp");
+const made = [];
+after(() => { for (const d of made) fs.rmSync(d, { recursive: true, force: true }); });
 
 // Issue 145, Step 1b: one warning toast per failure reason per process.
 // Every case runs its own driver (its own process). The driver below is local
@@ -102,7 +108,8 @@ process.exit(0);
 `;
 
 function stage({ captureMode = "accepted", injectMode = "error", wireErrors = {} }) {
-  const tmp = fs.mkdtempSync(path.join(process.cwd(), "..", ".tmp", "toast-145-"));
+  fs.mkdirSync(scratchRoot, { recursive: true });
+  const tmp = fs.mkdtempSync(path.join(scratchRoot, "toast-145-")); made.push(tmp);
   const pkgDir = stagePackageTree(tmp);
   const manifestPath = path.join(tmp, "manifest.json");
   const requestLogPath = path.join(tmp, "requests.ndjson");

@@ -1,17 +1,25 @@
 // Probe guard cases (issue 145, Step 8b). The probe under test defaults to
 // tests/harness/probe-145.mjs; PROBE_PATH overrides it for the mutant runs.
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { resolve } from "node:path";
 import { runDriver } from "./harness/bridge.mjs";
 
 const probePath = resolve(process.env.PROBE_PATH ?? "tests/harness/probe-145.mjs");
+// Module-anchored scratch: here is plugin/tests; two `..` reach the repo root.
+const here = path.dirname(fileURLToPath(import.meta.url));
+const scratchRoot = path.resolve(here, "..", "..", ".tmp");
+const made = [];
+after(() => { for (const d of made) rmSync(d, { recursive: true, force: true }); });
 
 function fixture() {
-  const tmp = mkdtempSync(path.join(process.env.TMPDIR ?? tmpdir(), "om-probe-guard-"));
+  mkdirSync(scratchRoot, { recursive: true });
+  const tmp = mkdtempSync(path.join(scratchRoot, "om-probe-guard-"));
+  made.push(tmp);
   return tmp;
 }
 
@@ -50,4 +58,22 @@ test("test_probe_refuses_without_driver_storage_root", async () => {
   assert.equal(r.code, 2, `code=${r.code} stderr=${r.stderr}`);
   assert.match(r.stderr, /DRIVER_STORAGE_ROOT unset/);
   assert.equal(existsSync(sentinel), false);
+});
+
+test("test_probe_reports_unreadable_inbox_as_open", async () => {
+  // Precondition: an absent sqlite3 must fail this case, never pass it.
+  execFileSync("sqlite3", ["-version"], { stdio: "ignore" });
+  const tmp = fixture();
+  const home = path.join(tmp, "home");
+  mkdirSync(home, { recursive: true });
+  const root = path.join(tmp, "root");
+  mkdirSync(root);
+  writeFileSync(path.join(root, "episodic.db"), "not a sqlite database\n");
+  const ledger = path.join(tmp, "ledger.md");
+  writeFileSync(ledger, "exit 1 2026-11-18T00:00:00Z\nSEED_NONCE=0123456789abcdef\n");
+  const env = { ...baseEnv(home), PROBE_LEDGER: ledger, DRIVER_STORAGE_ROOT: root };
+  const r = await runDriver(probePath, [], env);
+  assert.equal(r.code, 8, `code=${r.code} stderr=${r.stderr}`);
+  assert.match(r.stdout, /^OPEN — inbox state unreadable: .*not a database/m);
+  assert.match(readFileSync(ledger, "utf8"), /probe OPEN — inbox state unreadable: .*not a database/);
 });
