@@ -166,6 +166,8 @@ async fn test_partial_commit_retry_writes_tier1_once() {
 }
 
 /// `type == "skip"`: NEITHER tier is written, the item completes.
+/// Scope (issue 149): this payload has `metadata: None` and so no tool calls;
+/// a skip WITH tool calls now writes one deterministic episodic row.
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_capture_skip_writes_neither_tier() {
     let dir = TestDir::new("w53-skip");

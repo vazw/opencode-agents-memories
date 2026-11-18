@@ -19,6 +19,8 @@ use mem_episodic::inbox::{CaptureInbox, DRAIN_BATCH_LIMIT, InboxEntry, InboxNewE
 use mem_episodic::raw_context::MAX_RAW_CONTEXT_BYTES;
 use mem_episodic::record::NewAgentSession;
 use mem_episodic::record::{Decision, WorkItem};
+use mem_episodic::store::UpsertOutcome;
+use mem_episodic::validation::{MAX_RECENT_ACTION_BYTES, MAX_RECENT_ACTIONS};
 
 use mem_profile::error::ProfileError;
 use mem_store::db::{BatchMode, Value};
@@ -552,9 +554,12 @@ pub struct CaptureExtension {
 /// extension.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CaptureSummaryOutput {
-    /// Non-technical / incomplete / no context: writes NEITHER tier,
-    /// completes the item. The reason is carried so "injected-only" is never
-    /// confused with "blank" (D-52-5).
+    /// Non-technical / incomplete / no context: writes no tier-1 content and
+    /// completes the item. When the capture carries tool calls, the skip
+    /// still writes ONE deterministic episodic row (the floor for the
+    /// child's recent actions); without tool calls it writes nothing. The
+    /// reason is carried so "injected-only" is never confused with "blank"
+    /// (D-52-5).
     Skip(SkipReason),
     Capture {
         summary: String,
@@ -868,8 +873,9 @@ impl CaptureService {
             Ok(retention) => retention,
             Err(reason) => return self.dead_letter_now(entry, Failure::of(reason)).await,
         };
+        let actions = recent_action_lines(&metadata_tool_calls(&params.metadata), &self.privacy);
         if let Err(error) = self
-            .commit_episodic(&params, &summary, &tags, &extension, &retention)
+            .commit_episodic(&params, &summary, &tags, &extension, &retention, &actions)
             .await
         {
             log_episodic_write_failed(entry, &error);
@@ -998,8 +1004,24 @@ impl CaptureService {
                 return self.record_failure(entry, failure).await;
             }
         };
+        let actions = recent_action_lines(&metadata_tool_calls(&params.metadata), &self.privacy);
         let (summary, memory_type, tags, extension) = match output {
             CaptureSummaryOutput::Skip(reason) => {
+                // The floor: a skip with tool calls still records the
+                // child's actions. Without them nothing is written.
+                let persisted = if actions.is_empty() {
+                    false
+                } else {
+                    match self.commit_deterministic_row(&params, &actions).await {
+                        Ok(outcome) => outcome != UpsertOutcome::CuratedRetained,
+                        Err(error) => {
+                            log_episodic_write_failed(entry, &error);
+                            return self
+                                .record_failure(entry, Failure::of("episodic_write_failed"))
+                                .await;
+                        }
+                    }
+                };
                 let _ = self.inbox.mark_done(&entry.capture_id).await;
                 log(
                     AUTO_CAPTURE_SKIPPED,
@@ -1008,6 +1030,7 @@ impl CaptureService {
                         "sessionId": &params.session_id,
                         "type": "skip",
                         "reason": reason.as_str(),
+                        "persisted": persisted,
                     })),
                 );
                 return EntryOutcome::Done;
@@ -1022,7 +1045,7 @@ impl CaptureService {
 
         // 4. Commit 1: the episodic staging row (capture_id-aware upsert).
         if let Err(error) = self
-            .commit_episodic(&params, &summary, &tags, &extension, &retention)
+            .commit_episodic(&params, &summary, &tags, &extension, &retention, &actions)
             .await
         {
             log_episodic_write_failed(entry, &error);
@@ -1353,6 +1376,7 @@ impl CaptureService {
         tags: &[String],
         extension: &CaptureExtension,
         retention: &RetentionWrite,
+        actions: &[String],
     ) -> Result<(), EpisodicError> {
         let parent_row_id = match params.parent_session_id.as_deref() {
             Some(wire) if !wire.trim().is_empty() => {
@@ -1362,7 +1386,15 @@ impl CaptureService {
         };
         self.store
             .upsert_session(
-                episodic_record(params, summary, tags, extension, parent_row_id),
+                episodic_record(
+                    params,
+                    summary,
+                    tags,
+                    extension,
+                    parent_row_id,
+                    actions,
+                    false,
+                ),
                 self.embedder.as_ref(),
             )
             .await?;
@@ -1391,6 +1423,38 @@ impl CaptureService {
                 .await?;
         }
         Ok(())
+    }
+
+    /// The skip-path floor: one deterministic episodic row carrying only the
+    /// recent action lines. No tier-1 write and no retention legs. A
+    /// deterministic row never replaces a curated one; the store reports
+    /// `CuratedRetained` and writes nothing in that case.
+    async fn commit_deterministic_row(
+        &self,
+        params: &CaptureParams,
+        actions: &[String],
+    ) -> Result<UpsertOutcome, EpisodicError> {
+        let parent_row_id = match params.parent_session_id.as_deref() {
+            Some(wire) if !wire.trim().is_empty() => {
+                Some(self.resolve_parent_row_id(params, wire).await?)
+            }
+            _ => None,
+        };
+        let summary = deterministic_summary(actions);
+        self.store
+            .upsert_session(
+                episodic_record(
+                    params,
+                    &summary,
+                    &[],
+                    &CaptureExtension::default(),
+                    parent_row_id,
+                    actions,
+                    true,
+                ),
+                self.embedder.as_ref(),
+            )
+            .await
     }
 
     /// Resolves a WIRE parent session id to the project-visible ROW id (the
@@ -1653,27 +1717,7 @@ fn auto_capture_context(
                 .collect()
         })
         .unwrap_or_default();
-    let tool_calls: Vec<crate::capture_context::ToolCallInfo> = metadata
-        .as_ref()
-        .and_then(|m| m.get("autoCaptureContext"))
-        .and_then(|ctx| ctx.get("toolCalls"))
-        .and_then(Json::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| {
-                    Some(crate::capture_context::ToolCallInfo {
-                        name: item.get("name")?.as_str()?.to_string(),
-                        input: item
-                            .get("input")
-                            .and_then(Json::as_str)
-                            .unwrap_or_default()
-                            .to_string(),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let tool_calls = metadata_tool_calls(metadata);
 
     if let Some(prompt) = user_prompt {
         // Site 5's blank eligibility: after stripping and filtering, a present-
@@ -1785,6 +1829,8 @@ fn episodic_record(
     _tags: &[String],
     extension: &CaptureExtension,
     parent_row_id: Option<String>,
+    actions: &[String],
+    deterministic: bool,
 ) -> NewAgentSession {
     let mut extra: std::collections::BTreeMap<String, Json> = Default::default();
     if let Some(metadata) = params.metadata.as_ref().and_then(Json::as_object) {
@@ -1795,7 +1841,12 @@ fn episodic_record(
             if key == "autoCaptureContext"
                 || matches!(
                     key.as_str(),
-                    "filesTouched" | "completedWork" | "decisions" | "openThreads"
+                    "filesTouched"
+                        | "completedWork"
+                        | "decisions"
+                        | "openThreads"
+                        | "recentActions"
+                        | "captureDeterministic"
                 )
             {
                 continue;
@@ -1816,8 +1867,92 @@ fn episodic_record(
         extra,
         capture_id: Some(params.capture_id.clone()),
         parent_session_id: parent_row_id,
+        recent_actions: actions.to_vec(),
+        capture_deterministic: deterministic,
         ..Default::default()
     }
+}
+
+/// The deterministic summary: the action lines joined, clamped on a char
+/// boundary. Stored for search and embedding only; the inject block never
+/// renders it (the `capture_deterministic` branch in `inject.rs`).
+const MAX_DETERMINISTIC_SUMMARY_BYTES: usize = 300;
+
+fn deterministic_summary(actions: &[String]) -> String {
+    let joined = actions.join("\n");
+    clamp_to_char_boundary(&joined, MAX_DETERMINISTIC_SUMMARY_BYTES)
+}
+
+/// Truncates `text` to at most `max` bytes without splitting a UTF-8 char.
+fn clamp_to_char_boundary(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_string();
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_string()
+}
+
+/// (a) The tool calls of `metadata.autoCaptureContext.toolCalls`, parsed
+/// from the capture payload. Entries without a string `name` are dropped.
+fn metadata_tool_calls(metadata: &Option<Json>) -> Vec<crate::capture_context::ToolCallInfo> {
+    metadata
+        .as_ref()
+        .and_then(|m| m.get("autoCaptureContext"))
+        .and_then(|ctx| ctx.get("toolCalls"))
+        .and_then(Json::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    Some(crate::capture_context::ToolCallInfo {
+                        name: item.get("name")?.as_str()?.to_string(),
+                        input: item
+                            .get("input")
+                            .and_then(Json::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// (b) One rendered action line: `<name>: <input>` (or `<name>` alone when
+/// the input is empty), privacy-stripped, newline-collapsed, trimmed and cut
+/// to `MAX_RECENT_ACTION_BYTES` on a char boundary. `None` when empty.
+fn action_line(
+    call: &crate::capture_context::ToolCallInfo,
+    privacy: &mem_ai::privacy::PrivacyConfig,
+) -> Option<String> {
+    let raw = if call.input.is_empty() {
+        call.name.clone()
+    } else {
+        format!("{}: {}", call.name, call.input)
+    };
+    let stripped = privacy.strip_then_filter_text(&raw);
+    let collapsed: String = stripped
+        .chars()
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .collect();
+    let line = clamp_to_char_boundary(collapsed.trim(), MAX_RECENT_ACTION_BYTES);
+    if line.is_empty() { None } else { Some(line) }
+}
+
+/// (b) The last `MAX_RECENT_ACTIONS` action lines, chronological (oldest first).
+fn recent_action_lines(
+    calls: &[crate::capture_context::ToolCallInfo],
+    privacy: &mem_ai::privacy::PrivacyConfig,
+) -> Vec<String> {
+    let lines: Vec<String> = calls
+        .iter()
+        .filter_map(|call| action_line(call, privacy))
+        .collect();
+    let start = lines.len().saturating_sub(MAX_RECENT_ACTIONS);
+    lines[start..].to_vec()
 }
 
 #[cfg(test)]

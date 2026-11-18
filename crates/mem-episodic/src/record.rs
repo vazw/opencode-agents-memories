@@ -148,6 +148,10 @@ pub struct NewAgentSession {
     pub timestamp: Option<i64>,
     /// The client-minted capture id (upsert keying; `None` = plain insert).
     pub capture_id: Option<String>,
+    /// Last tool-call action lines (newest last).
+    pub recent_actions: Vec<String>,
+    /// Written by the deterministic skip path (no provider summary).
+    pub capture_deterministic: bool,
 }
 
 impl NewAgentSession {
@@ -170,6 +174,8 @@ impl NewAgentSession {
             completed_work: self.completed_work,
             decisions: self.decisions,
             open_threads: self.open_threads,
+            recent_actions: self.recent_actions,
+            capture_deterministic: self.capture_deterministic,
             extra: self.extra,
         };
         AgentSession {

@@ -28,6 +28,10 @@ pub const MAX_WORK_DESC_LEN: usize = 4_096;
 pub const MAX_DECISIONS: usize = 1_000;
 /// Maximum number of `open_threads` entries.
 pub const MAX_THREADS: usize = 1_000;
+/// Maximum number of `recent_actions` entries (newest kept at capture).
+pub const MAX_RECENT_ACTIONS: usize = 8;
+/// Maximum byte length of one `recent_actions` entry.
+pub const MAX_RECENT_ACTION_BYTES: usize = 160;
 /// Maximum number of unknown (`extra`) keys preserved from a peer.
 pub const MAX_EXTRA_KEYS: usize = 64;
 /// Maximum byte length of `git_branch`.
@@ -284,6 +288,27 @@ pub fn validate_metadata(metadata: &SessionMetadata) -> Result<(), EpisodicError
             "open_threads",
             format!("must contain at most {MAX_THREADS} entries"),
         ));
+    }
+
+    if metadata.recent_actions.len() > MAX_RECENT_ACTIONS {
+        return Err(invalid(
+            "recent_actions",
+            format!("must contain at most {MAX_RECENT_ACTIONS} entries"),
+        ));
+    }
+    for line in &metadata.recent_actions {
+        if line.is_empty() {
+            return Err(invalid("recent_actions", "entries must not be empty"));
+        }
+        if line.contains('\0') {
+            return Err(invalid("recent_actions", "entries must not contain NUL"));
+        }
+        if line.len() > MAX_RECENT_ACTION_BYTES {
+            return Err(invalid(
+                "recent_actions",
+                format!("entries must be at most {MAX_RECENT_ACTION_BYTES} bytes"),
+            ));
+        }
     }
 
     if metadata.extra.len() > MAX_EXTRA_KEYS {

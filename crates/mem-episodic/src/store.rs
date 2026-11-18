@@ -64,6 +64,9 @@ pub enum UpsertOutcome {
     Superseded,
     /// The triple matches a tombstone; nothing was written.
     TombstoneUnchanged,
+    /// A deterministic (skip-path) capture arrived against a live curated
+    /// row; the curated row is kept and nothing was written.
+    CuratedRetained,
 }
 
 /// The injected time source (W4.3): a millisecond clock the store reads.
@@ -428,6 +431,18 @@ impl EpisodicStore {
                     "capture_id",
                     "upsert requires a client-minted capture_id",
                 ));
+            }
+        }
+
+        // A deterministic capture never replaces a curated row. A missing or
+        // unparseable stored payload counts as curated (fail-safe).
+        if session.metadata.capture_deterministic {
+            let existing_deterministic = existing_row
+                .text("metadata")
+                .and_then(|json| crate::payload::SessionMetadata::from_json_str(&json).ok())
+                .is_some_and(|metadata| metadata.capture_deterministic);
+            if !existing_deterministic {
+                return Ok(UpsertOutcome::CuratedRetained);
             }
         }
 
