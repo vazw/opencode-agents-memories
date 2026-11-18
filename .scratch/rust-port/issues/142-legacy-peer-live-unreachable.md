@@ -36,13 +36,31 @@ end.
 
 ## Acceptance criteria
 
-- [ ] One of the two directions chosen, with the reason recorded in `## Comments`.
-- [ ] A test proves the chosen direction: either the value is emitted in a fixture that exercises the chosen path, or
+- [x] One of the two directions chosen, with the reason recorded in `## Comments`.
+- [x] A test proves the chosen direction: either the value is emitted in a fixture that exercises the chosen path, or
       the value is absent from the DTO's declared set and a test fails if it is re-added.
-- [ ] `docs/adr/0019-erasure-posture.md:157` and `crates/mem-web/src/api/dto.rs:355-358` agree with each other and with
+- [x] `docs/adr/0019-erasure-posture.md:157` and `crates/mem-web/src/api/dto.rs:355-358` agree with each other and with
       the test, in the same commit.
-- [ ] No answer-time probe of the sweep is introduced — issue 43 refused that, and this issue does not re-open it.
+- [x] No answer-time probe of the sweep is introduced — issue 43 refused that, and this issue does not re-open it.
 
 ## Blocked by
 
 Nothing. Independent of the rest of issue 43's residuals.
+
+## Comments
+
+Chosen: direction 2 — retire the value. `legacyPeerLive` is removed from the declared sweep-state set in `dto.rs`
+and from ADR-0019 D-19-3, and the ADR records the retirement in an `Amended (issue 142, 2026-11-18)` note
+saying it was never reachable from HTTP. The reason: the sweep's block record is report-only and the stamp table
+stores successes only, so no answer could carry the value. Making it reachable would cost a write on the failure
+path for a state no client can act on. The population that might have seen it is a pre-drop old-build state the
+owner ruled out on 2026-11-09 (ADR-0025: development phase, one laptop, sole user), and nothing consumes it. The
+owner ruled to retire the value and not make it reachable; no replacement field is added and nothing is wired to it.
+The emit mapping in `prompts.rs` is unchanged, which is the mechanical proof that no answer-time probe was
+introduced (issue 43's refusal stands).
+
+The guard is `crates/mem-web/tests/sweep_state_vocabulary.rs`: it fails if `legacyPeerLive` reappears in `dto.rs`,
+if the DTO and ADR declared sets differ from the four emitted labels, or if the ADR amendment note is removed.
+The same change folds `swept` into the ADR sentence, which had omitted a label `prompts.rs:114` emits.
+
+Evidence: `docs/evidence/issue-142/RUNS.md`.

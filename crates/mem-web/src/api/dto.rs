@@ -355,11 +355,10 @@ pub struct ErasureStateDto {
     pub state: &'static str,
     /// `"user-prompts" | "memories"` — never `"milestones"` on a delete answer.
     pub tier: &'static str,
-    /// `"swept" | "notYetSwept" | "sweepFailed" | "legacyPeerLive" |
-    /// "noSweepForTier"` (ADR-0019 D-19-3 as amended by W6c): `swept` only from
-    /// the status read's stamp, `sweepFailed` when the read fails (never
-    /// `notYetSwept`), `legacyPeerLive` unreachable from HTTP in W6c (the sweep's
-    /// block record is report-only).
+    /// `sweep_state: swept | notYetSwept | sweepFailed | noSweepForTier`
+    /// (ADR-0019 D-19-3, amended by issue 142). `swept` only from the status read's stamp;
+    /// `sweepFailed` when that read fails (never `notYetSwept`, which would claim no sweep ran);
+    /// `noSweepForTier` for a tier the sweep does not cover.
     pub sweep_state: &'static str,
     pub surviving_derived: SurvivingDerivedDto,
     /// The tiers a delete leaves, vault tri-state included.

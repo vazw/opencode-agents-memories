@@ -154,8 +154,8 @@ a mandatory same-interaction follow-up read (unforceable in the API).
 **D-19-3 — `EraseState` vocabulary: labels, never paths.**
 
 `Erased` is a unit variant; `PendingErase { tier, sweep_state, surviving_derived }` carries
-`tier: prompts | memories | milestones`, `sweep_state: notYetSwept | sweepFailed | legacyPeerLive |
-noSweepForTier`, and `surviving_derived { memories: Option<u64>, milestones_rewritten: u64 }`. The
+`sweep_state: swept | notYetSwept | sweepFailed | noSweepForTier`, `tier: prompts | memories | milestones`,
+and `surviving_derived { memories: Option<u64>, milestones_rewritten: u64 }`. The
 surface rule is part of the decision: **`tier: milestones` is emitted only by `purge-session`'s report** —
 neither delete DTO can rewrite a milestone. Three counts are never conflated: the live erased count is
 `EpisodicPurgeReport.milestones` (`purge.rs:99`); the W6 report **adds** `milestones_rewritten` (H6,
@@ -181,6 +181,14 @@ and it never turns a delete answer into `Erased` — a delete's residue postdate
 delete paths stay `PendingErase` (`:165-167`). A stamp read that fails answers `sweepFailed`, never
 `notYetSwept`: a failed read is not evidence that no sweep ran, and `Unknown` is scoped to the vault
 tier by D-19-9.
+
+**Amended (issue 142, 2026-11-18):** the vocabulary is four labels, not five. `legacyPeerLive` is
+**retired**: it was declared here and in `dto.rs`, but it was never reachable from HTTP — the sweep's block
+record is report-only (`crates/mem-bridge/src/sweep.rs`) and the stamp table stores successes only, so no
+answer could carry the value and a client arm written for it could never run. Nothing is made reachable in
+its place: issue 43's refusal to probe the sweep at answer time stands, and no read path changed. The `swept`
+label that the F2 note above added in prose is folded into the sentence for the first time here; that note's
+"fifth label" is a count as of W6c, not of this vocabulary.
 
 **Amended (issue 143):** `state` gains a third value, `deleted`, after `pending` and `erased`. It is the
 `410 Gone` answer of the status read for an id whose prompt row is gone and whose tombstone is on record
