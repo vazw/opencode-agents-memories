@@ -1,6 +1,6 @@
 # 141 — Render cleanup status in the Settings maintenance section
 
-Status: ready-for-agent — filed 2026-11-18 by owner decision, so the status value issue 41 exposes is actually used.
+Status: done — 2026-11-18. Filed by owner decision so the status value issue 41 exposes is actually used.
 
 *(Parent: issue 41.)*
 
@@ -41,3 +41,34 @@ is part of the deliverable rather than a follow-up.
 
 - 41 — supplies the endpoint. Also sequence against 140, which rewrites markup in `core_screens.rs`: whichever of
   the two lands first, the other rebases against it rather than editing a stale tree.
+
+## Comments
+
+**Closed 2026-11-18 at commit `1fc1f8a`.** Blueprint `blueprint-20261118-2207-issue-141-cleanup-status-row`
+(`sha256=c642072032df`), SYS-APPROVED 2026-11-18T05:35Z. Evidence: `docs/evidence/issue-141/README.md`.
+Three review rounds: round 1 rejected on four non-behavioural blockers, round 2 on five Step-7 deliverables, round 3
+approved after proving the code byte-identical to the round-2 snapshot (`diff -r` empty except moved logs,
+`git diff --numstat` still `+416/−23`, a fresh `trunk build` reproducing `web-ui-bc64730d57082f3d_bg.wasm`), so the
+round-2 gate runs stand and the lane was not re-run.
+
+Behaviour, from the reviewer's own runs: lane **RED 6/6** on the unwired bundle and **GREEN 24/24** after wiring with
+the pre-existing 13+5 cases intact; wasm suite 21 binaries / 20 `test result: ok`; `fmt` exit 0; both clippy gates
+exit 0; class coverage `emitted=192 dead=0 unresolved=0`. `EXIT=3` on the census is permitted by blueprint Step 7
+(`violations=0 unclassified=0`, exit may stay 3 for ruling-side stale rows); the 13 decomposes as **1 probe staleness**
+(`d58a94f ≠ 6c80902`) plus **12 pre-existing ruling-side findings** (6 stale kinds, 6 worklist overstatements),
+identical at base `abf2bce` before a line of this issue's code existed. `stale` and `drift` are the same counter.
+
+AC coverage: AC1 endpoint row with the pinned set 37→38; AC2 the `CleanupAutoStatus` classifier with `Unavailable`
+and "said disabled" as arms that cannot collapse; AC3 `cleanup_last_run_label` rendering a null `lastRunMs` as "never" rather
+than a zero date; AC4 the refetch proven by removing `refresh_status.run(())` at `core_screens.rs:2940` and watching the
+case red; AC5 `cleanup_disabled(state, auto_running)` total and pure, with `running: true` disabling the action while
+degradation leaves it enabled; AC6 mount, Reload and post-run fetches only — no timer, no interval, no polling.
+
+Three findings recorded rather than fixed:
+
+- `SETTINGS_PATHS` briefly gained `/api/cleanup/status` and was **reverted**, not pinned: the fetch builds its URL
+  from `endpoint(EndpointId::CleanupStatus).template` (`core_screens.rs:2493`), so the set never carries it. A pin
+  there would have been decoration.
+- `wasm-bindgen-cli` was reinstalled to **0.2.129** to match `Cargo.lock`; the pinned 0.2.100 runner failed every wasm
+  test binary on a schema mismatch. A machine-level repair, recorded so nobody reverts it.
+- The Step-0 ledger path diverged from the blueprint's to the wave spawn's `LEDGER:` path.
