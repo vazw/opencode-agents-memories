@@ -101,3 +101,20 @@ If a full `cargo test --workspace` on a freshly cleared `/tmp` leaves **zero** n
 `temp_dir()` is not the leak and this issue closes as measurement. The observation to run: count the dirs before, run the
 workspace suite to completion, count again. Measured today, the count went 3435 → 0 only because the dirs were deleted;
 the next full run's delta is the test of this diagnosis.
+
+**That observation has now been run, and it confirms the diagnosis.** On a cleared `/tmp` (0 `mem-store-*` dirs), a single
+`cargo test -p mem-store --no-fail-fast` left **276 new directories, 68 MB**:
+
+```
+=== mem-store dirs BEFORE ===
+0
+=== mem-store dirs AFTER ===
+276
+68      total
+```
+
+Per run, not per three days. At 68 MB a run, the 7.8 G tmpfs has room for roughly a hundred runs — which is why the
+failure arrived three days after the residue began rather than on the first run. One `mem-store` run also exited 101 with
+`user_prompts_schema_v2::test_v2_file_is_a_noop_and_stays_2` failing, one of the seven pre-existing reds independently
+recorded in issue 149's ledger; the abort path leaks whatever it had created, which is a second source on top of the
+files that never clean up.
