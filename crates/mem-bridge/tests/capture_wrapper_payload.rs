@@ -207,3 +207,35 @@ async fn test_episodic_write_failure_names_the_field() {
         "detail is a non-empty string: {line}"
     );
 }
+
+/// Issue 156: the V2-shaped payload (`name` on the tool part, no `tool`) carries
+/// the real tool name through the engine rendering. Green on HEAD by
+/// construction (the fixture is hand-authored with `edit`); the RED gates are
+/// the JS cases 2a and 2b.
+const WRAPPER_V2_TOOL_PAYLOAD: &str =
+    include_str!("../../../plugin/tests/fixtures/idle-capture-payload-v2-tool.json");
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_wrapper_v2_tool_payload_persists_recent_action_name() {
+    let dir = TestDir::new("cwp-v2-tool");
+    let (service, store) = service(&dir).await;
+    let params: CaptureParams =
+        serde_json::from_str(WRAPPER_V2_TOOL_PAYLOAD).expect("params parse");
+
+    service.enqueue(&params).await.expect("enqueue");
+    let total = drain_five(&service).await;
+    assert_eq!(total.done, 1, "the V2-tool payload persists: {total:?}");
+
+    let rows = store
+        .list_sessions(&params.project_id, 20)
+        .await
+        .expect("list sessions");
+    let row = rows
+        .iter()
+        .find(|row| row.session_id == params.session_id && row.agent_id == params.agent_id)
+        .expect("the (project, session, agent) row exists");
+    assert_eq!(
+        row.metadata.recent_actions,
+        vec!["edit: path: \"src/h.js\"".to_string()]
+    );
+}

@@ -64,6 +64,16 @@ process.env.OPENCODE_MEM_STORAGE_ROOT = process.env.DRIVER_STORAGE_ROOT;
 
 const hooksRef = { current: null };
 let retargeted = false;
+// Issue 156: a V2-shaped host. When \`v2Context\` is set, the transcript comes
+// from the REAL V2->V1 mapping (createLegacyClient), not a V1 literal, and the
+// mapped messages are written out so the test can observe the mapped part.
+const v2Messages = fixture.v2Context === undefined ? null : (await import(pathToFileURL(path.join(pkgDir, "dist", "v2", "legacy-client.js")).href)).createLegacyClient({
+  location: { directory: fixture.directory },
+  session: {
+    get: async ({ sessionID }) => ({ location: { directory: fixture.directory } }),
+    context: async ({ sessionID }) => fixture.v2Context,
+  },
+}, null).session.messages;
 const client = { session: {
   get: async (args) => {
     const id = args?.path?.id;
@@ -78,6 +88,11 @@ const client = { session: {
     if (!retargeted && fixture.retarget && id === fixture.retarget.onMessagesFor) {
       retargeted = true; // reentrant retarget: fires while fireIdleCapture is suspended
       await hooksRef.current.event({ event: { properties: fixture.retarget.fire } });
+    }
+    if (v2Messages) {
+      const mapped = await v2Messages({ path: { id } });
+      if (fixture.mappedPath) fs.writeFileSync(fixture.mappedPath, JSON.stringify(mapped.data));
+      return mapped;
     }
     return { data: fixture.messages?.[id] ?? [] };
   },
@@ -194,10 +209,11 @@ async function runCapture(t, fixture) {
 
   const donePath = path.join(tmp, "driver-done.txt");
   const messagesCountPath = path.join(tmp, "messages-calls.txt");
+  const mappedPath = path.join(tmp, "mapped-messages.json");
   const fixturePath = path.join(tmp, "fixture.json");
   fs.writeFileSync(
     fixturePath,
-    JSON.stringify({ ...fixture, countMessagesPath: messagesCountPath, helloConfigPath })
+    JSON.stringify({ ...fixture, countMessagesPath: messagesCountPath, helloConfigPath, mappedPath })
   );
   const driverPath = path.join(tmp, "driver.mjs");
   fs.writeFileSync(driverPath, DRIVER_SOURCE);
@@ -215,7 +231,8 @@ async function runCapture(t, fixture) {
   const messagesCalls = fs.existsSync(messagesCountPath)
     ? fs.readFileSync(messagesCountPath, "utf8").split("\n").filter(Boolean)
     : [];
-  return { code, stderr, wire, marker, requestLog, messagesCalls };
+  const mapped = fs.existsSync(mappedPath) ? JSON.parse(fs.readFileSync(mappedPath, "utf8")) : null;
+  return { code, stderr, wire, marker, requestLog, messagesCalls, mapped };
 }
 
 function captures(run) {
@@ -750,3 +767,79 @@ test(
     );
   }
 );
+
+// ---------------------------------------------------------------------------
+// Issue 156 — the recent-action tool name. A V1 tool part names itself by
+// `tool`; a V2 tool part (the live host shape, `legacyMessage` spreads the
+// part) carries `name` and no `tool`. The wrapper reads `tool`, then `name`.
+// ---------------------------------------------------------------------------
+
+const V1_TOOL_TURN = (toolPart) => [
+  { info: { id: "u1", role: "user" }, parts: [{ type: "text", text: "fix the parser" }] },
+  {
+    info: { id: "a1", role: "assistant" },
+    parts: [{ type: "text", text: "done" }, { type: "tool", ...toolPart }],
+  },
+];
+
+test("test_idle_capture_prefers_tool_over_name", { timeout: 30000 }, async (t) => {
+  const run = await runCapture(t, {
+    ...caseA(),
+    messages: {
+      "ses-A": V1_TOOL_TURN({ tool: "read", name: "bash", state: { input: { path: "a.txt" } } }),
+    },
+  });
+  const sent = captures(run);
+  assert.equal(sent.length, 1, "one capture reached the wire");
+  assert.equal(sent[0].params.metadata.autoCaptureContext.toolCalls[0].name, "read");
+});
+
+test("test_idle_capture_names_a_tool_part_with_neither_field_unknown", { timeout: 30000 }, async (t) => {
+  const run = await runCapture(t, {
+    ...caseA(),
+    messages: { "ses-A": V1_TOOL_TURN({ state: { input: { path: "a.txt" } } }) },
+  });
+  const sent = captures(run);
+  assert.equal(sent.length, 1, "one capture reached the wire");
+  const call = sent[0].params.metadata.autoCaptureContext.toolCalls[0];
+  assert.equal(call.name, "unknown");
+  assert.equal(call.input, 'path: "a.txt"');
+});
+
+const V2_TOOL_CONTEXT = [
+  { type: "user", id: "msg-u1", text: "fix the parser", agent: "build" },
+  {
+    type: "assistant",
+    id: "msg-a1",
+    agent: "build",
+    content: [
+      { type: "text", text: "done" },
+      { type: "tool", id: "tc-1", name: "edit", state: { status: "completed", input: { path: "src/h.js" } } },
+    ],
+  },
+];
+
+const V2_TOOL_FIXTURE = { ...caseA(), v2Context: V2_TOOL_CONTEXT, directory: "/work/project" };
+
+test("test_idle_capture_names_a_v2_tool_part_by_its_name", { timeout: 30000 }, async (t) => {
+  const run = await runCapture(t, { ...V2_TOOL_FIXTURE, expectCaptures: 1 });
+  // Control (i): the mapped transcript carries the real name. A failure here
+  // means legacyMessage drops `name` (Observation B), not the wrapper read.
+  const mappedTool = run.mapped.at(-1).parts.find((part) => part.type === "tool");
+  assert.equal(mappedTool.name, "edit", "control: the V2->V1 mapping keeps the tool name");
+  const sent = captures(run);
+  assert.equal(sent.length, 1, "one capture reached the wire");
+  assert.deepEqual(
+    sent[0].params.metadata.autoCaptureContext.toolCalls,
+    [{ name: "edit", input: 'path: "src/h.js"' }]
+  );
+});
+
+test("test_idle_capture_v2_tool_fixture_matches_the_live_payload", { timeout: 30000 }, async (t) => {
+  const run = await runCapture(t, { ...V2_TOOL_FIXTURE, expectCaptures: 1 });
+  const sent = captures(run);
+  assert.equal(sent.length, 1);
+  const live = { ...sent[0].params, capture_id: "cap-fixture-0001" };
+  const committed = JSON.parse(fs.readFileSync(path.join(path.dirname(FIXTURE_PATH), "idle-capture-payload-v2-tool.json"), "utf8"));
+  assert.deepEqual(live, committed);
+});

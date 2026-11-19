@@ -519,10 +519,22 @@ async function wireRun(t, steps, { failFlag = false } = {}) {
     REQUEST_LOG: requestLogPath, FLAG_PATH: flagPath, RESULT: resultPath,
   }, 45000);
   assert.equal(run.code, 0, run.stderr);
-  return JSON.parse(fs.readFileSync(resultPath, "utf8"));
+  const out = JSON.parse(fs.readFileSync(resultPath, "utf8"));
+  out.stderr = run.stderr;
+  return out;
 }
 
 const promptSteps = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => ({ prompt: from + i }));
+
+test("test_inject_requested_logs_turn_index_through_the_adapter", { timeout: 45000 }, async (t) => {
+  // Issue 150 observability: the adapter's zero-based turn index rides the
+  // inject.requested line. In first mode only turns 0 and 20 reach chat.message.
+  const out = await wireRun(t, promptSteps(0, 20));
+  const turns = out.stderr.split("\n").flatMap((line) => {
+    try { return [JSON.parse(line)]; } catch { return []; }
+  }).filter((e) => e.event === "inject.requested").map((e) => e.turn_index);
+  assert.deepEqual(turns, [0, 20]);
+});
 
 test("test_refresh_rule_wire_injects_at_prompt_indices_0_and_20", { timeout: 45000 }, async (t) => {
   const out = await wireRun(t, promptSteps(0, 20));

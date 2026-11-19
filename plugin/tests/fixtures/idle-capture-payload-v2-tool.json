@@ -1,0 +1,22 @@
+{
+  "agent_id": "build",
+  "capture_id": "cap-fixture-0001",
+  "metadata": {
+    "autoCaptureContext": {
+      "textResponses": [
+        "done"
+      ],
+      "toolCalls": [
+        {
+          "name": "edit",
+          "input": "path: \"src/h.js\""
+        }
+      ],
+      "userPrompt": "fix the parser"
+    },
+    "promptId": "msg-u1"
+  },
+  "project_id": "/work/project",
+  "session_id": "ses-A",
+  "transcript": "fix the parser"
+}
