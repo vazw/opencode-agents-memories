@@ -45,7 +45,9 @@ content the engine has just told us not to deliver. So the issue is not "restore
 ## Acceptance shape, not a prescription
 
 Issue 150's criterion 12 pins the present behaviour under the stub's `"silent"` inject mode: prompt 20 yields no context,
-prompt 21 re-injects. The fix flips that assertion for the transport-error case at minimum, and the issue is settled by
+prompt 21 re-injects. Issue 150 landed at `4449679` and that pin is the test
+`test_refresh_rule_failed_boundary_refresh_costs_one_turn` in `plugin/tests/v2-inject-delivery.test.mjs` — it asserts the
+empty block at prompt 20 and the re-inject at 21, so it is the assertion this issue's fix flips. The fix flips that assertion for the transport-error case at minimum, and the issue is settled by
 whichever of these the owner chooses:
 
 1. **Keep on error only.** `status !== "ok"` retains the previous block; a clean empty answer still clears it. No privacy

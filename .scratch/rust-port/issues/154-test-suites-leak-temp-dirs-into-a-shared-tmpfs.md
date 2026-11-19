@@ -1,6 +1,6 @@
-# 154 — the `mem-store` test suite leaks every temp dir into a 7.8 G shared tmpfs, and exhaustion reads as a mass regression in an unrelated suite
+# 154 — the test suites leak temp dirs into a 7.8 G shared tmpfs, and exhaustion reads as a mass regression in an unrelated suite
 
-Status: needs-triage — 2026-11-19 (defect measured with a discriminating before/after; fix shape re-priced: a dead-PID sweep inside `temp_dir()` needs zero call-site changes, an RAII guard needs 46 because `StoreConfig` holds a bare `PathBuf`)
+Status: needs-triage — 2026-11-19 (two suites measured: `mem-store` leaks 276 dirs / 68 MB per run, the wrapper suite 5887 dirs / 1845 MB in 1.4 days. Fix shape re-priced: a dead-PID sweep inside `temp_dir()` needs zero call-site changes, an RAII guard needs 46 because `StoreConfig` holds a bare `PathBuf`; the wrapper's `mkdtempSync` calls need their own answer)
 
 *(Filed after a false red on `main` was traced to disk exhaustion rather than to code. This is test-harness hygiene, not a defect in the shipped store.)*
 
@@ -56,6 +56,22 @@ Files that never call `cleanup_temp_dir`: `capture_id_migration`, `db_containmen
 `turso_auxiliary_db_upgrade`, `turso_connection_lifecycle`, `turso_connection_manager`, `turso_engine_migrator`,
 `turso_exact_fallback`, `turso_ready_gate`, `turso_shard_recreate`, `turso_shard_rotation`, `turso_vector_search`,
 `vector_store_subset`.
+
+## The wrapper suite leaks more, and faster
+
+A second measurement the same day, after issue 150 merged its seven new tests into `main`:
+
+- **`/tmp/om-*`: 5887 directories, 1845 MB**, oldest `Nov 18 18:36`, newest `Nov 19 07:49` — 1.4 days.
+- `plugin/tests/**`: **36** `mkdtempSync` calls against **13** `rmSync` cleanups, so most fixtures have no removal path at
+  all. The names are `om-<purpose>-XXXXXX` with a random suffix and **no PID**, so the dead-PID sweep proposed below
+  cannot identify them; the wrapper needs its own answer — a single per-run root (`om-run-<pid>/`, whose parent a sweep
+  can identify), a `t.after` per test, or the runner's own temp handling.
+- Clearing both suites' residue (`om-*`, `toast-*`, `opencode-mem-*`, `mem-store-*`, about **2.1 G**) took `/tmp` from
+  1.8 G free to **3.9 G free**, without touching `/tmp/opencode` (2.1 G, live host data that is not ours to delete).
+
+Together the two suites account for essentially all the pressure: 68 MB per `mem-store` run plus 5887 wrapper dirs over
+1.4 days. Either one alone would eventually fill a 7.8 G tmpfs; they did it together, and the symptom landed on the
+suite that happened to run second.
 
 ## Why it surfaces as someone else's failure
 

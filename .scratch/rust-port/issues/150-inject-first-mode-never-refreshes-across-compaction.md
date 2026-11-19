@@ -1,6 +1,6 @@
 # 150 — `inject_on: "first"` never refreshes the cached block, including across compaction
 
-Status: ready-for-agent — 2026-11-19 (triage: the default is justified by a measured 774 ms p50; the brief is a refresh *policy* inside that cost budget)
+Status: ready-for-human — 2026-11-19 (rule landed at `4449679`: in `first` mode every 20th prompt refreshes, cost 4 injects per 100 prompts. All 12 criteria reproduce and the reviewer built the four named mutants itself, each red on its named criterion. Owner check remains: a live `first`-mode child's filtered inject indices across prompts 0..20 must be exactly `[0, 20]`.)
 
 *Scope note. Issue 149 owns the content (a `## Recent actions` section) and, by its 2026-11-19 amendment, the one-line
 cache invalidation on compaction that 149's own measurement needs. This issue owns the policy: which refresh rule is
