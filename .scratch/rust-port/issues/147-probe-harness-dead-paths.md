@@ -1,6 +1,6 @@
 # 147 — the issue-145 probe harness has four dead-path defects
 
-Status: ready-for-agent — 2026-11-19 (all four defects confirmed present at `fe94c55`; the fix edits `plugin/tests/harness/probe-145.mjs`, `plugin/tests/probe-145-guard.test.mjs` and `plugin/tests/failure-toast-145.test.mjs` in place)
+Status: ready-for-human — 2026-11-19 (fixes landed on main at `c20d8b5`; AC-1–AC-8 reproduce and the reviewer re-ran HEAD's files to confirm each criterion discriminates. AC-3 is verified at source level only: the runtime branch needs `query_vector` `Some`, which the probe's `query_chars:0` cannot produce, so Step 8 entry (vi) stays BLOCKED by decision. Owner must accept that residual.)
 
 *(Filed from `.tmp/progress/blueprint-20261118-0715-issue-145-inject-sink-r32.review-1.md` findings 1–4. The reviewer
 approved the wave; these are latent defects in the test harness, not in the shipped sink.)*

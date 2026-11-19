@@ -1,6 +1,6 @@
 # 153 — a supported delivery probe: proving an injected block reached the agent is still an ad-hoc ritual
 
-Status: needs-info — 2026-11-19 (triage: blocked on 152 tier-1 host facts; then an owner choice among ritual, product probe, or a debug-flag block log — the third is why this is not simply "build it")
+Status: needs-info — 2026-11-19 (hook premise refuted by measurement; one owner scope call remains — keep the nonce ritual, or log a bounded block prefix behind a debug flag. Not build work until that call is made.)
 
 *Scope note. Issue 147 records four dead-path defects in the existing probe harness. Issue 148 rewrote the runbook to the
 nonce instrument. This issue asks whether a supported probe belongs in the product at all, which is a different question
@@ -105,3 +105,37 @@ read-only.
 **Status decision.** `needs-info`: blocked on 152 tier 1 (host dispatch facts) and then on one owner decision among the
 three options above. Not `ready-for-agent`, and deliberately not built now: 149, 150 and 152 all touch the delivery path,
 and a probe built before those settle would be rewritten.
+
+### Blocker resolved — 2026-11-19. The host dispatches no message-transform hook.
+
+The triage note above said: take 152 tier 1's answer first, and if the host dispatches no such hook, the product probe
+collapses to the wrapper's own log. That answer is in, and it is a no.
+
+**MEASURED**, host `v2.3.2-17-gb7e2ea5e01` at `/home/opencode/Code/Personal/JS/opencode`:
+
+- `grep -rn 'messages\.transform' packages/ --include=*.ts` (excluding `node_modules`) → **0 matches**.
+- The plugin hook registry declares exactly five domains, from `packages/core/src/plugin/hooks.ts` `interface Domains`:
+  `aisdk`, `session`, `permission`, `shell`, `tool`. There is no `chat` domain and no `experimental` domain.
+- The SDK the wrapper compiles against **does declare** `"experimental.chat.messages.transform"`
+  (`/home/opencode/.config/opencode/node_modules/@opencode-ai/plugin/dist/index.d.ts:259`).
+
+That is the declaration-without-dispatch trap 152's Q1a names: a type declaration is satisfiable with no dispatch behind
+it. **Option (b), the product probe built on that hook, is struck.** A future host may add the domain; nothing here says
+it will.
+
+**What survives is a genuine scope call, not a planner's question.** Two options, both priced:
+
+1. **The nonce ritual stands.** Zero build cost; one throwaway child per claim; it has already produced one false reading
+   (the dead `type='synthetic'` predicate, 145 Trap A). 148 already rewrote it, so this is close to "do nothing further".
+2. **Log a bounded block prefix behind a debug flag.** Closes the gap 149's criterion 23 pays ~30 lines of shell to work
+   around, and the same gap 150 would pay again. Costs: `plugin/tests/v2-inject-delivery.test.mjs:275-286` pins the
+   injection telemetry as **content-free** on purpose, so this changes that assertion, and memory text lands in a log file.
+
+**Advisory calibration** (askjev, 2026-11-19, advisory only): premise refuted **0.91**; "re-scope to the debug-flag log"
+0.74 but at confidence **0.65**; "is the debug flag worth its cost" **0.54**, i.e. even. The refutation is decisive; the
+choice between the two survivors is not, which is why this stays `needs-info` rather than `ready-for-agent`. No
+elaboration of the ritual captures much of this issue's value either (0.59 mass on "a little of it").
+
+**Inverted world, unchanged and now the deciding observation.** If the host persists the injected block in a readable row
+in a live run, both options are moot and this closes as measurement. 145 Trap A measured that absence for current
+sessions; a live re-read after the 149 host restart is the cheap confirmation.
