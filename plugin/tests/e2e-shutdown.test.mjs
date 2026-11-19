@@ -27,6 +27,7 @@ const PLUGIN = path.join(here, "..");
 /** A complete temp copy of the package (package.json, dist, src, index.js). */
 function tempPackage() {
   const dir = mkdtempSync(path.join(os.tmpdir(), "opencode-mem-e2e-"));
+  mkdirSync(path.join(dir, "home"));
   copyFileSync(path.join(PLUGIN, "package.json"), path.join(dir, "package.json"));
   copyFileSync(path.join(PLUGIN, "index.js"), path.join(dir, "index.js"));
   mkdirSync(path.join(dir, "dist"));
@@ -113,7 +114,7 @@ function runDriver(dir, root) {
       ["-e", driverScript()],
       {
         cwd: dir,
-        env: { ...process.env, OPENCODE_MEM_STORAGE_ROOT: root },
+        env: { ...process.env, HOME: path.join(dir, "home"), OPENCODE_MEM_STORAGE_ROOT: root },
         stdio: ["ignore", "pipe", "pipe"],
       },
     );

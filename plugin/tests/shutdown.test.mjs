@@ -22,6 +22,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { driverHome } from "./harness/bridge.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const realPkgRoot = path.resolve(here, "..");
@@ -222,6 +223,7 @@ test("test_shutdown_reaps_child", { timeout: 60000 }, async () => {
 
   const driver = spawn(process.execPath, [driverPath, pkgDir], {
     env: {
+      HOME: driverHome(tmp),
       STUB_LOG: requestLogPath,
       STUB_READY: readyPath,
       DRIVER_CTX_PATH: path.join(tmp, "driver-ctx.json"),
@@ -288,6 +290,7 @@ test("test_post_capture_shutdown_budget_allows_graceful_exit", { timeout: 60000 
 
   const driver = spawn(process.execPath, [driverPath, pkgDir], {
     env: {
+      HOME: driverHome(tmp),
       STUB_LOG: requestLogPath,
       STUB_READY: readyPath,
       DRIVER_CTX_PATH: path.join(tmp, "driver-ctx.json"),

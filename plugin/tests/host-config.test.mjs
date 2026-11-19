@@ -12,6 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { driverHome } from "./harness/bridge.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const realPkgRoot = path.resolve(here, "..");
@@ -178,6 +179,7 @@ test("test_host_config_forwards_env", { timeout: 60000 }, async () => {
   const driverResult = await (new Promise((resolve) => {
     const driver = spawn(process.execPath, [driverPath, pkgDir], {
       env: {
+        HOME: driverHome(tmp),
         STUB_LOG: requestLogPath,
         DRIVER_CTX_PATH: writeCtxFile(tmp, { client: null, project: null }),
         DRIVER_STORAGE_ROOT: root,
@@ -238,6 +240,7 @@ test("test_host_config_does_not_forward_host_credentials", { timeout: 60000 }, a
   const password = "hunter2-canary";
   const canary = "canary-env-secret";
   const env = {
+    HOME: driverHome(tmp),
     STUB_LOG: requestLogPath,
     DRIVER_CTX_PATH: writeCtxFile(tmp, {
       client: { _client: { headers: { Authorization: authorization } } },

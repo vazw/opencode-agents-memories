@@ -12,6 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { driverHome } from "./harness/bridge.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const realPkgRoot = path.resolve(here, "..");
@@ -243,6 +244,7 @@ async function runGlueTest(tmpRootSuffix, { ctx, events, wait }) {
   const driverPath = path.join(tmp, "driver.mjs");
   fs.writeFileSync(driverPath, DRIVER_SOURCE);
   const driverResult = await runDriver(driverPath, [pkgDir], {
+    HOME: driverHome(tmp),
     STUB_LOG: requestLogPath,
     DRIVER_CTX_PATH: writeCtxFile(tmp, ctx ?? { client: null, project: null }),
     DRIVER_STORAGE_ROOT: path.join(tmp, "storage"),
@@ -308,6 +310,7 @@ async function runWebDistCase(distEnvValue) {
   const driverPath = path.join(tmp, "driver.mjs");
   fs.writeFileSync(driverPath, DRIVER_SOURCE);
   const driverResult = await runDriver(driverPath, [pkgDir], {
+    HOME: driverHome(tmp),
     STUB_LOG: requestLogPath,
     DRIVER_CTX_PATH: writeCtxFile(tmp, { client: null, project: null }),
     DRIVER_STORAGE_ROOT: path.join(tmp, "storage"),
@@ -339,6 +342,7 @@ async function runChildEnvCase(extraEnv) {
   const driverPath = path.join(tmp, "driver.mjs");
   fs.writeFileSync(driverPath, DRIVER_SOURCE);
   const env = {
+    HOME: driverHome(tmp),
     STUB_LOG: requestLogPath,
     DRIVER_CTX_PATH: writeCtxFile(tmp, { client: null, project: null }),
     DRIVER_STORAGE_ROOT: path.join(tmp, "storage"),
@@ -425,6 +429,7 @@ test("test_wrapper_project_id_comes_from_host_directory", { timeout: 60000 }, as
   const driverPath = path.join(tmp, "driver.mjs");
   fs.writeFileSync(driverPath, DRIVER_SOURCE);
   const driverResult = await runDriver(driverPath, [pkgDir], {
+    HOME: driverHome(tmp),
     STUB_LOG: requestLogPath,
     DRIVER_CTX_PATH: writeCtxFile(tmp, { client: { sessionStub: { session: { agent: "build" }, data: [
       { info: { id: "u1", role: "user" }, parts: [{ type: "text", text: "hello" }] },

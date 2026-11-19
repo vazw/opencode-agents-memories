@@ -29,11 +29,38 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REAL_PKG_ROOT = path.resolve(here, "..", "..");
+
+// Issue 157: every driver spawn gets its own HOME so the wrapper and engine
+// child never write the owner's live log (~/.opencode-mem/opencode-mem.log).
+function realOrResolved(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch (error) {
+    if (error.code === "ENOENT") return path.resolve(p);
+    throw error;
+  }
+}
+const OWNER_HOME = realOrResolved(os.userInfo().homedir);
+let homeRoot = null;
+function runHomeRootDir() {
+  if (!homeRoot) {
+    homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "om-home-" + process.pid + "-"));
+    process.on("exit", () => fs.rmSync(homeRoot, { recursive: true, force: true }));
+  }
+  return homeRoot;
+}
+/** Explicit HOME for a caller-owned temp dir (the four sites that bypass runDriver). */
+export function driverHome(tmp) {
+  const home = path.join(tmp, "home");
+  fs.mkdirSync(home, { recursive: true });
+  return home;
+}
 
 /**
  * Complete temp copy of the package: `package.json` (the bundle's JSON import
@@ -429,6 +456,7 @@ const pkgDir = process.argv[2];
 const fixturePath = process.argv[3];
 const mode = process.env.DRIVER_MODE ?? "v1";
 const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+if (!process.env.DRIVER_STORAGE_ROOT) { process.stderr.write("driver refused: DRIVER_STORAGE_ROOT unset\\n"); process.exit(2); }
 process.env.OPENCODE_MEM_STORAGE_ROOT = process.env.DRIVER_STORAGE_ROOT;
 
 function writeRecord(record) {
@@ -1179,6 +1207,10 @@ throw new Error("unknown driver mode: " + mode);
  * captured output. `env` is used verbatim — pass `{ ...process.env, ...vars }`.
  */
 export function runDriver(driverPath, args, env, timeoutMs = 30000) {
+  if (!env.HOME || realOrResolved(env.HOME) === OWNER_HOME) {
+    env = { ...env, HOME: fs.mkdtempSync(path.join(runHomeRootDir(), "d-")) };
+  }
+  if (realOrResolved(env.HOME) === OWNER_HOME) throw new Error("runDriver: HOME resolves to the owner home");
   return new Promise((resolve) => {
     const driver = spawn(process.execPath, [driverPath, ...args], {
       env,
@@ -1193,7 +1225,7 @@ export function runDriver(driverPath, args, env, timeoutMs = 30000) {
     const killer = setTimeout(() => driver.kill("SIGKILL"), timeoutMs);
     driver.once("close", (code, signal) => {
       clearTimeout(killer);
-      resolve({ code, signal, stdout, stderr, timedOut: signal === "SIGKILL" });
+      resolve({ code, signal, stdout, stderr, timedOut: signal === "SIGKILL", home: env.HOME });
     });
   });
 }
