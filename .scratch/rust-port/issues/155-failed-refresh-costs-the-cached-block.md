@@ -2,7 +2,7 @@
 
 Status: needs-triage — 2026-11-19 (defect named by issue 150's plan gate; the fix is an adapter change, and whether stale-but-working beats absent is a product call)
 
-*(Filed from `GATE: REJECTED` on `blueprint-20261119-0026-issue-150-refresh-rule-r1.md`, required modification 7. Issue 150's criterion 13 pins the current loss so the fix will flip it.)*
+*(Filed from `GATE: REJECTED` on `blueprint-20261119-0026-issue-150-refresh-rule-r1.md`, required modification 7. Issue 150's criterion 12 pins the current loss so the fix will flip it.)*
 
 ## The defect
 
@@ -44,7 +44,7 @@ content the engine has just told us not to deliver. So the issue is not "restore
 
 ## Acceptance shape, not a prescription
 
-Issue 150's criterion 13 pins the present behaviour under the stub's `"silent"` inject mode: prompt 20 yields no context,
+Issue 150's criterion 12 pins the present behaviour under the stub's `"silent"` inject mode: prompt 20 yields no context,
 prompt 21 re-injects. The fix flips that assertion for the transport-error case at minimum, and the issue is settled by
 whichever of these the owner chooses:
 
@@ -60,4 +60,4 @@ whichever of these the owner chooses:
 If a live `first`-mode child whose prompt-20 inject fails still renders a block on prompt 20 (because the host replays an
 earlier message, or the adapter's delete happens after the call), then the delete-before-call reading above is wrong and
 this closes as measurement. The observation to run: stub `"silent"` at prompt 20 and read the `context` hook's argument —
-which is exactly what criterion 13 does offline.
+which is exactly what criterion 12 does offline.
