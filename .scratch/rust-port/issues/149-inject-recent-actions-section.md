@@ -1,6 +1,6 @@
 # 149 — engine inject block: a `## Recent actions` section (the M1 floor)
 
-Status: ready-for-agent — design of record settled with the owner 2026-11-19; blueprint not yet written
+Status: ready-for-human — implementation landed; closure is the owner-run render capture plus a post-restart reading of recent-action-delivered
 
 *(Spun out of issue 146 after a grilling session. 146 asked only for a background-shell section; the grilling found the
 shell line and the recent-action line are the same data and the same mechanism, so they are one section. `plugin/`,

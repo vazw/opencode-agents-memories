@@ -854,6 +854,8 @@ impl PortabilityService {
                 completed_work: row.metadata.completed_work.clone(),
                 decisions: row.metadata.decisions.clone(),
                 open_threads: row.metadata.open_threads.clone(),
+                recent_actions: row.metadata.recent_actions.clone(),
+                capture_deterministic: row.metadata.capture_deterministic,
                 extra: row.metadata.extra.clone(),
                 timestamp: Some(row.metadata.timestamp),
                 capture_id: row.capture_id.clone(),

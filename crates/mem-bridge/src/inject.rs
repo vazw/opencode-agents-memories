@@ -41,6 +41,7 @@ use mem_core::scope::Scope;
 use mem_embed::embedder::Embedder;
 use mem_episodic::record::AgentSession;
 use mem_episodic::store::EpisodicStore;
+use mem_episodic::validation::{MAX_RECENT_ACTION_BYTES, MAX_RECENT_ACTIONS};
 use mem_profile::profile_context::{
     ProfileInjectPolicy, StoredProfileRender, render_stored_profile,
 };
@@ -86,6 +87,8 @@ pub const HEADING_FACTS: &str = "## Project facts";
 pub const HEADING_SUMMARIES: &str = "## Captured session summaries";
 pub const HEADING_RECENT: &str = "## Recent sessions";
 pub const HEADING_OLDER: &str = "## Related older sessions";
+/// The requesting session's own last tool-call actions (issue 149).
+pub const HEADING_ACTIONS: &str = "## Recent actions";
 
 /// The `<memory_context>` frame's frozen bytes (issue 50, D-26-5): open tag,
 /// header sentence, safety sentence, close tag.
@@ -142,7 +145,8 @@ pub struct InjectParams {
     /// path.
     pub user_id: Option<String>,
     /// The hook's own session id. The compaction leg keys the tier-1 read on
-    /// it; every other path ignores it (the field is additive and optional).
+    /// it. The chat leg also uses it to pick the `## Recent actions` rows
+    /// (issue 149), never to filter history; the field is optional.
     pub session_id: Option<String>,
     /// Exclude episodic rows from the requesting session when explicitly set.
     pub exclude_session: Option<bool>,
@@ -477,6 +481,26 @@ impl InjectService {
             .max_memories
             .or_else(|| chat_policy.and_then(|p| p.max_memories));
 
+        // 2a. The requesting session's own action lines (issue 149). Filtered
+        // by `session_id` and the age cutoff, deliberately NOT by
+        // `excluded_session`: that flag means "do not repeat my history", not
+        // "do not remind me where I am". Ceilings, both pinned by tests: the
+        // row is found only inside `recent_raw` (the newest `2 × recent_count`
+        // project rows), and a row older than the age cutoff is dropped.
+        // ponytail: a dedicated session-keyed read would lift the row-window
+        // ceiling; add it when a child can outlast ten newer project rows.
+        let current_actions: Vec<Candidate> = match params.session_id.as_deref() {
+            Some(current) if !current.is_empty() => recent_raw
+                .iter()
+                .filter(|row| {
+                    row.session_id == current
+                        && !age_cutoff.is_some_and(|cutoff| row.created_at < cutoff)
+                })
+                .flat_map(action_candidates)
+                .collect(),
+            _ => Vec::new(),
+        };
+
         let mut episodic: Vec<Candidate> = Vec::new();
         for row in &recent {
             if excluded_session == Some(row.session_id.as_str())
@@ -612,8 +636,12 @@ impl InjectService {
         // older. `seen` was populated in READ order above, so this reorder
         // changes only the emission order (and therefore which prefix a
         // binding budget admits) — never the dedup predicate.
-        let mut candidates: Vec<Candidate> =
-            Vec::with_capacity(facts_section.len() + summaries_section.len() + episodic.len());
+        let mut candidates: Vec<Candidate> = Vec::with_capacity(
+            current_actions.len() + facts_section.len() + summaries_section.len() + episodic.len(),
+        );
+        // The actions lead: an ordinary candidate, charged by `greedy`, outside
+        // the 25 % tier-1 cap and outside `memory_count`.
+        candidates.extend(current_actions);
         candidates.extend(facts_section);
         candidates.extend(summaries_section);
         candidates.extend(episodic);
@@ -647,8 +675,18 @@ impl InjectService {
         // 5c. The cap counts EMITTED rows: applied after the budget pass and
         // the suppression, so a rejected or suppressed candidate never costs
         // a slot. `included` keeps priority order, so the prefix is the top N.
+        // Actions are not memories: the cap counts the other candidates and
+        // keeps every action line, so `retain` filters rather than truncates.
         if let Some(max_memories) = max_memories {
-            included.truncate(max_memories as usize);
+            let mut memories_kept = 0usize;
+            let limit = max_memories as usize;
+            included.retain(|candidate| {
+                if candidate.heading == HEADING_ACTIONS {
+                    return true;
+                }
+                memories_kept += 1;
+                memories_kept <= limit
+            });
         }
 
         if included.is_empty() {
@@ -678,9 +716,13 @@ impl InjectService {
         // (D-W5.3-3 + 44.13).
         let tokens = emitted_tokens(block.as_deref());
 
+        let memory_count = included
+            .iter()
+            .filter(|candidate| candidate.heading != HEADING_ACTIONS)
+            .count() as u64;
         Ok(InjectResult {
             block,
-            memory_count: included.len() as u64,
+            memory_count,
             tokens,
             truncated,
             handling_ms: ms(started),
@@ -1133,7 +1175,55 @@ fn store_error(error: mem_episodic::error::EpisodicError) -> InjectError {
 }
 
 /// Renders one episodic row as a one-line item (blocker first).
+/// One action line, read-side: `san` strips `<private>` regions and collapses
+/// newlines, then the line is clamped to `MAX_RECENT_ACTION_BYTES` on a char
+/// boundary. `None` when nothing remains. A line never carries a newline, so
+/// it can never forge a section heading.
+fn action_line(line: &str) -> Option<String> {
+    let cleaned = san(line);
+    let mut end = cleaned.len().min(MAX_RECENT_ACTION_BYTES);
+    while !cleaned.is_char_boundary(end) {
+        end -= 1;
+    }
+    let clamped = cleaned[..end].trim_end().to_string();
+    if clamped.is_empty() {
+        None
+    } else {
+        Some(clamped)
+    }
+}
+
+/// The last `MAX_RECENT_ACTIONS` action lines of one row, as candidates. Ids
+/// are `<row>#<index>`, so they never enter the row-level `seen` set.
+fn action_candidates(row: &AgentSession) -> Vec<Candidate> {
+    let lines = &row.metadata.recent_actions;
+    let start = lines.len().saturating_sub(MAX_RECENT_ACTIONS);
+    lines[start..]
+        .iter()
+        .enumerate()
+        .filter_map(|(offset, raw)| {
+            let index = start + offset;
+            action_line(raw).map(|line| Candidate {
+                id: format!("{}#{index}", row.id),
+                line,
+                blocker: false,
+                heading: HEADING_ACTIONS,
+                session_id: None,
+            })
+        })
+        .collect()
+}
+
 fn recent_line(row: &AgentSession) -> String {
+    if row.metadata.capture_deterministic {
+        // The stored summary of a deterministic row is the raw action text.
+        // It never renders in the block (issue 149 Decision 3); the stored row
+        // stays readable through recall, search and the web session API.
+        return format!(
+            "{}: recent actions recorded without a provider summary",
+            row.agent_id
+        );
+    }
     let summary = san(&row.summary);
     let threads = row.metadata.open_threads.join("; ");
     if threads.is_empty() {
@@ -1315,5 +1405,21 @@ mod tests {
             scored_line("x".to_string(), 0.0),
             r#"<memory relevance="0%">x</memory>"#
         );
+    }
+
+    /// The read clamp: a long line stops at the byte cap on a char boundary,
+    /// and a `<private>` region never survives. Helper-level, so the render
+    /// tests cannot hide a missing clamp behind a short fixture.
+    #[test]
+    fn test_action_line_read_clamp() {
+        let long = "é".repeat(200);
+        let clamped = super::action_line(&long).expect("non-empty");
+        assert!(clamped.len() <= 160, "clamped to {} bytes", clamped.len());
+        assert!(std::str::from_utf8(clamped.as_bytes()).is_ok());
+
+        let private = super::action_line("bash: <private>secret</private> ok").expect("line");
+        assert!(!private.contains("secret"), "line: {private}");
+
+        assert!(super::action_line("   ").is_none());
     }
 }

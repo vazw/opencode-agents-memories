@@ -1,6 +1,6 @@
 # 146 — the engine's inject block has no background-shell section
 
-Status: paused — blocked on issue 149 (`## Recent actions` section; the shell need is met there, see Comments)
+Status: closed — covered by issue 149 (2026-11-19)
 
 *(Filed by issue 145, blueprint `20261118-0715-issue-145-inject-sink-r24`, Step 0 item 7.)*
 

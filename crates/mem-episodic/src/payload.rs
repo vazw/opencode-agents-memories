@@ -28,6 +28,8 @@ use crate::record::{Decision, WorkItem};
 /// - `files_touched`, `completed_work`, `decisions`, `open_threads` — list
 ///   payload kept as TEXT-JSON (D-3: SQLite cannot index them usefully and a
 ///   second normalized copy would drift);
+/// - `recent_actions` — bounded last tool-call lines (validated, ≤ 8 × 160 B);
+/// - `capture_deterministic` — row written by the deterministic skip path;
 /// - `extra` — unknown/future top-level keys, preserved verbatim.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(crate = "mem_store::serde", rename_all = "camelCase")]
@@ -55,9 +57,20 @@ pub struct SessionMetadata {
     /// Threads left open for a later session.
     #[serde(default)]
     pub open_threads: Vec<String>,
+    /// Last tool-call action lines (one rendered line per call, newest last).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_actions: Vec<String>,
+    /// True when the row was written by the deterministic skip path (no
+    /// provider summary); such a row never replaces a curated row.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub capture_deterministic: bool,
     /// Unknown/future keys, preserved verbatim on round trip.
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl SessionMetadata {

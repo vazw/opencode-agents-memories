@@ -50,6 +50,8 @@ fn test_session_metadata_serde_round_trip() {
             description: "dedicated episodic.db".to_string(),
         }],
         open_threads: vec!["wire capture in W4.2".to_string()],
+        recent_actions: Vec::new(),
+        capture_deterministic: false,
         extra: BTreeMap::new(),
     };
 
@@ -63,6 +65,31 @@ fn test_session_metadata_serde_round_trip() {
 
     let parsed = SessionMetadata::from_json_str(&json).expect("deserialize");
     assert_eq!(parsed, metadata);
+}
+
+#[test]
+fn test_metadata_omits_actions_keys_when_default() {
+    let json = SessionMetadata::default()
+        .to_json_string()
+        .expect("serialize default");
+    assert!(!json.contains("\"recentActions\""), "json: {json}");
+    assert!(!json.contains("\"captureDeterministic\""), "json: {json}");
+
+    let metadata = SessionMetadata {
+        recent_actions: vec!["bash: command: \"cargo test\"".to_string()],
+        capture_deterministic: true,
+        ..SessionMetadata::default()
+    };
+    let json = metadata.to_json_string().expect("serialize");
+    assert!(json.contains("\"recentActions\""), "json: {json}");
+    assert!(
+        json.contains("\"captureDeterministic\":true"),
+        "json: {json}"
+    );
+
+    let parsed = SessionMetadata::from_json_str(&json).expect("deserialize");
+    assert_eq!(parsed.recent_actions, metadata.recent_actions);
+    assert!(parsed.capture_deterministic);
 }
 
 #[test]
@@ -320,4 +347,53 @@ fn test_agent_session_serializes_without_embedding() {
     assert_eq!(parsed.deleted_at, Some(42));
     assert_eq!(parsed.project_id, session.project_id);
     assert_eq!(parsed.metadata, session.metadata);
+}
+
+/// Seven cases: three accepted (the default, the 8-entry count boundary, the
+/// 160-byte byte boundary) and four rejected (9 entries, 161 bytes, an empty
+/// entry, an entry with NUL). Accept cases assert the upsert SUCCEEDS.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_recent_actions_validation_matrix() {
+    use mem_episodic::store::{EpisodicStore, UpsertOutcome};
+
+    let dir = common::TestDir::new("w149-actions-matrix");
+    let store = EpisodicStore::new(dir.path().to_path_buf(), dir.store_config());
+    let embedder = common::FakeEmbedder::with_vector(vec![0.1_f32; 8]);
+
+    let session = |n: usize, actions: Vec<String>| NewAgentSession {
+        project_id: "project-a".to_string(),
+        session_id: format!("matrix-{n}"),
+        agent_id: "agent-1".to_string(),
+        summary: "matrix".to_string(),
+        recent_actions: actions,
+        capture_deterministic: true,
+        ..Default::default()
+    };
+
+    let accepted = [
+        ("default empty", Vec::new()),
+        ("8 entries of 1 byte", vec!["x".to_string(); 8]),
+        ("one 160-byte entry", vec!["y".repeat(160)]),
+    ];
+    for (n, (label, actions)) in accepted.into_iter().enumerate() {
+        let outcome = store
+            .upsert_session(session(n, actions), &embedder)
+            .await
+            .unwrap_or_else(|error| panic!("accept case `{label}` must upsert: {error:?}"));
+        assert_eq!(outcome, UpsertOutcome::Inserted, "accept case `{label}`");
+    }
+
+    let rejected = [
+        ("9 entries of 1 byte", vec!["x".to_string(); 9]),
+        ("one 161-byte entry", vec!["y".repeat(161)]),
+        ("one empty entry", vec![String::new()]),
+        ("one entry with NUL", vec!["a\0b".to_string()]),
+    ];
+    for (n, (label, actions)) in rejected.into_iter().enumerate() {
+        let error = store
+            .upsert_session(session(100 + n, actions), &embedder)
+            .await
+            .expect_err(label);
+        assert_validation_field(error, "recent_actions");
+    }
 }

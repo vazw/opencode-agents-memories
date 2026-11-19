@@ -264,3 +264,103 @@ async fn test_recapture_revalidates_parent_and_embedding() {
         other => panic!("expected embedding validation, got {other:?}"),
     }
 }
+
+fn deterministic(capture_id: &str, summary: &str, actions: Vec<String>) -> NewAgentSession {
+    NewAgentSession {
+        capture_deterministic: true,
+        recent_actions: actions,
+        ..capture(capture_id, summary)
+    }
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_deterministic_recapture_does_not_replace_a_curated_row() {
+    let dir = TestDir::new("w149-curated-guard");
+    let store = store(&dir);
+    let embedder = embedder();
+
+    let curated = NewAgentSession {
+        open_threads: vec!["blocked on review".to_string()],
+        ..capture("019a0000-0000-7f00-8000-000000000001", "curated summary")
+    };
+    assert_eq!(
+        store
+            .upsert_session(curated, &embedder)
+            .await
+            .expect("curated"),
+        UpsertOutcome::Inserted
+    );
+
+    let outcome = store
+        .upsert_session(
+            deterministic(
+                "019a0000-0000-7f00-8000-000000000002",
+                "deterministic summary",
+                vec!["bash: command: \"cargo test\"".to_string()],
+            ),
+            &embedder,
+        )
+        .await
+        .expect("deterministic recapture");
+    assert_eq!(outcome, UpsertOutcome::CuratedRetained);
+
+    let row = store
+        .list_sessions("/srv/proj", 10)
+        .await
+        .expect("list")
+        .into_iter()
+        .next()
+        .expect("one row");
+    assert_eq!(row.summary, "curated summary");
+    assert_eq!(row.metadata.completed_work.len(), 1);
+    assert_eq!(
+        row.metadata.open_threads,
+        vec!["blocked on review".to_string()]
+    );
+    assert!(row.metadata.recent_actions.is_empty());
+    assert!(!row.metadata.capture_deterministic);
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_deterministic_recapture_refreshes_a_deterministic_row() {
+    let dir = TestDir::new("w149-det-refresh");
+    let store = store(&dir);
+    let embedder = embedder();
+
+    let first = deterministic(
+        "019a0000-0000-7f00-8000-000000000001",
+        "first deterministic",
+        vec!["bash: command: \"ls\"".to_string()],
+    );
+    assert_eq!(
+        store.upsert_session(first, &embedder).await.expect("first"),
+        UpsertOutcome::Inserted
+    );
+
+    let second = deterministic(
+        "019a0000-0000-7f00-8000-000000000002",
+        "second deterministic",
+        vec!["bash: command: \"cargo test\"".to_string()],
+    );
+    assert_eq!(
+        store
+            .upsert_session(second, &embedder)
+            .await
+            .expect("second"),
+        UpsertOutcome::Updated
+    );
+
+    let row = store
+        .list_sessions("/srv/proj", 10)
+        .await
+        .expect("list")
+        .into_iter()
+        .next()
+        .expect("one row");
+    assert_eq!(row.summary, "second deterministic");
+    assert_eq!(
+        row.metadata.recent_actions,
+        vec!["bash: command: \"cargo test\"".to_string()]
+    );
+    assert!(row.metadata.capture_deterministic);
+}
