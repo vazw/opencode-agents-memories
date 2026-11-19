@@ -80,6 +80,8 @@ export async function registerV2Adapter(ctx, legacyHooks) {
 
     const original = { type: "text", text: event.prompt.text };
     const output = { message: { id: event.messageID, parts: [original] } };
+    // Non-enumerable: deepEqual on the hook output must not see it (issue 150).
+    Object.defineProperty(output, "turnIndex", { value: turnIndex, enumerable: false });
 
     if (typeof legacyHooks["chat.message"] !== "function") return;
     await legacyHooks["chat.message"]({ sessionID: event.sessionID }, output);

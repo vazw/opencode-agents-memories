@@ -1409,7 +1409,7 @@ export const server = async function server(input) {
         let block = null;
         const query = queryFromParts(output);
         const session_id = typeof hookInput?.sessionID === "string" && hookInput.sessionID.length > 0 ? hookInput.sessionID : "oc-bridge-" + process.pid;
-        writeStructured("info", "inject.requested", { session_id, query_chars: typeof query === "string" ? Array.from(query).length : 0, host_contract: hostContract });
+        writeStructured("info", "inject.requested", { session_id, query_chars: typeof query === "string" ? Array.from(query).length : 0, host_contract: hostContract, ...(typeof output?.turnIndex === "number" ? { turn_index: output.turnIndex } : {}) });
         try {
           const state = bridge();
           await ensureStartedIn(state);
@@ -1776,7 +1776,7 @@ function parseIdleTranscript(messages) {
     }
     for (const part of message.parts) {
       if (!part || part.type !== "tool") continue;
-      const name = part.tool || "unknown";
+      const name = part.tool || part.name || "unknown";
       let input = "";
       try {
         const toolInput = part.state && part.state.input ? part.state.input : null;
