@@ -393,3 +393,164 @@ process.exit(0);
   });
   assert.equal(run2.code, 0, `Second child: ${run2.stderr}`);
 });
+
+// Issue 150: first-mode periodic refresh. Probes call shouldRefresh directly.
+const PROBE_DRIVER = `import fs from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+process.env.OPENCODE_MEM_STORAGE_ROOT = process.env.DRIVER_STORAGE_ROOT;
+const { server } = await import(pathToFileURL(path.join(process.argv[2], "dist/plugin.js")).href);
+const { hooks } = await server({ client: {}, directory: "/work/project" });
+await hooks["chat.message"]({ sessionID: "ses-1" }, { message: { parts: [] } });
+const decisions = [];
+for (const turnIndex of JSON.parse(process.argv[3])) decisions.push([turnIndex, await hooks.shouldRefresh({ turnIndex, hasCache: true })]);
+fs.writeFileSync(process.env.RESULT, JSON.stringify(decisions));
+process.exit(0);
+`;
+
+async function probeDecisions(t, inject_on, indices) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-refresh-probe-"));
+  const pkgDir = stagePackageTree(tmp);
+  const manifestPath = path.join(tmp, "manifest.json");
+  const resultPath = path.join(tmp, "result.json");
+  stageStubEngine(pkgDir, {
+    requestLogPath: path.join(tmp, "requests.ndjson"), manifestPath,
+    injectMode: "success", helloConfig: { inject_on },
+  });
+  t.after(() => assertReaped(manifestPath));
+  const driverPath = path.join(tmp, "driver.mjs");
+  fs.writeFileSync(driverPath, PROBE_DRIVER);
+  const run = await runDriver(driverPath, [pkgDir, JSON.stringify(indices)], {
+    ...process.env, DRIVER_STORAGE_ROOT: path.join(tmp, "storage"), RESULT: resultPath,
+  });
+  assert.equal(run.code, 0, run.stderr);
+  return new Map(JSON.parse(fs.readFileSync(resultPath, "utf8")));
+}
+
+test("test_refresh_rule_first_mode_fires_at_every_20th_prompt", { timeout: 30000 }, async (t) => {
+  const d = await probeDecisions(t, "first", [20, 40]);
+  assert.equal(d.get(20), true, "first mode refreshes at turnIndex 20");
+  assert.equal(d.get(40), true, "first mode refreshes at turnIndex 40");
+});
+
+test("test_refresh_rule_first_mode_does_not_fire_between_boundaries", { timeout: 30000 }, async (t) => {
+  const between = [...Array.from({ length: 19 }, (_, i) => i + 1), 21, 39, 41];
+  const d = await probeDecisions(t, "first", [...between, 20]);
+  for (const i of between) assert.equal(d.get(i), false, `first mode must not refresh at turnIndex ${i}`);
+  assert.equal(d.get(20), true, "boundary turnIndex 20 refreshes");
+});
+
+test("test_refresh_rule_always_mode_unchanged", { timeout: 30000 }, async (t) => {
+  const all = Array.from({ length: 61 }, (_, i) => i);
+  const always = await probeDecisions(t, "always", all);
+  for (const i of all) assert.equal(always.get(i), true, `always mode refreshes at turnIndex ${i}`);
+  // Positive control: the same probe in first mode is live at turnIndex 1.
+  const first = await probeDecisions(t, "first", [1]);
+  assert.equal(first.get(1), false, "first mode retains block at turnIndex 1");
+});
+
+// Wire tests: a V2 adapter over the real wrapper and stub engine. Each step is
+// a prompt (records the filtered inject delta and the adapter context), a
+// compaction event, or a failure-flag change.
+const WIRE_DRIVER = `import fs from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+process.env.OPENCODE_MEM_STORAGE_ROOT = process.env.DRIVER_STORAGE_ROOT;
+const pkgDir = process.argv[2];
+const steps = JSON.parse(process.argv[3]);
+const { server } = await import(pathToFileURL(path.join(pkgDir, "dist/plugin.js")).href);
+const { registerV2Adapter } = await import(pathToFileURL(path.join(pkgDir, "dist/v2/adapter.js")).href);
+const { hooks: legacy } = await server({ client: {}, directory: "/work/project" });
+const v2 = new Map(); const queue = []; let wake;
+const ctx = {
+  location: { directory: "/work/project" },
+  session: { hook: async (n, cb) => v2.set(n, cb), get: async () => ({ location: { directory: "/work/project" } }) },
+  event: { async *subscribe({ signal }) {
+    signal.addEventListener("abort", () => wake?.(), { once: true });
+    while (!signal.aborted) { if (queue.length) yield queue.shift(); else await new Promise(r => { wake = r; }); }
+  } },
+};
+const cleanup = await registerV2Adapter(ctx, legacy);
+const context = async (sessionID) => { const e = { sessionID, system: [] }; await v2.get("context")(e); return e.system.map(p => p.text); };
+const prompt = (sessionID, messageID) => v2.get("prompt")({ sessionID, messageID, prompt: { text: "q" } });
+const requestLog = process.env.REQUEST_LOG;
+const injectCount = () => {
+  if (!fs.existsSync(requestLog)) return 0;
+  return fs.readFileSync(requestLog, "utf8").split("\\n").filter(Boolean)
+    .map(l => JSON.parse(l).got)
+    .filter(m => m && m.method === "inject" && m.params.chat_injection === true).length;
+};
+const out = [];
+for (const step of steps) {
+  if (step.flag === "create") fs.writeFileSync(process.env.FLAG_PATH, "");
+  else if (step.flag === "remove") fs.rmSync(process.env.FLAG_PATH, { force: true });
+  else if (step.compact) {
+    // The host's V2 compaction hook: marks the session stale (adapter.js).
+    await v2.get("compaction")({ sessionID: "ses-1", system: [] });
+  } else {
+    const before = injectCount();
+    await prompt("ses-1", "m" + step.prompt);
+    out.push({ prompt: step.prompt, injects: injectCount() - before, context: await context("ses-1") });
+  }
+}
+fs.writeFileSync(process.env.RESULT, JSON.stringify(out));
+await cleanup();
+process.exit(0);
+`;
+
+const WIRE_BLOCK = "<memory_context>STUB_FIRST_BLOCK</memory_context>";
+
+async function wireRun(t, steps, { failFlag = false } = {}) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-refresh-wire-"));
+  const pkgDir = stagePackageTree(tmp);
+  const manifestPath = path.join(tmp, "manifest.json");
+  const requestLogPath = path.join(tmp, "requests.ndjson");
+  const resultPath = path.join(tmp, "result.json");
+  const flagPath = path.join(tmp, "fail.flag");
+  stageStubEngine(pkgDir, {
+    requestLogPath, manifestPath, injectMode: "block", helloConfig: { inject_on: "first" },
+    ...(failFlag ? { failFlagPath: flagPath } : {}),
+  });
+  t.after(() => assertReaped(manifestPath));
+  const driverPath = path.join(tmp, "driver.mjs");
+  fs.writeFileSync(driverPath, WIRE_DRIVER);
+  const run = await runDriver(driverPath, [pkgDir, JSON.stringify(steps)], {
+    ...process.env, DRIVER_STORAGE_ROOT: path.join(tmp, "storage"),
+    REQUEST_LOG: requestLogPath, FLAG_PATH: flagPath, RESULT: resultPath,
+  }, 45000);
+  assert.equal(run.code, 0, run.stderr);
+  return JSON.parse(fs.readFileSync(resultPath, "utf8"));
+}
+
+const promptSteps = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => ({ prompt: from + i }));
+
+test("test_refresh_rule_wire_injects_at_prompt_indices_0_and_20", { timeout: 45000 }, async (t) => {
+  const out = await wireRun(t, promptSteps(0, 20));
+  assert.equal(out[0].context.length > 0, true, "precondition: cache empty");
+  assert.deepEqual(out[1].context, [WIRE_BLOCK], "turn-0 block retained at prompt 1");
+  const indices = out.flatMap((o, i) => (o.injects > 0 ? [i] : []));
+  assert.deepEqual(indices, [0, 20]);
+});
+
+test("test_refresh_rule_compaction_at_18_then_19_and_20", { timeout: 45000 }, async (t) => {
+  const out = await wireRun(t, [...promptSteps(0, 18), { compact: true }, ...promptSteps(19, 20)]);
+  const vector = out.map(o => o.injects);
+  assert.deepEqual(vector, [1, ...Array(18).fill(0), 1, 1]);
+});
+
+test("test_refresh_rule_compaction_at_19_and_boundary_20_coalesce", { timeout: 45000 }, async (t) => {
+  const out = await wireRun(t, [...promptSteps(0, 19), { compact: true }, ...promptSteps(20, 20)]);
+  assert.equal(out.at(-1).injects, 1, "one inject at boundary prompt 20 after compaction at 19");
+});
+
+test("test_refresh_rule_failed_boundary_refresh_costs_one_turn", { timeout: 45000 }, async (t) => {
+  // Silent inject at 20 waits REQUEST_TIMEOUT_MS (15 s); the explicit 45 s driver bound covers it.
+  const out = await wireRun(t, [
+    ...promptSteps(0, 19),
+    { flag: "create" }, ...promptSteps(20, 20), { flag: "remove" }, ...promptSteps(21, 21),
+  ], { failFlag: true });
+  const at = (p) => out.find(o => o.prompt === p);
+  assert.deepEqual(at(20).context, [], "silent boundary inject leaves no block at prompt 20");
+  assert.deepEqual(at(21).context, [WIRE_BLOCK], "next prompt re-injects after the loss");
+  assert.equal(at(21).injects, 1, "inject request count rises at prompt 21");
+});

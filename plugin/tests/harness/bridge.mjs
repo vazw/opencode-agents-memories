@@ -59,7 +59,12 @@ export function stagePackageTree(tmpRoot) {
  *               rejects (`plugin/src/plugin.js:315`), the `chat.message` catch
  *               runs and `notifyHost` is reached;
  *   "success" → `inject` answers the canonical empty block, so no catch runs
- *               and no toast may be emitted.
+ *               and no toast may be emitted;
+ *   "block"   → `inject` answers a fixed non-empty block (issue 150), so the
+ *               adapter cache fills and a refresh is observable;
+ *   "silent"  → `inject` is never answered (see the `silent` branch below).
+ * `failFlagPath` (issue 150, optional): while that file exists, the stub never
+ * answers `inject`, whatever `injectMode` says.
  */
 // Additive (D-43): each key is `true` exactly when the stub serves it. Issue
 // 69 adds `skills` here; the wrapper reads known keys and ignores the rest.
@@ -104,11 +109,13 @@ export function stageStubEngine(pkgDir, {
   // when set, each answered request appends {"answered":<method>,"id":<id>} here
   // from the stdout write callback (the reply has been handed to the pipe).
   answerLogPath = null,
+  // Issue 150: while this file exists, the stub never answers inject.
+  failFlagPath = null,
 }) {
   const dir = path.join(pkgDir, "engine", `${process.platform}-${process.arch}`);
   fs.mkdirSync(dir, { recursive: true });
   const binPath = path.join(dir, "opencode-agents-memory");
-  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath: lifecycleLogPath ?? (requestLogPath ? requestLogPath + ".lifecycle" : null), captureMode, answerLogPath }), {
+  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath: lifecycleLogPath ?? (requestLogPath ? requestLogPath + ".lifecycle" : null), captureMode, answerLogPath, failFlagPath }), {
     mode: 0o755,
   });
   fs.chmodSync(binPath, 0o755);
@@ -118,8 +125,8 @@ export function stageStubEngine(pkgDir, {
 // Static body (no template interpolation inside the script beyond CONFIG):
 // answers the canned protocol-1.0.0 results, records its own pid, exits on
 // SIGTERM or stdin EOF.
-function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath, captureMode, answerLogPath }) {
-  const config = JSON.stringify({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath, captureMode, answerLogPath });
+function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath, captureMode, answerLogPath, failFlagPath }) {
+  const config = JSON.stringify({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath, captureMode, answerLogPath, failFlagPath });
   const blocks = JSON.stringify({
     restore:
       "## Restored Session Memory\n\n### Memory 1\nRetries are capped at three\n\nTags: project, opencode-mem\n\n### Memory 2\nDeploys go through the staging gate first\n\nTags: project, opencode-mem\n\n",
@@ -132,7 +139,7 @@ function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabiliti
 const CONFIG = ${config};
 const BLOCKS = ${blocks};
 import fs from "node:fs";
-const { injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath, captureMode, answerLogPath } = CONFIG;
+const { injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath, captureMode, answerLogPath, failFlagPath } = CONFIG;
 // Issue 70 wave 1's nine wire methods; appended to the hello's advertised set
 // only when the capability object advertises the same key.
 const TOOL_METHODS = ["add", "search", "forget", "list", "profile", "list-shards", "migrate", "export", "import"];
@@ -206,6 +213,8 @@ function respond(parsed) {
   if (loserStatus) return null;
   const id = parsed && parsed.id !== undefined ? parsed.id : null;
   const method = parsed && parsed.method;
+  // Issue 150: the failure flag silences inject while the file exists.
+  if (method === "inject" && failFlagPath && fs.existsSync(failFlagPath)) return null;
   // Read inside the generated body (never from the harness's own scope).
   const params = parsed.params ?? {};
   // The T22 knob: an error reply whose data must survive to the wrapper.
@@ -216,8 +225,7 @@ function respond(parsed) {
   if (method === "inject" && injectMode === "error") {
     return { id, jsonrpc: "2.0", error: { code: -32001, message: "degraded" } };
   }
-  // "silent": never answer inject at all (the wrapper's 2 s timeout is the
-  // only way out), while hello/capture/shutdown still answer.
+  // "silent": never answer inject at all (the wrapper's REQUEST_TIMEOUT_MS, 15 s, plugin/src/plugin.js:57, is the only way out), while hello/capture/shutdown still answer.
   if (method === "inject" && injectMode === "silent") return null;
   let result = null;
   if (method === "hello") {
@@ -335,6 +343,9 @@ function respond(parsed) {
         // so a no-subtraction implementation appends it to output.context.
         result = { block: BLOCKS.project, memory_count: 1, tokens: 0, truncated: false, handling_ms: 0 };
       }
+    } else if (injectMode === "block") {
+      // Issue 150: a fixed non-empty block, so the adapter cache is filled.
+      result = { block: "<memory_context>STUB_FIRST_BLOCK</memory_context>", memory_count: 1, tokens: 0, truncated: false, handling_ms: 0 };
     } else {
       result = { block: null, memory_count: 0, tokens: 0, truncated: false, handling_ms: 0 };
     }
