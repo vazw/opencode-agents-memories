@@ -1,6 +1,6 @@
 # 154 — the `mem-store` test suite leaks every temp dir into a 7.8 G shared tmpfs, and exhaustion reads as a mass regression in an unrelated suite
 
-Status: needs-triage — 2026-11-19 (defect measured with a discriminating before/after; the fix shape is a scope call between an RAII guard in one helper and 30 per-file edits)
+Status: needs-triage — 2026-11-19 (defect measured with a discriminating before/after; fix shape re-priced: a dead-PID sweep inside `temp_dir()` needs zero call-site changes, an RAII guard needs 46 because `StoreConfig` holds a bare `PathBuf`)
 
 *(Filed after a false red on `main` was traced to disk exhaustion rather than to code. This is test-harness hygiene, not a defect in the shipped store.)*
 
@@ -67,18 +67,27 @@ the second time in one day that an environment fault was read as a code defect.
 
 ## Ask
 
-Make temp-dir cleanup unavoidable rather than remembered. Options, in the order I would weigh them:
+Bound the growth, or make cleanup unavoidable. Four shapes, re-priced after checking what the helper is embedded in:
 
-1. **RAII guard in one helper.** `temp_dir()` returns a guard (`Deref<Target = Path>`, removes on `Drop`). All 30 files
-   are fixed by construction, no call site has to remember, and panicking tests still clean up. Cost: changes one shared
-   helper's return type; call sites that store a `PathBuf` need a `.to_path_buf()` or a deref.
-2. **30 per-file edits.** Add the missing `cleanup_temp_dir` calls. Cheaper to write, but it is the same class of defect
-   issue 147's defect 4 fixed in `plugin/tests/` — discipline that the next test forgets.
-3. **Move test temp dirs into the repo's `.tmp/`.** Largest blast radius: it contradicts the house law in
-   `docs/agents/testing.md` ("temp dirs under `std::env::temp_dir()` only"), so it is an owner ruling, not a triage pick.
+0. **Sweep stale dirs by dead PID, inside `temp_dir()` itself.** On first use, list `std::env::temp_dir()`, match the
+   `mem-store-w12-*` names, extract the PID, and remove the dir when `/proc/<pid>` does not exist. **Zero call sites
+   change**, one function grows ~20 lines, and it bounds accumulation permanently instead of fixing one release's worth
+   of dirs. It also handles today's exact failure — three days of dirs from dead runs — without touching 46 call sites.
+   Cost: Linux-specific (fine here), and PID reuse is theoretically possible, so the guard should also require an
+   age threshold. This is the option I would take first.
+1. **RAII guard in one helper.** `temp_dir()` returns a guard (`Deref<Target = Path>`, removes on `Drop`). **Not
+   drop-in as I first wrote it:** `store_config()` (`common/mod.rs:66-78`) puts the path into
+   `StoreConfig.storage_path`, which is a plain `PathBuf` (`crates/mem-store/src/config.rs:13`) and cannot hold a
+   guard. So this option necessarily changes `store_config`'s signature and therefore **46 call sites** across the test
+   tree, not 30. Correct by construction, and the most expensive.
+2. **30 per-file edits.** Add the missing `cleanup_temp_dir` calls. Cheap to write, but it is the same class of defect
+   issue 147's defect 4 fixed in `plugin/tests/` — discipline the next test forgets — and it does not clean what
+   panicking or aborted runs already left.
+3. **Move test temp dirs into the repo's `.tmp/`.** It contradicts the house law in `docs/agents/testing.md` ("temp dirs
+   under `std::env::temp_dir()` only"), so it is an owner ruling, not a triage pick.
 
-Option 1 is a deletion-shaped fix and I would start there, but it is a scope call, hence `needs-triage` rather than
-`ready-for-agent`.
+Option 0 and option 1 are complementary rather than exclusive: 0 bounds what leaks, 1 stops the leak. If only one is
+taken, 0 buys the most per line changed.
 
 ## Out of scope
 
