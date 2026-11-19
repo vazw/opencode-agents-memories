@@ -179,20 +179,33 @@ async fn test_actions_survive_a_tight_budget_and_truncated_reports_the_dropped_f
         false,
     )
     .await;
-    seed_fact(&shards_for(&dir), &"fact padding ".repeat(40)).await;
+    // Discriminating sizing, measured with the `greedy` cost model (not
+    // guessed). Each candidate costs `line + BULLET_BYTES (3) + heading`.
+    // Fixed overhead `fixed_overhead_bytes()` = 257 (measured).
+    //   action:  line "bash: keep-me" = 13 B, heading "## Recent actions" 18 B
+    //            -> cost 13 + 3 + 18 = 34, fits alone: 257 + 34 = 291 <= 380.
+    //   fact:    line = 70 `f` chars (fact renders raw, measured), heading
+    //            "## Project facts" 17 B -> cost 70 + 3 + 17 = 90, fits alone:
+    //            257 + 90 = 347 <= 380. Tier-1 cap = 380 / 4 = 95 >= 90, so the
+    //            cap does not drop it.
+    //   together: 257 + 34 + 90 = 381 > 380, so exactly one of them is kept.
+    // Whichever candidate greedy meets first wins. Actions are extended first,
+    // so the actions win and the fact is truncated. A reorder (facts first)
+    // keeps the fact and drops the action: the assertions below go red.
+    let fact_text = "f".repeat(70);
+    seed_fact(&shards_for(&dir), &fact_text).await;
 
-    // Sized so the actions (heading + one line + bullets) fit and the long
-    // fact does not. 2 bytes per token; fixed overhead is charged in greedy.
     let mut p = params(json!({}));
     p.session_id = Some("sess-cur".to_string());
-    p.token_budget = Some(120);
+    p.token_budget = Some(95); // 95 tokens * 4 bytes = 380 bytes
     let result = service.assemble(&p).await.expect("assemble");
     let block = result.block.unwrap_or_default();
 
+    assert!(block.contains("## Recent actions"), "block: {block}");
     assert!(block.contains("bash: keep-me"), "block: {block}");
     assert!(
-        !block.contains("fact padding fact padding fact padding fact padding"),
-        "the fact must not fit: {block}"
+        !block.contains(&fact_text),
+        "the fact must lose to the actions under this budget: {block}"
     );
     assert!(result.truncated, "the dropped fact must report truncated");
 }
