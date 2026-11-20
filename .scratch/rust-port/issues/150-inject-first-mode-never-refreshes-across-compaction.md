@@ -141,3 +141,38 @@ what that costs at 774 ms is not a design. A design whose trigger also fires in 
 `shouldRefresh` (`plugin/src/plugin.js:1504-1508`) already returns true there, so the only observable change is `first`.
 
 **This does not block issue 149.** 149 needs nothing from this file.
+
+### Live reading — 2026-11-20. The instrument works; the traffic does not reach the trigger.
+
+Issue 157 is fixed (`6fea3b5`), so the log is no longer shared with suite traffic and a log-derived reading is now
+attributable. MEASURED on `~/.opencode-mem/opencode-mem.log`, now one file (`26 KB`, no rotated sibling), window
+`2026-11-20T00:42:54.003` → `2026-11-20T16:55:04.959` — i.e. entirely after the fix landed and covering two full suite
+runs inside the window:
+
+| quantity | value |
+|---|---|
+| `inject.requested` lines | 32 |
+| of those carrying `turn_index` | 32 |
+| fixture-session lines | **0** |
+| sessions with inject history | 14 |
+| highest `turn_index` observed | **4** |
+| sessions reaching turn ≥ 2 | 6 |
+
+Two readings:
+
+1. **The wire field is trustworthy.** Every inject line carries `turn_index`, and no line in a 16 h window that contains
+   two suite runs belongs to a fixture session. 157's fix holds in production, not only under test.
+2. **The `[0, 20]` reading is still not obtainable, and the reason has changed.** It is no longer contamination — it is
+   that no session in this log has passed turn 4. A 20-turn refresh needs one session with 21 prompts; short sessions
+   never reach it, and the adapter's `turns` map is per session, so the counter resets with each new one.
+
+What would settle it, stated as the observation rather than the wish: one session that stays open for 21 prompts, then
+`inject.requested` for that `session_id` must show `turn_index` 0 and then 20, with a second `inject.received` pair at
+20 whose `block_bytes` is non-zero. Absent that traffic, the refresh rule's only evidence is the suite's own instance of
+the same observation (`plugin/tests/v2-inject-delivery.test.mjs`, criterion 6a), which exercises the same wrapper code
+path with a driven `turn_index` of `[0, 20]`.
+
+Status stays `ready-for-human`: the rule is landed and measured; what remains is the owner call the triage notes already
+frame — whether a refresh every 20th prompt is the intended policy for a non-compacting session, at 4 extra injects per
+100 prompts and roughly 0.8 s p50 each. The live number above does not change that decision; it only removes the doubt
+about whether the instrument was recording test noise.
