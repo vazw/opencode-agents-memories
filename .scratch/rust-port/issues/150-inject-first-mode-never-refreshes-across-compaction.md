@@ -176,3 +176,32 @@ Status stays `ready-for-human`: the rule is landed and measured; what remains is
 frame — whether a refresh every 20th prompt is the intended policy for a non-compacting session, at 4 extra injects per
 100 prompts and roughly 0.8 s p50 each. The live number above does not change that decision; it only removes the doubt
 about whether the instrument was recording test noise.
+
+### Live reading taken — 2026-11-20. The rule fires at turn 20. This supersedes the section above.
+
+The traffic the previous section said was missing was produced deliberately: one child session
+(`ses_e07357528ffe63tmsgI9N8tOzB`) in the running host, 21 real prompts, each sent only after the previous one
+went idle so no two prompts could collapse into a single adapter event. Measured off
+`~/.opencode-mem/opencode-mem.log`:
+
+| prompt | line | observation |
+|---|---|---|
+| 1 (turn 0) | `18:49:45.836` `inject.requested` `turn_index:0` | `inject.received` `block_bytes=3402`, `handling_ms=307` |
+| 2–20 (turns 1–19) | none | no `inject.requested`, no `inject.received`: the cache is retained, nothing is re-injected |
+| 21 (turn 20) | `18:53:01.607` `inject.requested` `turn_index:20` | `inject.received` `block_bytes=3127`, `handling_ms=319` |
+
+This is the `[0, 20]` reading the issue asked for, and it is the whole predicted shape: a refresh at turn 0, silence
+for nineteen prompts, a second refresh at turn 20, and the refreshed block carrying 3127 bytes — different from the
+turn-0 block, so the refresh delivered fresh content rather than a replay.
+
+Cost, measured on the same session: 2 injects per 21 prompts, against 21 for `always`. At the triage p50 of 774 ms the
+`always` alternative would have cost roughly 16 s of wall time in this session; the landed rule cost 0.6 s.
+
+Honest correction about the first attempt: the first run stopped at **twenty** prompts (turns 0–19) and produced no
+turn-20 line, and the reflex reading was that the rule had failed. It had not — the trigger is `turnIndex % 20 === 0`,
+so the refresh needs the 21st prompt. The measurement was one prompt short, not one mechanism broken. Recorded because
+the same off-by-one would invalidate any future reading of this field: `turn_index` appears in the log **only on a
+refresh**, so a missing line is evidence of a non-refreshing prompt, never of a missing prompt.
+
+Status stays `ready-for-human`, now for one reason only: the owner call on whether refresh every 20th prompt is the
+policy they want. Everything measurable is measured.
