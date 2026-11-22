@@ -1,6 +1,6 @@
 # 150 — `inject_on: "first"` never refreshes the cached block, including across compaction
 
-Status: ready-for-human — 2026-11-19 (rule landed at `4449679`: in `first` mode every 20th prompt refreshes, cost 4 injects per 100 prompts. All 12 criteria reproduce and the reviewer built the four named mutants itself, each red on its named criterion. Owner check remains: a live `first`-mode child's filtered inject indices across prompts 0..20 must be exactly `[0, 20]`.)
+Status: fixed-by-owner-ruling — 2026-11-22: "I don't think I want inject every N turn, at first turn and after compaction should be enough."
 
 *Scope note. Issue 149 owns the content (a `## Recent actions` section) and, by its 2026-11-19 amendment, the one-line
 cache invalidation on compaction that 149's own measurement needs. This issue owns the policy: which refresh rule is
@@ -205,3 +205,28 @@ refresh**, so a missing line is evidence of a non-refreshing prompt, never of a 
 
 Status stays `ready-for-human`, now for one reason only: the owner call on whether refresh every 20th prompt is the
 policy they want. Everything measurable is measured.
+
+### Close-out — 2026-11-22. Owner ruling: the every-N-turn refresh is deleted.
+
+Owner, verbatim: *"I don't think I want inject every N turn, at first turn and after compaction should be enough."*
+
+The rule landed at `4449679` is deleted from `plugin/src/plugin.js`, and with it the `turnIndex === 0` clause of
+`shouldRefresh`: a session's first prompt never has a cache, so `!hasCache` already fires there and the clause was
+runtime-redundant. The surviving predicate is `!hasCache || bridge().engineInjectOn !== "first"`, plus the adapter's
+`stale` mark from a compaction, which is set and consumed outside that predicate (`adapter.js:71`, before the gate).
+
+This close-out supersedes the two live-reading sections and the triage notes above. They stay unedited as the
+historical record — the tracker is a log, and the reasoning that led here is worth keeping.
+
+The rule worked. The `[0, 20]` reading (`ses_e07357528ffe63tmsgI9N8tOzB`, 2026-11-20) stands as measurement: it
+refreshed at turn 0 and turn 20 with silence in between, exactly as designed. It is removed by policy, not because
+it failed. The residual argument against it was cost and reach: 2 injects per 21 prompts against a p50 of 774 ms per
+inject, for a trigger real traffic never reached (14 sessions in 16 h, highest `turn_index` 4).
+
+Accepted consequence, recorded so it never reads as an oversight: in `first` mode a long **non-compacting** session
+now keeps its turn-0 block for the session's whole life. That is the ruling, not a regression — see "Consequence of
+leaving it" above.
+
+Unchanged: `always` mode (refresh every prompt), the compaction path (149's stale mark still refreshes the first
+prompt after a compaction), and the built-in default `InjectOn::First`.
+

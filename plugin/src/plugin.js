@@ -62,8 +62,6 @@ const MAX_AUTO_RESTARTS = 1;
 // Compaction is on the host's critical path: a wedged engine must not stall it
 // for the 15 s default. Both compaction calls pass this explicitly.
 const COMPACTION_REQUEST_TIMEOUT_MS = 2000;
-// Issue 150: first mode re-injects every 20th prompt of a session.
-const REFRESH_EVERY = 20;
 // Issue 69: the catalogue read is on the host's awaited `setup` path. With the
 // 5 s hello bound, a wedged engine can delay `setup` by up to ~8 s.
 const SKILLS_REQUEST_TIMEOUT_MS = 3000;
@@ -1503,11 +1501,10 @@ export const server = async function server(input) {
   // non-enumerable: a V1 host iterating `hooks` never sees it. `turnIndex` is
   // the adapter's per-session count of prompt-hook invocations (adapter.js).
   // Only `first` retains a nonempty cache after turn 0; unknown means `always`.
-  // Issue 150: first mode refreshes every 20th prompt; cost 4 injects per 100 prompts. ponytail: constant; upgrade to a config key when the owner tunes it.
+  // Issue 150, owner ruling 2026-11-22: refresh is not turn-based; a cached first-mode block lives until it is lost or cleared by compaction (adapter stale mark).
   Object.defineProperty(hooks, "shouldRefresh", {
     enumerable: false,
-    value: ({ turnIndex, hasCache }) =>
-      !hasCache || turnIndex === 0 || bridge().engineInjectOn !== "first" || turnIndex % REFRESH_EVERY === 0,
+    value: ({ hasCache }) => !hasCache || bridge().engineInjectOn !== "first",
   });
 
   return { hooks };

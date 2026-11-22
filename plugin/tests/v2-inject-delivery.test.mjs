@@ -14,9 +14,7 @@ const { hooks } = await server({ client: {}, directory: "/work/project" });
 const decisions = [];
 const turn = () => hooks["chat.message"]({ sessionID: "ses-1" }, { message: { parts: [] } });
 await turn(); // starts the child and runs hello
-for (const turnIndex of [0, 1]) {
-  decisions.push(await hooks.shouldRefresh({ turnIndex, hasCache: true }));
-}
+decisions.push(await hooks.shouldRefresh({ turnIndex: 1, hasCache: true }));
 // Kill only fixture child. Replacement advertises no policy and must forget first.
 fs.writeFileSync(process.env.HELLO_CONFIG, "{}");
 const { pid } = JSON.parse(fs.readFileSync(process.env.MANIFEST, "utf8"));
@@ -51,7 +49,7 @@ test("test_hello_advertises_inject_on_outside_capabilities", { timeout: 30000 },
     });
     assert.equal(run.code, 0, run.stderr);
     assert.deepEqual(JSON.parse(fs.readFileSync(resultPath, "utf8")),
-      [true, inject_on !== "first", true], String(inject_on));
+      [inject_on !== "first", true], String(inject_on));
   }
 });
 
@@ -394,7 +392,7 @@ process.exit(0);
   assert.equal(run2.code, 0, `Second child: ${run2.stderr}`);
 });
 
-// Issue 150: first-mode periodic refresh. Probes call shouldRefresh directly.
+// Issue 150: first-mode refresh policy (not turn-based). Probes call shouldRefresh directly.
 const PROBE_DRIVER = `import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -427,17 +425,13 @@ async function probeDecisions(t, inject_on, indices) {
   return new Map(JSON.parse(fs.readFileSync(resultPath, "utf8")));
 }
 
-test("test_refresh_rule_first_mode_fires_at_every_20th_prompt", { timeout: 30000 }, async (t) => {
-  const d = await probeDecisions(t, "first", [20, 40]);
-  assert.equal(d.get(20), true, "first mode refreshes at turnIndex 20");
-  assert.equal(d.get(40), true, "first mode refreshes at turnIndex 40");
-});
-
-test("test_refresh_rule_first_mode_does_not_fire_between_boundaries", { timeout: 30000 }, async (t) => {
-  const between = [...Array.from({ length: 19 }, (_, i) => i + 1), 21, 39, 41];
-  const d = await probeDecisions(t, "first", [...between, 20]);
-  for (const i of between) assert.equal(d.get(i), false, `first mode must not refresh at turnIndex ${i}`);
-  assert.equal(d.get(20), true, "boundary turnIndex 20 refreshes");
+test("test_refresh_rule_first_mode_never_fires_on_turn_count", { timeout: 30000 }, async (t) => {
+  // The refresh policy is not turn-based, at any turn index. At runtime
+  // `turnIndex === 0` with a live cache is unreachable (the single `contexts`
+  // writer runs after the turn counter increments), so this guards the
+  // contract, not a live path: re-adding `turnIndex === 0` or `% 20` turns it red.
+  const d = await probeDecisions(t, "first", [0, 20, 40]);
+  for (const i of [0, 20, 40]) assert.equal(d.get(i), false, `first mode must not refresh at turnIndex ${i}`);
 });
 
 test("test_refresh_rule_always_mode_unchanged", { timeout: 30000 }, async (t) => {
@@ -528,41 +522,35 @@ const promptSteps = (from, to) => Array.from({ length: to - from + 1 }, (_, i) =
 
 test("test_inject_requested_logs_turn_index_through_the_adapter", { timeout: 45000 }, async (t) => {
   // Issue 150 observability: the adapter's zero-based turn index rides the
-  // inject.requested line. In first mode only turns 0 and 20 reach chat.message.
+  // inject.requested line. In first mode only turn 0 reaches chat.message.
   const out = await wireRun(t, promptSteps(0, 20));
   const turns = out.stderr.split("\n").flatMap((line) => {
     try { return [JSON.parse(line)]; } catch { return []; }
   }).filter((e) => e.event === "inject.requested").map((e) => e.turn_index);
-  assert.deepEqual(turns, [0, 20]);
+  assert.deepEqual(turns, [0]);
 });
 
-test("test_refresh_rule_wire_injects_at_prompt_indices_0_and_20", { timeout: 45000 }, async (t) => {
+test("test_refresh_rule_wire_injects_only_at_turn_0", { timeout: 45000 }, async (t) => {
   const out = await wireRun(t, promptSteps(0, 20));
   assert.equal(out[0].context.length > 0, true, "precondition: cache empty");
   assert.deepEqual(out[1].context, [WIRE_BLOCK], "turn-0 block retained at prompt 1");
   const indices = out.flatMap((o, i) => (o.injects > 0 ? [i] : []));
-  assert.deepEqual(indices, [0, 20]);
+  assert.deepEqual(indices, [0]);
 });
 
-test("test_refresh_rule_compaction_at_18_then_19_and_20", { timeout: 45000 }, async (t) => {
-  const out = await wireRun(t, [...promptSteps(0, 18), { compact: true }, ...promptSteps(19, 20)]);
+test("test_refresh_rule_compaction_at_5_refreshes_next_prompt_only", { timeout: 45000 }, async (t) => {
+  const out = await wireRun(t, [...promptSteps(0, 5), { compact: true }, ...promptSteps(6, 7)]);
   const vector = out.map(o => o.injects);
-  assert.deepEqual(vector, [1, ...Array(18).fill(0), 1, 1]);
+  assert.deepEqual(vector, [1, 0, 0, 0, 0, 0, 1, 0], "compaction mark refreshes the next prompt once");
 });
 
-test("test_refresh_rule_compaction_at_19_and_boundary_20_coalesce", { timeout: 45000 }, async (t) => {
-  const out = await wireRun(t, [...promptSteps(0, 19), { compact: true }, ...promptSteps(20, 20)]);
-  assert.equal(out.at(-1).injects, 1, "one inject at boundary prompt 20 after compaction at 19");
-});
-
-test("test_refresh_rule_failed_boundary_refresh_costs_one_turn", { timeout: 45000 }, async (t) => {
-  // Silent inject at 20 waits REQUEST_TIMEOUT_MS (15 s); the explicit 45 s driver bound covers it.
+test("test_refresh_rule_lost_block_reinjects_next_prompt", { timeout: 45000 }, async (t) => {
+  // Silent inject at turn 0 waits REQUEST_TIMEOUT_MS (15 s); the explicit 45 s driver bound covers it.
   const out = await wireRun(t, [
-    ...promptSteps(0, 19),
-    { flag: "create" }, ...promptSteps(20, 20), { flag: "remove" }, ...promptSteps(21, 21),
+    { flag: "create" }, ...promptSteps(0, 0), { flag: "remove" }, ...promptSteps(1, 1),
   ], { failFlag: true });
   const at = (p) => out.find(o => o.prompt === p);
-  assert.deepEqual(at(20).context, [], "silent boundary inject leaves no block at prompt 20");
-  assert.deepEqual(at(21).context, [WIRE_BLOCK], "next prompt re-injects after the loss");
-  assert.equal(at(21).injects, 1, "inject request count rises at prompt 21");
+  assert.deepEqual(at(0).context, [], "failed turn-0 inject leaves no block");
+  assert.deepEqual(at(1).context, [WIRE_BLOCK], "next prompt re-injects after the loss");
+  assert.equal(at(1).injects, 1, "inject request count rises at prompt 1");
 });

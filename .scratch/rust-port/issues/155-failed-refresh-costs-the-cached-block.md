@@ -15,14 +15,14 @@ Status: needs-triage — 2026-11-19 (defect named by issue 150's plan gate; the 
 
 The session loses a block it had a moment earlier and was going to use anyway. It recovers on the next prompt, because
 `shouldRefresh` returns true when `!hasCache` — so the loss is bounded to one turn. It is still a loss: the turn that
-just compacted, or just crossed a refresh boundary, is the turn that most needs the memory.
+just compacted — or, at a session's first prompt, the very first turn — is the turn that most needs the memory.
 
 ## Why it is being filed now rather than ignored
 
-In the shipped default (`inject_on: "first"`) this fires once per session, at turn 0, where there is no previous block to
-lose. Issue 150 bounds staleness with a refresh every 20th prompt, which turns a once-per-session edge into a
-once-per-twenty-prompts one — every one of which can now destroy a block that was working. So 150 does not *cause* this
-defect, it makes it recurring, which is why its gate refused to let the risk stay deferred and unbound.
+Issue 150's every-20th-turn refresh was removed by owner ruling 2026-11-22 (refresh only on a lost cache or after a
+compaction), so the loss edge fires once per refresh event — a session's first prompt and the first prompt after each
+compaction — not on a periodic schedule. It remains a loss: the prompt that follows a compaction is exactly the one that
+most needs the memory.
 
 ## The tension the fix has to settle
 
@@ -44,11 +44,10 @@ content the engine has just told us not to deliver. So the issue is not "restore
 
 ## Acceptance shape, not a prescription
 
-Issue 150's criterion 12 pins the present behaviour under the stub's `"silent"` inject mode: prompt 20 yields no context,
-prompt 21 re-injects. Issue 150 landed at `4449679` and that pin is the test
-`test_refresh_rule_failed_boundary_refresh_costs_one_turn` in `plugin/tests/v2-inject-delivery.test.mjs` — it asserts the
-empty block at prompt 20 and the re-inject at 21, so it is the assertion this issue's fix flips. The fix flips that assertion for the transport-error case at minimum, and the issue is settled by
-whichever of these the owner chooses:
+The present behaviour under the stub's `"silent"` inject mode is pinned by `test_refresh_rule_lost_block_reinjects_next_prompt`
+in `plugin/tests/v2-inject-delivery.test.mjs`: a turn-0 inject that fails yields no context, and the next prompt
+re-injects — that is the assertion this issue's fix flips. The fix flips it for the transport-error case at minimum, and
+the issue is settled by whichever of these the owner chooses:
 
 1. **Keep on error only.** `status !== "ok"` retains the previous block; a clean empty answer still clears it. No privacy
    question, no extra round trip, and it covers the case that actually happens (engine down, timeout).
@@ -59,7 +58,7 @@ whichever of these the owner chooses:
 
 ## Inverted world
 
-If a live `first`-mode child whose prompt-20 inject fails still renders a block on prompt 20 (because the host replays an
-earlier message, or the adapter's delete happens after the call), then the delete-before-call reading above is wrong and
-this closes as measurement. The observation to run: stub `"silent"` at prompt 20 and read the `context` hook's argument —
-which is exactly what criterion 12 does offline.
+If a live `first`-mode child whose turn-0 inject fails still renders a block on the next prompt (because the host
+replays an earlier message, or the adapter's delete happens after the call), then the delete-before-call reading above
+is wrong and this closes as measurement. The observation to run: stub `"silent"` at turn 0 and read the `context`
+hook's argument — which is exactly what `test_refresh_rule_lost_block_reinjects_next_prompt` does offline.
