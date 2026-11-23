@@ -1,6 +1,6 @@
 # 154 — the test suites leak temp dirs into a 7.8 G shared tmpfs, and exhaustion reads as a mass regression in an unrelated suite
 
-Status: needs-triage — 2026-11-19 (two suites measured: `mem-store` leaks 276 dirs / 68 MB per run, the wrapper suite 5887 dirs / 1845 MB in 1.4 days. Fix shape re-priced: a dead-PID sweep inside `temp_dir()` needs zero call-site changes, an RAII guard needs 46 because `StoreConfig` holds a bare `PathBuf`; the wrapper's `mkdtempSync` calls need their own answer)
+Status: fixed — 2026-11-23, wrapper suite, commit `b31d9ad`. One exit-hook run root (`plugin/tests/harness/bridge.mjs` `tempRoot`) adopted at 37 `os.tmpdir()` sites; 19 dead `import os` removed; 2 `temp-hygiene` tests added. Verified by a private-`TMPDIR` probe (`mkdir` must prove an empty start, `find "$PROBE" -mindepth 1` prints 0, `rmdir` succeeds) and by two mutants that must leak (reverted raw site → 8 `om-toast-*`; deleted listener → one `om-run-*` with the file's roots nested). Reviewer re-ran the probe independently: 269/269, residue 0. Ceilings, named: a `SIGKILL`ed test-file process leaks one `om-run-<pid>-*` root; with no source guard, a new raw `mkdtemp` site is invisible until a run leaks. The Rust `mem-store` side (276 dirs / 68 MB per run) remains a separate wave — it needs its own shape, and the dead-PID sweep priced in "The cause, measured" is that wave's option, not this one's.
 
 *(Filed after a false red on `main` was traced to disk exhaustion rather than to code. This is test-harness hygiene, not a defect in the shipped store.)*
 
@@ -134,3 +134,39 @@ failure arrived three days after the residue began rather than on the first run.
 `user_prompts_schema_v2::test_v2_file_is_a_noop_and_stays_2` failing, one of the seven pre-existing reds independently
 recorded in issue 149's ledger; the abort path leaks whatever it had created, which is a second source on top of the
 files that never clean up.
+
+## Re-measured 2026-11-23 — the wrapper now dominates, and one file owns half of it
+
+Fresh count on `main` at `3d29955` (the tree after issue 150's suite run, i.e. one wrapper run old):
+
+```
+wc -l /tmp listing       785 entries
+du -sh /tmp              611M          (tmpfs, RAM — `tmpfs /tmp tmpfs rw,...`)
+ls -d /tmp/om-* | wc -l  739
+du -sch /tmp/om-*        571M          → 93% of the tmpfs is the wrapper's residue
+```
+
+Attribution, `du -sm /tmp/om-* | sort -rn | head`:
+
+- **4 × 81 M, all `om-log-sink-*`** = 324 M, i.e. **57% of all wrapper residue in this snapshot**. Contents:
+  `om-log-sink-*/opencode-mem/engine/linux-x64/opencode-agents-memory`, `83389016` bytes — the real staged engine,
+  copied into each case's temp root by the cases that need it, and never removed.
+  `plugin/tests/log-sink.test.mjs:40-51` (`runCase`) `mkdtempSync`es the root, `:42` stages the package, and the file
+  registers **no** removal for it — not `t.after`, not `process.on("exit")`.
+- The remaining 735 `om-*` dirs are ~1 M each: 119 `om-refresh-*`, 96 `om-capture-*`, 83 `om-inject-*`,
+  72 `om-compaction-*`, 68 `om-telemetry-*`, 48 `om-v2-*`, …
+
+Two corrections to the sections above, which were right about the mechanism and stale about the shape:
+
+1. **Option 0 (dead-PID sweep) no longer buys the most.** Only **114** of the 785 names carry a PID at all
+   (`om-home-<pid>-`); **671** are `mkdtempSync` random suffixes. Of the 114 with a PID, 46 are dead — **8.9 M**.
+   The sweep is worth ~1.5% of the residue: the wrapper's `om-<purpose>-XXXXXX` names cannot be identified by it, as
+   already noted above. The Rust `mem-store` side (276 dirs / 68 M a run) still fits option 0 and remains its own wave.
+2. **The wrapper's answer is one mechanism, not 43.** `plugin/tests/**` now has **43** `mkdtempSync` sites against
+   **13** `rmSync` cleanups. `plugin/tests/harness/bridge.mjs:53-54` already ships the pattern that fixes them:
+   `fs.mkdtempSync(...)` followed by `process.on("exit", () => fs.rmSync(root, { recursive: true, force: true }))`.
+   A single exported `tempRoot(prefix)` helper carrying that pair, adopted at the call sites, inverts the default from
+   leak to clean in one place. Named ceiling of the exit-hook shape: a `SIGKILL`ed suite still leaks, exactly as today.
+
+Order of value, measured: the 324 M in `log-sink` costs the fewest lines; the remaining 247 M costs the helper rollout;
+the 8.9 M dead-PID Rust sweep is the smallest prize of the three.
