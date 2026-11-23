@@ -14,7 +14,7 @@
 mod common;
 use std::fs;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
@@ -46,8 +46,8 @@ fn git(args: &[&str], cwd: &Path) {
     );
 }
 
-fn scratch_repo(name: &str) -> PathBuf {
-    let dir = common::temp_dir(&format!("w53-tier1-{name}"));
+fn scratch_repo(name: &str) -> TestDir {
+    let dir = TestDir::new(&format!("w53-tier1-{name}"));
     git(&["init", "-q", "-b", "main"], &dir);
     dir
 }
@@ -64,7 +64,7 @@ fn input(capture_id: &str, session_id: &str) -> CaptureSummaryInput {
     }
 }
 
-async fn fixture(name: &str) -> (TestDir, mem_store::shard_manager::ShardManager, PathBuf) {
+async fn fixture(name: &str) -> (TestDir, mem_store::shard_manager::ShardManager, TestDir) {
     let dir = TestDir::new(&format!("w53-tier1-fix-{name}"));
     let shards = common::shard_manager_with_probe(
         dir.store_config(),

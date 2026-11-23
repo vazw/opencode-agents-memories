@@ -63,16 +63,18 @@ async fn test_capture_drain_enqueues_vault_feeder_job() {
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_composition_wires_vault_feeder() {
     use std::collections::BTreeMap;
-    let root = common::temp_dir("cv-composition");
-    let home = common::temp_dir("cv-composition-home");
+    let root = common::TestDir::new("cv-composition");
+    let home = common::TestDir::new("cv-composition-home");
     let env: BTreeMap<String, String> = [("HOME", home.to_string_lossy().to_string())]
         .map(|(key, value)| (key.to_string(), value))
         .into_iter()
         .collect();
-    let mut config =
-        mem_core::config::Config::load(&mem_core::config::ConfigPaths::standard(&home), &env)
-            .expect("the default config loads");
-    config.storage_path = root.clone();
+    let mut config = mem_core::config::Config::load(
+        &mem_core::config::ConfigPaths::standard(home.path().to_path_buf()),
+        &env,
+    )
+    .expect("the default config loads");
+    config.storage_path = root.path().to_path_buf();
     config.embedding_dimensions = 8;
     let runtime = mem_bridge::composition::build_composed_runtime(
         &root,
@@ -84,8 +86,6 @@ async fn test_composition_wires_vault_feeder() {
     .expect("the runtime composes");
     assert!(runtime.capture.vault_feeder().is_some());
     drop(runtime);
-    common::cleanup_temp_dir(&root);
-    common::cleanup_temp_dir(&home);
 }
 
 struct NoopEmbedder;

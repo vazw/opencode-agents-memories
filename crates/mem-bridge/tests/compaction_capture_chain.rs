@@ -421,15 +421,20 @@ async fn test_inject_without_include_compaction_is_unchanged() {
 
 /// Builds the production composition over `root` with an explicit compaction
 /// configuration (or the loaded defaults when `None`).
-async fn composed_runtime(root: &Path, compaction: Option<(bool, u32)>) -> ComposedRuntime {
-    let home = common::temp_dir("w55-composed-home");
+async fn composed_runtime(
+    root: &Path,
+    home: &TestDir,
+    compaction: Option<(bool, u32)>,
+) -> ComposedRuntime {
     let env: BTreeMap<String, String> = [("HOME", home.to_string_lossy().to_string())]
         .map(|(key, value)| (key.to_string(), value))
         .into_iter()
         .collect();
-    let mut config =
-        mem_core::config::Config::load(&mem_core::config::ConfigPaths::standard(&home), &env)
-            .expect("the default config loads");
+    let mut config = mem_core::config::Config::load(
+        &mem_core::config::ConfigPaths::standard(home.path().to_path_buf()),
+        &env,
+    )
+    .expect("the default config loads");
     config.storage_path = root.to_path_buf();
     config.embedding_dimensions = 8;
     if let Some((enabled, memory_limit)) = compaction {
@@ -470,7 +475,8 @@ fn capture_params(root: &Path, index: usize) -> CaptureParams {
 /// summary-less provider-less entry is a `Skip` that still reports `done`),
 /// then `done: 3` with the other three counters `0`.
 async fn seed_three_tier1_rows(root: &Path) -> DrainReport {
-    let runtime = composed_runtime(root, None).await;
+    let home = TestDir::new("w55-composed-home");
+    let runtime = composed_runtime(root, &home, None).await;
     for index in 0..3 {
         runtime
             .capture
@@ -525,7 +531,8 @@ async fn test_disabled_config_returns_no_block_despite_rows() {
     // Its OWN runtime over the same root: rows pre-exist, and `{enabled:
     // false}` must still return None — which a `default()` policy cannot fake
     // here, because the default is enabled.
-    let runtime = composed_runtime(root.path(), Some((false, 2))).await;
+    let home = TestDir::new("w55-composed-home");
+    let runtime = composed_runtime(root.path(), &home, Some((false, 2))).await;
     let project_id = root.path().to_string_lossy().to_string();
     let result = runtime
         .inject
@@ -544,7 +551,8 @@ async fn test_configured_limit_renders_two_and_counts_two() {
     let root = TestDir::new("w55-config-limit");
     let _seed = seed_three_tier1_rows(root.path()).await;
 
-    let runtime = composed_runtime(root.path(), Some((true, 2))).await;
+    let home = TestDir::new("w55-composed-home");
+    let runtime = composed_runtime(root.path(), &home, Some((true, 2))).await;
     let project_id = root.path().to_string_lossy().to_string();
     let result = runtime
         .inject
@@ -566,7 +574,8 @@ async fn test_configured_limit_renders_two_and_counts_two() {
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_capture_written_tier1_row_is_restored_by_session_id() {
     let root = TestDir::new("w55-capture-chain");
-    let runtime = composed_runtime(root.path(), None).await;
+    let home = TestDir::new("w55-composed-home");
+    let runtime = composed_runtime(root.path(), &home, None).await;
     let summary = "Captured fact: the deploy uses the staging gate";
     let mut params_row = capture_params(root.path(), 7);
     params_row.summary = Some(summary.to_string());

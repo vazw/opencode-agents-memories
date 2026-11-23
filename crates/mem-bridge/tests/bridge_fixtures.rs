@@ -42,7 +42,10 @@ fn fixture(name: &str) -> String {
 /// The fixture engine now carries a REAL runtime over a temp storage dir:
 /// the W5.3 durable queue made `capture`/`inject` real; the frozen
 /// fixtures then double as behavioral responses to REAL store calls.
-fn full_engine() -> Engine {
+///
+/// The storage guard is RETURNED, not leaked: the caller drops it after the
+/// engine's last dispatch, so each fixture run owns and removes its tree.
+fn full_engine() -> (Engine, common::TestDir) {
     let dir = common::TestDir::new("w53-fixture-engine");
     let storage = dir.path().to_path_buf();
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -59,11 +62,11 @@ fn full_engine() -> Engine {
         skills: None,
         tools: None,
     };
-    // The temp dir's lifetime: the guard is dropped with the engine's test
-    // run (a leaked TestDir is bounded by the test count).
-    let _leak_dir = Box::leak(Box::new(dir));
     std::mem::forget(rt);
-    Engine::with_runtime(EngineConfig::default(), Arc::new(runtime))
+    (
+        Engine::with_runtime(EngineConfig::default(), Arc::new(runtime)),
+        dir,
+    )
 }
 
 fn request(name: &str) -> Request {
@@ -237,17 +240,15 @@ fn test_ndjson_framing_request_fixture_byte_equal() {
 
 #[test]
 fn test_hello_response_schema_equal_after_mask() {
-    assert_response_schema_equal_after_mask(
-        &full_engine(),
-        "hello-response.json",
-        "hello-request.json",
-    );
+    let (engine, _dir) = full_engine();
+    assert_response_schema_equal_after_mask(&engine, "hello-response.json", "hello-request.json");
 }
 
 #[test]
 fn test_capture_response_schema_equal_after_mask() {
+    let (engine, _dir) = full_engine();
     assert_response_schema_equal_after_mask(
-        &full_engine(),
+        &engine,
         "capture-response.json",
         "capture-request.json",
     );
@@ -255,29 +256,20 @@ fn test_capture_response_schema_equal_after_mask() {
 
 #[test]
 fn test_inject_response_schema_equal_after_mask() {
-    assert_response_schema_equal_after_mask(
-        &full_engine(),
-        "inject-response.json",
-        "inject-request.json",
-    );
+    let (engine, _dir) = full_engine();
+    assert_response_schema_equal_after_mask(&engine, "inject-response.json", "inject-request.json");
 }
 
 #[test]
 fn test_recall_response_schema_equal_after_mask() {
-    assert_response_schema_equal_after_mask(
-        &full_engine(),
-        "recall-response.json",
-        "recall-request.json",
-    );
+    let (engine, _dir) = full_engine();
+    assert_response_schema_equal_after_mask(&engine, "recall-response.json", "recall-request.json");
 }
 
 #[test]
 fn test_health_response_schema_equal_after_mask() {
-    assert_response_schema_equal_after_mask(
-        &full_engine(),
-        "health-response.json",
-        "health-request.json",
-    );
+    let (engine, _dir) = full_engine();
+    assert_response_schema_equal_after_mask(&engine, "health-response.json", "health-request.json");
 }
 
 /// O4's `health` leg (issue 45): the engine reports whether the mixed-version
@@ -317,8 +309,9 @@ fn test_health_reports_the_open_guard_override_state() {
 
 #[test]
 fn test_shutdown_response_schema_equal_after_mask() {
+    let (engine, _dir) = full_engine();
     assert_response_schema_equal_after_mask(
-        &full_engine(),
+        &engine,
         "shutdown-response.json",
         "shutdown-request.json",
     );

@@ -35,7 +35,7 @@ const MEMORY_KEY: &str = "sk-dummy-key-do-not-log";
 fn sink() -> LogSink {
     static ONCE: OnceLock<LogSink> = OnceLock::new();
     ONCE.get_or_init(|| {
-        let dir = common::temp_dir("memory-provider-log");
+        let dir = common::process_temp_dir("memory-provider-log");
         let sink = LogSink::new(dir.join("opencode-mem.log"));
         mem_core::logging::init_process_logging(sink.clone())
             .expect("the per-binary sink installs");

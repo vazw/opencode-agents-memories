@@ -26,17 +26,18 @@ use mem_store::sweep_probe::SweepPreflightBlock;
 use mem_store::vector::vector_to_text;
 
 /// A resolved config over a throwaway project + home. The sweep reads
-/// `storage_root` (passed explicitly) and the encryption knobs.
-fn config_for(dir: &TestDir) -> Config {
-    let project = common::temp_dir("sweep-config-project");
-    let home = common::temp_dir("sweep-config-home");
+/// `storage_root` (passed explicitly) and the encryption knobs. The two
+/// scratch guards are returned so the caller keeps them alive (and drops them).
+fn config_for(dir: &TestDir) -> (Config, TestDir, TestDir) {
+    let project = TestDir::new("sweep-config-project");
+    let home = TestDir::new("sweep-config-home");
     let mut config = Config::load(
-        &ConfigPaths::for_project(&project, &home),
+        &ConfigPaths::for_project(project.path(), home.path()),
         &std::collections::BTreeMap::new(),
     )
     .expect("the default config resolves");
     config.storage_path = dir.path().to_path_buf();
-    config
+    (config, project, home)
 }
 
 async fn seed_prompts(dir: &TestDir) {
@@ -122,7 +123,7 @@ async fn sweep_state_rows(dir: &TestDir, name: &str) -> Vec<(String, i64)> {
 #[test]
 fn test_run_without_apply_exits_64() {
     let dir = TestDir::new("sweep-usage");
-    let config = config_for(&dir);
+    let (config, _project, _home) = config_for(&dir);
     let request = SweepRequest { apply: false };
     assert_eq!(run(&config, dir.path(), &request), 64);
 }
@@ -130,7 +131,7 @@ fn test_run_without_apply_exits_64() {
 #[test]
 fn test_run_refuses_a_live_engine_holder_with_75() {
     let dir = TestDir::new("sweep-busy");
-    let config = config_for(&dir);
+    let (config, _project, _home) = config_for(&dir);
     let holder = acquire_engine_lock(dir.path(), std::sync::Arc::new(SystemProcessProbe))
         .expect("engine lock");
     let EngineLockOutcome::Acquired(lock) = holder else {
@@ -147,7 +148,7 @@ async fn test_sweep_vacuums_stamps_and_reports_all_three_targets() {
     seed_prompts(&dir).await;
     seed_profiles(&dir).await;
     seed_episodic(&dir).await;
-    let config = config_for(&dir);
+    let (config, _project, _home) = config_for(&dir);
 
     let phases = std::sync::Mutex::new(Vec::<&'static str>::new());
     let report = sweep_observed(
@@ -221,7 +222,7 @@ async fn test_sweep_vacuums_stamps_and_reports_all_three_targets() {
 async fn test_sweep_skips_absent_targets_without_failing() {
     let dir = TestDir::new("sweep-partial");
     seed_prompts(&dir).await;
-    let config = config_for(&dir);
+    let (config, _project, _home) = config_for(&dir);
 
     let report = sweep_observed(&config, dir.path(), &SweepRequest { apply: true }, &|_| {})
         .await
@@ -235,7 +236,7 @@ async fn test_sweep_skips_absent_targets_without_failing() {
 async fn test_sweep_refuses_a_live_multiprocess_marker_before_any_mutation() {
     let dir = TestDir::new("sweep-legacy-peer");
     seed_prompts(&dir).await;
-    let config = config_for(&dir);
+    let (config, _project, _home) = config_for(&dir);
 
     let marker = format!(
         r#"{{"pid":{},"timestamp":"2026-11-09T00:00:00.000Z","operation":null,"start_time":null,"mode":"multiprocess"}}"#,
@@ -262,7 +263,7 @@ async fn test_sweep_refuses_a_live_multiprocess_marker_before_any_mutation() {
 async fn test_bak_families_are_reaped_and_tshm_is_untouched() {
     let dir = TestDir::new("sweep-bak");
     seed_prompts(&dir).await;
-    let config = config_for(&dir);
+    let (config, _project, _home) = config_for(&dir);
 
     let baks = [
         "user-prompts.db.schema-v1-1700000000000.bak",
@@ -324,7 +325,7 @@ async fn test_a_failing_target_is_named_and_does_not_abort_the_others() {
         std::fs::set_permissions(&profiles_db, std::fs::Permissions::from_mode(0o000))
             .expect("make the target unopenable");
     }
-    let config = config_for(&dir);
+    let (config, _project, _home) = config_for(&dir);
 
     let report = sweep_observed(&config, dir.path(), &SweepRequest { apply: true }, &|_| {})
         .await
@@ -375,7 +376,7 @@ fn contains_bytes(path: &std::path::Path, needle: &[u8]) -> bool {
 async fn test_sweep_erases_the_canary_bytes_from_all_three_targets() {
     let dir = TestDir::new("sweep-canary");
     let marker = "W6C-CANARY-7f3a91";
-    let config = config_for(&dir);
+    let (config, _project, _home) = config_for(&dir);
 
     // user-prompts: a marker row, logically erased before the sweep.
     {

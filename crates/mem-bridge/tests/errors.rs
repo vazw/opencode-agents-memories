@@ -7,7 +7,6 @@
 use mem_bridge::engine::{Engine, EngineConfig};
 use mem_bridge::jsonrpc::{RequestId, Response, parse_line};
 use serde_json::{Value, json};
-use std::path::PathBuf;
 
 mod common;
 
@@ -141,20 +140,8 @@ async fn test_shutdown_without_session_id_also_32602() {
 // a REAL temp store (fixed scope resolution, fake embedder, no summarizer).
 // ---------------------------------------------------------------------------
 
-fn oracle_dir(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "w53-errors-{name}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|elapsed| elapsed.subsec_nanos())
-            .unwrap_or(0)
-    ))
-}
-
-async fn runtime_engine(name: &str, degraded: bool) -> (Engine, PathBuf) {
-    let dir = oracle_dir(name);
-    std::fs::create_dir_all(&dir).expect("temp storage");
+async fn runtime_engine(name: &str, degraded: bool) -> (Engine, common::TestDir) {
+    let dir = common::TestDir::new(&format!("w53-errors-{name}"));
     let runtime = oracle_runtime(&dir).await;
     let mut config = EngineConfig::default();
     if degraded {

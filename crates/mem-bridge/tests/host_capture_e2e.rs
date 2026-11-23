@@ -42,7 +42,7 @@ const SAMPLED_2_2_5_GENERATE_BODY: &str = include_str!(concat!(
 fn sink() -> LogSink {
     static ONCE: OnceLock<LogSink> = OnceLock::new();
     ONCE.get_or_init(|| {
-        let dir = common::temp_dir("host-capture-e2e-log");
+        let dir = common::process_temp_dir("host-capture-e2e-log");
         let sink = LogSink::new(dir.join("opencode-mem.log"));
         mem_core::logging::init_process_logging(sink.clone())
             .expect("the per-binary sink installs");

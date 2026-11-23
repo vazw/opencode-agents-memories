@@ -283,15 +283,17 @@ async fn test_hello_advertises_inject_on_outside_capabilities() {
 async fn test_composed_engine_advertises_the_configured_inject_on() {
     use std::collections::BTreeMap;
 
-    let root = common::temp_dir("inject-on-composed-root");
-    let home = common::temp_dir("inject-on-composed-home");
+    let root = common::TestDir::new("inject-on-composed-root");
+    let home = common::TestDir::new("inject-on-composed-home");
     let env: BTreeMap<String, String> = [("HOME".to_string(), home.to_string_lossy().to_string())]
         .into_iter()
         .collect();
-    let mut config =
-        mem_core::config::Config::load(&mem_core::config::ConfigPaths::standard(&home), &env)
-            .expect("the default config loads");
-    config.storage_path = root.clone();
+    let mut config = mem_core::config::Config::load(
+        &mem_core::config::ConfigPaths::standard(home.path().to_path_buf()),
+        &env,
+    )
+    .expect("the default config loads");
+    config.storage_path = root.path().to_path_buf();
     config.embedding_dimensions = 8;
     config.chat_message.inject_on = mem_core::config::InjectOn::First;
     let composed = mem_bridge::composition::build_composed_runtime(

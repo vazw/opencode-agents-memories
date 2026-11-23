@@ -29,7 +29,7 @@ static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 fn sink() -> LogSink {
     static ONCE: OnceLock<LogSink> = OnceLock::new();
     ONCE.get_or_init(|| {
-        let dir = common::temp_dir("log-signatures");
+        let dir = common::process_temp_dir("log-signatures");
         let sink = LogSink::new(dir.join("opencode-mem.log"));
         mem_core::logging::init_process_logging(sink.clone())
             .expect("the per-binary sink installs");

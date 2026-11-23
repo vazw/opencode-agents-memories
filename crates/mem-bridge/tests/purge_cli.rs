@@ -1353,21 +1353,11 @@ fn test_remove_probe_path_handles_dirs_links_files_and_absent_paths() {
         .expect("symlink must succeed after clearing a real dir");
 }
 
-fn scratch_home(label: &str) -> PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.subsec_nanos())
-        .unwrap_or(0);
-    let home = std::env::temp_dir().join(format!(
-        "mem-bridge-w71-{label}-{}-{nanos}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&home);
-    std::fs::create_dir_all(&home).expect("create home");
-    home
+fn scratch_home(label: &str) -> TestDir {
+    TestDir::new(&format!("w71-{label}"))
 }
 
-fn broken_config_home(label: &str) -> PathBuf {
+fn broken_config_home(label: &str) -> TestDir {
     let home = scratch_home(label);
     let config_dir = home.join(".config").join("opencode");
     std::fs::create_dir_all(&config_dir).expect("config dir");
@@ -1578,7 +1568,8 @@ async fn test_purge_session_rejects_an_invalid_scope_with_exit_64() {
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_purge_session_reports_a_store_failure_with_exit_74() {
     let home = scratch_home("store-failure");
-    let file = scratch_home("store-failure-root").join("not-a-directory");
+    let scratch_root = scratch_home("store-failure-root");
+    let file = scratch_root.join("not-a-directory");
     std::fs::write(&file, "a regular file, not a storage root").expect("write file");
     let args = purge_args(&file, PROJECT, SESSION, AGENT);
     let output = run_child(&home, &args);

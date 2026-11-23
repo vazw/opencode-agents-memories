@@ -4,7 +4,7 @@ mod common;
 
 use std::sync::Arc;
 
-use common::temp_dir;
+use common::TestDir;
 use mem_bridge::capture::CaptureParams;
 use mem_bridge::project_scope::apply_resolved_scope;
 use mem_bridge::vault_feeder::{VaultFeeder, VaultFeederJob};
@@ -84,7 +84,7 @@ async fn vault_row_contents(store: &mem_vault::VaultStore, scope_hash: &str) -> 
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_vault_feeder_promotes_user_marked_vault_tags() {
-    let dir = temp_dir("vf-vault-tags");
+    let dir = TestDir::new("vf-vault-tags");
     let vault = Arc::new(mem_vault::VaultStore::new(enabled_config(&dir)));
     let feeder = VaultFeeder::new(vault.clone());
     let s = scope();
@@ -101,7 +101,7 @@ async fn test_vault_feeder_promotes_user_marked_vault_tags() {
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_vault_feeder_promotes_verbatim_tags() {
-    let dir = temp_dir("vf-verbatim-tags");
+    let dir = TestDir::new("vf-verbatim-tags");
     let vault = Arc::new(mem_vault::VaultStore::new(enabled_config(&dir)));
     let feeder = VaultFeeder::new(vault.clone());
     let s = scope();
@@ -118,7 +118,7 @@ async fn test_vault_feeder_promotes_verbatim_tags() {
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_vault_feeder_promotes_on_vault_flag() {
-    let dir = temp_dir("vf-vault-flag");
+    let dir = TestDir::new("vf-vault-flag");
     let vault = Arc::new(mem_vault::VaultStore::new(enabled_config(&dir)));
     let feeder = VaultFeeder::new(vault.clone());
     let s = scope();
@@ -135,7 +135,7 @@ async fn test_vault_feeder_promotes_on_vault_flag() {
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_vault_feeder_does_not_promote_unmarked_content() {
-    let dir = temp_dir("vf-unmarked");
+    let dir = TestDir::new("vf-unmarked");
     let vault = Arc::new(mem_vault::VaultStore::new(enabled_config(&dir)));
     let feeder = VaultFeeder::new(vault.clone());
     let s = scope();
@@ -157,9 +157,9 @@ async fn test_vault_feeder_does_not_promote_unmarked_content() {
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_vault_feeder_no_ops_when_disabled() {
-    let dir = temp_dir("vf-disabled");
+    let dir = TestDir::new("vf-disabled");
     let vault = Arc::new(mem_vault::VaultStore::new(common::store_config(
-        dir.clone(),
+        dir.path().to_path_buf(),
     )));
     let feeder = VaultFeeder::new(vault.clone());
     let s = scope();
@@ -179,7 +179,7 @@ async fn test_vault_feeder_no_ops_when_disabled() {
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_vault_feeder_bounded_retry_then_drop() {
-    let dir = temp_dir("vf-retry");
+    let dir = TestDir::new("vf-retry");
     let vault = Arc::new(mem_vault::VaultStore::new(enabled_config(&dir)));
     let feeder = VaultFeeder::new(vault.clone());
     let mut s = scope();
@@ -205,7 +205,7 @@ async fn test_vault_feeder_enqueue_returns_immediately() {
     // three failing attempts with backoff and would reach drop_count == 1
     // before returning; observing drop_count == 0 immediately after enqueue
     // proves it returned first.
-    let dir = temp_dir("vf-enqueue");
+    let dir = TestDir::new("vf-enqueue");
     let vault = Arc::new(mem_vault::VaultStore::new(enabled_config(&dir)));
     let feeder = VaultFeeder::new(vault.clone());
     let mut s = scope();
@@ -229,7 +229,7 @@ async fn test_vault_feeder_enqueue_returns_immediately() {
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_vault_feeder_stores_references_not_values() {
-    let dir = temp_dir("vf-refs");
+    let dir = TestDir::new("vf-refs");
     let vault = Arc::new(mem_vault::VaultStore::new(enabled_config(&dir)));
     let feeder = VaultFeeder::new(vault.clone());
     let s = scope();
@@ -246,7 +246,7 @@ async fn test_vault_feeder_stores_references_not_values() {
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_vault_feeder_verbatim_round_trip_byte_identical() {
-    let dir = temp_dir("vf-roundtrip");
+    let dir = TestDir::new("vf-roundtrip");
     let vault = Arc::new(mem_vault::VaultStore::new(enabled_config(&dir)));
     let feeder = VaultFeeder::new(vault.clone());
     let s = scope();

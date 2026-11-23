@@ -1077,7 +1077,7 @@ fn temp_path(prefix: &str) -> PathBuf {
         .map(|duration| duration.subsec_nanos())
         .unwrap_or(0);
     std::env::temp_dir().join(format!(
-        "mem-store-w8-{prefix}-{}-{counter}-{nanos}",
+        "mem-store-w12-w8-{prefix}-{}-{counter}-{nanos}",
         std::process::id()
     ))
 }

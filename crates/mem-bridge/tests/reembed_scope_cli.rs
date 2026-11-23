@@ -163,10 +163,8 @@ fn binary_path() -> PathBuf {
     binary
 }
 
-fn scratch_home(label: &str) -> PathBuf {
-    let home = common::temp_dir(&format!("w3-reembed-home-{label}"));
-    std::fs::create_dir_all(&home).expect("create the scratch home");
-    home
+fn scratch_home(label: &str) -> TestDir {
+    TestDir::new(&format!("w3-reembed-home-{label}"))
 }
 
 fn write_config(home: &Path, base_url: &str) {

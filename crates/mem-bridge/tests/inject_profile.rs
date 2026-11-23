@@ -959,16 +959,18 @@ async fn test_inject_profile_tier_fails_soft_on_unparseable_profile_data() {
 async fn test_composed_runtime_wires_the_profile_tier_into_inject() {
     use std::collections::BTreeMap;
 
-    let root = common::temp_dir("inject-profile-composition");
-    let home = common::temp_dir("inject-profile-composition-home");
+    let root = common::TestDir::new("inject-profile-composition");
+    let home = common::TestDir::new("inject-profile-composition-home");
     let env: BTreeMap<String, String> = [("HOME", home.to_string_lossy().to_string())]
         .map(|(key, value)| (key.to_string(), value))
         .into_iter()
         .collect();
-    let mut config =
-        mem_core::config::Config::load(&mem_core::config::ConfigPaths::standard(&home), &env)
-            .expect("the default config loads");
-    config.storage_path = root.clone();
+    let mut config = mem_core::config::Config::load(
+        &mem_core::config::ConfigPaths::standard(home.path().to_path_buf()),
+        &env,
+    )
+    .expect("the default config loads");
+    config.storage_path = root.path().to_path_buf();
     config.embedding_dimensions = 8;
     config.user_email_override = Some("probe@example.com".to_string());
     let runtime = mem_bridge::composition::build_composed_runtime(
@@ -1009,8 +1011,6 @@ async fn test_composed_runtime_wires_the_profile_tier_into_inject() {
     assert!(block.contains("pref composed"), "{block}");
 
     drop(runtime);
-    common::cleanup_temp_dir(&root);
-    common::cleanup_temp_dir(&home);
 }
 
 struct NoopEmbedder;

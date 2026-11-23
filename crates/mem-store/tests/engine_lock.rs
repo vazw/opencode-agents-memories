@@ -29,7 +29,7 @@ fn temp_dir(prefix: &str) -> PathBuf {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let dir = std::env::temp_dir().join(format!(
-        "mem-store-w51-{prefix}-{}-{nanos}",
+        "mem-store-w12-w51-{prefix}-{}-0-{nanos}",
         std::process::id()
     ));
     std::fs::create_dir_all(&dir).expect("create temp dir");

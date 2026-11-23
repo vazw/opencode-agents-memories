@@ -8,9 +8,13 @@
 //! drives real git repositories in hermetic temp dirs (same hermeticity as
 //! `mem-core`'s own `project_scope.rs`).
 
+mod common;
+
+use common::TestDir;
+
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 const PREFIX: &str = "opencode";
@@ -36,18 +40,9 @@ fn git(args: &[&str], cwd: &Path) {
     );
 }
 
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "w53-project-scope-{name}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|elapsed| elapsed.subsec_nanos())
-            .unwrap_or(0)
-    ));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    dir
+/// A scratch dir owned by the returned guard: removed when the test drops it.
+fn scratch(name: &str) -> TestDir {
+    TestDir::new(&format!("w53-project-scope-{name}"))
 }
 
 fn create_repo(path: &Path) {
@@ -112,7 +107,7 @@ fn test_project_scope_from_directory_derives_one_project_tag_and_scope() {
 
     // One derivation means the seam's tag IS TagResolver's tag for the same
     // directory — not a separately hashed rendering.
-    let direct = tag_resolver.project_tag_info(Path::new(&repo));
+    let direct = tag_resolver.project_tag_info(Path::new(&repo.path()));
     assert_eq!(resolved.container_tag, direct.tag);
 
     // Reading a second time for the same project yields the same triple, so
@@ -122,8 +117,6 @@ fn test_project_scope_from_directory_derives_one_project_tag_and_scope() {
             .expect("resolution is stable");
     assert_eq!(resolved.container_tag, resolved_again.container_tag);
     assert_eq!(resolved.scope_hash, resolved_again.scope_hash);
-
-    let _ = fs::remove_dir_all(&repo);
 }
 
 /// A blank project scope is a hard rejection — never the empty tag (the

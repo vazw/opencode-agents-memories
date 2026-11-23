@@ -25,7 +25,7 @@ use mem_profile::profile_store::{ProfileConfig, ProfileData, ProfileItem, Profil
 fn sink() -> LogSink {
     static ONCE: OnceLock<LogSink> = OnceLock::new();
     ONCE.get_or_init(|| {
-        let dir = common::temp_dir("inject-profile-counter");
+        let dir = common::process_temp_dir("inject-profile-counter");
         let sink = LogSink::new(dir.join("opencode-mem.log"));
         mem_core::logging::init_process_logging(sink.clone())
             .expect("the per-binary sink installs");

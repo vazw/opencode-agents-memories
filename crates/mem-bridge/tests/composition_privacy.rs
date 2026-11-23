@@ -13,6 +13,8 @@
 //! complete` calls the inner provider synchronously, so the recorder holds the
 //! request before the stream is polled (dropping the stream is fine).
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -120,20 +122,6 @@ impl mem_embed::embedder::Embedder for NoopEmbedder {
     }
 }
 
-fn temp_dir(prefix: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "mem-bridge-i52-{prefix}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|elapsed| elapsed.subsec_nanos())
-            .unwrap_or(0)
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
-}
-
 fn load_config(root: &std::path::Path, home: &std::path::Path) -> mem_core::config::Config {
     let env: BTreeMap<String, String> = [("HOME".to_string(), home.to_string_lossy().to_string())]
         .into_iter()
@@ -168,8 +156,8 @@ async fn test_composed_runtime_wraps_the_minted_provider_in_the_privacy_layer() 
     // - wrapped with `PrivacyConfig::default()` (ignores the configured
     //   marker) -> 2 messages, because `<my-banner>` is not a default marker;
     // - `Arc::new(layer.wrap(..))` -> does not compile.
-    let root = temp_dir("composition-wrap");
-    let home = temp_dir("composition-wrap-home");
+    let root = common::TestDir::new("composition-wrap");
+    let home = common::TestDir::new("composition-wrap-home");
     let mut config = load_config(&root, &home);
     config.chat_message.filter_injected_prompts = true;
     config
@@ -208,8 +196,6 @@ async fn test_composed_runtime_wraps_the_minted_provider_in_the_privacy_layer() 
     assert_eq!(recorded[0].messages[0].content, "clean question");
 
     drop(runtime);
-    let _ = std::fs::remove_dir_all(&root);
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ---------------------------------------------------------------------------
@@ -220,8 +206,8 @@ async fn test_composed_runtime_wraps_the_minted_provider_in_the_privacy_layer() 
 async fn test_the_minted_layer_reads_filter_injected_prompts() {
     // A hard-coded `filter_injected_prompts: true` in `from_core` leaves this
     // RED: only one message would reach the recorder.
-    let root = temp_dir("composition-flag");
-    let home = temp_dir("composition-flag-home");
+    let root = common::TestDir::new("composition-flag");
+    let home = common::TestDir::new("composition-flag-home");
     let mut config = load_config(&root, &home);
     config.chat_message.filter_injected_prompts = false;
     config
@@ -256,8 +242,6 @@ async fn test_the_minted_layer_reads_filter_injected_prompts() {
     );
 
     drop(runtime);
-    let _ = std::fs::remove_dir_all(&root);
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ---------------------------------------------------------------------------
@@ -269,8 +253,8 @@ async fn test_composed_runtime_hands_the_resolved_privacy_config_to_capture() {
     // Omitting `.with_privacy(...)` leaves `PrivacyConfig::default()` (flag
     // `true`, no `<my-banner>`) -> not equal. `PartialEq` is over `bool`s and
     // two `Vec<String>`s, so the comparison is element-wise by construction.
-    let root = temp_dir("composition-privacy-link");
-    let home = temp_dir("composition-privacy-link-home");
+    let root = common::TestDir::new("composition-privacy-link");
+    let home = common::TestDir::new("composition-privacy-link-home");
     let mut config = load_config(&root, &home);
     config.chat_message.filter_injected_prompts = false;
     config
@@ -288,8 +272,6 @@ async fn test_composed_runtime_hands_the_resolved_privacy_config_to_capture() {
     );
 
     drop(runtime);
-    let _ = std::fs::remove_dir_all(&root);
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ---------------------------------------------------------------------------
@@ -303,8 +285,8 @@ async fn test_composed_runtime_hands_the_resolved_privacy_config_to_capture() {
 /// `capture_provider_unavailable` reason instead of dialling `127.0.0.1:4096`.
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_composition_never_fabricates_a_capture_provider() {
-    let root = temp_dir("composition-none-provider");
-    let home = temp_dir("composition-none-provider-home");
+    let root = common::TestDir::new("composition-none-provider");
+    let home = common::TestDir::new("composition-none-provider-home");
     let config = load_config(&root, &home);
 
     let runtime = build_composed_runtime(&root, &config, Arc::new(NoopEmbedder), None)
@@ -316,6 +298,4 @@ async fn test_composition_never_fabricates_a_capture_provider() {
     );
 
     drop(runtime);
-    let _ = std::fs::remove_dir_all(&root);
-    let _ = std::fs::remove_dir_all(&home);
 }

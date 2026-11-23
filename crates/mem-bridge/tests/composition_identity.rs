@@ -46,8 +46,8 @@ fn load_config(root: &std::path::Path, home: &std::path::Path) -> mem_core::conf
 
 #[tokio::test]
 async fn test_composition_wires_the_embedding_identity() {
-    let root = common::temp_dir("composition-identity");
-    let home = common::temp_dir("composition-identity-home");
+    let root = common::TestDir::new("composition-identity");
+    let home = common::TestDir::new("composition-identity-home");
     let config = load_config(&root, &home);
 
     let runtime = build_composed_runtime(&root, &config, Arc::new(NoopEmbedder), None)
@@ -88,16 +88,14 @@ async fn test_composition_wires_the_embedding_identity() {
     );
     drop(db);
     drop(runtime);
-    common::cleanup_temp_dir(&root);
-    common::cleanup_temp_dir(&home);
 }
 
 /// Step 9 — the Config → `LocalLoadOptions` hop carries the token-cap
 /// override (mutant: the extracted builder drops the field).
 #[test]
 fn test_composition_carries_the_configured_cap() {
-    let root = common::temp_dir("composition-cap-root");
-    let home = common::temp_dir("composition-cap-home");
+    let root = common::TestDir::new("composition-cap-root");
+    let home = common::TestDir::new("composition-cap-home");
     let mut config = load_config(&root, &home);
     config.embedding_max_tokens = Some(1024);
 
@@ -108,6 +106,4 @@ fn test_composition_carries_the_configured_cap() {
         Some(1024),
         "the composition must pass `embeddingMaxTokens` to the local loader"
     );
-    common::cleanup_temp_dir(&root);
-    common::cleanup_temp_dir(&home);
 }

@@ -19,8 +19,14 @@ use mem_store::platform::ProcessProbe;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// Unique temp directory (`mem-bridge-w53-{prefix}-{pid}-{counter}`).
-pub fn temp_dir(prefix: &str) -> PathBuf {
+/// Unique PROCESS-LIFETIME temp directory
+/// (`mem-bridge-w53-{prefix}-{pid}-{counter}`).
+///
+/// Ceiling: this dir survives the binary that created it. Only the five
+/// `OnceLock<LogSink>` initialisers use it directly, because their log must
+/// outlive every test in the binary; every test-scoped caller takes a
+/// [`TestDir`] instead.
+pub fn process_temp_dir(prefix: &str) -> PathBuf {
     let counter = COUNTER.fetch_add(1, Ordering::SeqCst);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -53,7 +59,7 @@ pub struct TestDir {
 impl TestDir {
     pub fn new(prefix: &str) -> Self {
         Self {
-            path: temp_dir(prefix),
+            path: process_temp_dir(prefix),
         }
     }
 
@@ -63,6 +69,14 @@ impl TestDir {
 
     pub fn store_config(&self) -> StoreConfig {
         store_config(self.path.to_path_buf())
+    }
+}
+
+impl std::ops::Deref for TestDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.path
     }
 }
 

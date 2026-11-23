@@ -222,8 +222,8 @@ async fn test_structured_delegates_verbatim() {
 async fn test_filtered_structured_redacts_before_the_inner_call() {
     // Mutant: the filter applied to the returned value, or not at all. The
     // recorded system prompt is the only place a request-side filter shows.
-    let root = common::temp_dir("capture-provider-redact");
-    let home = common::temp_dir("capture-provider-redact-home");
+    let root = common::TestDir::new("capture-provider-redact");
+    let home = common::TestDir::new("capture-provider-redact-home");
     let config = load_config(&root, &home);
 
     let recorder = RecordingCapture::new(json!({ "summary": "s", "type": "task", "tags": [] }));
@@ -271,8 +271,6 @@ async fn test_filtered_structured_redacts_before_the_inner_call() {
     );
 
     drop(runtime);
-    let _ = std::fs::remove_dir_all(&root);
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 // ---------------------------------------------------------------------------
@@ -283,8 +281,8 @@ async fn test_filtered_structured_redacts_before_the_inner_call() {
 async fn test_filtered_structured_never_calls_an_emptied_conversation() {
     // Mutant: delegate without the guard — the provider is dialled with only
     // the capture system prompt left, i.e. a 25.5 s round-trip for nothing.
-    let root = common::temp_dir("capture-provider-emptied");
-    let home = common::temp_dir("capture-provider-emptied-home");
+    let root = common::TestDir::new("capture-provider-emptied");
+    let home = common::TestDir::new("capture-provider-emptied-home");
     let mut config = load_config(&root, &home);
     config.chat_message.filter_injected_prompts = true;
     config
@@ -328,6 +326,4 @@ async fn test_filtered_structured_never_calls_an_emptied_conversation() {
     );
 
     drop(runtime);
-    let _ = std::fs::remove_dir_all(&root);
-    let _ = std::fs::remove_dir_all(&home);
 }
