@@ -9,10 +9,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { driverHome } from "./harness/bridge.mjs";
+import { driverHome, tempRoot } from "./harness/bridge.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const realPkgRoot = path.resolve(here, "..");
@@ -236,7 +235,7 @@ function runDriver(driverPath, args, env, timeoutMs = 30000) {
 
 // Shared helper: run the staged driver and parse the stub's stdin log.
 async function runGlueTest(tmpRootSuffix, { ctx, events, wait }) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), tmpRootSuffix));
+  const tmp = tempRoot(tmpRootSuffix);
   const pkgDir = stagePackage(tmp);
   const requestLogPath = path.join(tmp, "stub-requests.ndjson");
   const manifestPath = path.join(tmp, "stub-manifest.json");
@@ -302,7 +301,7 @@ function stripRequiredField(recorded, field) {
 // stub's wire log plus the manifest the stub wrote for its own process
 // (pid, argv, env) — the only place the child's argv/env are observable.
 async function runWebDistCase(distEnvValue) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-glue-webdist-"));
+  const tmp = tempRoot("om-glue-webdist-");
   const pkgDir = stagePackage(tmp);
   const requestLogPath = path.join(tmp, "stub-requests.ndjson");
   const manifestPath = path.join(tmp, "stub-manifest.json");
@@ -334,7 +333,7 @@ async function runWebDistCase(distEnvValue) {
 // Same shape as `runWebDistCase`: stage the package + stub engine, run the driver
 // once, and read the manifest the stub wrote for its own process.
 async function runChildEnvCase(extraEnv) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-glue-unguarded-"));
+  const tmp = tempRoot("om-glue-unguarded-");
   const pkgDir = stagePackage(tmp);
   const requestLogPath = path.join(tmp, "stub-requests.ndjson");
   const manifestPath = path.join(tmp, "stub-manifest.json");
@@ -420,7 +419,7 @@ test("test_wrapper_does_not_capture_on_every_chat_message", { timeout: 60000 }, 
 });
 
 test("test_wrapper_project_id_comes_from_host_directory", { timeout: 60000 }, async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-glue-"));
+  const tmp = tempRoot("om-glue-");
   const pkgDir = stagePackage(tmp);
   // A hostile payload tries to override the project scope from transcript
   // AND event data; the wrapper must ONLY trust input.directory.

@@ -31,7 +31,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
@@ -41,6 +40,7 @@ import {
   runDriver,
   stagePackageTree,
   stageStubEngine,
+  tempRoot,
 } from "./harness/bridge.mjs";
 
 const ADAPTER_MODULE = "../src/v2/adapter.js";
@@ -141,7 +141,7 @@ async function runCompactionCase(t, options) {
     // `undefined` drops the key — the pre-wave shape.
     helloConfig,
   } = options;
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-v2-compaction-hook-"));
+  const tmp = tempRoot("om-v2-compaction-hook-");
   const pkgDir = stagePackageTree(tmp);
   const requestLogPath = path.join(tmp, "stub-requests.ndjson");
   const manifestPath = path.join(tmp, "stub-manifest.json");

@@ -25,11 +25,10 @@ process.env.TZ = "Asia/Bangkok";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import { engineLogPath, engineStderrLogLine } from "../src/plugin.js";
-import { assertReaped, runDriver, stagePackageTree } from "./harness/bridge.mjs";
+import { assertReaped, runDriver, stagePackageTree, tempRoot } from "./harness/bridge.mjs";
 
 // The one instant every stamp assertion uses: 16:38 in Asia/Bangkok (+07:00).
 const FIXED_INSTANT = new Date("2026-11-03T09:38:00.000Z");
@@ -456,7 +455,7 @@ const PROBE_LINE = '{"component":"probe","event":"engine.stderr_probe","level":"
 const PROBE_EXPECT = 'engine.stderr_probe: {"component":"probe","level":"info"}';
 
 async function runDrain(t, fixture, { prepareHome, extraEnv } = {}) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-engine-stderr-"));
+  const tmp = tempRoot("om-engine-stderr-");
   const home = path.join(tmp, "home");
   fs.mkdirSync(home, { recursive: true });
   if (prepareHome !== undefined) prepareHome(home);

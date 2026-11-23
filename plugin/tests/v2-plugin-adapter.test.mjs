@@ -18,7 +18,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
@@ -27,6 +26,7 @@ import {
   runDriver,
   stagePackageTree,
   stageStubEngine,
+  tempRoot,
 } from "./harness/bridge.mjs";
 
 const ADAPTER_MODULE = "../src/v2/adapter.js";
@@ -453,7 +453,7 @@ test(
   "test_v2_adapter_idle_event_captures_the_transcript_through_the_legacy_client",
   { timeout: 60000 },
   async (t) => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-v2-adapter-e2e-"));
+    const tmp = tempRoot("om-v2-adapter-e2e-");
     const pkgDir = stagePackageTree(tmp);
     const requestLogPath = path.join(tmp, "stub-requests.ndjson");
     const manifestPath = path.join(tmp, "stub-manifest.json");

@@ -17,7 +17,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
@@ -27,6 +26,7 @@ import {
   runDriver,
   stagePackageTree,
   stageStubEngine,
+  tempRoot,
 } from "./harness/bridge.mjs";
 
 // The exact pre-issue-33 engine shape: the object is present, the key is not.
@@ -114,7 +114,7 @@ async function runCase(t, options) {
     killBoundMs = 30000,
     capabilities,
   } = options;
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-capa-"));
+  const tmp = tempRoot("om-capa-");
   const pkgDir = stagePackageTree(tmp);
   const requestLogPath = path.join(tmp, "stub-requests.ndjson");
   const manifestPath = path.join(tmp, "stub-manifest.json");

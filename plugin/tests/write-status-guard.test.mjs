@@ -13,13 +13,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
-import { DRIVER_SOURCE, runDriver, stagePackageTree } from "./harness/bridge.mjs";
+import { DRIVER_SOURCE, runDriver, stagePackageTree, tempRoot } from "./harness/bridge.mjs";
 
 function uniqueTempDir(prefix) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `write-status-guard-${prefix}-`));
+  return tempRoot(`write-status-guard-${prefix}-`);
 }
 
 function degradedLines(stderr) {

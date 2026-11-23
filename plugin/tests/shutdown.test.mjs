@@ -19,10 +19,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { driverHome } from "./harness/bridge.mjs";
+import { driverHome, tempRoot } from "./harness/bridge.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const realPkgRoot = path.resolve(here, "..");
@@ -212,7 +211,7 @@ await new Promise(() => {});
 `;
 
 test("test_shutdown_reaps_child", { timeout: 60000 }, async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-shutdown-"));
+  const tmp = tempRoot("om-shutdown-");
   const pkgDir = stagePackage(tmp);
   const requestLogPath = path.join(tmp, "stub-requests.ndjson");
   const manifestPath = path.join(tmp, "stub-manifest.json");
@@ -279,7 +278,7 @@ test("test_shutdown_reaps_child", { timeout: 60000 }, async () => {
 });
 
 test("test_post_capture_shutdown_budget_allows_graceful_exit", { timeout: 60000 }, async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-shutdown-cal-"));
+  const tmp = tempRoot("om-shutdown-cal-");
   const pkgDir = stagePackage(tmp);
   const requestLogPath = path.join(tmp, "stub-requests.ndjson");
   const manifestPath = path.join(tmp, "stub-manifest.json");

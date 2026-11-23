@@ -12,7 +12,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
@@ -20,6 +19,7 @@ import {
   runDriver,
   stagePackageTree,
   stageStubEngine,
+  tempRoot,
 } from "./harness/bridge.mjs";
 
 const DIRECTORY = "/work/proj";
@@ -41,7 +41,7 @@ process.exit(0);
 `;
 
 async function runCase(t, fixture) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-inject-query-"));
+  const tmp = tempRoot("om-inject-query-");
   const pkgDir = stagePackageTree(tmp);
   const requestLogPath = path.join(tmp, "stub-requests.ndjson");
   const manifestPath = path.join(tmp, "stub-manifest.json");

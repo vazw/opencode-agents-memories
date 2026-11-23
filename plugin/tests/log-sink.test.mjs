@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import crypto from "node:crypto";
-import { assertReaped, runDriver, stagePackageTree, stageStubEngine } from "./harness/bridge.mjs";
+import { assertReaped, runDriver, stagePackageTree, stageStubEngine, tempRoot } from "./harness/bridge.mjs";
 
 const PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OWNER = fs.realpathSync(os.userInfo().homedir);
@@ -38,7 +38,7 @@ process.exit(0);
 }
 
 function runCase({ name, injectMode, env = {}, cwdHome }) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-log-sink-"));
+  const tmp = tempRoot("om-log-sink-");
   const pkgDir = stagePackageTree(tmp);
   const manifestPath = path.join(tmp, "manifest.json");
   const requestLogPath = path.join(tmp, "requests.ndjson");
@@ -155,7 +155,7 @@ function noopDriver(tmp) {
 }
 
 test("test_run_driver_default_home_is_never_owner", { timeout: 30000 }, async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-157-"));
+  const tmp = tempRoot("om-157-");
   const run = await runDriver(noopDriver(tmp), [], { ...process.env, DRIVER_STORAGE_ROOT: path.join(tmp, "root") });
   assert.equal(typeof run.home, "string");
   assert.notEqual(fs.realpathSync(run.home), OWNER, `owner home spawned: ${OWNER}`);
@@ -163,7 +163,7 @@ test("test_run_driver_default_home_is_never_owner", { timeout: 30000 }, async ()
 });
 
 test("test_run_driver_rejects_symlinked_owner_home", { timeout: 30000 }, async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-157-"));
+  const tmp = tempRoot("om-157-");
   const alias = path.join(tmp, "alias");
   fs.symlinkSync(OWNER, alias);
   const run = await runDriver(noopDriver(tmp), [], { ...process.env, HOME: alias, DRIVER_STORAGE_ROOT: path.join(tmp, "root") });
@@ -171,7 +171,7 @@ test("test_run_driver_rejects_symlinked_owner_home", { timeout: 30000 }, async (
 });
 
 test("test_run_driver_treats_empty_home_as_absent", { timeout: 30000 }, async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-157-"));
+  const tmp = tempRoot("om-157-");
   const run = await runDriver(noopDriver(tmp), [], { ...process.env, HOME: "", DRIVER_STORAGE_ROOT: path.join(tmp, "root") });
   assert.equal(typeof run.home, "string");
   assert.notEqual(run.home, "");
@@ -179,7 +179,7 @@ test("test_run_driver_treats_empty_home_as_absent", { timeout: 30000 }, async ()
 });
 
 test("test_run_driver_surfaces_bad_home", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-157-"));
+  const tmp = tempRoot("om-157-");
   const plain = path.join(tmp, "plainfile");
   fs.writeFileSync(plain, "");
   assert.throws(
@@ -260,7 +260,7 @@ function changed(a, b) {
   return a.sha !== b.sha || a.size !== b.size || a.mtimeMs !== b.mtimeMs;
 }
 test("test_service_tripwire_detects_same_mtime_content_change", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-157-"));
+  const tmp = tempRoot("om-157-");
   const file = path.join(tmp, "service.json");
   fs.writeFileSync(file, "AAAA");
   const before = fingerprint(file);

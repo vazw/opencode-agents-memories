@@ -19,7 +19,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
@@ -29,6 +28,7 @@ import {
   runDriver,
   stagePackageTree,
   stageStubEngine,
+  tempRoot,
 } from "./harness/bridge.mjs";
 
 /** Asserts `pid` is gone within 2 s (all spawned pids, not just the manifest). */
@@ -73,7 +73,7 @@ async function runCase(t, {
   engineOptions = () => ({}),
   timeoutMs = 30000,
 }) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-shared-bridge-"));
+  const tmp = tempRoot("om-shared-bridge-");
   const pkgDir = stagePackageTree(tmp);
   const root = path.join(tmp, "storage");
   fs.mkdirSync(root, { recursive: true });

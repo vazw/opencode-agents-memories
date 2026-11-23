@@ -9,10 +9,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { driverHome } from "./harness/bridge.mjs";
+import { driverHome, tempRoot } from "./harness/bridge.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const realPkgRoot = path.resolve(here, "..");
@@ -168,7 +167,7 @@ function readManifest(manifestPath) {
 /* ------------------------------------------------------------------ tests */
 
 test("test_host_config_forwards_env", { timeout: 60000 }, async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-cfg-"));
+  const tmp = tempRoot("om-cfg-");
   const pkgDir = stagePackage(tmp);
   const requestLogPath = path.join(tmp, "stub-requests.ndjson");
   const manifestPath = path.join(tmp, "stub-manifest.json");
@@ -228,7 +227,7 @@ test("test_host_config_forwards_env", { timeout: 60000 }, async () => {
 });
 
 test("test_host_config_does_not_forward_host_credentials", { timeout: 60000 }, async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-sec-"));
+  const tmp = tempRoot("om-sec-");
   const pkgDir = stagePackage(tmp);
   const requestLogPath = path.join(tmp, "stub-requests.ndjson");
   const manifestPath = path.join(tmp, "stub-manifest.json");

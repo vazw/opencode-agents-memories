@@ -24,7 +24,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
@@ -33,6 +32,7 @@ import {
   runDriver,
   stagePackageTree,
   stageStubEngine,
+  tempRoot,
 } from "./harness/bridge.mjs";
 
 function readWire(requestLogPath) {
@@ -52,7 +52,7 @@ test(
   "test_v2_session_compaction_ended_reaches_the_v1_compacted_handler",
   { timeout: 30000 },
   async (t) => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-v2-compaction-"));
+    const tmp = tempRoot("om-v2-compaction-");
     const pkgDir = stagePackageTree(tmp);
     const requestLogPath = path.join(tmp, "stub-requests.ndjson");
     const manifestPath = path.join(tmp, "stub-manifest.json");

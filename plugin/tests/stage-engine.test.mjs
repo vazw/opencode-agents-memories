@@ -14,9 +14,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { tempRoot } from "./harness/bridge.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
@@ -33,7 +33,7 @@ const HASHED_ASSET = "// web-ui-abc.js\n";
 /* ---------------------------------------------------------------- helpers */
 
 function makeScratch() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "stage-engine-"));
+  return tempRoot("stage-engine-");
 }
 
 // Fake cargo builds the release binary the script expects; fake rustc reports

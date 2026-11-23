@@ -1,9 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { assertReaped, runDriver, stagePackageTree, stageStubEngine } from "./harness/bridge.mjs";
+import { assertReaped, runDriver, stagePackageTree, stageStubEngine, tempRoot } from "./harness/bridge.mjs";
 
 const DRIVER = `import fs from "node:fs";
 import path from "node:path";
@@ -28,7 +27,7 @@ process.exit(0);
 
 test("test_hello_advertises_inject_on_outside_capabilities", { timeout: 30000 }, async (t) => {
   for (const inject_on of ["first", "always", undefined, "invalid"]) {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-inject-delivery-"));
+    const tmp = tempRoot("om-inject-delivery-");
     const pkgDir = stagePackageTree(tmp);
     const manifestPath = path.join(tmp, "manifest.json");
     const helloConfigPath = path.join(tmp, "hello.json");
@@ -234,7 +233,7 @@ test("test_v2_context_refreshes_only_when_inject_on_says_so", { timeout: 10000 }
 });
 
 async function telemetryCase(t, mode, query) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-telemetry-"));
+  const tmp = tempRoot("om-telemetry-");
   const pkgDir = stagePackageTree(tmp);
   const manifestPath = path.join(tmp, "manifest.json");
   stageStubEngine(pkgDir, { requestLogPath: path.join(tmp, "requests.ndjson"), manifestPath, injectMode: mode });
@@ -285,7 +284,7 @@ test("test_wrapper_telemetry_captures_zero_bytes_and_excludes_content", async (t
 // AC-11: INTEGRATION CONTROL, not a RED claim. Real wrapper (staged dist) + real
 // adapter + stub engine advertising inject_on "first": it records wiring, not a mutant kill.
 test("test_hello_first_policy_survives_midturn_compaction", { timeout: 30000 }, async (t) => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-ac11-"));
+  const tmp = tempRoot("om-ac11-");
   const pkgDir = stagePackageTree(tmp);
   const requestLogPath = path.join(tmp, "requests.ndjson");
   const manifestPath = path.join(tmp, "manifest.json");
@@ -335,7 +334,7 @@ process.exit(0);`);
 });
 
 test("test_state_reset_on_child_replacement_enforces_new_policy", { timeout: 30000 }, async (t) => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-reset-"));
+  const tmp = tempRoot("om-reset-");
   const pkgDir = stagePackageTree(tmp);
   const helloConfigPath = path.join(tmp, "hello.json");
   const manifestPath = path.join(tmp, "manifest.json");
@@ -407,7 +406,7 @@ process.exit(0);
 `;
 
 async function probeDecisions(t, inject_on, indices) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-refresh-probe-"));
+  const tmp = tempRoot("om-refresh-probe-");
   const pkgDir = stagePackageTree(tmp);
   const manifestPath = path.join(tmp, "manifest.json");
   const resultPath = path.join(tmp, "result.json");
@@ -495,7 +494,7 @@ process.exit(0);
 const WIRE_BLOCK = "<memory_context>STUB_FIRST_BLOCK</memory_context>";
 
 async function wireRun(t, steps, { failFlag = false } = {}) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-refresh-wire-"));
+  const tmp = tempRoot("om-refresh-wire-");
   const pkgDir = stagePackageTree(tmp);
   const manifestPath = path.join(tmp, "manifest.json");
   const requestLogPath = path.join(tmp, "requests.ndjson");

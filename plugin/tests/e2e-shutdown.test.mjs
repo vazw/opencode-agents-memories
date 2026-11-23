@@ -16,17 +16,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { chmodSync, copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { tempRoot } from "./harness/bridge.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN = path.join(here, "..");
 
 /** A complete temp copy of the package (package.json, dist, src, index.js). */
 function tempPackage() {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "opencode-mem-e2e-"));
+  const dir = tempRoot("opencode-mem-e2e-");
   mkdirSync(path.join(dir, "home"));
   copyFileSync(path.join(PLUGIN, "package.json"), path.join(dir, "package.json"));
   copyFileSync(path.join(PLUGIN, "index.js"), path.join(dir, "index.js"));

@@ -18,7 +18,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
@@ -27,6 +26,7 @@ import {
   runDriver,
   stagePackageTree,
   stageStubEngine,
+  tempRoot,
 } from "./harness/bridge.mjs";
 
 function chatMessage(sessionID = "sess-1", text = "hello world") {
@@ -39,7 +39,7 @@ function chatMessage(sessionID = "sess-1", text = "hello world") {
 // Stages the package + stub engine + driver, runs one case, and returns the
 // driver's record, the stub's wire log and the driver's stderr.
 async function runToastCase(t, { injectMode, showToast, events, killBoundMs, helloConfig, diesAfterRequests }) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "om-toast-"));
+  const tmp = tempRoot("om-toast-");
   const pkgDir = stagePackageTree(tmp);
   const requestLogPath = path.join(tmp, "stub-requests.ndjson");
   const manifestPath = path.join(tmp, "stub-manifest.json");

@@ -48,11 +48,31 @@ function realOrResolved(p) {
 }
 const OWNER_HOME = realOrResolved(os.userInfo().homedir);
 let homeRoot = null;
-function runHomeRootDir() {
-  if (!homeRoot) {
-    homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "om-home-" + process.pid + "-"));
-    process.on("exit", () => fs.rmSync(homeRoot, { recursive: true, force: true }));
+let runRoot = null;
+let runRootExitRegistered = false;
+/**
+ * Issue 154: one per-process run root, `om-run-<pid>-XXXXXX` under
+ * `os.tmpdir()`, holding every `tempRoot()` directory. The single exit
+ * listener removes it recursively; the `try/catch` is load-bearing because a
+ * throw inside an exit handler turns a green run into exit code 1.
+ */
+export function tempRoot(prefix) {
+  if (typeof prefix !== "string" || prefix.length === 0 || prefix.includes(path.sep)) {
+    throw new TypeError("tempRoot: prefix must be a non-empty string without a path separator");
   }
+  runRoot ??= fs.mkdtempSync(path.join(os.tmpdir(), "om-run-" + process.pid + "-"));
+  if (!runRootExitRegistered) {
+    runRootExitRegistered = true;
+    process.on("exit", () => {
+      try {
+        fs.rmSync(runRoot, { recursive: true, force: true });
+      } catch {}
+    });
+  }
+  return fs.mkdtempSync(path.join(runRoot, prefix));
+}
+function runHomeRootDir() {
+  homeRoot ??= tempRoot("om-home-");
   return homeRoot;
 }
 /** Explicit HOME for a caller-owned temp dir (the four sites that bypass runDriver). */

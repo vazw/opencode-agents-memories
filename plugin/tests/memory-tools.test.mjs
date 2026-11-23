@@ -8,7 +8,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,6 +28,7 @@ import {
   runDriver,
   stagePackageTree,
   stageStubEngine,
+  tempRoot,
 } from "./harness/bridge.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -1169,7 +1169,7 @@ test(
   "test_tool_call_reaches_the_engine_as_recall",
   { timeout: 60000 },
   async (t) => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "memory-tools-"));
+    const tmp = tempRoot("memory-tools-");
     const pkgDir = stagePackageTree(tmp);
     const requestLogPath = path.join(tmp, "wire.log");
     const manifestPath = path.join(tmp, "stub.json");
@@ -1216,7 +1216,7 @@ test(
   "test_memory_tool_call_reaches_the_engine_as_the_routed_methods",
   { timeout: 60000 },
   async (t) => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "memory-tool-e2e-"));
+    const tmp = tempRoot("memory-tool-e2e-");
     const pkgDir = stagePackageTree(tmp);
     const requestLogPath = path.join(tmp, "wire.log");
     const manifestPath = path.join(tmp, "stub.json");
@@ -1427,7 +1427,7 @@ test(
   "test_memory_tool_surfaces_the_wire_reason_over_the_bridge",
   { timeout: 60000 },
   async (t) => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "memory-tool-e2e-"));
+    const tmp = tempRoot("memory-tool-e2e-");
     const pkgDir = stagePackageTree(tmp);
     const requestLogPath = path.join(tmp, "wire.log");
     const manifestPath = path.join(tmp, "stub.json");
