@@ -10,14 +10,88 @@
 
 pub mod capture;
 
+use mem_store::platform::{ProcessProbe, SystemProcessProbe};
 use std::path::PathBuf;
+use std::sync::Once;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::SystemTime;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+// ---------------------------------------------------------------------------
+// One-time dead-pid sweep of our own temp namespace (issue 154)
+// ---------------------------------------------------------------------------
+
+/// Minimum age before the sweep may remove a dead owner's directory. Must
+/// outlive every per-step fixture-child bound (60 s handshakes, 120 s probe,
+/// and a child may chain several steps); 900 s is 7.5x the largest of them.
+const SWEEP_MIN_AGE: Duration = Duration::from_secs(900);
+
+/// One flat sweep of `std::env::temp_dir()` per calling test binary.
+static SWEPT: Once = Once::new();
+
+/// `Some(pid)` iff `name` is `mem-store-w12-<prefix>-<pid>-<counter>-<nanos>`
+/// with a non-empty prefix and three numeric tail fields. Parsed from the
+/// **right**, so a prefix containing digits or hyphens cannot shift the pid.
+fn dead_pid_from_name(name: &str) -> Option<u32> {
+    let rest = name.strip_prefix("mem-store-w12-")?;
+    let mut fields = rest.rsplit('-');
+    fields.next()?.parse::<u64>().ok()?; // nanos
+    fields.next()?.parse::<u64>().ok()?; // counter
+    let pid = fields.next()?.parse::<u32>().ok()?;
+    if fields.next()?.is_empty() {
+        return None;
+    }
+    Some(pid)
+}
+
+/// Best-effort removal of over-age `mem-store-w12-*` directories whose owning
+/// pid is gone. Never panics, never prints: every failure is a `continue`.
+/// Off Linux (and on a host without procfs) `is_alive` answers `true`, so the
+/// sweep removes nothing rather than everything.
+fn sweep_dead_pid_dirs(base: &Path) {
+    let probe = SystemProcessProbe;
+    let Ok(entries) = std::fs::read_dir(base) else {
+        return;
+    };
+    for entry in entries {
+        let Ok(entry) = entry else { continue };
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        let Some(pid) = dead_pid_from_name(name) else {
+            continue;
+        };
+        if pid == std::process::id() {
+            continue; // our own live dirs
+        }
+        if probe.is_alive(pid) {
+            continue; // never touch a live owner
+        }
+        let Ok(metadata) = entry.path().symlink_metadata() else {
+            continue;
+        };
+        if !metadata.is_dir() {
+            continue; // never follow a symlink
+        }
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+        let Ok(age) = SystemTime::now().duration_since(modified) else {
+            continue;
+        };
+        if age < SWEEP_MIN_AGE {
+            continue; // age rail
+        }
+        let _ = std::fs::remove_dir_all(entry.path());
+    }
+}
 
 /// Unique temp directory under `std::env::temp_dir()` (never the user home,
 /// never a shared path): `{temp}/mem-store-w12-{pid}-{counter}-{nanos}`.
 pub fn temp_dir(prefix: &str) -> PathBuf {
+    SWEPT.call_once(|| sweep_dead_pid_dirs(&std::env::temp_dir()));
     let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
