@@ -1,6 +1,6 @@
 # 155 — a failed or empty refresh deletes the cached block, so one bad inject costs the session its memory for a turn
 
-Status: needs-triage — 2026-11-19 (defect named by issue 150's plan gate; the fix is an adapter change, and whether stale-but-working beats absent is a product call)
+Status: done — 2026-11-24 (landed in the 152+155 adapter wave)
 
 *(Filed from `GATE: REJECTED` on `blueprint-20261119-0026-issue-150-refresh-rule-r1.md`, required modification 7. Issue 150's criterion 12 pins the current loss so the fix will flip it.)*
 
@@ -62,3 +62,7 @@ If a live `first`-mode child whose turn-0 inject fails still renders a block on 
 replays an earlier message, or the adapter's delete happens after the call), then the delete-before-call reading above
 is wrong and this closes as measurement. The observation to run: stub `"silent"` at turn 0 and read the `context`
 hook's argument — which is exactly what `test_refresh_rule_lost_block_reinjects_next_prompt` does offline.
+
+## Outcome — landed 2026-11-24
+
+Adapter wave with issue 152/155: a refresh keeps a block the engine could not replace, and shell lifecycle rows carry a pid and its probed state. Ledger under `.tmp/progress/`.

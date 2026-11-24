@@ -1,6 +1,6 @@
 # 152 — true background-shell liveness needs a host capability the wrapper does not have
 
-Status: ready-for-agent — 2026-11-24 (tier 1 measured: both questions YES — shell lifecycle events and a PID are delivered; implementation brief below. Tier-2 residuals (a)(b) need one host restart)
+Status: done — 2026-11-24 (landed in the 152+155 adapter wave)
 
 *Scope note. Issue 149 decision 4 reports the last shell **action** and refuses to claim liveness; 146 records liveness as
 a known limit. This issue asks what capability a true liveness answer would need, and what would have to be measured to
@@ -206,3 +206,7 @@ why Q2 mattered.
 - Out of scope unchanged: 149's action line, any API or config key design, `plugin/dist/` by hand
   (the dist-sync gate owns it).
 
+
+## Outcome — landed 2026-11-24
+
+Adapter wave with issue 152/155: a refresh keeps a block the engine could not replace, and shell lifecycle rows carry a pid and its probed state. Ledger under `.tmp/progress/`.
