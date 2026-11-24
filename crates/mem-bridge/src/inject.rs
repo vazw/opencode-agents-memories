@@ -481,23 +481,18 @@ impl InjectService {
             .max_memories
             .or_else(|| chat_policy.and_then(|p| p.max_memories));
 
-        // 2a. The requesting session's own action lines (issue 149). Filtered
-        // by `session_id` and the age cutoff, deliberately NOT by
-        // `excluded_session`: that flag means "do not repeat my history", not
-        // "do not remind me where I am". Ceilings, both pinned by tests: the
-        // row is found only inside `recent_raw` (the newest `2 × recent_count`
-        // project rows), and a row older than the age cutoff is dropped.
-        // ponytail: a dedicated session-keyed read would lift the row-window
-        // ceiling; add it when a child can outlast ten newer project rows.
+        // 2a. The requesting session's own action lines (issue 149). Read by
+        // `(project_id, session_id)`, deliberately NOT by `excluded_session`:
+        // that flag means "do not repeat my history", not "do not remind me
+        // where I am". The age cutoff does not apply either: it bounds
+        // history, while this row is the agent's own position. One row feeds
+        // the section (`action_row`), and its ids (`<row>#<index>`) never enter
+        // the row-level `seen` set.
         let current_actions: Vec<Candidate> = match params.session_id.as_deref() {
-            Some(current) if !current.is_empty() => recent_raw
-                .iter()
-                .filter(|row| {
-                    row.session_id == current
-                        && !age_cutoff.is_some_and(|cutoff| row.created_at < cutoff)
-                })
-                .flat_map(action_candidates)
-                .collect(),
+            Some(current) if !current.is_empty() => {
+                let rows = self.read_session_rows(project_id, current).await?;
+                action_row(&rows).map(action_candidates).unwrap_or_default()
+            }
             _ => Vec::new(),
         };
 
@@ -922,6 +917,19 @@ impl InjectService {
             .map_err(store_error)
     }
 
+    /// Every live row of the requesting session (issue 149): one per agent,
+    /// newest first. Store errors go through `store_error` like `read_recent`.
+    async fn read_session_rows(
+        &self,
+        project_id: &str,
+        session_id: &str,
+    ) -> Result<Vec<AgentSession>, InjectError> {
+        self.store
+            .sessions_for_session(project_id, session_id)
+            .await
+            .map_err(store_error)
+    }
+
     /// The tier-1 leg's availability: the shared flag OR any live
     /// operation/legacy lock → skip.
     fn tier1_leg_available(&self) -> bool {
@@ -1212,6 +1220,18 @@ fn action_candidates(row: &AgentSession) -> Vec<Candidate> {
             })
         })
         .collect()
+}
+
+/// The one row that feeds `## Recent actions` for a session (issue 149): the
+/// newest row carrying actions, so an empty newer row cannot mask an older
+/// one, and several rows cannot multiply the section past `MAX_RECENT_ACTIONS`.
+// `rustfmt::skip`: the guard line is pinned by the issue-149 mutation anchor
+// (the `recent_actions` emptiness filter, one statement line); rustfmt's chain
+// width would split it.
+#[rustfmt::skip]
+fn action_row(rows: &[AgentSession]) -> Option<&AgentSession> {
+    let carrying = rows.iter().filter(|row| !row.metadata.recent_actions.is_empty());
+    carrying.max_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)))
 }
 
 fn recent_line(row: &AgentSession) -> String {

@@ -577,6 +577,43 @@ impl EpisodicStore {
             .collect())
     }
 
+    /// Session-scoped newest-first listing of every live row of one
+    /// `(project_id, session_id)` pair — one row per agent (the upsert key).
+    ///
+    /// Corrupt metadata rows are skipped with a warning, like
+    /// [`list_sessions`](Self::list_sessions). Unbounded on purpose: the pair
+    /// holds one row per agent; add a limit if a producer ever mints more.
+    pub async fn sessions_for_session(
+        &self,
+        project_id: &str,
+        session_id: &str,
+    ) -> Result<Vec<AgentSession>, EpisodicError> {
+        let db = self.ready().await?;
+        let rows = db
+            .query(
+                sql::LIST_SESSION_ROWS,
+                vec![
+                    Value::Text(session_id.to_string()),
+                    Value::Text(project_id.to_string()),
+                ],
+            )
+            .await?;
+        Ok(rows
+            .iter()
+            .filter_map(|row| match row_to_session(row) {
+                Ok(session) => Some(session),
+                Err(error) => {
+                    warn!(
+                        project_id,
+                        error = %error,
+                        "Skipping episodic row with unreadable metadata"
+                    );
+                    None
+                }
+            })
+            .collect())
+    }
+
     /// Deletes one row; `false` when no row matched.
     ///
     /// W4.2 (D-13): one `BatchMode::Write` batch of

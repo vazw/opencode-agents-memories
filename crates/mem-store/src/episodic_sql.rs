@@ -314,6 +314,12 @@ pub const SELECT_SESSION_DETAIL: &str = "SELECT id, capture_id, project_id, sess
 /// Project-scoped newest-first listing (`created_at DESC`, id tie-break).
 pub const LIST_SESSIONS: &str = "SELECT id, capture_id, project_id, session_id, agent_id, parent_session_id, summary, metadata, vector_extract(embedding) AS embedding, created_at, updated_at, deleted_at, orphaned FROM agent_sessions WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ?";
 
+/// Session-scoped newest-first listing: every live row of one
+/// `(project_id, session_id)` pair — one per agent — with `LIST_SESSIONS`'
+/// column list and the same order. Served by `idx_agent_sessions_session_id`;
+/// unbounded because a session holds one row per agent (issue 149).
+pub const LIST_SESSION_ROWS: &str = "SELECT id, capture_id, project_id, session_id, agent_id, parent_session_id, summary, metadata, vector_extract(embedding) AS embedding, created_at, updated_at, deleted_at, orphaned FROM agent_sessions WHERE session_id = ? AND project_id = ? AND deleted_at IS NULL ORDER BY created_at DESC, id DESC";
+
 /// Project-scoped cosine search, nearest first.
 pub const SEARCH_SESSIONS: &str = "SELECT id, capture_id, project_id, session_id, agent_id, parent_session_id, summary, metadata, vector_extract(embedding) AS embedding, created_at, updated_at, deleted_at, orphaned, vector_distance_cos(embedding, vector32(?)) AS distance FROM agent_sessions WHERE project_id = ? AND deleted_at IS NULL ORDER BY distance ASC, id ASC LIMIT ?";
 
