@@ -1,6 +1,6 @@
 # 161 — the debug inject probe drops the block's first heading, because the block glues it to the open tag
 
-Status: needs-triage — 2026-11-24 (MEASURED; two candidate fixes, one of them a byte-pinned engine change)
+Status: ready-for-human — 2026-11-24 (MEASURED; two candidate fixes, one of them a byte-pinned engine change)
 
 ## The defect
 
@@ -49,3 +49,29 @@ A fix is only proven if a flag-on reading logs a `sections` array containing the
 
 Issue 153's default-off shape stays. The instrument is correct in what it reads; it is the block that hands it a heading
 mid-line.
+
+## Outcome (2026-11-24T13:35Z)
+
+Fix (1) shipped in the engine; the probe was left untouched, as the issue's preference and its "one normaliser" rule
+require.
+
+- `crates/mem-bridge/src/inject.rs` — `render_history_body` pushes `'\n'` after `HISTORY_BLOCK_OPEN`, so the block reads
+  `<project_agent_session_history>\n## …`. The greedy invariant comment moved `emitted = 192 + 64 + Σ(h+1) + Σ(line+1)
+  = used − 1 − 2n <= used`; `fixed_overhead_bytes()` keeps its `+ 2` margin (`used_at_zero = 257` unmoved, so the
+  accepted row set cannot change).
+- `crates/mem-bridge/tests/capture_inject_e2e.rs` — positive/negative body-shape pair on the real JSON-RPC inject
+  block: `contains("<project_agent_session_history>\n## ")` and `!contains("<project_agent_session_history>## ")`. RED
+  before the engine change at `:262` with the glued block printed; GREEN after.
+- `crates/mem-bridge/tests/inject_budget.rs` — the one exact-length pin moved `474 → 475` (arithmetic comment
+  `192 + 64 + 19 + 2×100 = 475`). RED was taken UNEDITED straight after the engine change: `left: 475`, `right: 474`.
+- Gates: `cargo test -p mem-bridge` exit 0, 0 failed; `cargo fmt --all --check` exit 0; both `AGENTS.md` clippy gates
+  exit 0 with no output; `cd plugin && node --test tests/*.test.mjs` 271/271; `node --test tests/dist-sync.test.mjs`
+  2/2. `git diff --stat` touches no `plugin/` path, so no bundle rebuild.
+- Deployment: engine rebuilt (`cargo build --release`), `plugin/engine/linux-x64/opencode-agents-memory` replaced
+  (`33b5c73e1a094498…` → `115bfb382d914b48…`). `plugin/scripts/stage-engine.sh` stopped at `cp` with `Text file busy`
+  because the running host holds the staged binary; the built release binary was installed with an atomic `mv` instead,
+  and the staged UI bundle was moved aside to `.tmp/staged-web-ui-dist-20261124-1329` and moved back unchanged.
+
+Live confirmation still needs the owner's restart with `OPENCODE_MEM_DEBUG_INJECT=1`: only then can a flag-on
+`inject.received` show `sections` beginning with the block's first heading. Re-reading the existing log proves nothing
+about this build.
