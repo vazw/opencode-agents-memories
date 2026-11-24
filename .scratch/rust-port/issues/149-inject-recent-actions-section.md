@@ -1,6 +1,8 @@
 # 149 — engine inject block: a `## Recent actions` section (the M1 floor)
 
-Status: ready-for-human — implementation landed; closure is the owner-run render capture plus a post-restart reading of recent-action-delivered
+Status: ready-for-agent — 2026-11-24 (the "owner render capture" closure condition is superseded by a MEASURED
+starvation defect: the section's data exists and the heading still never renders — see "Measured 2026-11-24" below. Not
+an owner verification task; it is a build task.)
 
 *(Spun out of issue 146 after a grilling session. 146 asked only for a background-shell section; the grilling found the
 shell line and the recent-action line are the same data and the same mechanism, so they are one section. `plugin/`,
@@ -123,3 +125,65 @@ scope rather than as an untracked edit.
 invalidation lands, the child is seeing the `context`-hook replay rather than a refresh, and the section belongs
 on the compaction leg (the `experimental.session.compacting` output pushed onto `event.system` at
 `adapter.js:99-106`) instead of the prompt path.
+
+---
+
+## Measured 2026-11-24 — the section is starved, not missing
+
+Read after the host restart at `13:50:17` with `OPENCODE_MEM_DEBUG_INJECT` live, so the block's own heading list is now
+logged on every injection. This is the reading the issue was waiting on, and it is negative.
+
+**The log.** Across every flag-on `inject.received` in `~/.opencode-mem/opencode-mem.log`, the distinct `sections`
+arrays seen are:
+
+```
+sections=["Recent sessions"]
+sections=["Captured session summaries","Recent sessions"]
+sections=["Project facts","Captured session summaries","Recent sessions"]
+sections=["Captured session summaries"]
+```
+
+Three headings total, and `Recent actions` appears in none of them. The inject builder declares five
+(`crates/mem-bridge/src/inject.rs:87-91`: `Project facts`, `Captured session summaries`, `Recent sessions`,
+`Related older sessions`, `Recent actions`), so two of the five never render.
+
+**Why the heading is dropped.** `action_candidates` (`:1198`) maps `row.metadata.recent_actions` into candidates, so an
+empty list means no heading. The row it reads is chosen at `:492-501`: the requesting session's own row, but only from
+`recent_raw` — the newest `2 × recent_count` project rows — and only when it clears the age cutoff at `:497`. The
+`ponytail:` note at `:490` already names the upgrade: "a dedicated session-keyed read would lift the row-window ceiling".
+
+**The data is there.** Read-only on `~/.opencode-mem/data/episodic.db` (`immutable=1`):
+
+```
+agent_sessions rows:                          1369
+rows with non-empty recentActions:             115   (83 of them at the 8-line cap)
+this session's own row:                          1   recentActions = 5
+rows newer than that row:                      482
+```
+
+So the capture path is alive and this session has five recorded actions — and it sits 482 rows outside the window,
+because every gate, coder and reviewer subagent writes a newer row. The absence is starvation, not an empty-data
+omission and not a missing implementation.
+
+**Second ceiling, same wave.** The age cutoff at `:497` is independent of the window. Fixing the window alone could
+still leave this row dropped, so both are settled together, and the wave reports which one bit.
+
+## The fix
+
+A session-keyed read by `(project_id, session_id)` instead of a scan of `recent_raw`, so a session's own actions are
+found regardless of how many rows its subagents wrote. `idx_agent_sessions_session_id` exists, so the read is indexed;
+the window was a micro-optimisation guarding against a read the schema already serves. The age cutoff is decided in the
+same wave, with its behaviour stated rather than inherited.
+
+Deployment note for whoever plans it: this is `crates/mem-bridge`, so it needs an engine rebuild and
+`plugin/scripts/stage-engine.sh`, then a host restart. It cannot ride a plugin-only reload — unlike issues 152, 151 and
+155, which are `plugin/src/v2/adapter.js` changes. Do not batch it into a plugin-only restart and then read its absence
+as a failure.
+
+**Inverted world.** If the session-keyed read lands and a session with recorded actions still logs no `Recent actions`
+heading, the omission is downstream of row selection — check the `max_memories` exemption at `:684`, the row-level
+`seen` dedupe, and the `included.is_empty()` early return at `:692` — and this issue is reopened on that finding rather
+than on the window.
+
+**What this unblocks.** Issue 156 (recent-action lines losing the tool name) can only be observed when the section
+renders, so 156 shares this blocker and closes after it.
