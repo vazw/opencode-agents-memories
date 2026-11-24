@@ -1,8 +1,8 @@
 # 149 — engine inject block: a `## Recent actions` section (the M1 floor)
 
-Status: done — 2026-11-24T09:43Z (session-keyed actions read; engine staged sha256 33b5c73e1a094498; host restart pending, owner) — 2026-11-24 (the "owner render capture" closure condition is superseded by a MEASURED
-starvation defect: the section's data exists and the heading still never renders — see "Measured 2026-11-24" below. Not
-an owner verification task; it is a build task.)
+Status: done and verified live — 2026-11-24T18:29 local (fix `8f34546`; engine `33b5c73e1a094498` running as pid
+`14629`; both post-restart injections carry `## Recent actions` — see "Live verification" at the end. The earlier
+"owner render capture" closure condition was superseded by a MEASURED starvation defect, see "Measured 2026-11-24".)
 
 *(Spun out of issue 146 after a grilling session. 146 asked only for a background-shell section; the grilling found the
 shell line and the recent-action line are the same data and the same mechanism, so they are one section. `plugin/`,
@@ -215,3 +215,33 @@ tests, M4/M8 controls still red, gates green, production hunks byte-identical to
 **One step remains, and it is the owner's:** restart the host so the staged engine (`33b5c73e1a094498`) loads, then
 read one `inject.received` line for `sections` containing `Recent actions`. That reading also unblocks issue 156,
 whose tool-name defect can only be observed once the section renders.
+
+## Live verification — the section renders (2026-11-24T18:29 local)
+
+Owner restarted at `18:29:15`. Host `14558`, engine `14629`, and `/proc/14629/exe` hashes to `33b5c73e1a094498` — the staged
+binary that carries this fix.
+
+The reading the issue was blocked on, from `~/.opencode-mem/opencode-mem.log`:
+
+```
+line 918  18:29:24  session ses_e9d5dd698f (this session, the witness)
+          block_prefix: "<memory_context>\n…<project_agent_session_history>## Recent actions\nshell:…"
+line 920  18:29:34  session ses_e8839ef3ff
+          block_prefix: "…<project_agent_session_history>## Recent actions\nshell:…"
+```
+
+Both post-restart injections begin their history body with `## Recent actions`, and the lines under it are `shell:` actions.
+The witness session is the one measured starved before the fix — its own row carried five actions behind 482 newer rows —
+so this is the fix working on the exact input that defeated the windowed read.
+
+Five readings in total carry `Recent actions` as their first heading. Three of them (`14:09`, `14:37`, `15:22`, session
+`ses_df3bff192f`) predate the restart and came from the old windowed engine: that session is short-lived, so its own row
+was inside the window. They do not weaken the starvation finding; they show the section always worked for a session that
+never spawned subagents, which is exactly what the defect description said.
+
+**One caveat, filed as issue 161:** the `sections` array on those same lines does *not* list `Recent actions`. The block
+glues the first heading to the open tag (`inject.rs:1080` pushes `HISTORY_BLOCK_OPEN` then the heading with no newline),
+and the probe's scanner is line-anchored, so it drops the first heading in all 30 flag-on readings. The block is the
+authority here, not the array; read `block_prefix`.
+
+**Issue 156 is now unblocked** — the tool-name question can be asked of a rendered section.
