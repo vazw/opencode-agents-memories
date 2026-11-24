@@ -1,6 +1,6 @@
 # 161 — the debug inject probe drops the block's first heading, because the block glues it to the open tag
 
-Status: ready-for-human — 2026-11-24 (MEASURED; two candidate fixes, one of them a byte-pinned engine change)
+Status: done and verified live — 2026-11-25 (shipped `cf6d7b1`; running engine `115bfb382d914b48`, post-restart `sections[0]` is the block's first heading)
 
 ## The defect
 

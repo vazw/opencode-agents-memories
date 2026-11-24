@@ -1,6 +1,6 @@
 # 153 — a supported delivery probe: proving an injected block reached the agent is still an ad-hoc ritual
 
-Status: ready-for-human — 2026-11-24 (owner ruling: log on debug so we can inspect; the flag-gated instrument is built and reviewed, and the issue closes on one owner flag-on reading — restart the host with `OPENCODE_MEM_DEBUG_INJECT=1` and read `sections` off an `inject.received` line)
+Status: done — 2026-11-25 (flag-on reading obtained from the live host: flag set in `/proc/<pid>/environ`, 65 `inject.received` lines carry `sections`, the 144 before the cut-over carry none)
 
 *Scope note. Issue 147 records four dead-path defects in the existing probe harness. Issue 148 rewrote the runbook to the
 nonce instrument. This issue asks whether a supported probe belongs in the product at all, which is a different question
@@ -152,3 +152,26 @@ enforced in the fixture harness, not assumed from the caller's environment — a
 cannot redden the privacy assertion.
 Hook option stays struck (refuted 2026-11-19). Blueprint:
 `.tmp/blueprints/blueprint-20261124-0521-issue-153-debug-delivery-log.md`.
+
+## Closure reading, 2026-11-24/25 — the flag-on reading exists
+
+The issue was waiting on one owner reading with the flag on. MEASURED, on the live host:
+
+```
+OPENCODE_MEM_DEBUG_INJECT=1 present in the running host's environment  (/proc/<pid>/environ)
+209 inject.received lines in ~/.opencode-mem/opencode-mem.log
+144 without "sections"   newest 2026-11-24T13:31:56.936+07:00   (flag off)
+ 65 with    "sections"   first 2026-11-24T13:59:04.546+07:00    (flag on)
+                         newest 2026-11-25T00:11:32.713+07:00
+```
+
+The two sets do not interleave: every `inject.received` after `13:59:04` carries both `sections` and
+`block_prefix`, and every one before `13:31:57` carries neither. That is the flag's own pair, measured on one host
+build — absence with the flag off, presence with it on — rather than an inference from an exported flag.
+
+`sections` is ordered and complete as designed: the observed values run from `["Recent sessions"]` alone through
+`["Project facts","Captured session summaries","Recent sessions"]`, including two readings beginning
+`["Recent actions", …]`, which is issue 161's fix visible in the same telemetry.
+
+Scope of the claim: this closes 153's instrument question only. It says nothing about whether the block was
+*delivered*, which is issue 145's nonce instrument, and nothing about section accuracy beyond the headings listed.

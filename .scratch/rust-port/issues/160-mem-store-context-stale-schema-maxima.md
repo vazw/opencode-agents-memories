@@ -1,7 +1,7 @@
 # 160 — two schema maxima in `mem-store`'s CONTEXT.md drifted from the source constants
 
-Status: ready-for-agent — 2026-11-24 (both sides READ; correction is two numerals in one sentence.
-Decide at triage whether this is a direct correction or needs a wave — see "Size" below.)
+Status: done — 2026-11-25 (shipped `1a97781`; `cargo test --test context_docs` passes, repo-wide grep clean. Triage
+ruled it a direct correction rather than a wave — see "Size" below.)
 
 ## The defect
 
