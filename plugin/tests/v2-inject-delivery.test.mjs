@@ -232,7 +232,7 @@ test("test_v2_context_refreshes_only_when_inject_on_says_so", { timeout: 10000 }
   }
 });
 
-async function telemetryCase(t, mode, query) {
+async function telemetryCase(t, mode, query, { block = "<memory_context>BLOCK_SENTINEL_🚀</memory_context>", extraEnv = {} } = {}) {
   const tmp = tempRoot("om-telemetry-");
   const pkgDir = stagePackageTree(tmp);
   const manifestPath = path.join(tmp, "manifest.json");
@@ -242,7 +242,7 @@ async function telemetryCase(t, mode, query) {
   if (mode === "success") {
     fs.writeFileSync(bin, fs.readFileSync(bin, "utf8").replace(
       'block: null, memory_count: 0, tokens: 0, truncated: false, handling_ms: 0',
-      'block: "<memory_context>BLOCK_SENTINEL_🚀</memory_context>", memory_count: 1, tokens: 0, truncated: false, handling_ms: 37'));
+      `block: ${JSON.stringify(block)}, memory_count: 1, tokens: 0, truncated: false, handling_ms: 37`));
   }
   t.after(() => assertReaped(manifestPath));
   const driver = path.join(tmp, "driver.mjs");
@@ -252,9 +252,17 @@ const { server } = await import(pathToFileURL(${JSON.stringify(path.join(pkgDir,
 const { hooks } = await server({ client: {}, directory: "/work/project" });
 await hooks["chat.message"]({ sessionID: "ses-1" }, { message: { parts: [{ type: "text", text: ${JSON.stringify(query)} }] } });
 process.exit(0);`);
-  const run = await runDriver(driver, [], { ...process.env, DRIVER_STORAGE_ROOT: path.join(tmp, "storage") });
+  const run = await runDriver(driver, [], envForDriver(tmp, extraEnv));
   assert.equal(run.code, 0, run.stderr);
   return { raw: run.stderr, events: run.stderr.split("\n").flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } }) };
+}
+
+// The inherited shell may hold the debug flag; absence is ENFORCED here, never
+// assumed, so the flag-off case cannot be flipped red by the caller's env.
+function envForDriver(tmp, extraEnv) {
+  const env = { ...process.env };
+  delete env.OPENCODE_MEM_DEBUG_INJECT;
+  return { ...env, DRIVER_STORAGE_ROOT: path.join(tmp, "storage"), ...extraEnv };
 }
 
 test("test_wrapper_telemetry_requested_and_received_events", async (t) => {
@@ -279,6 +287,41 @@ test("test_wrapper_telemetry_captures_zero_bytes_and_excludes_content", async (t
   const nonempty = await telemetryCase(t, "success", "QUERY_SENTINEL_SECRET");
   assert.equal(nonempty.raw.includes("QUERY_SENTINEL_SECRET"), false);
   assert.equal(nonempty.raw.includes("BLOCK_SENTINEL_"), false);
+});
+
+// Issue 153: the debug-gated delivery echo. Both cases run the real hook, stub
+// engine and log writer; nothing imports the helper, so neither criterion is
+// reachable without the mechanism running.
+const BLOCK = "<memory_context>\n## Project facts\n- f\n## Recent actions\n- ran bash (background): dev\n"
+  + "🚀".repeat(600) + "\n## Captured session summaries\n</memory_context>";
+const SMALL = "<memory_context>ok</memory_context>";
+
+test("test_debug_inject_echo_when_flag_on", async (t) => {
+  const { events } = await telemetryCase(t, "success", "q", { block: BLOCK, extraEnv: { OPENCODE_MEM_DEBUG_INJECT: "1" } });
+  const received = events.find(e => e.event === "inject.received");
+  assert.deepEqual(received.sections, ["Project facts", "Recent actions", "Captured session summaries"]);
+  assert.equal(received.prefix_truncated, true);
+  assert.ok(received.block_prefix.startsWith("<memory_context>\n## Project facts\n"));
+  assert.ok(received.block_prefix.endsWith("…"));
+  assert.equal(received.block_prefix.includes("\uFFFD"), false, "cut on codepoints, never bytes");
+  assert.equal(Array.from(received.block_prefix).length, 513, "512 codepoints plus the ellipsis");
+  assert.equal(received.block_prefix.includes("Captured session summaries"), false, "headings scanned over the whole block");
+  const small = await telemetryCase(t, "success", "q", { block: SMALL, extraEnv: { OPENCODE_MEM_DEBUG_INJECT: "1" } });
+  const smallReceived = small.events.find(e => e.event === "inject.received");
+  assert.equal(smallReceived.prefix_truncated, false);
+  assert.equal(smallReceived.block_prefix, SMALL);
+});
+
+test("test_debug_inject_absent_when_flag_off", async (t) => {
+  const { events } = await telemetryCase(t, "success", "q", { block: BLOCK });
+  const received = events.find(e => e.event === "inject.received");
+  assert.equal("sections" in received, false);
+  assert.equal("block_prefix" in received, false);
+  assert.deepEqual(received, {
+    level: "info", component: "opencode-mem-plugin", event: "inject.received",
+    session_id: "ses-1", block_bytes: Buffer.byteLength(BLOCK), handling_ms: 37,
+    status: "ok", host_contract: "server",
+  });
 });
 
 // AC-11: INTEGRATION CONTROL, not a RED claim. Real wrapper (staged dist) + real

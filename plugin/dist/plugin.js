@@ -257,6 +257,28 @@ export function shortError(err) {
   return text.slice(0, 120);
 }
 
+// Issue 153 (owner ruling 2026-11-24, "log on debug so we can inspect"):
+// with OPENCODE_MEM_DEBUG_INJECT=1 the inject.received line also carries the
+// block's ordered section headings and a bounded prefix. Default off, so the
+// line keeps today's shape exactly. ponytail: 512/20/60 are constants, not
+// config — raise them when a reading needs a longer window.
+const DEBUG_INJECT_PREFIX_CODEPOINTS = 512;
+const DEBUG_INJECT_MAX_SECTIONS = 20;
+
+function debugInjection(block) {
+  if (rawEnv("OPENCODE_MEM_DEBUG_INJECT") !== "1" || typeof block !== "string" || block.length === 0) return null;
+  const sections = [];
+  for (const line of block.split("\n")) {
+    if (sections.length >= DEBUG_INJECT_MAX_SECTIONS) break;
+    if (!line.startsWith("## ")) continue;
+    const heading = line.slice(3).trim();
+    if (heading.length > 0 && heading.length <= 60) sections.push(heading);
+  }
+  const points = Array.from(block);
+  const cut = points.length > DEBUG_INJECT_PREFIX_CODEPOINTS;
+  return { sections, block_prefix: cut ? points.slice(0, DEBUG_INJECT_PREFIX_CODEPOINTS).join("") + "…" : block, prefix_truncated: cut };
+}
+
 // ── engine stderr drain (issue 117) ─────────────────────────────────────
 // The engine writes machine-readable NDJSON on fd 2 (`structured_stderr`:
 // consolidation ticks, capture retry and dead-letter events, degraded notices)
@@ -1417,7 +1439,11 @@ export const server = async function server(input) {
           }
           const block_bytes = block !== null ? Buffer.byteLength(block, "utf8") : 0;
           const handling_ms = typeof result?.handling_ms === "number" ? result.handling_ms : 0;
-          writeStructured("info", "inject.received", { session_id, block_bytes, handling_ms, status: block_bytes > 0 ? "ok" : "empty", host_contract: hostContract });
+          const received = { session_id, block_bytes, handling_ms, status: block_bytes > 0 ? "ok" : "empty", host_contract: hostContract };
+          if (typeof output?.turnIndex === "number") received.turn_index = output.turnIndex;
+          const debug = debugInjection(block);
+          if (debug !== null) Object.assign(received, debug);
+          writeStructured("info", "inject.received", received);
         } catch (err) {
           writeStructured("info", "inject.received", { session_id, block_bytes: 0, handling_ms: 0, status: "error", host_contract: hostContract });
           logWarn("inject.failed", { message: shortError(err) });
