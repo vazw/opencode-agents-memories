@@ -1,6 +1,6 @@
 # 156 — live recent-action lines all read `unknown: <input>`, because the V2 host names a tool part `name`, not `tool`
 
-Status: ready-for-human — 2026-11-19 (FIXED on main at `bd477b2`, merged from `d684da0`; blueprint `blueprint-20261119-1119-issue-156-and-150-observability-r4.md`, gate-approved at `cd6843f1c9f0`; handoff and review are in `.tmp/progress/`, counts there as measured output. Rows captured before the fix keep their `unknown:` lines — no migration. Live confirmation needs one capture after the host reloads the plugin, i.e. the next restart.)
+Status: done — verified live 2026-11-24T18:29 local (FIXED on main at `bd477b2`, merged from `d684da0`; blueprint `blueprint-20261119-1119-issue-156-and-150-observability-r4.md`, gate-approved at `cd6843f1c9f0`; handoff and review are in `.tmp/progress/`, counts there as measured output. Rows captured before the fix keep their `unknown:` lines — no migration. The post-restart capture now shows real tool names — see "Live confirmation" at the end.)
 
 *(Filed from the live post-restart verification of the staged build `5a4622b05f6ad62d…` on 2026-11-19 ~14:31 +07. Issue 149 shipped the section; the V1 harness cannot see this because it feeds the V1 part shape.)*
 
@@ -75,3 +75,21 @@ Both shapes then work: V1 fixtures keep their `tool`, the live host supplies `na
 The one-line change is trivial; closing it as a silent edit is not. It alters what every captured action line says,
 `plugin/dist/plugin.js` must stay byte-identical to `src`, and the harness needs a V2-shaped fixture or the fix ships
 unwatched — the exact failure this issue exists to name.
+
+## Live confirmation — 2026-11-24T18:29 local
+
+The restart this issue was waiting on happened (`18:29:15`, engine `33b5c73e1a094498`). Action lines now carry real tool
+names, read from the two post-restart `inject.received` blocks:
+
+```
+line 918  session ses_e9d5dd698f
+  shell: command: "cd /home/opencode/Code/Personal/Rust/opencode-agents-memory && set -e && git add crates/me..."
+  memory: content: "DECISION (issue 149 wave, shipped 8f34546, 2026-11-24): ..."
+  read: path: "/home/opencode/Code/Pers…"
+line 920  session ses_e8839ef3ff
+  shell: command: "cd /home/opencode/Code/Personal/JS/opencode && R=.tmp/progress/20261124-0527-fork-sync-v24..."
+```
+
+No `unknown:` in either block. `bd477b2` is confirmed at the first token, which is what the issue asked for.
+
+Rows captured before the fix keep their `unknown:` lines, as the status said — no migration was promised and none is due.
