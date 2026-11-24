@@ -1,6 +1,6 @@
 # 153 — a supported delivery probe: proving an injected block reached the agent is still an ad-hoc ritual
 
-Status: needs-info — 2026-11-19 (hook premise refuted by measurement; one owner scope call remains — keep the nonce ritual, or log a bounded block prefix behind a debug flag. Not build work until that call is made.)
+Status: ready-for-human — 2026-11-24 (owner ruling: log on debug so we can inspect; the flag-gated instrument is built and reviewed, and the issue closes on one owner flag-on reading — restart the host with `OPENCODE_MEM_DEBUG_INJECT=1` and read `sections` off an `inject.received` line)
 
 *Scope note. Issue 147 records four dead-path defects in the existing probe harness. Issue 148 rewrote the runbook to the
 nonce instrument. This issue asks whether a supported probe belongs in the product at all, which is a different question
@@ -139,3 +139,16 @@ elaboration of the ritual captures much of this issue's value either (0.59 mass 
 **Inverted world, unchanged and now the deciding observation.** If the host persists the injected block in a readable row
 in a live run, both options are moot and this closes as measurement. 145 Trap A measured that absence for current
 sessions; a live re-read after the 149 host restart is the cheap confirmation.
+
+### Owner ruling — 2026-11-24
+
+"log on debug so we can inspect". Option 2 of the two survivors. Instrument:
+`OPENCODE_MEM_DEBUG_INJECT=1` adds `sections`, `block_prefix`, `prefix_truncated` to
+`inject.received`; default off. The pinned content-free test
+`test_wrapper_telemetry_captures_zero_bytes_and_excludes_content`
+(`plugin/tests/v2-inject-delivery.test.mjs:280`, exact `deepEqual` at `:283`) keeps its body
+untouched; the file gains the flag-on and flag-off cases beside it. Default-off absence is
+enforced in the fixture harness, not assumed from the caller's environment — an exported flag
+cannot redden the privacy assertion.
+Hook option stays struck (refuted 2026-11-19). Blueprint:
+`.tmp/blueprints/blueprint-20261124-0521-issue-153-debug-delivery-log.md`.
