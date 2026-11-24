@@ -1,6 +1,6 @@
 # 152 — true background-shell liveness needs a host capability the wrapper does not have
 
-Status: ready-for-agent — 2026-11-19 (tier-1 host read is executable now; tier-2 live instrument needs owner approval)
+Status: ready-for-agent — 2026-11-24 (tier 1 measured: both questions YES — shell lifecycle events and a PID are delivered; implementation brief below. Tier-2 residuals (a)(b) need one host restart)
 
 *Scope note. Issue 149 decision 4 reports the last shell **action** and refuses to claim liveness; 146 records liveness as
 a known limit. This issue asks what capability a true liveness answer would need, and what would have to be measured to
@@ -154,6 +154,55 @@ open or answers yes:
 - Any change to 149's action line. 146 records liveness as a known limit; the line stays a history statement until a
   source exists.
 - Designing an API, a config key or an engine field. Tier 1 answers yes/no; a design needs a measured yes.
-- `plugin/dist/`. Tier 1 writes no repo file at all.
+- `plugin/dist/`. Tier 1 writes no code or config file — only its findings file under `docs/evidence/`.
 - Any PID-based liveness on non-Linux hosts. `observe_process` is `#[cfg(target_os = "linux")]`; on other targets there
   is no instrument, and saying so is part of the answer.
+
+## Outcome — tier 1 measured 2026-11-24
+
+Full findings with commands and verbatim output: `docs/evidence/issue-152-host-capability/README.md`.
+
+- **Q1: YES.** The host publishes `shell.created` / `shell.exited` / `shell.deleted`
+  (`packages/schema/src/shell.ts:58-60`, published from `packages/core/src/shell.ts:473` / `:1079`),
+  they are in the client's subscribable union (`packages/client/src/promise/generated/types.ts:4546-4547`),
+  and **this wrapper already subscribes to the whole bus** —
+  `plugin/src/v2/adapter.js:131` `ctx.event.subscribe({ signal })`, forwarding every event to the
+  legacy `event` hook, which drops all but `session.compacted`. Also available: a shell pre-create
+  hook (`packages/core/src/shell.ts:904`, payload command/cwd/timeout/shell/env, no id, no pid) and
+  tool hooks `execute.before` / `execute.after` (`packages/plugin/src/promise/tool.ts:44-77`,
+  triggered at `packages/core/src/tool.ts:129`/`:168`/`:180`).
+- **Q2: YES.** `Shell.Info.pid` (`packages/schema/src/shell.ts:49`), set at
+  `packages/core/src/shell.ts:976` / `:466`; `shell.created` carries the whole `Info`, so the pid
+  arrives with creation. That is exactly `observe_process`'s input (`crates/mem-store/src/platform.rs:345`).
+- **The triage premise is refuted.** `tool.execute.before` / `tool.execute.after` do not exist in the
+  running host at all (absent from the v2.3.2 binary and from its source outside v1 docs); the live
+  wrapper reports `"host_contract":"setup"`. The question was asked in v1 spelling.
+
+**Consequence.** 149's refusal to claim liveness is now a choice, not a capability limit. 146's limit
+line stands until the implementation lands, because nothing is recorded yet.
+
+**Residuals — tier 2, one host restart, owner's word.** Each is one logged line:
+
+- (a) whether `ephemeral` events reach a plugin subscriber, not only the UI data reducer.
+  Fallback if they do not: `shell.list` over the API (a poll, not an event).
+- (b) whether `pid` is populated for the background shells this wrapper itself starts.
+
+**Named limit (not a residual).** A SIGKILLed shell publishes no `shell.exited` — the host never sees
+the exit. The pid from `shell.created` plus `observe_process` is the answer for that case, which is
+why Q2 mattered.
+
+### Implementation brief — for the planner, not a design
+
+- Subscribe is already open: extend the branch in `plugin/src/v2/adapter.js` (or the legacy `event`
+  hook it feeds) to record `shell.created` (id, pid, command, cwd) and `shell.exited`
+  (id, exit, status) instead of adding a second subscription.
+- Carrying the fact to a resumed child needs a store field the capture path can write
+  (`crates/mem-bridge/src/capture.rs`); no schema decision is made here.
+- Liveness verification is `observe_process(pid)` (`crates/mem-store/src/platform.rs:345`), Linux
+  only; elsewhere the record states "reported by host", never "alive".
+- Evidence for the blueprint's gate: a probe with a background shell that exits cleanly and one that
+  is killed — the exited record must appear for the first and the pid check must answer for the
+  second. Start-only recording is not liveness and must fail the gate.
+- Out of scope unchanged: 149's action line, any API or config key design, `plugin/dist/` by hand
+  (the dist-sync gate owns it).
+
