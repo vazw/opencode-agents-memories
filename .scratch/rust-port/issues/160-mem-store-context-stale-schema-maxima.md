@@ -56,3 +56,38 @@ Either way the acceptance is the same and is grep-able: every numeral in that se
 - Correcting the two numerals does not prevent the third drift. Nothing reds when a `CONTEXT.md`
   numeral goes stale, and no mechanism is proposed here; the project's answer to that class is the
   `CONTEXT.md` per-crate review, not a test.
+
+## Corrected directly — 2026-11-24 (triage: doc-only, no wave)
+
+Took the direct path: both `file:line` anchors were already READ, the acceptance is a grep, and a planner/gate/coder
+round over two numerals would cost more than the edit. Re-reading the sentence as the issue asked turned up **two more
+drifts of the same class** in the same sentence, so the edit is four changes rather than two:
+
+| correction | what the sentence said | what the source says |
+|---|---|---|
+| shard maximum | `MEMORY_SHARD_MAX_KNOWN = 3` | `= 4` — `schema_migrations.rs:74` |
+| episodic maximum | `EPISODIC_MAX_KNOWN = 7` | `= 8` — `schema_migrations.rs:78` |
+| episodic legs | "v6 and v7 are applied by `apply_episodic_schema`" | v6, **v7 and v8** — the v8 leg is at `:725-737`, gated `max_known >= 8`, and stamps `user_version = 8` |
+| the "every set" list | four constants | five — `USER_PROFILES_MAX_KNOWN = 2` (`:72`) goes through the same `apply_schema_migrations` runner with `max_known: USER_PROFILES_MAX_KNOWN` at `crates/mem-profile/src/profile_store.rs:670` |
+
+The third is worth naming separately: the sentence's parenthetical is not decoration, it explains *why* the maximum is
+not derived from the migration slice. Leaving it saying "v6 and v7" while the maximum reads 8 would have been a correct
+numeral inside a false explanation — the exact shape that reads as verified because a nearby figure is right.
+
+The fourth makes the sentence's own claim ("every set carries its maximum") true; the list omitted one set that does.
+
+**Verified after the edit**, all five sentences numerals against source:
+
+```
+METADATA_MAX_KNOWN        ctx = 2  src = 2
+USER_PROMPTS_MAX_KNOWN    ctx = 4  src = 4
+MEMORY_SHARD_MAX_KNOWN    ctx = 4  src = 4
+EPISODIC_MAX_KNOWN        ctx = 8  src = 8
+USER_PROFILES_MAX_KNOWN   ctx = 2  src = 2
+```
+
+`cargo test --test context_docs` passes. A repo-wide grep for the two old restatements now matches only this issue's own
+table, the issue-159 review note, and gitignored scratch copies — no tracked doc restates them.
+
+**Not touched, deliberately:** `crates/mem-store/tests/prompt_tombstone_schema.rs`, the opposite-policy tripwire that
+must red on a legless constant bump.
