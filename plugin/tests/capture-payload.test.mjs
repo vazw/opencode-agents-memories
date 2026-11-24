@@ -846,14 +846,14 @@ test("test_idle_capture_names_a_v2_tool_part_by_its_name", { timeout: 30000 }, a
 // live pid, and the note reaches the captured action line.
 // ---------------------------------------------------------------------------
 
-function shellTurn(command) {
+function shellTurn(command, tool = "shell") {
   return [
     { info: { id: "u1", role: "user" }, parts: [{ type: "text", text: "start the dev server" }] },
     {
       info: { id: "a1", role: "assistant" },
       parts: [
         { type: "text", text: "started" },
-        { type: "tool", tool: "shell", state: { status: "completed", input: { command } } },
+        { type: "tool", tool, state: { status: "completed", input: { command } } },
       ],
     },
   ];
@@ -954,8 +954,8 @@ test("test_shell_exited_event_beats_a_live_pid", { timeout: 30000 }, async (t) =
 test("test_shell_note_reaches_the_captured_action_line", { timeout: 30000 }, async (t) => {
   // The wire criterion. The note rides the row's FRONT: the engine renders
   // `name: input` and clamps the whole line from its END, so a note appended
-  // after the command can be cut while a prefix survives. (The row join itself
-  // matches the clamped 100-char tool input, so the command stays inside it.)
+  // after the command can be cut while a prefix survives. (The fixture's command
+  // is under the cap, so the clamp never runs.)
   const run = await runCapture(t, {
     ...caseA(),
     sessions: { "ses-A": { agent: "build" } },
@@ -977,6 +977,73 @@ test("test_shell_note_reaches_the_captured_action_line", { timeout: 30000 }, asy
     call.input.endsWith('command: "npm run dev"'),
     true,
     "the row's existing text is unchanged behind the stamp"
+  );
+});
+
+test("test_shell_note_reaches_a_command_longer_than_the_cap", { timeout: 30000 }, async (t) => {
+  // Issue 163: the live defect. Real commands are long (median 529 bytes over the
+  // 320 post-restart samples), so the note must survive the 100-byte input clamp:
+  // the match needs the untruncated command, and the note is a prefix that both
+  // clamps cut from the end.
+  const command = "npm run dev -- " + "x".repeat(1128);
+  const run = await runCapture(t, {
+    ...caseA(),
+    sessions: { "ses-A": { agent: "build" } },
+    messages: { "ses-A": shellTurn(command) },
+    events: [
+      { type: "shell.created", info: shellInfo("sh-f", { sessionID: "ses-A", pid: process.pid, command }) },
+      { type: "session.idle", sessionID: "ses-A" },
+    ],
+    expectCaptures: 1,
+    expectEvent: null,
+  });
+  const call = shellRow(run, "ses-A")[0];
+  assert.equal(
+    call.input.startsWith(`[pid ${process.pid}, alive at capture] command: `),
+    true,
+    "a command longer than the input cap still carries the note"
+  );
+});
+
+test("test_shell_note_skips_a_non_shell_tool", { timeout: 30000 }, async (t) => {
+  // Issue 163 guard: only shell/bash rows are candidates, even when the tool's
+  // own input holds the live shell's command byte for byte.
+  const run = await runCapture(t, {
+    ...caseA(),
+    sessions: { "ses-A": { agent: "build" } },
+    messages: { "ses-A": shellTurn("npm run dev", "grep") },
+    events: [
+      { type: "shell.created", info: shellInfo("sh-g", { sessionID: "ses-A", pid: process.pid, command: "npm run dev" }) },
+      { type: "session.idle", sessionID: "ses-A" },
+    ],
+    expectCaptures: 1,
+    expectEvent: null,
+  });
+  assert.deepEqual(
+    shellRow(run, "ses-A"),
+    [{ name: "grep", input: 'command: "npm run dev"' }],
+    "a non-shell tool is never stamped"
+  );
+});
+
+test("test_shell_note_skips_a_shell_with_no_matching_command", { timeout: 30000 }, async (t) => {
+  // Issue 163 guard: a recorded shell names a DIFFERENT command, so the row is
+  // untouched — the note is a claim about the command the row actually ran.
+  const run = await runCapture(t, {
+    ...caseA(),
+    sessions: { "ses-A": { agent: "build" } },
+    messages: { "ses-A": shellTurn("npm run build") },
+    events: [
+      { type: "shell.created", info: shellInfo("sh-h", { sessionID: "ses-A", pid: process.pid, command: "npm run dev" }) },
+      { type: "session.idle", sessionID: "ses-A" },
+    ],
+    expectCaptures: 1,
+    expectEvent: null,
+  });
+  assert.deepEqual(
+    shellRow(run, "ses-A"),
+    [{ name: "shell", input: 'command: "npm run build"' }],
+    "a shell running another command is never stamped"
   );
 });
 

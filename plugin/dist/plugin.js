@@ -1891,12 +1891,12 @@ function parseIdleTranscript(messages, shellState) {
       } catch {
         input = "";
       }
+      // Issue 163: BEFORE the clamp — `includes` needs every byte of the
+      // command; the note is a prefix, so clamping after keeps it and cuts the tail.
+      input = shellStamped(name, input, sessionID, shells);
       if (input.length > MAX_TOOL_INPUT_LENGTH) {
         input = input.slice(0, MAX_TOOL_INPUT_LENGTH) + "...";
       }
-      // Issue 152: AFTER the clamp, so the stamp is never what gets cut — the
-      // engine clamps the whole `name: input` line from its end.
-      input = shellStamped(name, input, sessionID, shells);
       toolCalls.push({ name, input });
     }
   }
