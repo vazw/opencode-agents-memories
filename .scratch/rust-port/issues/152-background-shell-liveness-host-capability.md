@@ -260,3 +260,9 @@ sqlite3 'file:/home/opencode/.opencode-mem/data/episodic.db?immutable=1&mode=ro'
 A non-zero count with `alive at capture` or `exited` wording settles the row half live. Until then, residuals
 (a) ephemeral-event delivery and (b) `pid` population for wrapper-started background shells stay uncleared,
 and no live reading is claimed.
+
+Per issue 163, landed 2026-11-24, the placement half of the reason this section reads zero is gone:
+`shellStamped` now runs before the 100-byte tool-input clamp, so a long command can match its shell record
+and the note reaches the row. The read above is still the one that closes it, and the observable count
+stays a **lower bound** — a command holding `"` or a newline is JSON-escaped in the row join and still never
+matches. Residuals (a) and (b) are untouched.
