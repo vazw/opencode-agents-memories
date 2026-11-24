@@ -1,6 +1,6 @@
 # Issue 162 — the wrapper→adapter `injectStatus` seam has no end-to-end coverage
 
-Status: ready-for-agent
+Status: done — 2026-11-25 (landed; review APPROVED)
 Filed: 2026-11-24, out of the issue-152/155 wave (`8a783b4`) review
 Severity: low today, high the first time the producer silently dies
 
@@ -62,8 +62,57 @@ unable to observe the field — for example if the real wrapper's `output` is no
 That is a real possibility and would make the seam untestable rather than untested, which is a different
 finding worth recording.
 
+## Outcome — 2026-11-24
+
+Both acceptance criteria delivered, as two cases in `plugin/tests/v2-inject-delivery.test.mjs`:
+
+- **AC-1** — `test_inject_status_empty_clears_a_compacted_block`. Real wrapper + real adapter through
+  `wireRun`: prompt 0 caches `WIRE_BLOCK` in `first` mode, a V2 compaction marks the session, the stub's
+  answer switches to an empty success (`{ block: null }`) via the new per-request `injectModePath` harness
+  knob, prompt 1 refreshes (`injects` 1) and the adapter clears the cache (context `[]`), prompt 2 stays
+  cleared. Deleting the producer from `plugin/dist/plugin.js` reds it as an assertion
+  (`actual ["<memory_context>STUB_FIRST_BLOCK</memory_context>"]`, `expected []`).
+- **AC-2 delivered as C2**, not dropped — `test_chat_message_output_hides_inject_status_from_enumeration`.
+  The wrapper annotates any object handed to the public `hooks["chat.message"]`, so a caller-built output
+  the test holds is enough: `Object.keys(output)` is `["message"]`, the descriptor reports `has: true`,
+  `enumerable: false`. Flipping `enumerable` to `true` reds it (`true !== false`). `has` is asserted
+  because an absent property is also non-enumerable — the key check alone cannot tell a deleted producer
+  from a hidden field.
+
+Corrected claim (supersedes the 152/155 blueprint's SECURITY bullet, which names this file's line 129 as
+the guard; that `output` is adapter-built against a stub that never sets the field):
+
+> `injectStatus` must be non-enumerable: the hook output carries no third key. The invariant is asserted on
+> a caller-built output, not on the adapter's local; mutant B (`enumerable: true`) is the case that pins it.
+
+Fixture note: `wireRun` stages `injectMode: "block"` and the switch is **block → empty success**, not
+`error → empty` as the 162 blueprint's prose says. `success` is not a named stub branch; it falls through
+to `{ block: null }`, the suite's existing convention. The `injectModePath` read sits before the `error`
+branch so every mode is re-read per request, which is what lets a run that *started* on `error` switch too.
+
 ## Not in scope
 
 - Issue 152's residuals (a) and (b) — uncleared, and they need a live host.
 - The `[exited]`-without-pid nuance the reviewer noted (`shellNote`, the exited branch emits `[exited]` before
   the pid guard): blueprint snippet verbatim, no pid ever reaches `process.kill`, no defect.
+
+## Review, 2026-11-25 — APPROVED
+
+The reviewer re-executed all seven claims rather than inheriting them, including rebuilding the blueprint
+body hash against its own recipe. It re-ran the three mutants itself: mutants B, C-on-C1 and C-on-C2 each RED
+as an `AssertionError`, each proven landed by pre/post grep, each restored `cmp`-identical, closing on
+`DIST-PRISTINE` and `TRAP-RESTORED`.
+
+- **C2** inspects the caller-built literal it handed to the real `hooks["chat.message"]` — `has`,
+  `enumerable === false`, `keys === ["message"]` — and mutant C reds it at `has`, which is the half that makes
+  deletion loud.
+- **C1** seeds `WIRE_BLOCK`, pins `injects === 1`, asserts `[]` after; mutant C reds the clear assertion, so the
+  seed and the forced refresh were both live.
+- **The knob is inert by default, measured** — the full suite run by the reviewer: 283 pass, 0 fail, `pipefail`.
+- `plugin/src`, `plugin/dist` and `crates` untouched, `src`↔`dist` identical, dist-sync green.
+- The prose/fixture discrepancy is recorded above and the fixture was left alone, as instructed.
+
+**What this closes and what it does not.** The seam now has end-to-end coverage: the empty-SUCCESS clear can no
+longer die silently, and its non-enumerability is asserted on an object a test actually holds. It does not make
+issue 155's keep-on-failure path live-observed — that still needs a real refresh failure, and no reading is
+claimed for it.
