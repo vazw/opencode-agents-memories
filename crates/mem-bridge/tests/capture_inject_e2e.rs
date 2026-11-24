@@ -256,6 +256,17 @@ async fn test_host_driven_idle_capture_persist_then_next_chat_message_injects() 
         Some("<memory_context>"),
         "the frame opens the block: {block}"
     );
+    // The history open tag is a LINE of its own: the probe's scanner is
+    // line-anchored, and a heading glued after the tag (`<project_agent_session_history>## `)
+    // is invisible to it, so the block must never carry that pair.
+    assert!(
+        block.contains("<project_agent_session_history>\n## "),
+        "the history body opens on its own line: {block}"
+    );
+    assert!(
+        !block.contains("<project_agent_session_history>## "),
+        "the first heading is never glued after the open tag: {block}"
+    );
     assert_eq!(
         block.lines().nth(1),
         Some("The following block is reference context injected from the memory system."),

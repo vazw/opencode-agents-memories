@@ -1078,6 +1078,9 @@ fn wrap_context(profile: Option<&str>, history: Option<&str>) -> Option<String> 
 /// Renders the history body grouped by heading — the one history renderer.
 fn render_history_body(included: &[Candidate]) -> String {
     let mut body = String::from(HISTORY_BLOCK_OPEN);
+    // The open tag owns its line: the probe's scanner is line-anchored, so a
+    // heading glued after the tag is invisible to it.
+    body.push('\n');
     let mut last_heading = "";
     for candidate in included {
         if last_heading != candidate.heading {
@@ -1347,7 +1350,7 @@ fn classify_row(metadata_text: Option<&str>) -> Option<FactOrSummary> {
 /// "Already open" is derived from the last ACCEPTED candidate, so a skipped
 /// candidate can never mark a heading as paid for. This is what makes the
 /// emitted history block provably bounded: with `n` accepted rows,
-/// `emitted = 192 + 63 + Σ(h+1) + Σ(line+1) = used − 2 − 2n <= used
+/// `emitted = 192 + 64 + Σ(h+1) + Σ(line+1) = used − 1 − 2n <= used
 /// <= budget_bytes`.
 ///
 /// Tier-1 candidates (`## Project facts` / `## Captured session summaries`)
