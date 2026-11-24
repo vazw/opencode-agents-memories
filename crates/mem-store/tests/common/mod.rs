@@ -1127,7 +1127,7 @@ pub fn write_reembed_swap_state(db_path: &Path, staged: &Path, backup: &Path) ->
 /// | v0-legacy | `seed_user_prompts(0, false, true)` | 9 cols, 1 row | `Some(…)` | `Some(proof.as_ref())` | row intact, defaults 0/NULL |
 /// | v1-without | `seed_user_prompts(1, false, false)` | 9 cols, **no row** | `Some(…)` | `Some(proof.as_ref())` | types/defaults, INSERT roundtrip, **no `.schema-v*`** |
 /// | v1-with | `seed_user_prompts(1, true, false)` | 12 cols, **no row** | `Some(…)` | `Some(proof.as_ref())` | 12 cols after, `Ok(2)` twice |
-/// | v2-noop | `seed_user_prompts(2, true, false)` | 12 cols, **no row** | `Some(…)` | `Some(proof.as_ref())` | `USER_PROMPTS_MAX_KNOWN == 2`, `Ok(2)` |
+/// | v2-noop | `seed_user_prompts(2, true, false)` | 12 cols, **no row** | `Some(…)` | `Some(proof.as_ref())` | `user_version` stays 2, `Ok(2)` twice |
 /// | v3 | `seed_user_prompts(3, true, true)` | 12 cols, 1 row | `Some(…)` | `Some(proof.as_ref())` | typed refusal, version/columns/row unchanged |
 /// | fail-surface arm (a) | empty file + `PRAGMA user_version = 1` by hand | **no table** | `Some(…)` | `Some(proof.as_ref())` | `Err`, **no `.schema-v*`** |
 /// | fail-surface arm (b) | `PromptsDb`, `version = 0`, `probe_error = "disk I/O error"` | — | `None` | `None` | `Err` propagates, no ALTER batch |

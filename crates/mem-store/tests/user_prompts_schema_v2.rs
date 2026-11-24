@@ -13,14 +13,15 @@ use std::path::Path;
 
 use mem_store::db::{BatchMode, BoxFuture, Db, ExecResult, Row, Statement, Value, query_one};
 use mem_store::error::StoreError;
-use mem_store::schema_migrations::{MigrationOptions, USER_PROMPTS_MAX_KNOWN};
+use mem_store::schema_migrations::MigrationOptions;
 
 const PROMPTS_DB: &str = "user-prompts.db";
 
 /// The v2 leg pinned under a **v2-max** build: this suite is the v2 battery,
-/// and the production maximum moved to v3 with issue 43 W6c (the v3 sweep-stamp
-/// leg is covered by `tests/sweep_stamp.rs`). A v3 file is therefore still
-/// "newer than this build" here — the refusal's shape is what is pinned.
+/// and it pins `max_known = 2` locally rather than tracking the production
+/// maximum (v4 since the issue-143 prompt tombstone). A file above 2 is
+/// therefore still "newer than this build" here — the refusal's shape is what
+/// is pinned.
 fn migration_options(db_path: &Path) -> MigrationOptions {
     MigrationOptions {
         db_path: Some(db_path.to_path_buf()),
@@ -280,7 +281,7 @@ async fn test_v1_with_columns_converges_to_v2() {
 }
 
 // ---------------------------------------------------------------------------
-// 5/8 — a v2 file is a no-op and the maximum is 2
+// 5/8 — a v2 file is a no-op and stays 2 under a local v2 pin
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -296,10 +297,6 @@ async fn test_v2_file_is_a_noop_and_stays_2() {
     let proof = common::exclusive_root(&config.storage_path);
     let options = migration_options(&db_path);
 
-    assert_eq!(
-        USER_PROMPTS_MAX_KNOWN, 3,
-        "the production maximum is v3; this suite pins the v2 leg under max_known = 2"
-    );
     let first = mem_store::schema_migrations::apply_user_prompts_schema(
         db.as_ref(),
         &options,
