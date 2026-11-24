@@ -1,6 +1,6 @@
 # 149 — engine inject block: a `## Recent actions` section (the M1 floor)
 
-Status: ready-for-agent — 2026-11-24 (the "owner render capture" closure condition is superseded by a MEASURED
+Status: done — 2026-11-24T09:43Z (session-keyed actions read; engine staged sha256 33b5c73e1a094498; host restart pending, owner) — 2026-11-24 (the "owner render capture" closure condition is superseded by a MEASURED
 starvation defect: the section's data exists and the heading still never renders — see "Measured 2026-11-24" below. Not
 an owner verification task; it is a build task.)
 
@@ -32,7 +32,7 @@ Each was forced by a measurement, not by taste. The measurement is named with ea
 
 3. **A bounded last-actions list is the floor; the summariser's extension is enrichment on top.** The engine already
    stores `files_touched` / `completed_work` / `decisions` / `open_threads` in `SessionMetadata`, and `recent_line`
-   (`crates/mem-bridge/src/inject.rs:1136`) renders only `summary` and `open_threads`. But those fields exist only when
+   (`crates/mem-bridge/src/inject.rs:1237`) renders only `summary` and `open_threads`. But those fields exist only when
    the summariser ran: `Auto-capture skipped: reason "provider_skip"` was measured on a child that read fourteen files,
    and `capture.rs:1795` strips `autoCaptureContext` before persisting. Extension-only would render nothing exactly when
    the provider declines. So: persist a bounded `Vec<String>` of recent actions, and render the extension on top.
@@ -187,3 +187,31 @@ than on the window.
 
 **What this unblocks.** Issue 156 (recent-action lines losing the tool name) can only be observed when the section
 renders, so 156 shares this blocker and closes after it.
+
+## Landed 2026-11-24T09:43Z — the section is no longer starved
+`Recent actions` reads the requesting session's own row by `(project_id, session_id)`; the `2 x recent_count` window and the age cutoff no longer apply to it. The eviction and age-ceiling tests were replaced by `test_actions_render_for_own_row_beyond_the_project_window` and `test_actions_render_for_an_old_session_resumed_days_later`; the anti-vacuity test is unchanged.
+Engine staged sha256 33b5c73e1a094498. Owner: rerun `SETUP` after the host restart and require a `sections` reading carrying `Recent actions`.
+
+## Review outcome — APPROVED (round 2)
+
+`review-1` was `REJECTED` on two surviving mutants, not on the code: the comparator (`max_by`→`min_by`) and the
+dropped `deleted_at IS NULL` predicate both lived through the whole suite because every fixture used the correct
+implementation's happy path — one carrying row, distinct ticks, freshly inserted rows, one project, no tombstones.
+Bounded contexts `inject.rs` / `episodic_sql.rs` were measured correct; the defect was oracle coverage.
+
+`debug-1` widened the sweep and found five survivors of that one class (M1, M2 tie-break, M3 `updated_at`, M5
+`flat_map`, M12 project predicate, M13 soft delete, M18 reversed tie-break). Prescription was test-only: five tests
+added, production sources untouched. It also measured that the review's own proposed remedy — merging the
+two-carrying case into `test_actions_come_from_the_newest_row_that_has_them` — would have traded one survivor for two,
+by deleting the only fixture where the newest row carries no actions.
+
+Two mutants remain accepted without a test, stated rather than silent: the read-side `MAX_RECENT_ACTIONS` clamp is
+unreachable (validation rejects a ninth action, capture truncates at eight), and the `ORDER BY` in the session-keyed
+read is equivalent for its only consumer, which is order-independent over a unique comparator.
+
+`review-2` re-ran the mutants on its own throwaway worktree: all seven RED as assertion panics naming the right
+tests, M4/M8 controls still red, gates green, production hunks byte-identical to wave 1.
+
+**One step remains, and it is the owner's:** restart the host so the staged engine (`33b5c73e1a094498`) loads, then
+read one `inject.received` line for `sections` containing `Recent actions`. That reading also unblocks issue 156,
+whose tool-name defect can only be observed once the section renders.
