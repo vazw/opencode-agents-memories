@@ -586,6 +586,30 @@ test("test_refresh_rule_compaction_at_5_refreshes_next_prompt_only", { timeout: 
   assert.deepEqual(vector, [1, 0, 0, 0, 0, 0, 1, 0], "compaction mark refreshes the next prompt once");
 });
 
+test("test_v2_compaction_then_failed_refresh_keeps_the_block", { timeout: 45000 }, async (t) => {
+  // Issue 155: a refresh the engine cannot answer must not cost the turn the
+  // block it was already using. Prompt 1's inject is silenced by the stub's
+  // failure flag, so the wrapper's `chat.message` catches and the adapter keeps
+  // the block the compaction otherwise made stale; prompt 2 re-asks (the retry
+  // mark), prompt 3 replays the cache in `first` mode.
+  const out = await wireRun(t, [
+    { prompt: 0 },
+    { compact: true },
+    { flag: "create" },
+    { prompt: 1 },
+    { flag: "remove" },
+    { prompt: 2 },
+    { prompt: 3 },
+  ], { failFlag: true });
+  const at = (p) => out.find((o) => o.prompt === p);
+  assert.deepEqual(at(0).context, [WIRE_BLOCK], "precondition: turn 0 injected");
+  assert.deepEqual(at(1).context, [WIRE_BLOCK], "a failed refresh keeps the previous block");
+  assert.equal(at(1).injects, 1, "prompt 1 really asked the engine");
+  assert.deepEqual(at(2).context, [WIRE_BLOCK], "the next prompt re-asks and replaces it");
+  assert.equal(at(2).injects, 1, "the retry mark forces the refresh");
+  assert.equal(at(3).injects, 0, "and the kept block stops later refreshes in `first` mode");
+});
+
 test("test_refresh_rule_lost_block_reinjects_next_prompt", { timeout: 45000 }, async (t) => {
   // Silent inject at turn 0 waits REQUEST_TIMEOUT_MS (15 s); the explicit 45 s driver bound covers it.
   const out = await wireRun(t, [

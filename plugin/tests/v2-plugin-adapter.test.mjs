@@ -565,6 +565,98 @@ test(
   }
 );
 
+// Issue 155: the two answers a THROWING or EMPTY refresh can get. Both cases
+// run over the same first-mode harness — `shouldRefresh: ({ hasCache }) =>
+// !hasCache` — so a refresh that returns nothing must be forced by the adapter's
+// own marks (compaction, retry), never by the pin answering true.
+function createFirstModeLegacy(handle) {
+  const legacy = { "chat.message": handle };
+  Object.defineProperty(legacy, "shouldRefresh", {
+    value: ({ hasCache }) => !hasCache,
+    enumerable: false,
+  });
+  return legacy;
+}
+
+test("test_v2_empty_answer_clears_the_kept_block", { timeout: 5000 }, async () => {
+  const { registerV2Adapter } = await import(ADAPTER_MODULE);
+  const harness = createHarness();
+  let calls = 0;
+  let answer = "ok";
+  const legacy = createFirstModeLegacy(async (_input, output) => {
+    calls += 1;
+    if (answer === "empty") {
+      // What the wrapper does for an empty SUCCESS: no part, `injectStatus`.
+      Object.defineProperty(output, "injectStatus", { value: "empty", enumerable: false });
+      return;
+    }
+    output.message.parts.push({ type: "text", text: `BLOCK-${calls}` });
+    Object.defineProperty(output, "injectStatus", { value: "ok", enumerable: false });
+  });
+  const cleanup = await registerV2Adapter(harness.ctx, legacy);
+  const prompt = (messageID) => harness.hooks.get("prompt")({ sessionID: "ses-1", messageID, prompt: { text: "q" } });
+  const context = async () => {
+    const event = { sessionID: "ses-1", system: [] };
+    await harness.hooks.get("context")(event);
+    return event.system.map((part) => part.text);
+  };
+
+  await prompt("m1");
+  assert.deepEqual(await context(), ["BLOCK-1"], "prompt 0 fills the cache");
+  assert.equal(calls, 1);
+
+  // The compaction mark forces prompt 1 to refresh even with a live cache.
+  await harness.hooks.get("compaction")({ sessionID: "ses-1", system: [] });
+  answer = "empty";
+  await prompt("m2");
+  assert.equal(calls, 2, "the compaction mark forced the refresh");
+  assert.deepEqual(await context(), [], "an empty SUCCESS clears the withdrawn block");
+
+  answer = "ok";
+  await prompt("m3");
+  assert.equal(calls, 3, "with no cache the next prompt refreshes");
+  assert.deepEqual(await context(), ["BLOCK-3"], "and re-populates it");
+
+  await cleanup();
+});
+
+test("test_v2_kept_block_forces_one_retry", { timeout: 5000 }, async () => {
+  const { registerV2Adapter } = await import(ADAPTER_MODULE);
+  const harness = createHarness();
+  let calls = 0;
+  let answer = "ok";
+  const legacy = createFirstModeLegacy(async (_input, output) => {
+    calls += 1;
+    if (answer === "throw") throw new Error("refresh lookup failed");
+    output.message.parts.push({ type: "text", text: `BLOCK-${calls}` });
+  });
+  const cleanup = await registerV2Adapter(harness.ctx, legacy);
+  const prompt = (messageID) => harness.hooks.get("prompt")({ sessionID: "ses-1", messageID, prompt: { text: "q" } });
+  const context = async () => {
+    const event = { sessionID: "ses-1", system: [] };
+    await harness.hooks.get("context")(event);
+    return event.system.map((part) => part.text);
+  };
+
+  await prompt("m1");
+  assert.deepEqual(await context(), ["BLOCK-1"], "prompt 0 fills the cache");
+  assert.equal(calls, 1);
+
+  await harness.hooks.get("compaction")({ sessionID: "ses-1", system: [] });
+  answer = "throw";
+  // RED before issue 155: this throw rejected the prompt hook. It must resolve.
+  await prompt("m2");
+  assert.equal(calls, 2, "the compaction mark forced the throwing refresh");
+  assert.deepEqual(await context(), ["BLOCK-1"], "a failed refresh keeps the block");
+
+  answer = "ok";
+  await prompt("m3");
+  assert.equal(calls, 3, "the retry mark forces the next prompt to ask again");
+  assert.deepEqual(await context(), ["BLOCK-3"], "the successful retry replaces the block");
+
+  await cleanup();
+});
+
 // Issue 149: after a compaction, the NEXT prompt refreshes the block. In
 // `first` mode a session replays its cached block until a refresh; the
 // compaction hook marks the session stale and the next prompt drops the cache.

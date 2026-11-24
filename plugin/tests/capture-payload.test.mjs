@@ -17,6 +17,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -832,6 +833,150 @@ test("test_idle_capture_names_a_v2_tool_part_by_its_name", { timeout: 30000 }, a
   assert.deepEqual(
     sent[0].params.metadata.autoCaptureContext.toolCalls,
     [{ name: "edit", input: 'path: "src/h.js"' }]
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Issue 152 — shell liveness on the existing recent-action row.
+//
+// The wrapper records the host's `shell.*` events, probes the pid at row-build
+// time and prefixes the state onto the `shell`/`bash` tool call's input. These
+// four cases are the seam's contract: scoped to its own session, exited when the
+// pid is gone (SIGKILL leaves no exit event), the host's own exit record beats a
+// live pid, and the note reaches the captured action line.
+// ---------------------------------------------------------------------------
+
+function shellTurn(command) {
+  return [
+    { info: { id: "u1", role: "user" }, parts: [{ type: "text", text: "start the dev server" }] },
+    {
+      info: { id: "a1", role: "assistant" },
+      parts: [
+        { type: "text", text: "started" },
+        { type: "tool", tool: "shell", state: { status: "completed", input: { command } } },
+      ],
+    },
+  ];
+}
+
+// The host's `Shell.Info` (`packages/schema/src/shell.ts:41-53`), reduced to the
+// fields the wrapper reads.
+function shellInfo(id, { sessionID, pid, command, background = true }) {
+  return {
+    id,
+    status: "running",
+    command,
+    cwd: "/work/proj",
+    shell: "/bin/bash",
+    file: "/tmp/shell-output.log",
+    ...(pid === undefined ? {} : { pid }),
+    metadata: { sessionID, background },
+    time: { started: 1 },
+  };
+}
+
+function shellRow(run, sessionID) {
+  const sent = captures(run).find((m) => m.params.session_id === sessionID);
+  assert.ok(sent, `the ${sessionID} capture reached the wire`);
+  return sent.params.metadata.autoCaptureContext.toolCalls;
+}
+
+test("test_shell_note_is_scoped_to_its_own_session", { timeout: 30000 }, async (t) => {
+  const run = await runCapture(t, {
+    ...caseA(),
+    sessions: { "ses-A": { agent: "build" }, "ses-B": { agent: "build" } },
+    messages: { "ses-A": shellTurn("npm run dev"), "ses-B": shellTurn("npm run dev") },
+    events: [
+      { type: "shell.created", info: shellInfo("sh-b", { sessionID: "ses-B", pid: process.pid, command: "npm run dev" }) },
+      { type: "session.idle", sessionID: "ses-A" },
+      { type: "session.idle", sessionID: "ses-B" },
+    ],
+    expectCaptures: 2,
+    expectEvent: null,
+  });
+  assert.deepEqual(
+    shellRow(run, "ses-A"),
+    [{ name: "shell", input: 'command: "npm run dev"' }],
+    "a foreign session's shell leaves this session's row unchanged"
+  );
+  assert.deepEqual(
+    shellRow(run, "ses-B"),
+    [{ name: "shell", input: `[pid ${process.pid}, alive at capture] command: "npm run dev"` }],
+    "the owning session's row carries the pid and its probed state"
+  );
+});
+
+test("test_shell_note_reports_a_sigkilled_shell_as_exited", { timeout: 30000 }, async (t) => {
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  const pid = child.pid;
+  await new Promise((resolve) => child.once("spawn", resolve));
+  child.kill("SIGKILL");
+  await new Promise((resolve) => child.once("close", resolve));
+  // Precondition: the pid is gone, so only the wrapper's probe can answer.
+  assert.throws(() => process.kill(pid, 0), (err) => err.code === "ESRCH", "the child is gone");
+
+  const run = await runCapture(t, {
+    ...caseA(),
+    messages: { "ses-A": shellTurn("npm run dev") },
+    events: [
+      { type: "shell.created", info: shellInfo("sh-c", { sessionID: "ses-A", pid, command: "npm run dev" }) },
+      { type: "session.idle", sessionID: "ses-A" },
+    ],
+    expectCaptures: 1,
+    expectEvent: null,
+  });
+  assert.deepEqual(
+    shellRow(run, "ses-A"),
+    [{ name: "shell", input: `[pid ${pid}, exited] command: "npm run dev"` }],
+    "a SIGKILLed shell has no exit event, so the probe must say exited"
+  );
+});
+
+test("test_shell_exited_event_beats_a_live_pid", { timeout: 30000 }, async (t) => {
+  const run = await runCapture(t, {
+    ...caseA(),
+    messages: { "ses-A": shellTurn("npm run dev") },
+    events: [
+      { type: "shell.created", info: shellInfo("sh-d", { sessionID: "ses-A", pid: process.pid, command: "npm run dev" }) },
+      { type: "shell.exited", id: "sh-d", exit: 0, status: "exited" },
+      { type: "session.idle", sessionID: "ses-A" },
+    ],
+    expectCaptures: 1,
+    expectEvent: null,
+  });
+  assert.deepEqual(
+    shellRow(run, "ses-A"),
+    [{ name: "shell", input: `[pid ${process.pid}, exited] command: "npm run dev"` }],
+    "the host's exit record outranks the probe of a still-live pid"
+  );
+});
+
+test("test_shell_note_reaches_the_captured_action_line", { timeout: 30000 }, async (t) => {
+  // The wire criterion. The note rides the row's FRONT: the engine renders
+  // `name: input` and clamps the whole line from its END, so a note appended
+  // after the command can be cut while a prefix survives. (The row join itself
+  // matches the clamped 100-char tool input, so the command stays inside it.)
+  const run = await runCapture(t, {
+    ...caseA(),
+    sessions: { "ses-A": { agent: "build" } },
+    messages: { "ses-A": shellTurn("npm run dev") },
+    events: [
+      { type: "shell.created", info: shellInfo("sh-e", { sessionID: "ses-A", pid: process.pid, command: "npm run dev" }) },
+      { type: "session.idle", sessionID: "ses-A" },
+    ],
+    expectCaptures: 1,
+    expectEvent: null,
+  });
+  const call = shellRow(run, "ses-A")[0];
+  assert.equal(
+    call.input.startsWith(`[pid ${process.pid}, alive at capture] command: `),
+    true,
+    "the note precedes the command on the captured action row"
+  );
+  assert.equal(
+    call.input.endsWith('command: "npm run dev"'),
+    true,
+    "the row's existing text is unchanged behind the stamp"
   );
 });
 

@@ -123,7 +123,7 @@ test("test_v2_memory_context_isolates_sessions", { timeout: 5000 }, async () => 
 test("test_v2_memory_context_injects_nothing_when_the_v1_hook_injects_nothing", { timeout: 5000 }, async () => {
   const { registerV2Adapter } = await import(ADAPTER_MODULE);
   const harness = createHarness();
-  const legacy = createLegacyHooks(["stale block", null, "after empty lookup"]);
+  const legacy = createLegacyHooks(["stale block"]);
   const cleanup = await registerV2Adapter(harness.ctx, legacy);
 
   // Seed the cache FIRST: with a fresh adapter, "removed the stale block" and
@@ -131,14 +131,23 @@ test("test_v2_memory_context_injects_nothing_when_the_v1_hook_injects_nothing", 
   await harness.hooks.get("prompt")({ sessionID: "ses-1", messageID: "msg-1", prompt: { text: "first" } });
   assert.deepEqual(await contextOf(harness.hooks, "ses-1"), ["stale block"]);
 
-  // Upstream `:58`, empty half: a refresh that injects nothing drops it.
+  // Upstream `:58`, empty half: a refresh that SUCCEEDS with nothing drops the
+  // block. The V1 hook says so through a non-enumerable `injectStatus` (issue
+  // 155) — without that seam an empty answer and a transport failure both
+  // return a one-part output, and a failure must KEEP the block.
+  legacy["chat.message"] = async (_input, output) => {
+    Object.defineProperty(output, "injectStatus", { value: "empty", enumerable: false });
+  };
   await harness.hooks.get("prompt")({ sessionID: "ses-1", messageID: "msg-2", prompt: { text: "second" } });
   assert.deepEqual(
     await contextOf(harness.hooks, "ses-1"),
     [],
-    "an empty injection leaves no stale context behind"
+    "an empty successful answer leaves no stale context behind"
   );
 
+  legacy["chat.message"] = async (_input, output) => {
+    output.message.parts.push({ type: "text", text: "after empty lookup", synthetic: true });
+  };
   await harness.hooks.get("prompt")({ sessionID: "ses-1", messageID: "msg-3", prompt: { text: "third" } });
   assert.deepEqual(
     await contextOf(harness.hooks, "ses-1"),
@@ -146,29 +155,28 @@ test("test_v2_memory_context_injects_nothing_when_the_v1_hook_injects_nothing", 
     "a later prompt recovers"
   );
 
-  // Upstream `:58`, failed half: the adapter drops the block BEFORE the V1 hook
-  // runs, so a throwing refresh cannot leave the previous block behind.
+  // Upstream `:58`, failed half — SUPERSEDED by issue 155's owner ruling, which
+  // this wave implements. The pin's own words ("the adapter drops the block
+  // BEFORE the V1 hook runs") describe exactly the pre-call delete that is
+  // gone: a refresh the engine could not answer leaves the previous block in
+  // place and asks again next prompt. A failure is not evidence the block was
+  // withdrawn.
   legacy["chat.message"] = async () => {
     throw new Error("refresh lookup failed");
   };
-  await assert.rejects(
-    () =>
-      harness.hooks.get("prompt")({
-        sessionID: "ses-1",
-        messageID: "msg-4",
-        prompt: { text: "fourth" },
-      }),
-    /refresh lookup failed/,
-    "the V1 hook's failure surfaces — the adapter does not swallow it"
-  );
+  await harness.hooks.get("prompt")({
+    sessionID: "ses-1",
+    messageID: "msg-4",
+    prompt: { text: "fourth" },
+  });
   assert.deepEqual(
     await contextOf(harness.hooks, "ses-1"),
-    [],
-    "a failed refresh drops the stale block too"
+    ["after empty lookup"],
+    "a failed refresh keeps the block it could not replace (issue 155)"
   );
 
   // Upstream `:62` (`result.retried === result.recovered`): the failure must not
-  // latch. A retry prompt refreshes and caches again, so the session recovers
+  // latch. The next prompt re-asks and caches again, so the session recovers
   // instead of staying memoryless for the rest of its life.
   legacy["chat.message"] = async (_input, output) => {
     output.message.parts.push({ type: "text", text: "recovered after failure", synthetic: true });
@@ -181,7 +189,7 @@ test("test_v2_memory_context_injects_nothing_when_the_v1_hook_injects_nothing", 
   assert.deepEqual(
     await contextOf(harness.hooks, "ses-1"),
     ["recovered after failure"],
-    "a failed refresh does not latch: the next prompt recovers"
+    "a failed refresh does not latch: the next prompt re-asks and recovers"
   );
 
   await cleanup();

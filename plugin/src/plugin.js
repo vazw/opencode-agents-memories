@@ -74,7 +74,9 @@ const MEMORY_TOOL_REQUEST_TIMEOUT_MS = 30000;
 // Issue 50 (D-26-11): the authored-text cap, in CODE POINTS — the same unit the
 // engine's `chars().take(2000)` cap counts (never UTF-16 units or bytes).
 const MAX_QUERY_CHARS = 2000;
-
+// Issue 152: shell records retained per session, oldest evicted. Beyond a
+// session's most recent handful, a row's pid is noise and the map unbounded.
+const MAX_TRACKED_SHELLS = 8;
 // ── canonical serialization (§1, D-42) ──────────────────────────────────
 // Wire objects serialize compactly with keys in lexicographic order at every
 // level; every line ends with exactly one newline.
@@ -1416,6 +1418,10 @@ export const server = async function server(input) {
   // Prompt id → capture_id: one UUIDv7 per prompt; a replayed idle delivery
   // of the same prompt reuses the SAME capture_id (idempotent upsert key).
   const captureIdByPrompt = new Map();
+  // Issue 152: the host's shell lifecycle records for this server, keyed by the
+  // host's shell id. Never a stored "running": the note is probed when a row is
+  // built. The session lives under `info.metadata.sessionID` (the host's key).
+  const shells = new Map();
 
   const hooks = {
     "chat.message": async (hookInput, output) => {
@@ -1427,6 +1433,10 @@ export const server = async function server(input) {
         // the per-message TRANSCRIPT capture is gone (the idle capture owns
         // the transcript); an inject error fails open (no block, no error).
         let block = null;
+        // Issue 155: what this hook could answer, for the adapter's refresh
+        // rule. A throw and an empty answer both return a one-part output, so
+        // this is the only seam that tells them apart.
+        let injectStatus = "error";
         const query = queryFromParts(output);
         const session_id = typeof hookInput?.sessionID === "string" && hookInput.sessionID.length > 0 ? hookInput.sessionID : "oc-bridge-" + process.pid;
         writeStructured("info", "inject.requested", { session_id, query_chars: typeof query === "string" ? Array.from(query).length : 0, host_contract: hostContract, ...(typeof output?.turnIndex === "number" ? { turn_index: output.turnIndex } : {}) });
@@ -1441,6 +1451,7 @@ export const server = async function server(input) {
           const handling_ms = typeof result?.handling_ms === "number" ? result.handling_ms : 0;
           const received = { session_id, block_bytes, handling_ms, status: block_bytes > 0 ? "ok" : "empty", host_contract: hostContract };
           if (typeof output?.turnIndex === "number") received.turn_index = output.turnIndex;
+          injectStatus = received.status;
           const debug = debugInjection(block);
           if (debug !== null) Object.assign(received, debug);
           writeStructured("info", "inject.received", received);
@@ -1448,6 +1459,11 @@ export const server = async function server(input) {
           writeStructured("info", "inject.received", { session_id, block_bytes: 0, handling_ms: 0, status: "error", host_contract: hostContract });
           logWarn("inject.failed", { message: shortError(err) });
           notifyHost(hostInputRef()?.client, "inject.failed");
+        }
+        if (output && typeof output === "object") {
+          // Non-enumerable, the `turnIndex` idiom: deepEqual on the hook output
+          // must not see it (issues 150/155).
+          Object.defineProperty(output, "injectStatus", { value: injectStatus, enumerable: false });
         }
         if (
           block !== null &&
@@ -1501,6 +1517,18 @@ export const server = async function server(input) {
           hookInput && hookInput.event && typeof hookInput.event === "object"
             ? hookInput.event.properties
             : null;
+        // Issue 152: `shell.*` is the only family that reaches this hook with no
+        // project and no session in the envelope (the adapter lets it past the
+        // location filter by type), so it is dispatched before any id read. The
+        // session comes from `info.metadata.sessionID`, never from here.
+        if (
+          properties !== null &&
+          typeof properties.type === "string" &&
+          properties.type.startsWith("shell.")
+        ) {
+          handleShellEvent(properties);
+          return;
+        }
         let sessionId = null;
         if (hookInput && typeof hookInput.sessionID === "string" && hookInput.sessionID.length > 0) {
           sessionId = hookInput.sessionID;
@@ -1658,6 +1686,50 @@ export const server = async function server(input) {
     return newCaptureId();
   }
 
+  // Issue 152: what the host said about a shell. `pid` is kept only when it is
+  // usable (an integer above 1): `process.kill` with 0 or -1 probes a process
+  // group, so an unusable value must never reach the probe. The command is
+  // stored for the row join and never logged — it already reaches the store
+  // with the transcript, and a log line would be a second copy.
+  function handleShellEvent(properties) {
+    if (properties.type === "shell.created") {
+      const info = properties.info;
+      const sessionID =
+        typeof info?.metadata?.sessionID === "string" && info.metadata.sessionID.length > 0
+          ? info.metadata.sessionID
+          : null;
+      if (sessionID === null || typeof info?.id !== "string" || info.id.length === 0) return;
+      const pid = Number.isInteger(info.pid) && info.pid > 1 ? info.pid : null;
+      const sameSession = [];
+      for (const [id, entry] of shells) {
+        if (entry.sessionID === sessionID) sameSession.push(id);
+      }
+      if (sameSession.length >= MAX_TRACKED_SHELLS) shells.delete(sameSession[0]);
+      const command = typeof info.command === "string" ? info.command : "";
+      shells.set(info.id, {
+        sessionID,
+        pid,
+        command,
+        status: info.status === "exited" ? "exited" : "running",
+      });
+      writeStructured("info", "shell.recorded", {
+        session_id: sessionID,
+        shell_id: info.id,
+        pid_present: pid !== null,
+        background: info.metadata.background === true,
+        command_chars: Array.from(command).length,
+      });
+      return;
+    }
+    if (typeof properties.id !== "string" || properties.id.length === 0) return;
+    if (properties.type === "shell.exited") {
+      const record = shells.get(properties.id);
+      if (record) record.status = "exited";
+      return;
+    }
+    if (properties.type === "shell.deleted") shells.delete(properties.id);
+  }
+
   async function fireIdleCapture(sessionID) {
     try {
       // Issue 98 (D-98-7): the value is read from the state object that owns
@@ -1724,7 +1796,7 @@ export const server = async function server(input) {
               ? response
               : null;
           if (messages !== null) {
-            const parsed = parseIdleTranscript(messages);
+            const parsed = parseIdleTranscript(messages, { sessionID, shells });
             ({ userPrompt, promptId, textResponses, toolCalls } = parsed);
           }
         }
@@ -1759,9 +1831,13 @@ export const server = async function server(input) {
 
 /** Inject params of an idle capture (issue 34: project_id is the host dir). */
 /** Port of upstream's tail-start extraction (getAIResponseMessages +
- * extractAIContent, simplified to the LAST user prompt). */
-function parseIdleTranscript(messages) {
+ * extractAIContent, simplified to the LAST user prompt).
+ * `shellState` (issue 152) is `{ sessionID, shells }`: the per-server shell
+ * records the tool loop stamps onto matching action rows. */
+function parseIdleTranscript(messages, shellState) {
   const MAX_TOOL_INPUT_LENGTH = 100;
+  const sessionID = shellState?.sessionID ?? null;
+  const shells = shellState?.shells ?? null;
   let lastUserIndex = -1;
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
@@ -1818,14 +1894,52 @@ function parseIdleTranscript(messages) {
       if (input.length > MAX_TOOL_INPUT_LENGTH) {
         input = input.slice(0, MAX_TOOL_INPUT_LENGTH) + "...";
       }
+      // Issue 152: AFTER the clamp, so the stamp is never what gets cut — the
+      // engine clamps the whole `name: input` line from its end.
+      input = shellStamped(name, input, sessionID, shells);
       toolCalls.push({ name, input });
     }
   }
   return { userPrompt, promptId, textResponses, toolCalls };
 }
 
-// ── entry module (loader contract) ─────────────────────────────────────
+// Issue 152: what the row may claim about a shell. Computed when the row is
+// built, never stored: `[pid N, exited]` when the host said so or the pid is
+// gone, `[pid N, alive at capture]` otherwise, and silence when there is no
+// usable pid — never a guess presented as fact.
+function shellNote(rec) {
+  if (rec.status === "exited") return rec.pid === null ? "[exited]" : `[pid ${rec.pid}, exited]`;
+  if (rec.pid === null) return null;
+  if (!alivePid(rec.pid)) return `[pid ${rec.pid}, exited]`;
+  return `[pid ${rec.pid}, alive at capture]`;
+}
 
+// Signal 0 probes liveness without delivering anything. EPERM means the pid
+// exists but is not ours to signal, which is still alive; ESRCH means gone.
+function alivePid(pid) {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+
+/** Issue 152: prefix the shell's state onto the action row it names. */
+function shellStamped(name, input, sessionID, shells) {
+  if (name !== "shell" && name !== "bash") return input;
+  if (shells === null) return input;
+  for (const rec of shells.values()) {
+    if (rec.sessionID === sessionID && rec.command && input.includes(rec.command)) {
+      const note = shellNote(rec);
+      if (note) input = note + " " + input;
+    }
+  }
+  return input;
+}
+
+// ── entry module (loader contract) ─────────────────────────────────────
 const id = pkg.name;
 
 // The V2 host contract is a different entry (`{ id, setup }`), but upstream's

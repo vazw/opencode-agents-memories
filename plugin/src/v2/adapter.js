@@ -41,6 +41,10 @@ export async function registerV2Adapter(ctx, legacyHooks) {
   // (inside the per-session chain), so a refresh already in flight is never
   // lost. `first` mode keeps replaying a cache that a compaction has made stale.
   const stale = new Set();
+  // Issue 155: sessions whose last refresh answered nothing. The next prompt
+  // asks again even in `first` mode, where a live cache would otherwise replay
+  // the block that refresh failed to replace.
+  const retry = new Set();
   // Same-session prompts run one after another (a promise chain per session),
   // so an older completion can never overwrite a newer prompt's cache.
   // Different sessions never wait on each other.
@@ -65,18 +69,16 @@ export async function registerV2Adapter(ctx, legacyHooks) {
   async function onPrompt(event) {
     const turnIndex = turns.get(event.sessionID) ?? 0;
     turns.set(event.sessionID, turnIndex + 1);
-    // ponytail: the mark is consumed only by a prompt. A session that compacts
-    // and never prompts again keeps its entry until adapter cleanup, which is
-    // harmless (no prompt, no replay). Upgrade: drop marks on session delete.
-    if (stale.delete(event.sessionID)) contexts.delete(event.sessionID);
+    let status = null;
+    // Issue 155: the compaction mark forces one refresh; it no longer deletes
+    // the block in anticipation of a replacement the engine may never send.
+    const compacted = stale.delete(event.sessionID);
+    const retried = retry.delete(event.sessionID);
     const hasCache = contexts.has(event.sessionID);
-    // `first` mode keeps a nonempty cache; the cache lives until a refresh,
-    // a compaction-location cleanup or adapter cleanup (staleness is the
-    // documented first-mode tradeoff).
-    if (!shouldRefresh({ turnIndex, hasCache })) return;
-    // A refreshing turn: whatever the previous turn injected is stale (a failed
-    // or empty refresh leaves no block, so the next prompt retries).
-    contexts.delete(event.sessionID);
+    // `first` mode keeps a nonempty cache; the cache lives until a refresh, a
+    // compaction mark or adapter cleanup (staleness is the documented
+    // first-mode tradeoff). A compaction or a retry refreshes regardless.
+    if (!compacted && !retried && !shouldRefresh({ turnIndex, hasCache })) return;
 
     const original = { type: "text", text: event.prompt.text };
     const output = { message: { id: event.messageID, parts: [original] } };
@@ -84,7 +86,16 @@ export async function registerV2Adapter(ctx, legacyHooks) {
     Object.defineProperty(output, "turnIndex", { value: turnIndex, enumerable: false });
 
     if (typeof legacyHooks["chat.message"] !== "function") return;
-    await legacyHooks["chat.message"]({ sessionID: event.sessionID }, output);
+    // Issue 155: the wrapper cannot distinguish a transport failure from an
+    // empty answer except through `injectStatus`, and an unhandled rejection
+    // would reach the host's turn loop. A throw therefore keeps the block and
+    // asks again next prompt.
+    try {
+      await legacyHooks["chat.message"]({ sessionID: event.sessionID }, output);
+      status = output.injectStatus;
+    } catch {
+      status = "error";
+    }
 
     // Harvest what the V1 hook appended; the original part is never a block.
     const injected = output.message.parts
@@ -92,6 +103,10 @@ export async function registerV2Adapter(ctx, legacyHooks) {
       .map((part) => part.text)
       .join("\n");
     if (injected) contexts.set(event.sessionID, injected);
+    // An empty SUCCESS also reports a purge, an expiry or a scope change, so
+    // the withdrawn block is dropped. Anything else keeps it.
+    if (status === "empty") contexts.delete(event.sessionID);
+    if (!injected && status !== "empty" && contexts.has(event.sessionID)) retry.add(event.sessionID);
   }
 
   await ctx.session.hook("context", async (event) => {
@@ -129,8 +144,12 @@ export async function registerV2Adapter(ctx, legacyHooks) {
     if (typeof legacyHooks.event !== "function" || typeof ctx.event?.subscribe !== "function") return;
     try {
       for await (const raw of ctx.event.subscribe({ signal: controller.signal })) {
-        if (!(await eventBelongsToLocation(ctx, raw))) continue;
         const event = toLegacyEvent(raw);
+        // Issue 152: `shell.*` envelopes carry neither a project directory nor
+        // a top-level session id — their `info.id` is a SHELL id, so the
+        // location filter refuses them by construction. The bypass is exactly
+        // the `shell.` prefix; every other event keeps today's filter.
+        if (!event.type.startsWith("shell.") && !(await eventBelongsToLocation(ctx, raw))) continue;
         // Compaction is mid-turn: retain context until policy refresh/cleanup.
         await legacyHooks.event({ event });
       }
@@ -149,5 +168,6 @@ export async function registerV2Adapter(ctx, legacyHooks) {
     turns.clear();
     queues.clear();
     stale.clear();
+    retry.clear();
   };
 }
