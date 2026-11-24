@@ -210,3 +210,53 @@ why Q2 mattered.
 ## Outcome — landed 2026-11-24
 
 Adapter wave with issue 152/155: a refresh keeps a block the engine could not replace, and shell lifecycle rows carry a pid and its probed state. Ledger under `.tmp/progress/`.
+
+## Live state after the 2026-11-24T22:47:45 restart
+
+MEASURED, and the wave is only half verified live. The capture side works; the note does not reach a row, for
+a reason filed as issue 163.
+
+Capture, from `~/.opencode-mem/opencode-mem.log` since the restart:
+
+```
+shell.recorded events   320
+fields                  {"background":…,"command_chars":…,"pid_present":true,"session_id":"ses_e9d5dd…","shell_id":"sh_…"}
+plugin/src vs plugin/dist   byte-identical for both changed files (cmp -s)
+```
+
+The record carries the pid and the session, and `shell.recorded` exists in no commit before `e2bf76a`, so the
+new code is live.
+
+The note, however, is absent from every row and every block:
+
+```
+SELECT count(*) FROM agent_sessions WHERE metadata LIKE '%[pid %'   ->  0     (139 rows carry recentActions)
+grep -c '\[pid ' ~/.opencode-mem/opencode-mem.log                    ->  0
+```
+
+Two of the three candidate explanations are excluded by measurement:
+
+- **Not timing.** `agent_sessions` rows are written by the session-summary path, not per tool call (a
+  one-command probe subagent produced no row at all). The newest summary for this session is timestamp
+  `1795527638809`, i.e. before the first post-restart `shell.recorded` at 22:49:39 — so no row has yet been
+  built from a session holding shell records. A later summary could still carry a note.
+- **Not placement.** See issue 163: the note cannot match a command longer than
+  `MAX_TOOL_INPUT_LENGTH = 100` (`plugin/src/plugin.js:1838`), because the input is truncated before
+  `shellStamped` requires `input.includes(rec.command)` (`:1894` then `:1934`). Measured over the same 320
+  records: median command length 529 bytes, only 8 of 320 at or under 100.
+
+So the honest status: capture verified live, note verified only by tests that use short commands, and the
+mechanism as written is unreachable for 97.5 % of real shells.
+
+### What settles it
+
+After issue 163 lands, one session summary for a session holding shell records, then:
+
+```
+sqlite3 'file:/home/opencode/.opencode-mem/data/episodic.db?immutable=1&mode=ro' \
+  "SELECT count(*) FROM agent_sessions WHERE metadata LIKE '%[pid %';"
+```
+
+A non-zero count with `alive at capture` or `exited` wording settles the row half live. Until then, residuals
+(a) ephemeral-event delivery and (b) `pid` population for wrapper-started background shells stay uncleared,
+and no live reading is claimed.

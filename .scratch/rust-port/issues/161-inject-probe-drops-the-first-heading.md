@@ -75,3 +75,30 @@ require.
 Live confirmation still needs the owner's restart with `OPENCODE_MEM_DEBUG_INJECT=1`: only then can a flag-on
 `inject.received` show `sections` beginning with the block's first heading. Re-reading the existing log proves nothing
 about this build.
+
+## Live verification — 2026-11-24T22:47:45 restart
+
+MEASURED, and this is the wave's payoff: the probe can no longer hide a first heading.
+
+```
+pid 28153  /proc/28153/exe sha256 = 115bfb382d914b48   started 22:47:45
+staged     plugin/engine/linux-x64/opencode-agents-memory sha256 = 115bfb382d914b48
+```
+
+The release build the reviewer reproduced from `target/release` is what runs. Rollback dirs untouched:
+`linux-x64.old-5a4622b0/`, `linux-x64.old-6fe8acd0/`.
+
+Three consecutive `block_prefix` readings from `~/.opencode-mem/opencode-mem.log`, the pre-restart one as the
+control:
+
+| reading | block_prefix | sections |
+|---|---|---|
+| 22:01:30 (pre-restart) | `<project_agent_session_history>## Project facts` | first heading absent |
+| 22:48:30 (post) | `<project_agent_session_history>\n## Recent actions` | `["Recent actions","Project facts","Recent sessions"]` |
+| 22:49:35 (post) | `<project_agent_session_history>\n## Project facts` | `["Project facts","Recent sessions"]` |
+
+The first element of `sections` is now the block's first heading, which is exactly the observation the defect
+denied. The 30-of-30 under-report is gone.
+
+Scope of the claim: this verifies the block shape and the probe's agreement with it. It does not re-verify the
+budget arithmetic, which the crate's tests pin.
