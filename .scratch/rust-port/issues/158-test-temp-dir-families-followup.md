@@ -22,5 +22,6 @@ Follow-up of issue 154 (whose mem-store half closed the sweep for its own namesp
 - Duplicated sweep code between mem-store and mem-profile; a shared testkit crate is rejected (new crate + three dev-dependency edges + ADR-0001 table amendment for ~60 duplicated lines).
 - mem-bridge keeps 5 dirs per run, growing 5/run; bounded only by a sweep, which this wave rejects.
 - mem-store residue is bounded to the last 900 s of runs; a lone `engine_lock` / `search_cost_bench` binary has no `mod common;` and relies on another mem-store binary in the same `TMPDIR` to sweep.
-- Both sweeps are no-ops without `/proc`; the `mem-inv-*` / `mem-pm-*` families are measured, not edited (a `shard_inventory.rs` creator is recorded, not absorbed).
+- Both sweeps are no-ops without `/proc`; the `mem-inv-*` family is closed (line 27) and `mem-pm-*` remains measured, not edited.
 - No source guard: a future test can still write a bare creator, visible only to the next residue probe.
+- 2026-11-23: residual `mem-inv-*` family (`shard_inventory.rs`) closed — three creators now `common::temp_dir`; `mem-pm-*` measured 0 leaked, latent, not edited.
