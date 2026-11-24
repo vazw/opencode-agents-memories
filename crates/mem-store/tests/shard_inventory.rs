@@ -278,8 +278,7 @@ async fn test_resolves_migration_source_by_stored_project_path_and_by_from_hash(
 
 #[tokio::test]
 async fn test_rejects_ambiguous_and_invalid_from_hash_values() {
-    let shared = std::env::temp_dir().join("mem-inv-shared-0x93");
-    std::fs::create_dir_all(&shared).expect("shared dir");
+    let shared = common::temp_dir("inv-shared");
     let rig = rig("inv-bad", vec![]).await;
     seed_shard(&rig, "a1b2c3d4e5f60003", 1, Some(&shared), 0).await;
     seed_shard(&rig, "a1b2c3d4e5f60004", 1, Some(&shared), 0).await;
@@ -356,8 +355,7 @@ async fn test_rejects_ambiguous_and_invalid_from_hash_values() {
 
 #[tokio::test]
 async fn test_lists_current_project_group_as_current_with_summary_counts() {
-    let live = std::env::temp_dir().join("mem-inv-current-0x94");
-    std::fs::create_dir_all(&live).expect("live dir");
+    let live = common::temp_dir("inv-current");
     let rig = rig("inv-current", vec![]).await;
     // The current directory's fixture map must key on the CURRENT dir; the
     // rig built a source without entries: rebuild by registering a canned
@@ -467,8 +465,7 @@ async fn test_status_precedence_covers_empty_and_missing_file_groups() {
 
 #[tokio::test]
 async fn test_inventory_discovers_disk_only_shard_files() {
-    let live = std::env::temp_dir().join("mem-inv-disk-0x95");
-    std::fs::create_dir_all(&live).expect("live dir");
+    let live = common::temp_dir("inv-disk");
     let rig = rig("inv-disk", vec![]).await;
     let hash = "d000000000000001";
     let file = rig
