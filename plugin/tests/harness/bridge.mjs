@@ -158,11 +158,14 @@ export function stageStubEngine(pkgDir, {
   answerLogPath = null,
   // Issue 150: while this file exists, the stub never answers inject.
   failFlagPath = null,
+  // Issue 162: re-read per `inject` request (the `skillsPath` idiom), so a case
+  // can switch the answer mid-run — block, then an empty success.
+  injectModePath = null,
 }) {
   const dir = path.join(pkgDir, "engine", `${process.platform}-${process.arch}`);
   fs.mkdirSync(dir, { recursive: true });
   const binPath = path.join(dir, "opencode-agents-memory");
-  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath: lifecycleLogPath ?? (requestLogPath ? requestLogPath + ".lifecycle" : null), captureMode, answerLogPath, failFlagPath }), {
+  fs.writeFileSync(binPath, stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath: lifecycleLogPath ?? (requestLogPath ? requestLogPath + ".lifecycle" : null), captureMode, answerLogPath, failFlagPath, injectModePath }), {
     mode: 0o755,
   });
   fs.chmodSync(binPath, 0o755);
@@ -172,8 +175,8 @@ export function stageStubEngine(pkgDir, {
 // Static body (no template interpolation inside the script beyond CONFIG):
 // answers the canned protocol-1.0.0 results, records its own pid, exits on
 // SIGTERM or stdin EOF.
-function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath, captureMode, answerLogPath, failFlagPath }) {
-  const config = JSON.stringify({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath, captureMode, answerLogPath, failFlagPath });
+function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath, captureMode, answerLogPath, failFlagPath, injectModePath }) {
+  const config = JSON.stringify({ injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath, captureMode, answerLogPath, failFlagPath, injectModePath });
   const blocks = JSON.stringify({
     restore:
       "## Restored Session Memory\n\n### Memory 1\nRetries are capped at three\n\nTags: project, opencode-mem\n\n### Memory 2\nDeploys go through the staging gate first\n\nTags: project, opencode-mem\n\n",
@@ -186,7 +189,9 @@ function stubEngineSource({ injectMode, requestLogPath, manifestPath, capabiliti
 const CONFIG = ${config};
 const BLOCKS = ${blocks};
 import fs from "node:fs";
-const { injectMode, requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath, captureMode, answerLogPath, failFlagPath } = CONFIG;
+const { requestLogPath, manifestPath, capabilities, skills, skillsPath, helloConfig, helloConfigPath, wireErrors, diesAfterRequests, loserStatus, lifecycleLogPath, captureMode, answerLogPath, failFlagPath, injectModePath } = CONFIG;
+// Issue 162: re-assigned from \`injectModePath\`; every other CONFIG key stays const.
+let injectMode = CONFIG.injectMode;
 // Issue 70 wave 1's nine wire methods; appended to the hello's advertised set
 // only when the capability object advertises the same key.
 const TOOL_METHODS = ["add", "search", "forget", "list", "profile", "list-shards", "migrate", "export", "import"];
@@ -268,6 +273,12 @@ function respond(parsed) {
   const wireError = wireErrors[method];
   if (wireError) {
     return { id, jsonrpc: "2.0", error: { code: wireError.code, message: wireError.message, data: wireError.data } };
+  }
+  // Issue 162: re-read the answer mode per inject request, BEFORE the \`error\`
+  // branch — a read after it could never switch an \`error\` run to another
+  // answer. An unreadable or empty file keeps the startup mode.
+  if (method === "inject" && injectModePath) {
+    try { injectMode = fs.readFileSync(injectModePath, "utf8").trim() || injectMode; } catch { /* keep the startup mode */ }
   }
   if (method === "inject" && injectMode === "error") {
     return { id, jsonrpc: "2.0", error: { code: -32001, message: "degraded" } };

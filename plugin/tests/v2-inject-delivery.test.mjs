@@ -520,6 +520,9 @@ const out = [];
 for (const step of steps) {
   if (step.flag === "create") fs.writeFileSync(process.env.FLAG_PATH, "");
   else if (step.flag === "remove") fs.rmSync(process.env.FLAG_PATH, { force: true });
+  // Issue 162: the stub re-reads this file before each inject, so a case can
+  // switch the engine's answer mid-run (block -> empty success).
+  else if (step.mode) fs.writeFileSync(process.env.INJECT_MODE_PATH, step.mode);
   else if (step.compact) {
     // The host's V2 compaction hook: marks the session stale (adapter.js).
     await v2.get("compaction")({ sessionID: "ses-1", system: [] });
@@ -543,16 +546,19 @@ async function wireRun(t, steps, { failFlag = false } = {}) {
   const requestLogPath = path.join(tmp, "requests.ndjson");
   const resultPath = path.join(tmp, "result.json");
   const flagPath = path.join(tmp, "fail.flag");
+  // Issue 162: per-case mode file, inside this case's tempRoot so no leftover
+  // flips another case's stub; absent until a `{ mode }` step writes it.
+  const injectModePath = path.join(tmp, "inject-mode.txt");
   stageStubEngine(pkgDir, {
     requestLogPath, manifestPath, injectMode: "block", helloConfig: { inject_on: "first" },
-    ...(failFlag ? { failFlagPath: flagPath } : {}),
+    ...(failFlag ? { failFlagPath: flagPath } : {}), injectModePath,
   });
   t.after(() => assertReaped(manifestPath));
   const driverPath = path.join(tmp, "driver.mjs");
   fs.writeFileSync(driverPath, WIRE_DRIVER);
   const run = await runDriver(driverPath, [pkgDir, JSON.stringify(steps)], {
     ...process.env, DRIVER_STORAGE_ROOT: path.join(tmp, "storage"),
-    REQUEST_LOG: requestLogPath, FLAG_PATH: flagPath, RESULT: resultPath,
+    REQUEST_LOG: requestLogPath, FLAG_PATH: flagPath, INJECT_MODE_PATH: injectModePath, RESULT: resultPath,
   }, 45000);
   assert.equal(run.code, 0, run.stderr);
   const out = JSON.parse(fs.readFileSync(resultPath, "utf8"));
@@ -619,4 +625,50 @@ test("test_refresh_rule_lost_block_reinjects_next_prompt", { timeout: 45000 }, a
   assert.deepEqual(at(0).context, [], "failed turn-0 inject leaves no block");
   assert.deepEqual(at(1).context, [WIRE_BLOCK], "next prompt re-injects after the loss");
   assert.equal(at(1).injects, 1, "inject request count rises at prompt 1");
+});
+
+test("test_inject_status_empty_clears_a_compacted_block", { timeout: 45000 }, async (t) => {
+  // Issue 162: the "clear" half of the `injectStatus` seam, through the real
+  // wrapper. The empty answer is only distinguishable from a transport failure
+  // by `injectStatus`, so without the producer the adapter keeps the block.
+  const out = await wireRun(t, [{ prompt: 0 }, { compact: true }, { mode: "success" }, { prompt: 1 }, { prompt: 2 }]);
+  const at = (p) => out.find((o) => o.prompt === p);
+  assert.deepEqual(at(0).context, [WIRE_BLOCK], "precondition: turn 0 seeded the cache");
+  assert.equal(at(1).injects, 1, "the compaction forced the refresh");
+  assert.deepEqual(at(1).context, [], "an empty SUCCESS clears the block the refresh was replacing");
+  assert.deepEqual(at(2).context, [], "the cleared cache is not resurrected");
+});
+
+// Issue 162 AC-2: the wrapper annotates ANY output handed to the public hook, so
+// the invariant is asserted on a caller-built object the test holds. `has` is
+// not redundant with `keys`: an absent property is also non-enumerable, so the
+// key check alone stays green with the producer deleted.
+test("test_chat_message_output_hides_inject_status_from_enumeration", { timeout: 45000 }, async (t) => {
+  const tmp = tempRoot("om-inject-status-");
+  const pkgDir = stagePackageTree(tmp);
+  const manifestPath = path.join(tmp, "manifest.json");
+  const resultPath = path.join(tmp, "result.json");
+  stageStubEngine(pkgDir, { requestLogPath: path.join(tmp, "requests.ndjson"), manifestPath, injectMode: "success" });
+  t.after(() => assertReaped(manifestPath));
+  const driverPath = path.join(tmp, "driver.mjs");
+  fs.writeFileSync(driverPath, `import fs from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+process.env.OPENCODE_MEM_STORAGE_ROOT = process.env.DRIVER_STORAGE_ROOT;
+const { server } = await import(pathToFileURL(path.join(process.argv[2], "dist/plugin.js")).href);
+const { hooks } = await server({ client: {}, directory: "/work/project" });
+const output = { message: { id: "msg-1", parts: [{ type: "text", text: "ping" }] } };
+await hooks["chat.message"]({ sessionID: "ses-1" }, output);
+const d = Object.getOwnPropertyDescriptor(output, "injectStatus");
+fs.writeFileSync(process.env.RESULT, JSON.stringify({ keys: Object.keys(output), has: d !== undefined, enumerable: d?.enumerable }));
+process.exit(0);
+`);
+  const run = await runDriver(driverPath, [pkgDir], {
+    ...process.env, DRIVER_STORAGE_ROOT: path.join(tmp, "storage"), RESULT: resultPath,
+  }, 45000);
+  assert.equal(run.code, 0, run.stderr);
+  const res = JSON.parse(fs.readFileSync(resultPath, "utf8"));
+  assert.equal(res.has, true, "the wrapper must annotate the output it was handed");
+  assert.equal(res.enumerable, false, "the annotation must stay non-enumerable");
+  assert.deepEqual(res.keys, ["message"], "enumeration hides the annotation");
 });
