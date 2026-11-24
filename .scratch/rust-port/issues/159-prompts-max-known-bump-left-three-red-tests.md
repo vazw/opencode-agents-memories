@@ -1,7 +1,8 @@
 # 159 — the prompts v4 bump left three test reds behind, and they re-pin the numeral that caused them
 
-Status: ready-for-agent — 2026-11-24 (defect READ from source; the wave confirms the reds by
-running them, then makes them derive from the constant instead of re-pinning a literal)
+Status: done — 2026-11-24 (shipped `c675a7a` tests, `0bb4185` tracker; reviewer APPROVED after adding a
+third mutant; the accepted assertion is a version range paired with a `prompt_tombstones` existence check,
+not `user_version == USER_PROMPTS_MAX_KNOWN`)
 
 ## The defect
 
