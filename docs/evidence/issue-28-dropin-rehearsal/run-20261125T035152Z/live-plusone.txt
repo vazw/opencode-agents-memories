@@ -1,0 +1,9 @@
+=== live +1 attribution 2026-11-25T03:57:07Z ===
+--- canary text anywhere in live search results? ---
+0
+--- newest live memories (createdAt desc) via /api/memories ---
+2026-11-25T03:56:22.286Z auto-capture-54d20de80b26473633bc1efbabb81bdcb169c94ed7b829abfe67cac549220ab4 :: Authored a blueprint (`.tmp/blueprints/blueprint-20261125-0343-ceiling-drill-const-bump.md
+2026-11-25T03:51:51.847Z auto-capture-ad35568fa966792ce97a4dd04dfc0e3a43f824a77e8cd0e6cb4fd23f4fe03521 :: Grilling session settled eight queue decisions, recorded in tracker commit d254413. Item 1
+2026-11-25T03:51:39.826Z mem_1795578699826_0696eeb50 :: GRILLING RULINGS (2026-11-25, owner, commit d254413) for the remaining queue — eight decis
+--- run window start epoch ms ~ 1795578691000 ---
+2026-11-25T03:57:08Z

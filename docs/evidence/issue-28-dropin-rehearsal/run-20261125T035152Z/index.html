@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="origin" />
+    <title>OpenCode Memory Explorer</title>
+    
+<script type="module">
+import init, * as bindings from '/web-ui-a55d4d337bfbc403.js';
+const wasm = await init({ module_or_path: '/web-ui-a9518e565911ca80_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+    <link rel="stylesheet" href="/styles-6d52ac1e2118a38f.css" integrity="sha384-qalXcn62HebTYdPN+qokVLa+kYlk8FDGNMfG7oQsrGXF0onYLCgp6QY2WGzzkl8w"/>
+    <link rel="icon" href="data:," />
+  <link rel="modulepreload" href="/web-ui-a55d4d337bfbc403.js" crossorigin="anonymous" integrity="sha384-Tyxuy3xIwGc1lyL3bfZBddaBsppK+cxfimpFQmYUANNFkAjVQwjoBHTK1zMTseGY"><link rel="preload" href="/web-ui-a9518e565911ca80_bg.wasm" crossorigin="anonymous" integrity="sha384-o4nuHtvujUCyACBcpCWXbo8uTU5aKTXkPxHE/TjBgIxlScIIc322PaaBGC4PTLTZ" as="fetch" type="application/wasm"><script>window.__OPENCODE_MEM_TOKEN__="<REDACTED>"</script></head>
+  <body></body>
+</html>

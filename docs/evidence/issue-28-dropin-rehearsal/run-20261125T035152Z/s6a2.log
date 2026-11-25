@@ -1,0 +1,11 @@
+=== S6a-corrected assets 2026-11-25T03:55:49Z ===
+runbook form `grep -o assets/[^"]*\.js` output: (empty) -> asset=200 above was the index re-fetched, not an asset
+JS=/web-ui-a55d4d337bfbc403.js
+js_asset=200
+rc_js=0
+WASM=/web-ui-a9518e565911ca80_bg.wasm
+wasm_asset=200 bytes=1327427
+rc_wasm=0
+CSS=/styles-6d52ac1e2118a38f.css
+css_asset=200
+rc_css=0

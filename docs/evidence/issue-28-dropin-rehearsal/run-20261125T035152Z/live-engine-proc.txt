@@ -1,0 +1,5 @@
+=== S1b exact live-engine identity 2026-11-25T03:52:09Z ===
+--- exact binary exec, /proc scan ---
+28153 :: /home/opencode/Code/Personal/Rust/opencode-agents-memory/plugin/engine/linux-x64/opencode-agents-memory --storage-root /home/opencode/.opencode-mem/data 
+exact_count=3
+live_engine_proc_count_exact=1

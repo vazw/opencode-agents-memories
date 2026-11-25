@@ -1,0 +1,33 @@
+=== S4a pre-state (TS entry present) 2026-11-25T03:53:53Z ===
+rc_cp_ref=0
+rc_cp=0
+rc_sed_a=0
+grep_ts_entry_count=1
+--- 4b uninstall TS ---
+rc_sed_b=0
+grep_ts_after_uninstall=0
+--- 4c install the port: append local plugin path as last plugins element ---
+rc_sed_c=0
+grep_local_plugin_lines=1
+--- plugins array after install ---
+     1	    "plugins": [
+     2	        "opencode-cockpit@0.11.2",
+     3	        "opencode-antigravity-auth@latest",
+     4	        "@magpie-community/opencode-zcode-auth@latest",
+     5	        "/home/opencode/Code/Personal/JS/session-talk",
+     6	        "/home/opencode/Code/Personal/Rust/opencode-agents-memory/plugin"
+     7	    ],
+--- diff live-reference -> post-install ---
+220,221c220,221
+<         "/home/opencode/Code/Personal/Rust/opencode-agents-memory/plugin",
+<         "/home/opencode/Code/Personal/JS/session-talk"
+---
+>         "/home/opencode/Code/Personal/JS/session-talk",
+>         "/home/opencode/Code/Personal/Rust/opencode-agents-memory/plugin"
+rc_diff=1
+--- sha256 ---
+bffc2a1bc92bc9e6ee3a3ef1aef3ceea2c11946af84d1552cff6ce266e8504fe  plugin/index.js
+a54f8ec3ff3b41d59472b29b30e6cd999c708bd416a86196c8dd9e78e912a089  plugin/dist/plugin.js
+f902d471ab3ee3f7451bbc75585d30269f94ab5814d131323cf5fba2f025bbac  web-ui/dist/index.html
+115bfb382d914b4873931fbcc894b4c825279dbeae003daa6370840c1f6b892e  plugin/engine/linux-x64/opencode-agents-memory
+sha256_lines=4

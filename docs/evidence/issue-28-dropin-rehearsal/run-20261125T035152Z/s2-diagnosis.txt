@@ -1,0 +1,36 @@
+=== diagnosis 2026-11-25T03:52:24Z ===
+--- copy-backup.log summary ---
+41
+--- dir perms + a couple of files ---
+drwx------ 5 opencode opencode 4096 Nov 25 10:04 /home/opencode/.opencode-mem/data
+total 45084
+drwx------ 5 opencode opencode     4096 Nov 25 10:04 .
+drwxr-xr-x 6 opencode opencode     4096 Nov 20 00:40 ..
+-rw------- 1 opencode opencode       64 Nov 16 18:12 .auth-token
+drwx------ 3 opencode opencode       20 Nov 16 18:12 .cache
+-rw-r--r-- 1 opencode opencode       95 Nov 24 22:47 .engine.lock
+-rw-r--r-- 1 opencode opencode    12288 Nov 16 18:12 .profile-learning-coordination.db
+-rw-r--r-- 1 opencode opencode    32768 Nov 25 10:52 .profile-learning-coordination.db-shm
+-rw-r--r-- 1 opencode opencode        0 Nov 16 18:12 .profile-learning-coordination.db-wal
+-rw-r--r-- 1 opencode opencode     3515 Nov 16 18:12 .turso-migrated
+-rw-r--r-- 1 opencode opencode       41 Nov 16 18:12 .tursodb-engine-v1
+-rw-r--r-- 1 opencode opencode      107 Nov 24 22:47 .wal-mode
+--- plain read-only SELECT on one shard ---
+one=/home/opencode/.opencode-mem/data/projects/project_1b5c40c3136fed58_shard_0.db
+Parse error in 3rd command line argument: database is locked (5)
+rc_select=1
+--- journal mode / lock info ---
+Parse error in 3rd command line argument: database is locked (5)
+rc_pragma=1
+--- sidecar files present? ---
+/home/opencode/.opencode-mem/data/projects/project_2991cca9ba1ab013_shard_0.db-tshm
+/home/opencode/.opencode-mem/data/projects/project_2991cca9ba1ab013_shard_0.db-wal
+/home/opencode/.opencode-mem/data/projects/project_2991cca9ba1ab013_shard_0.db-shm
+/home/opencode/.opencode-mem/data/projects/project_fd2bfb63318dfd29_shard_0.db-wal
+/home/opencode/.opencode-mem/data/projects/project_60622035863a6bab_shard_0.db-wal
+/home/opencode/.opencode-mem/data/projects/project_60622035863a6bab_shard_0.db-shm
+/home/opencode/.opencode-mem/data/projects/project_fd2bfb63318dfd29_shard_0.db-shm
+/home/opencode/.opencode-mem/data/projects/project_1b5c40c3136fed58_shard_0.db-wal
+/home/opencode/.opencode-mem/data/projects/project_2416a5f68e61f821_shard_0.db-wal
+/home/opencode/.opencode-mem/data/projects/project_26e50c7b19bbf9cf_shard_0.db-wal
+wal_count=44

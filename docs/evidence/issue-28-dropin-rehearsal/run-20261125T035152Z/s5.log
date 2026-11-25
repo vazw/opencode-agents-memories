@@ -1,0 +1,11 @@
+=== S5 start 2026-11-25T03:54:08Z ===
+launched_pid=541
+--- pgrep --storage-root $REH/store ---
+541 /home/opencode/Code/Personal/Rust/opencode-agents-memory/plugin/engine/linux-x64/opencode-agents-memory --mode=standalone --storage-root /home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/rehearsal-28/20261125T035152Z/store --web-port 3749
+rc_pgrep=0
+--- health ---
+health=200
+rc_health=0
+--- engine.log head ---
+{"component":"engine","entries":[{"outcome":"found","reason":"observed","store":"episodic.db"},{"outcome":"unknown","reason":"not_opened","store":"user-profiles.db"},{"outcome":"unknown","reason":"not_opened","store":"user-prompts.db"},{"outcome":"unknown","reason":"disabled","store":"facts.db"},{"outcome":"unknown","reason":"not_opened","store":"skills.db"},{"outcome":"unknown","reason":"not_observed","store":"metadata.db"},{"outcome":"unknown","reason":"not_opened","store":"vault.db"},{"outcome":"unknown","reason":"not_observed","store":"shard.db"}],"event":"storage.root_audit","level":"info","root_name":"store"}
+{"busy":0,"component":"consolidation","event":"consolidation.startup_tick","failed":0,"level":"info","projects_scanned":25,"runs":25}

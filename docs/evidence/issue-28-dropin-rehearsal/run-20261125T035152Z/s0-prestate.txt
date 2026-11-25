@@ -1,0 +1,12 @@
+=== S0 pre-state 2026-11-25T03:51:56Z ===
+28153 Tue Nov 24 22:47:45 2026    12:04:11
+rc_ps=0
+377210f54a94c716d5057bac40ad055b84ba8835527c5bd33c46edd244bcdb66  /home/opencode/.opencode-mem/data/.engine.lock
+rc_lock=0
+/home/opencode/.opencode-mem/data 1795575867
+rc_stat=0
+live_db_count=43
+live_legacy_bak_count=0
+rc_curl=0
+live_total=5602 live_shards=36
+rc_jq=0

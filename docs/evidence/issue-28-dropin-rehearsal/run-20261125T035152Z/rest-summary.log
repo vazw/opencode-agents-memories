@@ -1,0 +1,9 @@
+=== S6b smoke-rest-surface (retry, evidence dir pre-created) 2026-11-25T03:56:12Z ===
+03:56:12 live pass against http://127.0.0.1:3749 (token len=64 prefix=0b6a…, never printed)
+03:56:12 GET-only mode: every call is a GET; the log self-check at exit enforces it
+03:56:12 live search term harvested from live memory content: probe
+03:56:13 live project id resolved (never printed in full)
+03:56:13 live catalog has no skill files (recorded, not asserted)
+03:56:13 live GET-only self-check: PASS (11 GET calls, zero non-GET)
+03:56:13 LIVE PASS COMPLETE
+rc_smoke=0

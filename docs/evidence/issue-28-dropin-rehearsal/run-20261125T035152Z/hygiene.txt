@@ -1,0 +1,16 @@
+=== hygiene 2026-11-25T03:59:39Z ===
+--- rehearsal processes ---
+6463 /bin/bash -c cd /home/opencode/Code/Personal/Rust/opencode-agents-memory || exit 1 REH=$PWD/.tmp/rehearsal-28/20261125T035152Z { printf '=== hygiene %s ===\n' "$(date -u +%FT%TZ)" printf -- '--- rehearsal processes ---\n'; pgrep -af 'rehearsal-28' || echo none printf -- '--- ports ---\n'; ss -ltn | grep -E ':(3749|3750)' || echo free printf -- '--- live engine ---\n'; ps -o pid=,lstart= -p 28153 || echo GONE printf -- '--- live markers ---\n'; sha256sum "$HOME/.opencode-mem/data/.engine.lock"; stat -c '%n %Y' "$HOME/.opencode-mem/data" printf 'dbs='; find "$HOME/.opencode-mem/data" -type f -name '*.db' | wc -l printf 'legacy='; find "$HOME/.opencode-mem/data" -type f -name '*.legacy.bak' | wc -l printf -- '--- git status ---\n'; git status --porcelain printf -- '--- transcript ---\n'; wc -l docs/evidence/issue-28-dropin-rehearsal/TRANSCRIPT.md } > "$REH/evidence/hygiene.txt" 2>&1 cat "$REH/evidence/hygiene.txt"
+--- ports ---
+free
+--- live engine ---
+28153 Tue Nov 24 22:47:45 2026
+--- live markers ---
+377210f54a94c716d5057bac40ad055b84ba8835527c5bd33c46edd244bcdb66  /home/opencode/.opencode-mem/data/.engine.lock
+/home/opencode/.opencode-mem/data 1795575867
+dbs=43
+legacy=0
+--- git status ---
+ M docs/evidence/issue-28-dropin-rehearsal/TRANSCRIPT.md
+--- transcript ---
+492 docs/evidence/issue-28-dropin-rehearsal/TRANSCRIPT.md

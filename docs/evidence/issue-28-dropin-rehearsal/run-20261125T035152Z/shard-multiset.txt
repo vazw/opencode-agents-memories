@@ -1,0 +1,8 @@
+=== per-shard multiset cross-check 2026-11-25T03:57:56Z ===
+note: /api/stats shard entries carry dbPath=null, so rows are matched as a multiset, not by name
+live_entries=36
+copy_entries=36
+live_sum=5602
+copy_sum=5602
+--- diff of sorted multisets ---
+rc_diff=0

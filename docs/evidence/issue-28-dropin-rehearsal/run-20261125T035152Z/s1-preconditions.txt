@@ -1,0 +1,22 @@
+=== S1 2026-11-25T03:52:01Z ===
+engine_ok
+plugin_ok
+web_ok
+token_ok
+live_engine_ok
+port_3749_free
+port_3750_free
+live_engine_proc_count=3
+sqlite3=3.54.1
+jq=jq-1.8.2
+curl=curl 8.22.0 (x86_64-unknown-linux-gnu) libcurl/8.22.0 OpenSSL/3.6.5 zlib/1.4 zstd/1.5.7 libidn2/2.3.8 libpsl/0.23.3 libssh2/1.11.1 nghttp2/1.70.0 ngtcp2/1.26.0 nghttp3/1.18.0
+smoke_rest_present
+live_config_present
+=== S1b exact live-engine identity 2026-11-25T03:52:05Z ===
+--- pgrep -af (raw, includes self-match) ---
+28153 /home/opencode/Code/Personal/Rust/opencode-agents-memory/plugin/engine/linux-x64/opencode-agents-memory --storage-root /home/opencode/.opencode-mem/data
+28660 /bin/bash -c cd /home/opencode/Code/Personal/Rust/opencode-agents-memory || exit 1 REH=$PWD/.tmp/rehearsal-28/20261125T035152Z { echo "=== S1b exact live-engine identity $(date -u +%FT%TZ) ===" echo "--- pgrep -af (raw, includes self-match) ---" pgrep -af 'opencode-agents-memory --storage-root /home/opencode/.opencode-mem/data' echo "--- exact binary exec, /proc scan ---" for p in /proc/[0-9]*; do   [ -r "$p/cmdline" ] || continue   c=$(tr '\0' ' ' < "$p/cmdline")   case "$c" in     */plugin/engine/linux-x64/opencode-agents-memory\ --storage-root\ /home/opencode/.opencode-mem/data*) echo "${p#/proc/} :: $c";;   esac done | tee "$REH/evidence/live-engine-proc.txt" echo -n "live_engine_proc_count_exact="; wc -l < "$REH/evidence/live-engine-proc.txt" } | tee -a "$REH/evidence/s1-preconditions.txt"
+28666 /bin/bash -c cd /home/opencode/Code/Personal/Rust/opencode-agents-memory || exit 1 REH=$PWD/.tmp/rehearsal-28/20261125T035152Z { echo "=== S1b exact live-engine identity $(date -u +%FT%TZ) ===" echo "--- pgrep -af (raw, includes self-match) ---" pgrep -af 'opencode-agents-memory --storage-root /home/opencode/.opencode-mem/data' echo "--- exact binary exec, /proc scan ---" for p in /proc/[0-9]*; do   [ -r "$p/cmdline" ] || continue   c=$(tr '\0' ' ' < "$p/cmdline")   case "$c" in     */plugin/engine/linux-x64/opencode-agents-memory\ --storage-root\ /home/opencode/.opencode-mem/data*) echo "${p#/proc/} :: $c";;   esac done | tee "$REH/evidence/live-engine-proc.txt" echo -n "live_engine_proc_count_exact="; wc -l < "$REH/evidence/live-engine-proc.txt" } | tee -a "$REH/evidence/s1-preconditions.txt"
+--- exact binary exec, /proc scan ---
+28153 :: /home/opencode/Code/Personal/Rust/opencode-agents-memory/plugin/engine/linux-x64/opencode-agents-memory --storage-root /home/opencode/.opencode-mem/data 
+live_engine_proc_count_exact=1

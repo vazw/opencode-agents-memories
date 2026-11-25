@@ -1,0 +1,26 @@
+=== S3 detail 2026-11-25T03:53:24Z ===
+Scoped a wave to remove `unwrap` and `expect` calls from production code, identifying 97 sites across 8 crates (43 poisoned-mutex locks, 54 infallible-by-construction claims) while exempting test code. Established a Clippy-based gate policy requiring explicit error handling for `?` operators and defining strict rules for mutex lock recovery versus propagation.
+
+Tags: rust, error-handling, refactoring, linting
+--- columns ---
+0|id|TEXT|0||1
+1|content|TEXT|1||0
+2|vector|F32_BLOB(768)|1||0
+3|tags_vector|F32_BLOB(768)|0||0
+4|container_tag|TEXT|1||0
+5|tags|TEXT|0||0
+6|type|TEXT|0||0
+7|created_at|INTEGER|1||0
+8|updated_at|INTEGER|1||0
+9|metadata|TEXT|0||0
+10|display_name|TEXT|0||0
+11|user_name|TEXT|0||0
+12|user_email|TEXT|0||0
+13|project_path|TEXT|0||0
+14|project_name|TEXT|0||0
+15|git_repo_url|TEXT|0||0
+16|is_pinned|INTEGER|0|0|0
+17|session_id|TEXT|0||0
+18|source_prompt_created_at|INTEGER|0||0
+--- shard size ---
+2965

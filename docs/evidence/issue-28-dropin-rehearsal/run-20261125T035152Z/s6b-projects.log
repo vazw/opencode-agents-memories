@@ -1,0 +1,7 @@
+=== /api/projects comparison 2026-11-25T03:56:00Z ===
+--- copy 3749 ---
+{"success":true,"data":[{"projectId":"/home/opencode/Code/Work/antwall","sessionCount":223,"milestoneCount":0,"lastActivityAt":1795573785931},{"projectId":"/home/opencode/Code/Personal/Rust/opencode-agents-memory","sessionCount":780,"milestoneCount":0,"lastActivityAt":1795540569168},{"projectId":"/home/opencode/Code/Personal","sessionCount":4,"milestoneCount":0,"lastActivityAt":1795520980275},{"projectId":"/home/opencode/Code/Personal/JS/opencode","sessionCount":77,"milestoneCount":0,"lastActivityAt":1795513234884},{"projectId":"/home/opencode/Code/Work/antministrator","sessionCount":25,"miles
+copy_projects_count=25
+--- live 3742 (read-only, reference) ---
+{"success":true,"data":[{"projectId":"/home/opencode/Code/Work/antwall","sessionCount":223,"milestoneCount":0,"lastActivityAt":1795573785931},{"projectId":"/home/opencode/Code/Personal/Rust/opencode-agents-memory","sessionCount":780,"milestoneCount":0,"lastActivityAt":1795540569168},{"projectId":"/home/opencode/Code/Personal","sessionCount":4,"milestoneCount":0,"lastActivityAt":1795520980275},{"pr
+live_projects_count=25

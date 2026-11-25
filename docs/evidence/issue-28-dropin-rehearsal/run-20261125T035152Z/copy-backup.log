@@ -1,0 +1,47 @@
+=== 2a start 2026-11-25T03:52:17Z ===
+ok .profile-learning-coordination.db
+ok ai-sessions.db
+BACKUP_FAILED episodic.db
+BACKUP_FAILED metadata.db
+BACKUP_FAILED projects/project_1b5c40c3136fed58_shard_0.db
+BACKUP_FAILED projects/project_2416a5f68e61f821_shard_0.db
+BACKUP_FAILED projects/project_26e50c7b19bbf9cf_shard_0.db
+BACKUP_FAILED projects/project_2991cca9ba1ab013_shard_0.db
+BACKUP_FAILED projects/project_2b347e22819619db_shard_0.db
+BACKUP_FAILED projects/project_2e0c6650509a1116_shard_0.db
+BACKUP_FAILED projects/project_302698e854e26c9b_shard_0.db
+BACKUP_FAILED projects/project_323406f3cd449797_shard_0.db
+BACKUP_FAILED projects/project_3651885f02e2c6e5_shard_0.db
+BACKUP_FAILED projects/project_386a2282239f9d1d_shard_0.db
+BACKUP_FAILED projects/project_3b11efdb85393efa_shard_0.db
+BACKUP_FAILED projects/project_3ddacb8e07061af7_shard_0.db
+BACKUP_FAILED projects/project_44dd019f522ec731_shard_0.db
+BACKUP_FAILED projects/project_4bb4d8f9597749d4_shard_0.db
+BACKUP_FAILED projects/project_4c8b445c6111c05e_shard_0.db
+BACKUP_FAILED projects/project_4e5cc490a355b9a2_shard_0.db
+BACKUP_FAILED projects/project_5ab96a576a8a09d0_shard_0.db
+BACKUP_FAILED projects/project_60622035863a6bab_shard_0.db
+BACKUP_FAILED projects/project_635fe41062171832_shard_0.db
+BACKUP_FAILED projects/project_6e64d9c620f21fbf_shard_0.db
+BACKUP_FAILED projects/project_72d8672be48c0ff0_shard_0.db
+BACKUP_FAILED projects/project_7e435878fa2210be_shard_0.db
+BACKUP_FAILED projects/project_850c22d4c819fa4a_shard_0.db
+BACKUP_FAILED projects/project_8af7b4ea42c95840_shard_0.db
+BACKUP_FAILED projects/project_8f4f95f4469217a1_shard_0.db
+BACKUP_FAILED projects/project_96503976c50cc319_shard_0.db
+BACKUP_FAILED projects/project_9d02e0e611952810_shard_0.db
+BACKUP_FAILED projects/project_bf054e760631dcfc_shard_0.db
+BACKUP_FAILED projects/project_c47153e67a3e5db9_shard_0.db
+BACKUP_FAILED projects/project_d335b30a52d79b38_shard_0.db
+BACKUP_FAILED projects/project_d4ba68f645671262_shard_0.db
+BACKUP_FAILED projects/project_da4d52176999ad20_shard_0.db
+BACKUP_FAILED projects/project_dab0656911de71ed_shard_0.db
+BACKUP_FAILED projects/project_f28b4a74af055334_shard_0.db
+BACKUP_FAILED projects/project_f63374817f977785_shard_0.db
+BACKUP_FAILED projects/project_fd2bfb63318dfd29_shard_0.db
+BACKUP_FAILED skills.db
+BACKUP_FAILED user-profiles.db
+BACKUP_FAILED user-prompts.db
+=== 2a end 2026-11-25T03:52:18Z ===
+backup_failures=41
+backup_ok=2

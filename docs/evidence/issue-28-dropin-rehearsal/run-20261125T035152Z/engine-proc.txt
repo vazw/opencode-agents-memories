@@ -1,0 +1,1 @@
+541 /home/opencode/Code/Personal/Rust/opencode-agents-memory/plugin/engine/linux-x64/opencode-agents-memory --mode=standalone --storage-root /home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/rehearsal-28/20261125T035152Z/store --web-port 3749

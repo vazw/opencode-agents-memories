@@ -1,0 +1,8 @@
+=== S7 second engine 2026-11-25T03:56:34Z ===
+second_engine_rc=75
+--- second-engine log ---
+{"component":"engine","event":"lock_lost","holder_pid":541,"level":"warn"}
+--- copy status file ---
+degraded: engine lock held (pid=541, ts=2026-11-25T03:56:34.512Z)
+
+--- first engine still alive? ---  541       02:25

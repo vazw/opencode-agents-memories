@@ -1,0 +1,12 @@
+=== S5 mint 2026-11-25T03:54:19Z ===
+mint=401
+rc_mint=0
+token_len=64
+--- stats after migration ---
+rc_stats=0
+total=5602 shards=36
+rc_jq=0
+--- .legacy.bak in the copy ---
+legacy_bak_count=0
+--- any *.bak* in the copy ---
+/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/rehearsal-28/20261125T035152Z/store/user-profiles.db.schema-v1-1794209986309.bak

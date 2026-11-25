@@ -1,0 +1,12 @@
+=== canary containment check 2026-11-25T03:57:01Z ===
+--- live 3742: search for the canary ---
+live_hits_with_canary_id=0
+live_hits_total=24
+--- live stats now ---
+live_total=5603
+--- live memory count per shard for this project (no canary expected) ---
+4	null
+18	null
+66	null
+12	null
+9	null

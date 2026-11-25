@@ -1,0 +1,28 @@
+=== S4 config inspection 2026-11-25T03:53:31Z ===
+--- plugin refs in live config ---
+220:        "/home/opencode/Code/Personal/Rust/opencode-agents-memory/plugin",
+rc_grep=0
+--- surrounding lines ---
+     1	            "resource": "opencode api GET /openapi.json",
+     2	            "effect": "allow"
+     3	        },
+     4	        {
+     5	            "action": "external_directory",
+     6	            "resource": "~/.config/service/*",
+     7	            "effect": "deny"
+     8	        }
+     9	    ],
+    10	    "websearch": true,
+    11	    "formatter": false,
+    12	    "plugins": [
+    13	        "opencode-cockpit@0.11.2",
+    14	        "opencode-antigravity-auth@latest",
+    15	        "@magpie-community/opencode-zcode-auth@latest",
+    16	        "/home/opencode/Code/Personal/Rust/opencode-agents-memory/plugin",
+    17	        "/home/opencode/Code/Personal/JS/session-talk"
+    18	    ],
+    19	    "providers": {
+    20	        "litellm": {
+    21	            "name": "Bangmod LocalLLM",
+--- config sha256 ---
+7950d22d7c9febaa0517fcc0cdb983469a36dbecb8fa9f40292394249d6647bd  /home/opencode/.config/opencode/opencode.jsonc

@@ -1,0 +1,8 @@
+=== S5d presence check 2026-11-25T03:55:16Z ===
+wal_bytes=0
+--- immutable by-id read ---
+mem_1792819727024_p5ug3wy03|1792819727024|Scoped a wave to remove `unwrap` and `expect` calls from production code, identifying 97 s
+rc_byid=0
+--- count in ref shard (pre-run 2965) ---
+2965
+rc_count=0

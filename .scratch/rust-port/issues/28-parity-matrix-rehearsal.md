@@ -1,9 +1,9 @@
 # 28 — W7.2 · Parity matrix & drop-in rehearsal
 
-Status: ready-for-agent — 2026-11-25 (§11 live swap ruled **superseded** by the live system, so AC2 closes on
-`## Owner ruling 2026-11-25` rather than a repeat; the remaining work is §2–§8, the copy-first phase, which this
-issue's own ruling delegates to a subagent. The 23 missing matrix rows are **issue 71**. §0b D3 hatch: reconfirmed
-deferred.)
+Status: ready-for-human — 2026-11-25 (copy-first phase executed: the store migrates and serves, with one cell
+unobtainable on this machine (`S5 .legacy.bak`, migrated in place elsewhere) and one real finding filed as issue 165;
+four runbook defects filed as 164. §11 live swap: ruled superseded, see `## Owner ruling 2026-11-25`. The 23 missing
+matrix rows are **issue 71**. §0b D3 hatch: reconfirmed deferred. Owner must rule on the `S5 .legacy.bak` cell.)
 
 ## What to build
 
@@ -92,3 +92,36 @@ copy-first phase runs, evidence that a pristine TS store migrates on a current b
 **§2–§8 (copy-first) stays in scope and is delegated to a subagent.** It is safe with the live engine alive: port
 3749 against a copy at `.tmp/rehearsal-28/<stamp>/store`, the live root read-only, the live pid never signalled.
 The transcript at `docs/evidence/issue-28-dropin-rehearsal/TRANSCRIPT.md` is still `NOT RUN`.
+
+## Copy-first phase executed, 2026-11-25 (run `20261125T035152Z`)
+
+Delegated per the ruling above, against a 651 MB copy under `.tmp/rehearsal-28/20261125T035152Z/`, engine on port
+3749, the live engine (pid 28153, port 3742) never signalled. Transcript:
+`docs/evidence/issue-28-dropin-rehearsal/TRANSCRIPT.md`; 54 evidence files landed at
+`docs/evidence/issue-28-dropin-rehearsal/run-20261125T035152Z/`.
+
+**What it establishes.** Count before `5602` (copy and live agree) → migration against the copy → count after
+`5602`; per-shard multiset against the live API empty-`diff`; integrity `43 ok / 0 bad`; a canary round-trip
+(`mem_1795578986897_02e51ee7e` back at `0.6330`, `5602→5603`); REST walk `rc=0` with 11 GET rows all `200`; UI
+index/js/wasm/css all `200` with the exact title; a second engine refused (`rc=75`, `lock_lost`); one injection
+with the `<memory_context>` frame. Post-run live invariants unchanged: same `lstart`, `.engine.lock` sha256,
+root `%Y`, 43 databases, 0 `.legacy.bak`, live config `cmp` rc=0.
+
+**Two cells fail, and only one of them is a defect.**
+
+1. **S5 `.legacy.bak` = 0 — unobtainable on this machine, not a failure of the port.** `.turso-migrated` reads
+   `completedAt 2026-10-30T15:14:45.697Z` with shard paths under a *different* home (`/home/vaz/.opencode-mem/data`),
+   so `legacy_migrator` returns early and the `.bak` family was reaped by the erase sweep. The cell cannot be
+   satisfied on a store migrated in place elsewhere. **Owner question:** accept `completedAt` plus the early-return
+   as the "migration path exists" evidence, or require a rehearsal against a store that was never migrated.
+2. **S5 recall rank 1 — real, and filed.** The frozen query (`97 sites across 8 crates`) did not return the
+   pre-registered id anywhere in the 20 results. Not retuned, per the runbook. Filed as **issue 165** with the
+   mechanism it exposed (`/api/search` pools a per-shard cap and then sorts) and the observation that would
+   distinguish starvation from an honest low rank.
+
+**Four runbook defects found by the run** — `sqlite3 -readonly … .backup` is `SQLITE_BUSY` on all 43 databases, the
+asset grep matches nothing in this build, `scripts/smoke-rest-surface.sh` never creates its `--evidence-dir` and
+reports a path failure as an empty roster, and §8's restore expectation is inverted. Filed as **issue 164**.
+
+**Not run:** §9, §10, §11 (the last ruled superseded above). §13's landing was done by the orchestrator rather than
+by the script; one artifact (`probe-b/x.db`, 1.3 MB) is deliberately untracked and regenerable.

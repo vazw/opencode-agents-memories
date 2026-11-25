@@ -1,0 +1,15 @@
+=== S8 rollback 2026-11-25T03:56:38Z ===
+--- pids matching the rehearsal root BEFORE kill ---
+541 /home/opencode/Code/Personal/Rust/opencode-agents-memory/plugin/engine/linux-x64/opencode-agents-memory --mode=standalone --storage-root /home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/rehearsal-28/20261125T035152Z/store --web-port 3749
+rc_kill=0
+rehearsal_engine_gone
+port_3749_free_again
+--- engine log tail (shutdown) ---
+{"component":"engine","entries":[{"outcome":"found","reason":"observed","store":"episodic.db"},{"outcome":"unknown","reason":"not_opened","store":"user-profiles.db"},{"outcome":"unknown","reason":"not_opened","store":"user-prompts.db"},{"outcome":"unknown","reason":"disabled","store":"facts.db"},{"outcome":"unknown","reason":"not_opened","store":"skills.db"},{"outcome":"unknown","reason":"not_observed","store":"metadata.db"},{"outcome":"unknown","reason":"not_opened","store":"vault.db"},{"outcome":"unknown","reason":"not_observed","store":"shard.db"}],"event":"storage.root_audit","level":"info","root_name":"store"}
+{"busy":0,"component":"consolidation","event":"consolidation.startup_tick","failed":0,"level":"info","projects_scanned":25,"runs":25}
+{"component":"engine","elapsed_ms":0,"event":"engine.shutdown_complete","level":"info"}
+--- config restore ---
+rc_cp_post=0
+rc_cp_restore=0
+ts_entry_after_restore=0
+rc_diff_restore=0

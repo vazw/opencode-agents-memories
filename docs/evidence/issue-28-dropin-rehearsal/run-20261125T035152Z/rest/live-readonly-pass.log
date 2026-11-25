@@ -1,0 +1,37 @@
+03:56:12 live pass against http://127.0.0.1:3749 (token len=64 prefix=0b6a…, never printed)
+03:56:12 GET-only mode: every call is a GET; the log self-check at exit enforces it
+LIVECALL GET /api/health
+GET /api/health -> 200 {"success":true,"status":"ok","authEnabled":false}
+LIVECALL GET /api/tags
+GET /api/tags -> 200 {"success":true,"data":{"project":[{"tag":"opencode_project_2416a5f68e61f821","displayName":"/home/opencode/.config/opencode-cockpit","userName":"vazw","userEmail":"vaz@siamstr.com","projectPath":"/ho
+LIVECALL GET /api/memories?page=1
+GET /api/memories?page=1 -> 200 {"success":true,"data":{"items":[{"type":"memory","id":"auto-capture-ad35568fa966792ce97a4dd04dfc0e3a43f824a77e8cd0e6cb4fd23f4fe03521","content":"Grilling session settled eight queue decisions, record
+LIVECALL GET /api/stats
+GET /api/stats -> 200 {"success":true,"data":{"total":5602,"byScope":{"user":0,"project":5602},"byType":{"action":1,"adr":1,"advisory":1,"amendment":1,"analysis":55,"append":1,"approval":2,"architecture":33,"architecture-d
+LIVECALL GET /api/user-profile
+GET /api/user-profile -> 200 {"success":true,"data":{"exists":false,"userId":"vaz@siamstr.com","message":"No profile found. Keep chatting to build your profile."}}
+LIVECALL GET /api/user-profiles
+GET /api/user-profiles -> 200 {"success":true,"data":[]}
+LIVECALL GET /api/projects
+GET /api/projects -> 200 {"success":true,"data":[{"projectId":"/home/opencode/Code/Work/antwall","sessionCount":223,"milestoneCount":0,"lastActivityAt":1795573785931},{"projectId":"/home/opencode/Code/Personal/Rust/opencode-a
+LIVECALL GET /skills/index.json
+GET /skills/index.json -> 200 {"skills":[]}
+LIVECALL GET /api/memories?page=1
+GET /api/memories?page=1 -> 200 {"success":true,"data":{"items":[{"type":"memory","id":"auto-capture-ad35568fa966792ce97a4dd04dfc0e3a43f824a77e8cd0e6cb4fd23f4fe03521","content":"Grilling session settled eight queue decisions, record
+03:56:12 live search term harvested from live memory content: probe
+LIVECALL GET /api/search?q=probe
+GET /api/search?q=probe -> 200 {"success":true,"data":{"items":[{"type":"prompt","id":"prompt_1793311397853_hvz3eh2","sessionId":"ses_e90309e58ffeUH4XeVmlAW3zpa","content":"Verdict: NULL — negative, not marginal. Do not wire it. Th
+LIVECALL GET /api/projects
+GET /api/projects -> 200 {"success":true,"data":[{"projectId":"/home/opencode/Code/Work/antwall","sessionCount":223,"milestoneCount":0,"lastActivityAt":1795573785931},{"projectId":"/home/opencode/Code/Personal/Rust/opencode-a
+03:56:13 live project id resolved (never printed in full)
+LIVECALL GET /api/projects/%2Fhome%2Fopencode%2FCode%2FWork%2Fantwall/sessions
+GET /api/projects/%2Fhome%2Fopencode%2FCode%2FWork%2Fantwall/sessions -> 200 {"success":true,"data":[{"agentId":"syseng","agentName":"syseng","createdAt":1795573785931,"filesTouched":[".tmp/drill-bundles/kern-ladder-20261125T02Z/","probes/fixtures/control-e2big-d8c1ea64d31e.tx
+LIVECALL GET /api/projects/%2Fhome%2Fopencode%2FCode%2FWork%2Fantwall/milestones
+GET /api/projects/%2Fhome%2Fopencode%2FCode%2FWork%2Fantwall/milestones -> 200 {"success":true,"data":[]}
+LIVECALL GET /skills/index.json
+GET /skills/index.json -> 200 {"skills":[]}
+03:56:13 live catalog has no skill files (recorded, not asserted)
+LIVECALL GET /api/memories?page=1
+GET /api/memories?page=1 -> 200 {"success":true,"data":{"items":[{"type":"memory","id":"auto-capture-ad35568fa966792ce97a4dd04dfc0e3a43f824a77e8cd0e6cb4fd23f4fe03521","content":"Grilling session settled eight queue decisions, record
+03:56:13 live GET-only self-check: PASS (11 GET calls, zero non-GET)
+03:56:13 LIVE PASS COMPLETE

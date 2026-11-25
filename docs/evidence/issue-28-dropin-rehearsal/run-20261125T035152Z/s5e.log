@@ -1,0 +1,9 @@
+=== S5e DIAGNOSTIC (not the frozen Q_REF) 2026-11-25T03:55:31Z ===
+D=infallible-by-construction claims while exempting test code
+rc_curl=0
+hits_with_target_id=1
+mem_1794369885539_0673e5eb0	0.5102985086038583
+auto-capture-25c221afa5d558e839577ba8d19503310e4c112612c6734ebd8a0092fbd775be	0.5050794567950853
+auto-capture-64dfbf828b714e137b50585e2d25b1521221dde04706d6c32dac6c17ffff89f4	0.5013426312688687
+--- rank of target among returned ---
+rank=20 similarity=0.4689909533215277

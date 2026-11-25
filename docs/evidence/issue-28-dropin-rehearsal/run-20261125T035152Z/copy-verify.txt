@@ -1,0 +1,7 @@
+=== S2 verify 2026-11-25T03:53:05Z ===
+dbs=43
+shard_files=36
+--- metadata registry ---
+36
+5602
+rc_meta=0

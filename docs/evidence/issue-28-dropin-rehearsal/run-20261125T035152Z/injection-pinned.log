@@ -1,0 +1,12 @@
+=== injection pinned 2026-11-25T03:57:34Z ===
+OPENCODE_SESSION_ID=ses_def2b9612ffe7NMoFAw4iRr1FQ
+--- inject lines in local window 10:5x (+07:00) ---
+2
+--- inject lines whose session_id is this session ---
+1
+--- the newest inject line, full ---
+[2026-11-25T10:51:26.795+07:00] inject.received: {"block_bytes":2675,"block_prefix":"<memory_context>\nThe following block is reference context injected from the memory system.\n\n<project_agent_session_history>\n## Project facts\n<memory relevance=\"72%\">OPS GOTCHA (2026-10-31): running the staged engine binary by hand WITHOUT `--storage-root` targets the LIVE store (`~/.opencode-mem/data`) — it attempts the engine lock, finds it held by the running engine, writes `degraded: engine lock held (pid=<holder>, ts=…)` into `<store>/status`, and exits 75. That line reads exactly like a plugin degradat…","component":"opencode-mem-plugin","handling_ms":840,"host_contract":"setup","level":"info","prefix_truncated":true,"sections":["Project facts","Recent sessions"],"session_id":"ses_def2b9612ffe7NMoFAw4iRr1FQ","status":"ok","turn_index":0}
+--- does any inject block_prefix carry the memory_context frame? ---
+74
+--- statuses seen ---
+    218 "status":"ok"

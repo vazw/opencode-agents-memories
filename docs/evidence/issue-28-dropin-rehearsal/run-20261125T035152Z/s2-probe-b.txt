@@ -1,0 +1,20 @@
+=== probe b: db+wal byte copy, recovered in scratch 2026-11-25T03:52:42Z ===
+rc_cp_db=0
+rc_cp_wal=0
+--- size match ---
+/home/opencode/.opencode-mem/data/projects/project_1b5c40c3136fed58_shard_0.db 782336
+/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/rehearsal-28/20261125T035152Z/evidence/probe-b/x.db 782336
+/home/opencode/.opencode-mem/data/projects/project_1b5c40c3136fed58_shard_0.db-wal 4111792
+/home/opencode/Code/Personal/Rust/opencode-agents-memory/.tmp/rehearsal-28/20261125T035152Z/evidence/probe-b/x.db-wal 4111792
+--- count after WAL replay in scratch ---
+0
+rc_recover_count=0
+--- journal_mode / integrity ---
+wal
+ok
+rc_integrity=0
+--- did recovery write into the copy? sidecars now: ---
+total 1704
+drwxr-xr-x 2 opencode opencode      18 Nov 25 10:52 .
+drwxr-xr-x 3 opencode opencode    4096 Nov 25 10:52 ..
+-rw------- 1 opencode opencode 1355776 Nov 25 10:52 x.db

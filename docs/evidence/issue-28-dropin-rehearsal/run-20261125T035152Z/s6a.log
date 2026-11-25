@@ -1,0 +1,12 @@
+=== S6a UI 2026-11-25T03:55:37Z ===
+index=200
+rc_index=0
+<title>OpenCode Memory Explorer</title>
+rc_title=0
+ASSET=
+asset=200
+rc_asset=0
+--- listing endpoint GET /api/memories ---
+rc_list=0
+{"success":true,"data":{"items":[{"type":"memory","id":"auto-capture-ad35568fa966792ce97a4dd04dfc0e3a43f824a77e8cd0e6cb4fd23f4fe03521","content":"Grilling session settled eight queue decisions, recorded in tracker commit d254413. Item 151 gets a context instrument (logging sessionID, has, turn counter) with a pre-registered decision rule; 145 drops to an unattended restart since background_compact
+listing_total_field=6027

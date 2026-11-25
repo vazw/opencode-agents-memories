@@ -1,0 +1,13 @@
+=== S6c canary add 2026-11-25T03:56:26Z ===
+CANARY=rehearsal-28-canary-20261125T035152Z
+TAG=opencode_project_2416a5f68e61f821 (real project tag from the copy, not the synthetic 0123456789abcdef)
+--- stats before add ---
+total_before=5602
+--- POST /api/memories ---
+{"success":true,"data":{"id":"mem_1795578986897_02e51ee7e"}}
+rc_post=0
+--- search back by canary ---
+id=mem_1795578986897_02e51ee7e similarity=0.6330108286400182
+rehearsal-28-canary-20261125T035152Z zqx traffic light
+--- stats after add ---
+total_after=5603

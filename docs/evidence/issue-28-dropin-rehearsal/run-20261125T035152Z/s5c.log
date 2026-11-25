@@ -1,0 +1,13 @@
+=== S5 recall 2026-11-25T03:54:52Z ===
+Q_REF=97 sites across 8 crates
+rc_curl=0
+id=auto-capture-a7df5e746c0f1ce35ca9d2f46498de5f78e8d2bbaab4f5b086ad05e21888b17c similarity=0.49742903405164396
+rc_jq=0
+--- content head 200 ---
+READ-ONLY Plan Gate review of blueprint r6 for repo-only #91 peer-route fail-closed repair (scripts/offload-drill.sh, scripts/test-offload-drill-contracts.sh). Emitted GATE: REJECTED with five require
+--- items returned ---
+20
+--- top-3 ids ---
+auto-capture-a7df5e746c0f1ce35ca9d2f46498de5f78e8d2bbaab4f5b086ad05e21888b17c	0.49742903405164396
+auto-capture-8aa2d7026cf536823abb23d65b2dd9b9648faf33248eab1c3e07bad412ec1adb	0.49069678760361846
+mem_1794507444332_04e368e6b	0.47316902135811767

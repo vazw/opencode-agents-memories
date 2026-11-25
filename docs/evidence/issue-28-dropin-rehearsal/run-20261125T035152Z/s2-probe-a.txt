@@ -1,0 +1,10 @@
+=== probe a: immutable URI 2026-11-25T03:52:37Z ===
+89
+rc_immutable=0
+--- wal size for that db ---
+/home/opencode/.opencode-mem/data/projects/project_1b5c40c3136fed58_shard_0.db-wal 4111792
+stat: cannot statx '/home/opencode/.opencode-mem/data/projects/project_1b5c40c3136fed58_shard_0.db-shm': No such file or directory
+stat: cannot statx '/home/opencode/.opencode-mem/data/projects/project_1b5c40c3136fed58_shard_0.db-tshm': No such file or directory
+--- probe a2: mode=ro only ---
+Parse error in 3rd command line argument: database is locked (5)
+rc_ro=1
