@@ -163,3 +163,16 @@ plus the reviewed working-tree change; nothing was reverted. Scratch only; live 
 - Step 7 / 8b probe guard: `grep -n 'plugin/undefined' plugin/tests/probe-145-guard.test.mjs` → no output, rc `1`; marker count `5` rc 0; guard GREEN `ℹ tests 2 ℹ pass 2 ℹ fail 0` rc 0. Mutant `reap-guard-deleted` → `✖ test_probe_refuses_without_seed_exit_line`, `AssertionError [ERR_ASSERTION]: code=0 stderr=`; mutant `root-guard-deleted` → `✖ test_probe_refuses_without_driver_storage_root`, `AssertionError [ERR_ASSERTION]: code=0 stderr=`. Probe header cites `startBridge` at `plugin/src/plugin.js:898`; the tree measures `909` (`async function startBridge(state) {`). A comment, not a gate.
 - Shell half unmet: crates/mem-bridge/src/inject.rs carries no background-shell section, so a child cannot be told which shell it left running; filed as issue 146 (146-inject-block-lacks-shell-section.md).
 - M1 gap deferred. The arm (a)/(b) question is unresolved on current evidence. Runbook: `docs/evidence/issue-145/README.md`.
+
+## Preflight 2026-11-25 — the post-restart run is unblocked except for the owner's R2
+
+Host restarted 2026-11-25T04:21:39Z (`args=["service","restart"]`), which this runbook's header waits for. Read-only; nothing under `~/.opencode-mem/` written, no signal sent. Window 04:50:45Z.
+
+- **S0 schema: PASS.** `session_message` lists `id, session_id, type, seq, time_created, time_updated, data`; `session_v2` lists `id, project_id, workspace_id, parent_id, …`. No drift, so Q0 may run.
+- **R1 host graph: PASS.** `grep 'host_contract' ~/.opencode-mem/opencode-mem.log | tail -3` shows `"host_contract":"setup"` on live inject lines, newest `2026-11-25T11:43:02.701+07:00` (`status:"ok"`, `block_bytes:2871`). The V2 host graph is running; no further restart is needed for R1.
+- **Q1 calibration: PASS, under a corrected literal.** `grep -c '"host_contract"'` = 462. The runbook's original `tail -5 | grep 'inject.received'` returns rc 1 while the engine is healthy, because a live host appends engine stderr to the same file and the last five lines are usually not inject lines — MEASURED here. The line is now `grep 'inject.received' … | tail -1`, which returns the 11:43:02 line with `"level":"info"`. Fixed in `docs/evidence/issue-145/README.md`.
+- **Processes:** host pid 8878 (`opencode serve --service`), engine pid 8953 (`plugin/engine/linux-x64/opencode-agents-memory --storage-root /home/opencode/.opencode-mem/data`).
+
+**Still blocked on the owner, and only on this:** R2 — five fresh children from a different directory, each starting one named background shell plus one named action, then the owner triggers compaction in each child and stops. R3/Q6/Q7 then need one follow-up turn per child with a fresh `PROBE-NONCE-<8 hex>` written after the boundary. Nothing in R0/R1/Q1 can be advanced further without that.
+
+Q8 remains not measured by construction (no tool hook; issue 146 closes as covered by 149).

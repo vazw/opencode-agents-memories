@@ -73,11 +73,13 @@ Q1 (calibration, log side):
 
 ```sh
 date -u +%FT%TZ; grep -c '"host_contract"' ~/.opencode-mem/opencode-mem.log; echo rc=$?
-tail -5 ~/.opencode-mem/opencode-mem.log | grep 'inject.received'; echo rc=$?
+grep 'inject.received' ~/.opencode-mem/opencode-mem.log | tail -1; echo rc=$?
 ```
 
 Both must be non-zero and the last `inject.received` must carry `"level":"info"`. Zero is recorded as `uncalibrated` and
-the runbook stops — the engine half is not running and a child's `NONE` would measure nothing.
+the runbook stops — the engine half is not running and a child's `NONE` would measure nothing. The last-line read is
+`grep | tail -1`, not `tail -5 | grep`: a live host appends engine stderr to the same file, so the last five lines are
+usually not inject lines and `tail -5 | grep` returns rc 1 while the engine is perfectly healthy (MEASURED 2026-11-25).
 
 Q1b (calibration, instrument side — run once per run, before any child):
 
