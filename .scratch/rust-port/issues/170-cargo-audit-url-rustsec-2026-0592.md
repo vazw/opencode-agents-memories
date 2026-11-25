@@ -1,6 +1,6 @@
 # 170 — `cargo audit` reports `RUSTSEC-2026-0592` against `url 2.5.8`
 
-Status: ready-for-agent — measured: url and rustix both lockfile-patchable; chrono needs an accept entry; cargo audit must exit 0 after
+Status: done — url 2.5.9 + rustix 1.1.6 patched, chrono accepted with reason; cargo audit rc 1→0; 2 files
 Filed: 2026-11-25, noticed by the issue-169 review (`.tmp/progress/issue-169-score-determinism.review-2.md`)
 
 ## The observation
@@ -89,3 +89,48 @@ finding is read, which is what this triage did.
 Closed as *measurement, not a deliverable* only if `cargo update --precise` for either crate fails to resolve, or if
 the bump moves behaviour the gates can see — in which case the finding goes back to the accept list with the measured
 reason, not to a silent pin.
+
+## Landed 2026-11-25 — blueprint `03953867f390`, four gate rounds, review APPROVED
+
+Two files: `Cargo.lock` (`19 19`) and `.cargo/audit.toml` (`+18/−1`).
+
+| change | before | after |
+|---|---|---|
+| `cargo audit` | rc 1 | **rc 0**, 1568 advisories / 495 crates loaded |
+| `url` | 2.5.8 (vulnerability) | 2.5.9 |
+| `rustix` | 1.1.5 (unsound) | 1.1.6; `0.38.44` retained |
+| `chrono 0.4.45` | unmaintained, unrecorded | accept entry with class, blocking crate, revisit condition |
+
+Lock diff breakdown, measured: 6 `version` lines (`url`, `form_urlencoded 1.2.2→1.2.3`, `rustix`), 6 `checksum`
+lines as a disjoint set, and 26 other lines = 13 pairs — 4 `rustix` refs and 9 `windows-sys` refs (`0.61.2` refs
+`16 → 7`; 8 re-pointed onto `0.52.0`, 1 onto `0.59.0`; three package entries retained). `Cargo.toml` untouched, so
+no manifest change was needed.
+
+**"Clean" was proved distinct from "could not look", three independent ways:** the same scanner against the base
+lock reports both advisories (rc 1); `--db <nonexistent>` exits 1 loudly; and the DB-loaded line carries a numeral
+(1568) the run cannot print without loading. The config-less probe ran from outside the repo and listed chrono while
+dropping url and rustix; the config-driven run mutes exactly four IDs.
+
+### Findings recorded, not fixed
+
+1. **F-1, fixed here as a one-token follow-up taken in the same wave.** `.cargo/audit.toml:2` said `cargo-audit
+   0.22.2`; the installed tool is `0.23.0`. Corrected, and the discovery note strengthened: measured on 0.23.0,
+   discovery is **cwd-relative with no ancestor walk** — a run from `.tmp/` *inside* this repo sees
+   `settings.ignore = []`. The blueprint's "walks up from the invocation directory" sentence is wrong; the chosen
+   probe cwd still works, and the control is stronger than it claimed. The two doctrine claims (out-of-range year is
+   fatal; a well-formed nonexistent ID is silently accepted) were re-tested on 0.23.0 and hold.
+2. **F-2, blueprint text only.** The test row `config_driven_run_ignores_chrono` names a mutant where a trailing
+   space or inner comma makes the ignore entry "inert while the file still parses". Measured on 0.23.0: both are
+   **fatal parse errors**, rc 1. The row is still non-vacuous — it is carried by the config-less/config-driven pair —
+   but its mutant description is wrong and should be corrected on the next touch of that plan.
+3. **F-3, environment.** A reviewer full-suite run hit `ENOSPC` with `/home` at 0 bytes free and produced one extra
+   red (`test_probe_refuses_git_executable_inside_the_untrusted_project_root`), which passes standalone and was
+   absent on the post-recovery run. Not attributable to the diff. Disk was at 98 % (18 G free) after recovery, so
+   this will recur: a load-sensitive suite plus a full workspace build can exhaust it mid-run.
+
+### Verified at review, not inherited
+
+`cargo audit` rc 0 with a real scan; both audit runs with their cwds; the accept entry byte-exact
+(`grep -cx` = 1, `od -c` clean) **and** absent from `warnings.unmaintained`; the lock carrying `2.5.9`/`1.1.6` with
+`2.5.8` and `rustix 1.1.5` gone; tests rc 101 with `comm -13` empty against the coder's own baseline;
+`fmt` and both clippy gates rc 0.

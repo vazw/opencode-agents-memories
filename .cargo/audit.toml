@@ -1,6 +1,9 @@
 # cargo-audit configuration for this workspace.
-# cargo-audit 0.22.2 reads this file ONLY at .cargo/audit.toml (cargo-config discovery,
+# cargo-audit 0.23.0 reads this file ONLY at .cargo/audit.toml (cargo-config discovery,
 # relative to the invocation directory); a repo-root audit.toml is silently ignored.
+# Verified on 0.23.0: discovery is cwd-relative with NO ancestor walk — a run from
+# `.tmp/` inside this repo sees settings.ignore = []. (The 0.22.2 figure here was a
+# stale observation; the doctrine below was re-tested on 0.23.0 and holds.)
 # Audit gates must therefore run from the repo root.
 #
 # Every entry below is an ACCEPTED finding with its class, its reason and its blocking
@@ -13,7 +16,8 @@
 # config-driven run. Matching is exact-string: no prefix, no wildcard, no class filter.
 #
 # Classes as RustSec records them today: RUSTSEC-2025-0057 = unmaintained,
-# RUSTSEC-2024-0436 = unmaintained, RUSTSEC-2026-0253 = unsound.
+# RUSTSEC-2024-0436 = unmaintained, RUSTSEC-2026-0253 = unsound,
+# RUSTSEC-2026-0543 = unmaintained.
 #
 # Drift check (periodic): an `ignore` entry silences its ID regardless of class, so a
 # reclassification (e.g. unsound -> vulnerability) would be hidden by this file. Copy
@@ -52,4 +56,16 @@ ignore = [
   #   undocumented — not demonstrably reachable, not demonstrably unreachable.
   #   Revisit when turso_core admits tantivy ^0.27.
   "RUSTSEC-2026-0253",
+
+  # RUSTSEC-2026-0543 — unmaintained, not vulnerable. chrono 0.4.45.
+  #   Direct workspace dependency (Cargo.toml:45) for timestamps and log
+  #   rotation: 29 `chrono::` references across mem-core (9), mem-web (18),
+  #   mem-store (1) and mem-portability (1). The advisory records no fixed
+  #   upgrade ("No fixed upgrade is available!") and describes no defect;
+  #   unmaintained is a maintenance class. Replacing it would be a 29-site
+  #   migration off `DateTime<Local>` and its formatting surface — a scheduled
+  #   change, not an incidental one.
+  #   Revisit when `cargo search chrono` reports a release above 0.4.45 and the
+  #   config-less probe no longer lists RUSTSEC-2026-0543 for that version.
+  "RUSTSEC-2026-0543",
 ]
