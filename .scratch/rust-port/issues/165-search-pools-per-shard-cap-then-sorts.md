@@ -3,7 +3,7 @@
 > Filename kept for link stability. Retitled 2026-11-25: the earlier title ("pools a per-shard cap and then sorts")
 > described a mechanism that measurement has now ruled out three times. See the two "Measured" sections below.
 
-Status: ready-for-agent — fix shape measured: candidate floor `k ≥ 320` **plus** removal of the insertion-ordered
+Status: ready-for-agent — fix shape = one blend-ordered statement per shard (measured exact, 122.6 ms vs 209 ms today); the widened-cap shape in the frontier section is SUPERSEDED
 `ids.truncate(1000)` clamp; both are required, neither alone reaches zero starvation
 Filed: 2026-11-25, from the issue 28 copy-first rehearsal (run `20261125T035152Z`), cell S5
 
@@ -223,3 +223,66 @@ look better at 320 than at 1290.
   `plugin/engine/` until it is restaged, which is an owner action.
 - Whether `k=320`'s 2.1× request cost is acceptable is a product call, recorded here with its numbers so it can be
   reversed on evidence rather than argued from intuition.
+
+## Superseded 2026-11-25 — the blend-ordered arm wins, and it is cheaper than today
+
+Report: `.tmp/progress/issue-165-blend-ordered-measurement.md`. The owner declined to accept the widened cap
+unexamined and asked for the blend-ordered alternative to be measured first. It was, and it dominates:
+
+| arm | whole request (27 tagged shards, 5518 rows) | true top-20 | exact? |
+|---|---|---|---|
+| **A** — today, per-channel `k=40` union | 209.0 ms | **13/20** | no |
+| **B** — `k=320` + clamp neutralised | 452.1 ms | 20/20 | yes |
+| **C20** — one blend-ordered statement per shard | **122.6 ms** | **20/20** | **yes, `max |Δ| = 0.0`** |
+| **C200** — same, N=200 | 123.5 ms | 20/20 | yes |
+
+So the fix does not have to buy correctness with latency. C is **1.70× faster than today** and **3.69× faster than the
+widening it replaces**, while being the only exact arm. Release build, 1 warmup + 5 timed runs.
+
+**Exactness is measured over every row, not just the served page.** The SQL blend was compared with the Rust blend
+over all 2997 rows of `…shard_0`: `max |Δ| = 0.0`, zero mismatches. Top-20 and top-200 are identical id-by-id *and*
+similarity-by-similarity, and the served page is 20/20 in order with worst aligned delta 0.0 — in a store where the
+`word.contains(tag)` branch actually fires (`c` ⊂ `across`/`crates`), so the comparison is not passing by that branch
+being dead.
+
+**The implementation detail that decides it: the embedding must bind as an F32-LE blob.** The same statement written
+with `vector32(?)` costs 302–307 ms, because the text→F32 parse is redone per row inside `CASE`/`MAX`. Blob binding
+brings the large shard to 67.8 ms. A coder who uses `vector32(?)` will produce a correct, slow fix — so this belongs
+in the plan as a forbidden form, not a footnote.
+
+Cost per row: 22.6 µs, split LIKE 15.7 µs (70 %), content cosine 4.9, tag overlap 1.6, tags cosine 0.4, sort 0.3.
+
+## Fix shape, replacing the earlier one
+
+Delete the per-channel candidate union and the `ids.truncate(1000)` clamp for the search path: per shard, one
+expression computes the blend over the shard's rows and returns the top `offset + limit` ids ordered by it. Both the
+`k` floor and the clamp become unnecessary because the candidate set *is* the served set — which is why this is a
+deletion rather than a widening.
+
+**`total` becomes a real number.** Today `total` is the pooled candidate count (`387`), which is an artefact of the
+cap and moves with the caller's page size. An exact `COUNT(*)` over the same filter costs **1.24 ms for all shards,
+1.0 % of C**, and reports `5518`. That is a user-visible change and must be stated in the API contract and covered by
+a test, not slipped in: a client that paginates by `total` currently cannot reach beyond row 387 at all.
+
+**Known ceiling, recorded so it is not discovered as a surprise:** C is O(rows) with a LIKE-dominated constant. It is
+projected to meet the widened cap at roughly 5× the largest current shard and to lose near the 50 000-row store cap.
+The one-line upgrade at that point is a cosine-ordered inner `LIMIT` before the LIKE terms.
+
+## Acceptance criteria, rewritten for C
+
+1. For **both** frozen queries plus one query chosen by the implementer, the served `pageSize=20` page equals the
+   full-scan reference top-20, id-by-id **and** similarity-by-similarity, measured through HTTP (the arm above was
+   measured on a harness; the harness↔engine offset is 10–14 % on A/B and is stated, not hidden).
+2. Served similarity matches the reference to within a stated tolerance (the harness measured `0.0`), so a fix that
+   reorders correctly but changes the blend fails.
+3. Whole-request latency at `pageSize=20` is measured at HEAD before and after, not pinned, and does not regress
+   against today's 209 ms. C's own figure must come from the engine's HTTP path, not the harness.
+4. `total` equals the count of rows in scope, is stable across `pageSize`, and a client paging with it reaches every
+   row exactly once — the property today cannot satisfy at `total=387`.
+5. No `vector32(?)` binding on the hot path: a test or a reviewed line pins the F32-LE blob form, because the text
+   form is silently 2.5× slower and functionally identical.
+
+## Remaining open, unchanged
+
+- Issue 169's fix is in no built engine (see the staging note); restaging is an owner action.
+- Issue 170 (dependency patches) ships first, as a smaller wave.
