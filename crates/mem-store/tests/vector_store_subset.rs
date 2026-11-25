@@ -11,10 +11,10 @@ use mem_store::schema_migrations::{
     MigrationOptions, apply_schema_migrations, memory_shard_migrations,
 };
 use mem_store::vector::{
-    MemoryInsert, ProjectAssociation, count_all_vectors, count_vectors_by_container_tag,
-    get_all_memories, get_distinct_tags, get_project_path_counts, get_stats_memories,
-    insert_vector, insert_vector_statement, resolve_session_id, update_project_association,
-    vector_to_text,
+    MemoryInsert, ProjectAssociation, count_all_vectors, count_in_shard,
+    count_vectors_by_container_tag, get_all_memories, get_distinct_tags, get_project_path_counts,
+    get_stats_memories, insert_vector, insert_vector_statement, resolve_session_id,
+    update_project_association, vector_to_text,
 };
 
 use mem_store::config::StoreConfig;
@@ -162,6 +162,59 @@ async fn test_count_all_vectors_and_by_container_tag() {
         0
     );
     assert_eq!(count_all_vectors(db.as_ref()).await, 2);
+}
+
+/// Issue 165 — the search `total` counts rows in scope, not the page.
+#[tokio::test]
+async fn test_count_in_shard_counts_only_the_requested_tag() {
+    let config = common::store_config("vec-count-in-shard");
+    let db = prepared_db(&config, "shard.db", 2).await;
+    let tag_a = "opencode_project_a1b2c3d4e5f60001";
+    let tag_b = "opencode_user_bbbbbbbbbbbbbbbb";
+    for (id, tag) in [
+        ("a1", tag_a),
+        ("a2", tag_a),
+        ("a3", tag_a),
+        ("b1", tag_b),
+        ("b2", tag_b),
+    ] {
+        let mut insert = record(id, 1, false, None);
+        insert.container_tag = tag.to_string();
+        insert_vector(db.as_ref(), &insert).await.unwrap();
+    }
+    assert_eq!(
+        count_in_shard(db.as_ref(), tag_a).await.expect("count A"),
+        3,
+        "the requested tag's own rows, not the shard's"
+    );
+    assert_eq!(
+        count_in_shard(db.as_ref(), tag_b).await.expect("count B"),
+        2
+    );
+    assert_eq!(
+        count_in_shard(db.as_ref(), "opencode_absent")
+            .await
+            .expect("count absent"),
+        0
+    );
+}
+
+/// Issue 165 — a store failure is a returned `Err`, never the `Ok(0)` the
+/// legacy `count_vectors_by_container_tag` habit produces (which would make a
+/// live shard look empty and collapse `total`). Mutant: `unwrap_or(0)`.
+#[tokio::test]
+async fn test_count_in_shard_propagates_a_store_failure() {
+    let config = common::store_config("vec-count-unreadable");
+    let db = prepared_db(&config, "shard.db", 2).await;
+    db.execute("DROP TABLE memories", Vec::new())
+        .await
+        .expect("the table drops");
+    assert!(
+        count_in_shard(db.as_ref(), "opencode_project_a1b2c3d4e5f60001")
+            .await
+            .is_err(),
+        "an unreadable shard must not report zero rows"
+    );
 }
 
 // ---------------------------------------------------------------------------

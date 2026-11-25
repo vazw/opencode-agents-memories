@@ -114,6 +114,9 @@ struct FakeState {
     tombstones: Vec<(String, i64)>,
     /// Makes `prompt_tombstone` answer a store failure (the D-9 500 arm).
     tombstone_read_fails: bool,
+    /// Issue 165: makes `count_in_shard` answer a store failure (the count-
+    /// failure arm that must undercount `total` without shortening `items`).
+    count_in_shard_fails: bool,
 }
 
 /// The shared fake backend.
@@ -263,6 +266,7 @@ impl FakeBackend {
                 sweep_read_fails: false,
                 tombstones: Vec::new(),
                 tombstone_read_fails: false,
+                count_in_shard_fails: false,
             }),
             migrator: Arc::new(Mutex::new(TagMigrator::new())),
             calls: Mutex::new(Vec::new()),
@@ -374,6 +378,15 @@ impl FakeBackend {
             .lock()
             .expect("fake state lock")
             .tombstone_read_fails = fails;
+    }
+
+    /// Issue 165: makes a per-shard count fail, the arm that must undercount
+    /// `total` while `items` still reaches `offset + page_size`.
+    pub fn set_count_in_shard_failure(&self, fails: bool) {
+        self.state
+            .lock()
+            .expect("fake state lock")
+            .count_in_shard_fails = fails;
     }
 
     /// Replaces the seeded profile's `profile_data` (a test-only seed, never
@@ -610,6 +623,31 @@ impl MemoryPort for FakeBackend {
                 tags: row.tags.clone(),
             })
             .collect())
+    }
+
+    /// Issue 165: the per-shard count, with `set_count_in_shard_failure` as
+    /// the knob for the undercount arm.
+    async fn count_in_shard(
+        &self,
+        shard: &ShardRef,
+        container_tag: &str,
+    ) -> Result<u64, PortError> {
+        self.record(format!(
+            "count_in_shard:{}:{container_tag}",
+            shard.scope_hash
+        ));
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| PortError::Store("lock".into()))?;
+        if state.count_in_shard_fails {
+            return Err(PortError::Store("count failed".into()));
+        }
+        Ok(state
+            .memories
+            .iter()
+            .filter(|(owner, row)| owner == shard && row.container_tag == container_tag)
+            .count() as u64)
     }
 
     async fn list_memories_by_container_tag(

@@ -1953,3 +1953,76 @@ async fn test_keyword_bump_sql_reads_candidates_through_the_id_index() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Issue 165 — `blend_ordered_sql`, pinned byte-for-byte
+// ---------------------------------------------------------------------------
+//
+// The emitted shape is the measured one: one flat projection, both arithmetic
+// forms (`* 1.0 / n` for the boost, `* (1.0 / n)` for the keyword term), the
+// conditional tag clause, and the total order. `turso` executes it unchanged,
+// so a whitespace or clause drift is a behaviour change, not cosmetics.
+
+#[test]
+fn test_blend_ordered_sql_pins_the_frozen_unfiltered_shape() {
+    let tokens = vec![
+        "97".to_string(),
+        "sites".to_string(),
+        "across".to_string(),
+        "crates".to_string(),
+    ];
+    let containment = vec![
+        Vec::new(),
+        Vec::new(),
+        vec!["c".to_string()],
+        vec!["c".to_string()],
+    ];
+    let statement = sql::blend_ordered_sql(&sql::BlendTerms {
+        tokens: &tokens,
+        containment: &containment,
+        filtered: false,
+    });
+    let expected = r#"SELECT m.id AS id,
+  MIN(1.0, MAX(0.0, 1.0 - vector_distance_cos(m.vector, ?))) * 0.5
+  + MAX(
+      CASE WHEN m.tags_vector IS NOT NULL
+        THEN MIN(1.0, MAX(0.0, 1.0 - vector_distance_cos(m.tags_vector, ?)))
+        ELSE 0.0 END,
+      ( (CASE WHEN instr(lower(IFNULL(m.tags, '')), ?) > 0 THEN 1 ELSE 0 END)
+      + (CASE WHEN instr(lower(IFNULL(m.tags, '')), ?) > 0 THEN 1 ELSE 0 END)
+      + (CASE WHEN instr(lower(IFNULL(m.tags, '')), ?) > 0 OR instr(',' || lower(IFNULL(m.tags, '')) || ',', ',' || ? || ',') > 0 THEN 1 ELSE 0 END)
+      + (CASE WHEN instr(lower(IFNULL(m.tags, '')), ?) > 0 OR instr(',' || lower(IFNULL(m.tags, '')) || ',', ',' || ? || ',') > 0 THEN 1 ELSE 0 END) ) * 1.0 / 4
+    ) * 0.3
+  + ( (CASE WHEN m.content LIKE ? ESCAPE '\' OR IFNULL(m.tags, '') LIKE ? ESCAPE '\' THEN 1 ELSE 0 END)
+    + (CASE WHEN m.content LIKE ? ESCAPE '\' OR IFNULL(m.tags, '') LIKE ? ESCAPE '\' THEN 1 ELSE 0 END)
+    + (CASE WHEN m.content LIKE ? ESCAPE '\' OR IFNULL(m.tags, '') LIKE ? ESCAPE '\' THEN 1 ELSE 0 END)
+    + (CASE WHEN m.content LIKE ? ESCAPE '\' OR IFNULL(m.tags, '') LIKE ? ESCAPE '\' THEN 1 ELSE 0 END) ) * (1.0 / 4) * 0.2
+  AS sim
+FROM memories m
+WHERE m.vector IS NOT NULL
+ORDER BY sim DESC, created_at DESC, id ASC
+LIMIT ?"#;
+    assert_eq!(statement, expected);
+    assert_eq!(statement.matches('?').count(), 17);
+}
+
+#[test]
+fn test_blend_ordered_sql_pins_the_no_token_filtered_shape() {
+    let statement = sql::blend_ordered_sql(&sql::BlendTerms {
+        tokens: &[],
+        containment: &[],
+        filtered: true,
+    });
+    let expected = r#"SELECT m.id AS id,
+  MIN(1.0, MAX(0.0, 1.0 - vector_distance_cos(m.vector, ?))) * 0.5
+  + (CASE WHEN m.tags_vector IS NOT NULL
+        THEN MIN(1.0, MAX(0.0, 1.0 - vector_distance_cos(m.tags_vector, ?)))
+        ELSE 0.0 END) * 0.4
+  AS sim
+FROM memories m
+WHERE m.vector IS NOT NULL AND m.container_tag = ?
+ORDER BY sim DESC, created_at DESC, id ASC
+LIMIT ?"#;
+    assert_eq!(statement, expected);
+    assert_eq!(statement.matches('?').count(), 4);
+}

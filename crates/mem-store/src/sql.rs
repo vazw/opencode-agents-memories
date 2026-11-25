@@ -344,6 +344,87 @@ pub const KEYWORD_SCORES_TAGGED: &str = r#"
           LIMIT ?
         "#;
 
+/// Issue 165 — the blend-ordered statement's inputs. `tokens` is
+/// `tokenize_query_text`'s output (lowercased, 0..=16); `containment` is the
+/// same length and carries, per word, the shard's verbatim (padding kept,
+/// lowercased) tag chunks whose trimmed form is a substring of that word.
+/// `filtered` is `!container_tag.is_empty()` — computed once by the caller,
+/// and the only thing that decides whether the tag clause and its placeholder
+/// exist, so the clause and the bind list cannot drift.
+pub struct BlendTerms<'a> {
+    pub tokens: &'a [String],
+    pub containment: &'a [Vec<String>],
+    pub filtered: bool,
+}
+
+/// Issue 165 — the needle source. The caller appends `AND container_tag = ?`
+/// iff its blend is filtered, so the read and the blend always scope alike.
+pub const NEEDLE_SOURCE_SQL: &str = "SELECT DISTINCT tags FROM memories WHERE tags IS NOT NULL";
+
+/// Issue 165 — one flat projection per shard computing the exact blend over the
+/// shard's rows and returning the top `LIMIT` ids ordered by it.
+///
+/// Placeholder order is `content blob, tags blob`, then per word `1 word
+/// needle + k containment needles`, then per token `LIKE content, LIKE tags`,
+/// then `container_tag` iff `filtered`, then the limit. Count:
+/// `2 + Σ(1 + k) + 2n + filtered + 1`.
+///
+/// Both arithmetic forms are mirrored from the Rust blend, never normalised:
+/// the boost divides (`… * 1.0 / n`, pinning REAL against integer division) and
+/// the keyword term multiplies a precomputed reciprocal (`… * (1.0 / n)`).
+/// They agree at n=4 and differ by 1 ULP at n=7 / numerator 5.
+///
+/// The tag predicate mirrors the **unmodified** Rust
+/// `tag.contains(word) || word.contains(tag)` on the raw column: the word
+/// needle is a plain `instr` (a token never contains a comma), and each
+/// containment needle is a verbatim chunk compared against the comma-delimited
+/// haystack, so padding cancels per row. No `replace(` appears anywhere.
+pub fn blend_ordered_sql(terms: &BlendTerms<'_>) -> String {
+    let mut sql = String::from(
+        "SELECT m.id AS id,\n  MIN(1.0, MAX(0.0, 1.0 - vector_distance_cos(m.vector, ?))) * 0.5",
+    );
+    if terms.tokens.is_empty() {
+        sql.push_str(
+            "\n  + (CASE WHEN m.tags_vector IS NOT NULL\n        THEN MIN(1.0, MAX(0.0, 1.0 - vector_distance_cos(m.tags_vector, ?)))\n        ELSE 0.0 END) * 0.4",
+        );
+    } else {
+        let word = |alternatives: &[String]| {
+            format!(
+                "(CASE WHEN {} THEN 1 ELSE 0 END)",
+                alternatives.join(" OR ")
+            )
+        };
+        let mut boost = Vec::with_capacity(terms.tokens.len());
+        for (index, _) in terms.tokens.iter().enumerate() {
+            let mut alternatives = vec!["instr(lower(IFNULL(m.tags, '')), ?) > 0".to_string()];
+            for _ in terms.containment.get(index).into_iter().flatten() {
+                alternatives.push(
+                    "instr(',' || lower(IFNULL(m.tags, '')) || ',', ',' || ? || ',') > 0"
+                        .to_string(),
+                );
+            }
+            boost.push(word(&alternatives));
+        }
+        sql.push_str(
+            "\n  + MAX(\n      CASE WHEN m.tags_vector IS NOT NULL\n        THEN MIN(1.0, MAX(0.0, 1.0 - vector_distance_cos(m.tags_vector, ?)))\n        ELSE 0.0 END,\n      ( ",
+        );
+        sql.push_str(&boost.join("\n      + "));
+        sql.push_str(&format!(" ) * 1.0 / {}", terms.tokens.len()));
+        sql.push_str("\n    ) * 0.3");
+        let like = "(CASE WHEN m.content LIKE ? ESCAPE '\\' OR IFNULL(m.tags, '') LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)";
+        let likes = vec![like; terms.tokens.len()].join("\n    + ");
+        sql.push_str("\n  + ( ");
+        sql.push_str(&likes);
+        sql.push_str(&format!(" ) * (1.0 / {}) * 0.2", terms.tokens.len()));
+    }
+    sql.push_str("\n  AS sim\nFROM memories m\nWHERE m.vector IS NOT NULL");
+    if terms.filtered {
+        sql.push_str(" AND m.container_tag = ?");
+    }
+    sql.push_str("\nORDER BY sim DESC, created_at DESC, id ASC\nLIMIT ?");
+    sql
+}
+
 /// Issue 169: exact keyword hit count over an already-decided candidate set.
 ///
 /// Local — no upstream counterpart — so it is self-pinned by

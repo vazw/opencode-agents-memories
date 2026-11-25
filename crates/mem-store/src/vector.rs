@@ -71,6 +71,18 @@ pub fn vector_to_text(vector: &[f32]) -> Result<String, StoreError> {
     Ok(serde_json::to_string(vector)?)
 }
 
+/// Raw F32 little-endian vector blob — the binding shape `vector_distance_cos`
+/// reads without re-parsing per row. The legacy test fixtures and
+/// [`crate::vector_utils::blob_to_float32_array`] share exactly this layout
+/// (no header), so the round trip is the store's own decoder.
+pub fn vector_to_blob(vector: &[f32]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(vector.len() * 4);
+    for value in vector {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    bytes
+}
+
 /// Upstream `resolveSessionId`: explicit non-empty wins, else metadata.
 /// `parseSessionIdFromMetadata` moved to `vector_utils` (single home).
 pub fn resolve_session_id(session_id: Option<String>, metadata: Option<&str>) -> Option<String> {
@@ -191,6 +203,22 @@ pub async fn count_vectors_by_container_tag(db: &dyn Db, container_tag: &str) ->
     .flatten()
     .and_then(|row| row.i64("count"))
     .unwrap_or(0) as u64
+}
+
+/// Issue 165 — the honest per-shard count behind `search`'s `total`: the same
+/// `COUNT(*) … WHERE container_tag = ?` predicate family the row selection
+/// uses, with a store failure **propagated** instead of coerced to `Ok(0)`
+/// (`count_vectors_by_container_tag` above keeps the upstream coercion for its
+/// own callers, so the caller that must distinguish "zero rows" from "unread
+/// shard" gets a `Result`).
+pub async fn count_in_shard(db: &dyn Db, container_tag: &str) -> Result<u64, StoreError> {
+    let row = crate::db::query_one(
+        db,
+        crate::sql::COUNT_VECTORS_BY_CONTAINER_TAG,
+        vec![Value::Text(container_tag.to_string())],
+    )
+    .await?;
+    Ok(row.and_then(|row| row.i64("count")).unwrap_or(0).max(0) as u64)
 }
 
 /// Upstream `getAllMemories` (`SELECT *`, `created_at DESC`).
@@ -377,9 +405,13 @@ pub async fn exact_scan_kind(
 ///
 /// Issue 169: the returned scores are the upstream `LIMIT k` *provisional*
 /// values — a row deeper than `k` in a token's scan misses that token's bump.
-/// They are kept for `tests/search_cost_bench.rs`'s twin harness;
-/// [`search_in_shard`] spends only the returned **ids** and scores the merged
-/// candidate set with [`keyword_bumps`], which has no `LIMIT`.
+///
+/// Kept for upstream parity only — **nothing in this repository calls it**.
+/// Since issue 165 `search_in_shard` takes its candidates from one
+/// blend-ordered statement (`blend_ordered_ids`) and scores them with
+/// `keyword_bumps`, which has no `LIMIT`; the W8 bench twin
+/// (`tests/search_cost_bench.rs`) mirrors that statement (`narrow_blend_ids`),
+/// so this port's only remaining reference is this definition.
 pub async fn keyword_scores(
     db: &dyn Db,
     query_text: Option<&str>,
@@ -459,9 +491,135 @@ pub async fn keyword_bumps(
         .collect())
 }
 
+/// Split a stored tags string into its lowercased comma chunks, **keeping the
+/// padding** and dropping only a chunk that is empty after trimming. Padding is
+/// kept because the SQL containment needle is compared verbatim against the raw
+/// haystack: `instr(',' || tags || ',', ',' || chunk || ',')` cancels per-row
+/// padding only when the chunk carries it. One caller (`blend_needles`).
+fn tag_chunks(tags: &str) -> Vec<String> {
+    tags.split(',')
+        .map(str::to_lowercase)
+        .filter(|chunk| !chunk.trim().is_empty())
+        .collect()
+}
+
+/// Issue 165 — per-word needles for the blend statement's boost predicate.
+///
+/// `words` is the tokenized query (lowercased, 0..=16); `containment[i]` holds
+/// the shard's verbatim (padding kept) tag chunks whose trimmed form is a
+/// substring of `words[i]`. Sorted and deduplicated so the built statement and
+/// its bind list are stable.
+pub struct BlendNeedles {
+    pub words: Vec<String>,
+    pub containment: Vec<Vec<String>>,
+}
+
+/// Issue 165 — read the shard's distinct tag strings and derive the
+/// containment needles. The read carries the **same `filtered`** as the blend
+/// (`AND container_tag = ?` iff the tag is non-empty): scoping the read to the
+/// tag keeps one tag's chunks from boosting another tag's rows, and skipping
+/// the predicate on the empty-tag `all-projects` path keeps the
+/// reverse-containment disjunct from collapsing to zero there.
+async fn blend_needles(
+    db: &dyn Db,
+    query_text: Option<&str>,
+    container_tag: &str,
+) -> Result<BlendNeedles, StoreError> {
+    let words = tokenize_query_text(query_text);
+    if words.is_empty() {
+        return Ok(BlendNeedles {
+            words,
+            containment: Vec::new(),
+        });
+    }
+    let filtered = !container_tag.is_empty();
+    let sql = if filtered {
+        format!("{} AND container_tag = ?", crate::sql::NEEDLE_SOURCE_SQL)
+    } else {
+        crate::sql::NEEDLE_SOURCE_SQL.to_string()
+    };
+    let mut params = Vec::new();
+    if filtered {
+        params.push(Value::Text(container_tag.to_string()));
+    }
+    let rows = db.query(&sql, params).await?;
+    let mut chunks: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for row in rows {
+        if let Some(tags) = row.text("tags") {
+            chunks.extend(tag_chunks(&tags));
+        }
+    }
+    let containment = words
+        .iter()
+        .map(|word| {
+            chunks
+                .iter()
+                .filter(|chunk| word.contains(chunk.trim()))
+                .cloned()
+                .collect()
+        })
+        .collect();
+    Ok(BlendNeedles { words, containment })
+}
+
+/// Issue 165 — the shard's top `limit` ids, ordered by the exact blend (SQL
+/// `ORDER BY sim DESC, created_at DESC, id ASC`, the repo's single scored
+/// ordering rule — see [`scored_order`]). Membership and order are decided
+/// here; the served number is still computed by the Rust blend after
+/// hydration.
+///
+/// `filtered` is derived once from `container_tag` and handed to both the
+/// builder and the bind list, so the conditional clause and its placeholder
+/// cannot drift.
+async fn blend_ordered_ids(
+    db: &dyn Db,
+    query_vector: &[f32],
+    query_text: Option<&str>,
+    container_tag: &str,
+    limit: usize,
+) -> Result<Vec<String>, StoreError> {
+    let needles = blend_needles(db, query_text, container_tag).await?;
+    let filtered = !container_tag.is_empty();
+    let terms = crate::sql::BlendTerms {
+        tokens: &needles.words,
+        containment: &needles.containment,
+        filtered,
+    };
+    let sql = crate::sql::blend_ordered_sql(&terms);
+    let mut params = vec![
+        Value::Blob(vector_to_blob(query_vector)),
+        Value::Blob(vector_to_blob(query_vector)),
+    ];
+    for (word, chunks) in needles.words.iter().zip(&needles.containment) {
+        params.push(Value::Text(word.clone()));
+        for chunk in chunks {
+            params.push(Value::Text(chunk.clone()));
+        }
+    }
+    for token in &needles.words {
+        let pattern = format!("%{}%", escape_like_pattern(token));
+        params.push(Value::Text(pattern.clone()));
+        params.push(Value::Text(pattern));
+    }
+    if filtered {
+        params.push(Value::Text(container_tag.to_string()));
+    }
+    params.push(Value::Integer(i64::try_from(limit).unwrap_or(i64::MAX)));
+    let rows = db.query(&sql, params).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| row.text("id").unwrap_or_default())
+        .collect())
+}
+
 /// Upstream `searchInShard` (L99–208), byte-order-faithful. Divergence
 /// (recorded): takes the `Db` seam and does NOT prepare the schema —
 /// preparation is manager-owned since W1.2.
+///
+/// Issue 165: the per-channel candidate union, its `k` floor and the 1000-id
+/// clamp are gone. One blend-ordered statement per shard decides the row set;
+/// the unchanged keyword-bump + hydrate + Rust blend produces the served
+/// number.
 pub async fn search_in_shard(
     db: &dyn Db,
     query_vector: &[f32],
@@ -469,62 +627,37 @@ pub async fn search_in_shard(
     limit: usize,
     query_text: Option<&str>,
 ) -> Result<Vec<SearchResult>, StoreError> {
-    // the query vector is serialized once and threaded: a failure is typed, not a panic (ADR-0013 D-3)
-    let query_json = vector_to_text(query_vector)?;
-    // Exact cosine already returns the best-k rows; over-fetch a little so
-    // content+tags+keyword candidates can merge before the hybrid re-rank.
-    let k = (limit.saturating_mul(2)).max(32);
-
-    let content_hits =
-        exact_scan_kind(db, &query_json, k, container_tag, VectorColumn::Content).await?;
-    let tags_hits = exact_scan_kind(db, &query_json, k, container_tag, VectorColumn::Tags).await?;
-    // Issue 169: only the ids feed the candidate set; the provisional `LIMIT k`
-    // scores are not consumed here (the merged set is scored exactly below).
-    let keyword_candidates = keyword_scores(db, query_text, container_tag, k).await?;
-
-    // Insertion-ordered candidate ids (content hits, then tags hits, then
-    // keyword ids) — mirrors the JS `Set` merge.
-    let mut seen = std::collections::HashSet::new();
-    let mut ids: Vec<String> = Vec::new();
-    for id in content_hits
-        .into_iter()
-        .map(|(id, _)| id)
-        .chain(tags_hits.into_iter().map(|(id, _)| id))
-        .chain(keyword_candidates.iter().map(|(id, _)| id.clone()))
-    {
-        if seen.insert(id.clone()) {
-            ids.push(id);
-        }
-    }
+    let ids = blend_ordered_ids(db, query_vector, query_text, container_tag, limit).await?;
     if ids.is_empty() {
         return Ok(Vec::new());
     }
-    // Placeholder-count clamp (the frozen hydrate builder clamps the same
-    // way; ids stay BOUND PARAMS — never interpolated).
-    ids.truncate(1000);
-    // Issue 169: score the decided set exactly. `k` still governs membership
-    // above; this statement has no `LIMIT`, so a candidate's score is a
-    // function of (row, tokens) alone.
-    let keyword = keyword_bumps(db, query_text, &ids).await?;
-
+    // the query vector is serialized once and threaded: a failure is typed, not a panic (ADR-0013 D-3)
+    let query_json = vector_to_text(query_vector)?;
     let filtered = !container_tag.is_empty();
-    let sql = crate::sql::hydrate_candidates_sql(ids.len(), filtered);
-    let mut params = vec![
-        Value::Text(query_json.clone()),
-        Value::Text(query_json.clone()),
-    ];
-    params.extend(ids.into_iter().map(Value::Text));
-    if filtered {
-        params.push(Value::Text(container_tag.to_string()));
-    }
-    let rows = db.query(&sql, params).await?;
-
     let query_words = tokenize_query_text(query_text);
     let has_keyword = !query_words.is_empty();
 
-    let mut results: Vec<SearchResult> = rows
-        .into_iter()
-        .map(|row| {
+    // Chunk the hydrate (the frozen builder clamps its placeholders to 1000):
+    // a `limit` above 1000 must not silently drop the tail. `ids` is the
+    // statement's full order, so concatenating chunk results and one final
+    // sort preserve it.
+    let mut results: Vec<SearchResult> = Vec::with_capacity(ids.len());
+    for chunk in ids.chunks(1000) {
+        // Issue 169: score the decided set exactly. `k` no longer exists;
+        // this statement has no `LIMIT`, so a candidate's score is a function
+        // of (row, tokens) alone.
+        let keyword = keyword_bumps(db, query_text, chunk).await?;
+        let sql = crate::sql::hydrate_candidates_sql(chunk.len(), filtered);
+        let mut params = vec![
+            Value::Text(query_json.clone()),
+            Value::Text(query_json.clone()),
+        ];
+        params.extend(chunk.iter().cloned().map(Value::Text));
+        if filtered {
+            params.push(Value::Text(container_tag.to_string()));
+        }
+        let rows = db.query(&sql, params).await?;
+        results.extend(rows.into_iter().map(|row| {
             let id = row.text("id").unwrap_or_default();
             // NULL dist (keyword-only candidate) coerces like upstream's
             // `Number(null)` → 0 before the similarity transform.
@@ -589,15 +722,20 @@ pub async fn search_in_shard(
                 git_repo_url: row.text("git_repo_url").filter(|text| !text.is_empty()),
                 is_pinned: row.i64("is_pinned"),
             }
-        })
-        .collect();
+        }));
+    }
 
-    // Stable sort, similarity descending (always finite by construction:
-    // every component is finite; partial_cmp guards defensively).
+    // Similarity descending, then `created_at` descending, then id ascending —
+    // the statement's own total order (and the repo's single scored ordering
+    // rule, [`crate::vector::scored_order`]), so an exact tie is deterministic
+    // instead of hydration-ordered. The handler's global sort must use the same
+    // comparator or paging cannot be exact.
     results.sort_by(|a, b| {
         b.similarity
             .partial_cmp(&a.similarity)
             .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.created_at.cmp(&a.created_at))
+            .then_with(|| a.id.cmp(&b.id))
     });
     results.truncate(limit);
     Ok(results)

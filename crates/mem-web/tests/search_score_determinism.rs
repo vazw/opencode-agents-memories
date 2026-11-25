@@ -12,7 +12,8 @@
 //! tag each), and the production adapters. Only the embedder is a fake — a
 //! fixed 768-dim vector, so the content channel is constant and the keyword
 //! channel is the only variable. No prompts are seeded, so the handler's
-//! prompt term is provably zero and `total` is `Σ_shards min(page_size, rows)`.
+//! prompt term is provably zero and `total` is the exact row count in scope
+//! (112), stable across `pageSize`.
 
 mod common;
 
@@ -365,8 +366,8 @@ async fn test_search_pages_are_a_partition_of_the_ranking() {
         let data = search_page(store.router(), page_size, page).await;
         assert_eq!(
             data["total"].as_u64().expect("total") as usize,
-            page_size.min(SHARD_A_ROWS) + page_size.min(SHARD_B_ROWS),
-            "total is Σ_shards min(page_size, rows) with zero prompts"
+            SHARD_A_ROWS + SHARD_B_ROWS,
+            "total is the exact row count in scope with zero prompts"
         );
         paged_ids.extend(ids(&data));
     }
@@ -387,8 +388,8 @@ async fn test_search_pages_are_a_partition_of_the_ranking() {
     let wide = search(store.router(), PAGE_SIZE_CEILING).await;
     assert_eq!(
         wide["total"].as_u64().expect("total") as usize,
-        PAGE_SIZE_CEILING.min(SHARD_A_ROWS) + PAGE_SIZE_CEILING.min(SHARD_B_ROWS),
-        "total at the ceiling is Σ_shards min(page_size, rows)"
+        SHARD_A_ROWS + SHARD_B_ROWS,
+        "total at the ceiling is the same exact row count"
     );
     let wide_ids = ids(&wide);
     assert!(
@@ -405,6 +406,32 @@ async fn test_search_pages_are_a_partition_of_the_ranking() {
         paged_ids, expected,
         "the paged sequence must be the pageSize={PAGE_SIZE_CEILING} ranking filtered to the served ids"
     );
+}
+
+/// AC4 — `total` is the exact row count in scope and does not move with
+/// `pageSize`. The cross-size comparison is the property: a single size is
+/// satisfied by `total = entries.len()` at the ceiling (112 of 112 rows fit),
+/// so the mutant survives every one-size-at-a-time assertion.
+#[tokio::test]
+async fn test_search_total_is_the_exact_row_count_at_every_page_size() {
+    let store = real_store().await;
+    let expected = SHARD_A_ROWS + SHARD_B_ROWS; // 112, zero prompts
+    let mut measured: Vec<(usize, usize)> = Vec::new();
+    for page_size in [10usize, 20, 40, PAGE_SIZE_CEILING] {
+        let data = search(store.router(), page_size).await;
+        let total = data["total"].as_u64().expect("total") as usize;
+        assert_eq!(
+            total, expected,
+            "pageSize={page_size}: total must be the exact row count in scope"
+        );
+        measured.push((page_size, total));
+    }
+    for pair in measured.windows(2) {
+        assert_eq!(
+            pair[0].1, pair[1].1,
+            "total moved with pageSize: {measured:?}"
+        );
+    }
 }
 
 /// CONTROL: two identical calls at a fixed `pageSize` are already byte

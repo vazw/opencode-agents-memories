@@ -3,8 +3,10 @@
 > Filename kept for link stability. Retitled 2026-11-25: the earlier title ("pools a per-shard cap and then sorts")
 > described a mechanism that measurement has now ruled out three times. See the two "Measured" sections below.
 
-Status: ready-for-agent — fix shape = one blend-ordered statement per shard (measured exact, 122.6 ms vs 209 ms today); the widened-cap shape in the frontier section is SUPERSEDED
-`ids.truncate(1000)` clamp; both are required, neither alone reaches zero starvation
+Status: ready-for-agent — **code shipped and reviewed** (one blend-ordered statement per shard). The `k` cap, the per-channel
+candidate union and the `ids.truncate(1000)` clamp are all deleted; both were required, neither alone reached zero starvation.
+**Remaining before closure: Step 11, the engine-HTTP before/after measurement backing AC1 and AC3 — syseng-owned.** It blocks
+issue closure, not the code deliverable. The widened-cap shape in the frontier section is SUPERSEDED.
 Filed: 2026-11-25, from the issue 28 copy-first rehearsal (run `20261125T035152Z`), cell S5
 
 ## The observation
@@ -286,3 +288,31 @@ The one-line upgrade at that point is a cosine-ordered inner `LIMIT` before the 
 
 - Issue 169's fix is in no built engine (see the staging note); restaging is an owner action.
 - Issue 170 (dependency patches) ships first, as a smaller wave.
+
+## Landed
+
+Implementation reviewed `STATUS: APPROVED` (review-2 + F4 re-review). Blueprint `c237053f9c9e`, six gate rounds.
+
+- **One blend-ordered statement per shard.** Per shard, one flat SQL projection scores the shard's rows and returns the
+  top `offset + limit` ids; `ORDER BY sim DESC, created_at DESC, id ASC`. The order is **prefix-compatible with the
+  handler's merge comparator**, which is the property that matters: `search_in_shard` cuts with one comparator and the
+  handler merges with another, so a merely total per-shard order still re-serves and drops rows as `offset` grows.
+  Measured: the two-key `(sim, id)` form walked 280 entries with 257 distinct and 23 never served; the triple gives 280/280/0.
+- **Deleted:** `vector.rs` `k = (limit*2).max(32)` and its use, the per-channel union block, `ids.truncate(1000)`.
+  `exact_scan_kind` and `keyword_scores` kept.
+- **Embedding binds as an F32-LE blob**; `vector32(?)` is forbidden on the hot path (302–307 ms vs 67.8 ms) and a
+  param-recording assertion pins `Value::Blob` with `len == dims*4`.
+- **Served scores unchanged**: the tag predicate at `vector.rs:552` was not touched; the SQL needle is exact via
+  `instr(',' || lower(tags) || ',', ',' || chunk || ',')`, so Rust keeps upstream `vector-search.ts:178` parity.
+- **Two arithmetic forms mirrored, not normalised** — the boost divides, the keyword term multiplies a reciprocal.
+  They agree at n=4 and differ by 1 ULP at n=7/k=5, which the test pins as `to_bits()` literals.
+- **`total` is now the exact scope count**, stable across `pageSize`, replacing the pooled candidate count that a client
+  could not page past. A failed count falls back to `MAX_SHARD_PREFIX = 50_000` (== `max_vectors_per_shard`), never `LIMIT -1`.
+- **Dead-oracle note:** both `MAX_SHARD_PREFIX` arms are only reachable at `offset = 0`, where the mutant and the shipped
+  constant are indistinguishable; the row now discriminates at `offset = 180` over a 500-row shard and reds both call sites
+  at `0 vs 20` items.
+
+**Open, deliberately not closed by this wave:** Step 11 (engine-HTTP latency and exactness, AC1/AC3). `keyword_scores` is
+now unreferenced in the tree; it stays as a `pub` upstream-parity port, and the module-wide `#![allow(dead_code)]` in
+`crates/mem-store/src/vector.rs:17` means no lint would report it going dead — recorded, not fixed (narrowing 14 module
+allows is out of scope).

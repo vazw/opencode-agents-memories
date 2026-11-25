@@ -512,6 +512,22 @@ impl MemoryPort for ProductionMemory {
         Ok(rows.iter().map(stats_memory_row).collect())
     }
 
+    /// Issue 165 — the exact per-tag count behind `search`'s `total`.
+    /// `COUNT(*)` through the store, with the same read-lane stat the other
+    /// read methods use (a missing shard file is a 503, never a silent
+    /// recreate) and the store error propagated, never coerced to zero.
+    async fn count_in_shard(
+        &self,
+        shard: &ShardRef,
+        container_tag: &str,
+    ) -> Result<u64, PortError> {
+        self.stat_shard_file(shard).await?;
+        let db = self.open(shard).await?;
+        mem_store::vector::count_in_shard(db.as_ref(), container_tag)
+            .await
+            .map_err(store_failure)
+    }
+
     async fn list_memories_by_container_tag(
         &self,
         shard: &ShardRef,

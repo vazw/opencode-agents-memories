@@ -874,9 +874,45 @@ struct SearchEntry {
     item: SearchItemDto,
 }
 
+/// The entry's own id, for the sort's final tie-break.
+fn entry_id(entry: &SearchEntry) -> &str {
+    match &entry.item {
+        SearchItemDto::Memory(memory) => &memory.id,
+        SearchItemDto::Prompt(prompt) => &prompt.id,
+    }
+}
+
+/// The documented per-shard row cap: a shard larger than this already violates
+/// its own contract. The constant exists so the count-failure path is bounded
+/// *and* never smaller than a legitimate shard.
+pub const MAX_SHARD_PREFIX: usize = 50_000;
+
+/// Issue 165 — a `pageSize`-dependent prompt limit makes `total` move with the
+/// page size. Prompt entries carry `similarity: 1.0` and sort first, so a fixed
+/// cap keeps the served set page-stable.
+const SEARCH_PROMPT_LIMIT: usize = 200;
+
+/// Issue 165 — the per-shard `LIMIT` for a page at `offset`.
+///
+/// `offset.saturating_add(page_size)` alone can saturate to `usize::MAX`, which
+/// binds as `LIMIT -1` — SQLite reads that as "no limit" and materialises every
+/// row. A shard can never contribute more rows than it holds, so clamp by its
+/// own count.
+pub fn shard_prefix(offset: usize, page_size: usize, shard_rows: usize) -> usize {
+    offset.saturating_add(page_size).min(shard_rows)
+}
+
 /// `GET /api/search` — upstream `handleSearch` (the route-level
 /// `"query parameter required"` check lives here, keeping upstream's status
 /// and message).
+///
+/// Issue 165 contract: `total` is the **exact** count of memory rows in scope
+/// (every row this search can return) plus the prompt entries served, and it is
+/// stable across `pageSize`. `items` is `skip(offset).take(page_size)` of the
+/// full ranking, so walking `page` 1..=`total_pages` yields every entry once.
+/// A failed per-shard count undercounts `total` for that shard by that shard's
+/// row count, is logged, and does **not** shorten `items` (that shard's prefix
+/// falls back to [`MAX_SHARD_PREFIX`]); the response stays 200, never a 503.
 pub async fn search(
     State(state): State<Arc<AppState>>,
     Query(query): Query<Vec<(String, String)>>,
@@ -888,11 +924,16 @@ pub async fn search(
         Ok(pagination) => pagination,
         Err(response) => return response,
     };
-    let filter_tags: Vec<String> = query_values(&query, "tag")
-        .iter()
-        .map(|tag| tag.trim().to_string())
-        .filter(|tag| !tag.is_empty())
-        .collect();
+    // Offset saturates: `page` is any positive `usize`.
+    let offset = (page - 1).saturating_mul(page_size);
+    // Repeated `?tag=A&tag=A` must not double-count or re-read the shards.
+    let mut filter_tags: Vec<String> = Vec::new();
+    for tag in query_values(&query, "tag") {
+        let tag = tag.trim();
+        if !tag.is_empty() && !filter_tags.iter().any(|seen| seen == tag) {
+            filter_tags.push(tag.to_string());
+        }
+    }
 
     let query_vector = match state.api.embed.embed(query_text, EmbedTask::Query).await {
         Ok(vector) => vector,
@@ -900,6 +941,8 @@ pub async fn search(
     };
 
     let mut entries: Vec<SearchEntry> = Vec::new();
+    // Issue 165: the exact row count in scope, accumulated per shard below.
+    let mut memory_total: u64 = 0;
     let prompts: Vec<PromptRow> = if filter_tags.is_empty() {
         // Global search: every distinct container tag, invalid ones skipped
         // (upstream's `tryExtractScopeFromContainerTag` branch — never widened).
@@ -935,6 +978,29 @@ pub async fn search(
                 return port_failure("GET /api/search", error);
             }
             for shard in shards {
+                // Issue 165: the exact total, and a bounded per-shard prefix.
+                // A failed count logs, undercounts `total` by this shard's
+                // rows, and still lets `items` reach `offset + page_size`
+                // through the cap — never a truncated page, never `LIMIT -1`.
+                let shard_rows = match state
+                    .api
+                    .memory
+                    .count_in_shard(&shard, &container_tag)
+                    .await
+                {
+                    Ok(count) => {
+                        memory_total = memory_total.saturating_add(count);
+                        usize::try_from(count).unwrap_or(MAX_SHARD_PREFIX)
+                    }
+                    Err(error) => {
+                        tracing::warn!(error = %error, "count shard failed");
+                        MAX_SHARD_PREFIX
+                    }
+                };
+                let shard_limit = shard_prefix(offset, page_size, shard_rows);
+                if shard_limit == 0 {
+                    continue;
+                }
                 match state
                     .api
                     .memory
@@ -942,7 +1008,7 @@ pub async fn search(
                         &shard,
                         &query_vector,
                         &container_tag,
-                        page_size,
+                        shard_limit,
                         Some(query_text),
                     )
                     .await
@@ -958,7 +1024,7 @@ pub async fn search(
         match state
             .api
             .prompts
-            .search_prompts(query_text, None, page_size * 2)
+            .search_prompts(query_text, None, SEARCH_PROMPT_LIMIT)
             .await
         {
             Ok(prompts) => prompts,
@@ -987,6 +1053,20 @@ pub async fn search(
                 return port_failure("GET /api/search", error);
             }
             for shard in shards {
+                let shard_rows = match state.api.memory.count_in_shard(&shard, filter_tag).await {
+                    Ok(count) => {
+                        memory_total = memory_total.saturating_add(count);
+                        usize::try_from(count).unwrap_or(MAX_SHARD_PREFIX)
+                    }
+                    Err(error) => {
+                        tracing::warn!(error = %error, "count shard failed");
+                        MAX_SHARD_PREFIX
+                    }
+                };
+                let shard_limit = shard_prefix(offset, page_size, shard_rows);
+                if shard_limit == 0 {
+                    continue;
+                }
                 match state
                     .api
                     .memory
@@ -994,7 +1074,7 @@ pub async fn search(
                         &shard,
                         &query_vector,
                         filter_tag,
-                        page_size * 2,
+                        shard_limit,
                         Some(query_text),
                     )
                     .await
@@ -1018,7 +1098,7 @@ pub async fn search(
             match state
                 .api
                 .prompts
-                .search_prompts(query_text, project_path.as_deref(), page_size * 2)
+                .search_prompts(query_text, project_path.as_deref(), SEARCH_PROMPT_LIMIT)
                 .await
             {
                 Ok(prompts) => {
@@ -1032,21 +1112,26 @@ pub async fn search(
         prompt_by_id.into_values().collect()
     };
 
+    // Issue 165: `total` is the exact row count in scope plus the prompt
+    // entries served — never the pooled page.
+    let prompt_total = prompts.len();
     entries.extend(prompts.into_iter().map(search_prompt_entry));
 
     // Similarity descending, then `createdAt` descending (upstream's
-    // `b.createdAt.localeCompare(a.createdAt)` over the ISO strings).
+    // `b.createdAt.localeCompare(a.createdAt)` over the ISO strings), then id
+    // ascending — the same total order each shard's statement uses, so a
+    // per-shard prefix is a prefix of this ranking and paging stays exact.
     entries.sort_by(|left, right| {
         right
             .similarity
             .partial_cmp(&left.similarity)
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| right.created_at.cmp(&left.created_at))
+            .then_with(|| entry_id(left).cmp(entry_id(right)))
     });
 
-    let total = entries.len();
+    let total = usize::try_from(memory_total).unwrap_or(usize::MAX) + prompt_total;
     let total_pages = total.div_ceil(page_size);
-    let offset = (page - 1).saturating_mul(page_size);
     let mut items: Vec<SearchItemDto> = entries
         .into_iter()
         .skip(offset)

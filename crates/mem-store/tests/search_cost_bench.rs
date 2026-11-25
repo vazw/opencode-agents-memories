@@ -1285,8 +1285,103 @@ async fn narrow_scan(
         .collect())
 }
 
-/// The harness-local twin of `vector::search_in_shard`: the same scanning,
-/// candidate merge, ranking and blend; only the three SQL statements differ.
+/// The narrow layout keeps `tags` in `memories` and moves only the vector
+/// columns to `memory_vectors`, so the narrow blend statement is the production
+/// one with the join spliced in. The statement's shape is pinned by
+/// `golden_sql.rs`, so all three replacements are total (a shape change fails
+/// there, not here).
+fn narrow_blend_sql(terms: &mem_store::sql::BlendTerms<'_>) -> String {
+    mem_store::sql::blend_ordered_sql(terms)
+        .replace(
+            "FROM memories m",
+            "FROM memories m JOIN memory_vectors v ON v.id = m.id",
+        )
+        .replace("m.tags_vector", "v.tags_vector")
+        .replace("m.vector", "v.vector")
+}
+
+/// The blend statement's bind list, in the builder's documented order:
+/// `content blob, tags blob`, then per word `1 word needle + k containment
+/// needles`, then per token `LIKE content, LIKE tags`, then `container_tag` iff
+/// filtered, then the limit. Mirrors `vector::blend_ordered_ids`.
+async fn narrow_blend_ids(
+    db: &dyn Db,
+    query_vector: &[f32],
+    query_text: Option<&str>,
+    container_tag: &str,
+    limit: usize,
+) -> Result<Vec<(String, f64)>, StoreError> {
+    let words = mem_store::vector_utils::tokenize_query_text(query_text);
+    let filtered = !container_tag.is_empty();
+    // `tags` never moved, so the needle source and its `filtered` predicate are
+    // the production read; only the blend statement needs the join.
+    let mut source = mem_store::sql::NEEDLE_SOURCE_SQL.to_string();
+    let mut source_params = Vec::new();
+    if filtered {
+        source.push_str(" AND container_tag = ?");
+        source_params.push(Value::Text(container_tag.to_string()));
+    }
+    let mut chunks: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for row in db.query(&source, source_params).await? {
+        if let Some(tags) = row.text("tags") {
+            chunks.extend(
+                tags.split(',')
+                    .map(str::to_lowercase)
+                    .filter(|chunk| !chunk.trim().is_empty()),
+            );
+        }
+    }
+    let containment: Vec<Vec<String>> = words
+        .iter()
+        .map(|word| {
+            chunks
+                .iter()
+                .filter(|chunk| word.contains(chunk.trim()))
+                .cloned()
+                .collect()
+        })
+        .collect();
+    let terms = mem_store::sql::BlendTerms {
+        tokens: &words,
+        containment: &containment,
+        filtered,
+    };
+    let sql = narrow_blend_sql(&terms);
+    let mut params = vec![
+        Value::Blob(vector::vector_to_blob(query_vector)),
+        Value::Blob(vector::vector_to_blob(query_vector)),
+    ];
+    for (word, needles) in words.iter().zip(&containment) {
+        params.push(Value::Text(word.clone()));
+        for needle in needles {
+            params.push(Value::Text(needle.clone()));
+        }
+    }
+    for token in &words {
+        let pattern = format!("%{}%", mem_store::vector_utils::escape_like_pattern(token));
+        params.push(Value::Text(pattern.clone()));
+        params.push(Value::Text(pattern));
+    }
+    if filtered {
+        params.push(Value::Text(container_tag.to_string()));
+    }
+    params.push(Value::Integer(i64::try_from(limit).unwrap_or(i64::MAX)));
+    Ok(db
+        .query(&sql, params)
+        .await?
+        .into_iter()
+        .map(|row| {
+            (
+                row.text("id").unwrap_or_default(),
+                row.f64("sim").unwrap_or(0.0),
+            )
+        })
+        .collect())
+}
+
+/// The harness-local twin of `vector::search_in_shard`: the same one-statement
+/// ranking over the narrow layout, then the same hydration. `scan_us` is the
+/// blend statement, `hydrate_us` the row read.
 async fn narrow_search_in_shard(
     db: &dyn Db,
     query_vector: &[f32],
@@ -1295,28 +1390,11 @@ async fn narrow_search_in_shard(
     query_text: Option<&str>,
 ) -> Result<(Vec<SearchResult>, Split), StoreError> {
     let query_json = vector::vector_to_text(query_vector)?;
-    let k = limit.saturating_mul(2).max(32);
 
     let scan_started = std::time::Instant::now();
-    let content_hits =
-        narrow_scan(db, NARROW_CONTENT_SCAN_SQL, &query_json, container_tag, k).await?;
-    let tags_hits = narrow_scan(db, NARROW_TAGS_SCAN_SQL, &query_json, container_tag, k).await?;
-    let keyword_candidates = vector::keyword_scores(db, query_text, container_tag, k).await?;
+    let ordered = narrow_blend_ids(db, query_vector, query_text, container_tag, limit).await?;
     let scan_us = scan_started.elapsed().as_secs_f64() * 1_000_000.0;
-
-    let mut seen = HashSet::new();
-    let mut ids: Vec<String> = Vec::new();
-    for id in content_hits
-        .into_iter()
-        .map(|(id, _)| id)
-        .chain(tags_hits.into_iter().map(|(id, _)| id))
-        .chain(keyword_candidates.iter().map(|(id, _)| id.clone()))
-    {
-        if seen.insert(id.clone()) {
-            ids.push(id);
-        }
-    }
-    if ids.is_empty() {
+    if ordered.is_empty() {
         return Ok((
             Vec::new(),
             Split {
@@ -1325,67 +1403,36 @@ async fn narrow_search_in_shard(
             },
         ));
     }
-    ids.truncate(1000);
-    // Issue 169: score the decided set exactly, mirroring `search_in_shard`.
-    let keyword = vector::keyword_bumps(db, query_text, &ids).await?;
+
+    let position: HashMap<&str, usize> = ordered
+        .iter()
+        .enumerate()
+        .map(|(index, (id, _))| (id.as_str(), index))
+        .collect();
+    let scored: HashMap<&str, f64> = ordered
+        .iter()
+        .map(|(id, sim)| (id.as_str(), *sim))
+        .collect();
 
     let hydrate_started = std::time::Instant::now();
-    let sql = narrow_hydrate_sql(ids.len());
+    let sql = narrow_hydrate_sql(ordered.len());
     let mut params = vec![
         Value::Text(query_json.clone()),
         Value::Text(query_json.clone()),
     ];
-    params.extend(ids.into_iter().map(Value::Text));
+    params.extend(ordered.iter().map(|(id, _)| Value::Text(id.clone())));
     params.push(Value::Text(container_tag.to_string()));
     let rows = db.query(&sql, params).await?;
     let hydrate_us = hydrate_started.elapsed().as_secs_f64() * 1_000_000.0;
 
-    let query_words = mem_store::vector_utils::tokenize_query_text(query_text);
-    let has_keyword = !query_words.is_empty();
     let mut results: Vec<SearchResult> = rows
         .into_iter()
         .map(|row| {
             let id = row.text("id").unwrap_or_default();
-            let content_sim = mem_store::vector_utils::distance_to_similarity(
-                row.f64("content_dist").unwrap_or(0.0),
-            );
-            let tags_sim = match row.f64("tags_dist") {
-                Some(dist) => mem_store::vector_utils::distance_to_similarity(dist),
-                None => 0.0,
-            };
             let memory_tags_str = row.text("tags").unwrap_or_default();
-            let memory_tags: Vec<String> = memory_tags_str
-                .split(',')
-                .map(|tag| tag.trim().to_lowercase())
-                .filter(|tag| !tag.is_empty())
-                .collect();
-            let mut exact_match_boost = 0.0;
-            if !query_words.is_empty() && !memory_tags.is_empty() {
-                let matches = query_words
-                    .iter()
-                    .filter(|word| {
-                        memory_tags
-                            .iter()
-                            .any(|tag| tag.contains(word.as_str()) || word.contains(tag.as_str()))
-                    })
-                    .count();
-                exact_match_boost = matches as f64 / query_words.len().max(1) as f64;
-            }
-            let keyword_sim = keyword
-                .iter()
-                .find(|(scored_id, _)| *scored_id == id)
-                .map(|(_, score)| *score)
-                .unwrap_or(0.0);
-            let final_tags_sim = tags_sim.max(exact_match_boost);
-            let similarity = if has_keyword {
-                content_sim * 0.5 + final_tags_sim * 0.3 + keyword_sim * 0.2
-            } else {
-                content_sim * 0.6 + final_tags_sim * 0.4
-            };
             SearchResult {
-                id,
+                similarity: scored.get(id.as_str()).copied().unwrap_or(0.0),
                 memory: row.text("content").unwrap_or_default(),
-                similarity,
                 created_at: row.i64("created_at").unwrap_or(0),
                 tags: if memory_tags_str.is_empty() {
                     Vec::new()
@@ -1401,15 +1448,16 @@ async fn narrow_search_in_shard(
                 project_name: row.text("project_name").filter(|text| !text.is_empty()),
                 git_repo_url: row.text("git_repo_url").filter(|text| !text.is_empty()),
                 is_pinned: row.i64("is_pinned"),
+                id,
             }
         })
         .collect();
-    results.sort_by(|a, b| {
-        b.similarity
-            .partial_cmp(&a.similarity)
-            .unwrap_or(Ordering::Equal)
+    results.sort_by_key(|result| {
+        position
+            .get(result.id.as_str())
+            .copied()
+            .unwrap_or(usize::MAX)
     });
-    results.truncate(limit);
     Ok((
         results,
         Split {

@@ -502,6 +502,25 @@ pub trait MemoryPort: Send + Sync {
         Ok(rows.into_iter().map(MemoryStatsRow::from).collect())
     }
 
+    /// Issue 165 — the shard's row count for one container tag: the exact
+    /// `search` `total` is built from it, so it must distinguish "zero rows"
+    /// from "unreadable shard" (an `Err`, never `Ok(0)`).
+    ///
+    /// The default derives the count from [`Self::all_memories`], so a fake
+    /// that already implements that read needs no new method; the production
+    /// adapter overrides it with a `COUNT(*)` and keeps its read-lane stat.
+    async fn count_in_shard(
+        &self,
+        shard: &ShardRef,
+        container_tag: &str,
+    ) -> Result<u64, PortError> {
+        let rows = self.all_memories(shard).await?;
+        Ok(rows
+            .iter()
+            .filter(|row| row.container_tag == container_tag)
+            .count() as u64)
+    }
+
     async fn list_memories_by_container_tag(
         &self,
         shard: &ShardRef,
