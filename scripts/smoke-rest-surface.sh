@@ -261,6 +261,10 @@ selftest_evidence_dir() {
 	ev_case "evidence-dir-unwritable" "$T/unwritable/evidence" 3 \
 		"EVIDENCE-DIR: $T/unwritable/evidence is not writable (path error, not an empty roster)" 'roster is empty'
 	chmod 0700 "$T/unwritable/evidence"
+	# (v) the path itself is a regular file: the third documented path message,
+	#     pinned so it cannot drift while the suite stays green
+	ev_case "evidence-dir-path-is-a-file" "$T/regular-file" 3 \
+		"EVIDENCE-DIR: $T/regular-file is not a directory (path error, not an empty roster)" 'roster is empty'
 
 	kill "$stub" || :
 	wait "$stub" || :

@@ -567,10 +567,19 @@ Step labels map onto the sections one-to-one: `S0`→§0 (pre-state), `S1`→§1
 # §6a's temp files now live under $REH/tmp, which this block does not copy, so a
 # hit here means some cell wrote one into logs/ or evidence/ — redact that file
 # and re-run; the scratch tree is kept on refusal.
-TOKEN_HIT=$( { [ -d "$REH/logs" ] && grep -rlF -- '__OPENCODE_MEM_TOKEN__' "$REH/logs"; \
-  [ -d "$REH/evidence" ] && grep -rlF -- '__OPENCODE_MEM_TOKEN__' "$REH/evidence"; } )
+# The scan fails closed: grep's exit status is kept, and rc > 1 (a path it could
+# not read) is reported as `scan-failed` and refused exactly like a hit. Without
+# that, a mode-000 capture passes the gate, the cp -a below fails on it, and a
+# partial copy would still be staged and committed.
+TOKEN_HIT=$( {
+  for d in "$REH/logs" "$REH/evidence"; do
+    [ -d "$d" ] || continue
+    scan_rc=0; grep -rlF -- '__OPENCODE_MEM_TOKEN__' "$d" || scan_rc=$?
+    [ "$scan_rc" -le 1 ] || printf 'scan-failed: %s (grep rc=%s)\n' "$d" "$scan_rc"
+  done
+} )
 if [ -n "$TOKEN_HIT" ]; then
-  printf 'TOKEN-IN-EVIDENCE STOP: these captures still carry the index token; nothing was copied or staged — redact them, then re-run this block:\n%s\n' "$TOKEN_HIT" >&2
+  printf 'TOKEN-IN-EVIDENCE STOP: nothing was copied or staged — a capture below still carries the index token, or the scan could not read a path (`scan-failed`); redact or fix it, then re-run this block:\n%s\n' "$TOKEN_HIT" >&2
   false
 else
   cp -a "$REH/evidence/." docs/evidence/issue-28-dropin-rehearsal/raw/

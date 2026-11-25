@@ -110,3 +110,26 @@ and a token gate sits before the evidence tree can be staged. The gate was prove
 **Three non-blocking findings remain open**, each with the reviewer's own fix shape, and none affects a criterion:
 the handoff's line anchors are stale after the last edit; §13's gate treats a `grep` scan failure (rc 2) as "no hits",
 which is fail-open on scan errors; and the `is not a directory` message is the one path message no selftest case pins.
+
+## Follow-up 2026-11-25 — the three non-blocking findings closed (review-3 APPROVED)
+
+Review 2 approved the wave and left three findings that affected no criterion. All three are now closed, and one of
+them was worth more than its billing:
+
+- **§13's token gate was fail-open on a scan error.** `TOKEN_HIT=$( { … grep … } )` discarded `grep`'s status, so a
+  marker-bearing file it could not read (mode `000`) made the scan exit 2 and the gate read that as "no hits". The
+  copy then failed on that file, `git add`/`git commit` still ran, and the block exited 0 — a partial copy reported as
+  success. The gate now keeps the status and refuses `scan-failed` exactly like a hit. The reviewer proved the fix is
+  load-bearing by deleting the status check and reproducing the original fail-open on `c418e0e`.
+- **The `is not a directory` message is pinned.** A new selftest case asserts the full emitted string; a guard-only
+  format-string mutant reds that case alone while the other thirteen stay green, so the pin discriminates this message
+  rather than path errors in general.
+- **The stale anchors are corrected append-only.** `handoff-2.md` stayed byte-identical (`c970ad5b…`); the correction
+  lives in `handoff-3.md`. Review 3 then found two of the *new* anchors mis-derived, which are corrected in
+  `handoff-3`'s own `CORRECTION` section: the §13 range was cited as `:569-584` when the gate runs `:574-591` inside a
+  fence at `:563-592` — the cited range had omitted `cp -a`, `git add`, `git commit` and the `find -delete`, i.e. the
+  commands the gate guards — and the case range was `:264-268` for a case that ends at `:267`.
+
+That last one is the wave's own lesson recurring: an anchor written from narrative rather than re-derived after the
+final edit. Four instances now, in a ledger, a handoff and two plans. The rule that works is to derive the range with a
+command whose output is quoted, and only after the last edit.
