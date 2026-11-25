@@ -1,9 +1,9 @@
 # 28 — W7.2 · Parity matrix & drop-in rehearsal
 
-Status: ready-for-human — 2026-10-29 (split: the 23 missing matrix rows are **issue 71**; this issue is the
-manual drop-in rehearsal and the §0b D3 hatch, which is now **ruled: reconfirmed deferred**. The rehearsal plan
-is fixed — copy-first, re-derivable transcript, live swap as a separate owner-executed repeat — under
-`## Owner rulings 2026-10-29`.)
+Status: ready-for-agent — 2026-11-25 (§11 live swap ruled **superseded** by the live system, so AC2 closes on
+`## Owner ruling 2026-11-25` rather than a repeat; the remaining work is §2–§8, the copy-first phase, which this
+issue's own ruling delegates to a subagent. The 23 missing matrix rows are **issue 71**. §0b D3 hatch: reconfirmed
+deferred.)
 
 ## What to build
 
@@ -73,3 +73,22 @@ The copy-first phase (§2–§8) is safe with the live engine alive: port **3749
 `.tmp/rehearsal-28/<stamp>/store`, the live root read-only, pid 4719 never signalled. The live repeat is
 §11 and is what closes AC2.
 
+
+## Owner ruling 2026-11-25 — the live repeat is superseded, not deferred
+
+Ruled in a grilling session, after both premises were measured.
+
+**§11 (the live swap, which closes AC2) is closed as superseded by the live system.** MEASURED:
+`~/.config/opencode/opencode.jsonc:216-220` lists the local `plugin/` and contains no `opencode-mem` reference at
+all, and the live root carries `user-profiles.db.schema-v1-*.bak` — the migrator's rename marker. The step §11 asks
+for ("remove `opencode-mem@latest`, install the local plugin") describes the state the machine has been in for
+weeks. Re-running it would re-do a completed migration on the only copy of the user's memory, which this issue's
+own 2026-10-29 ruling forbids.
+
+Recording the trade: this repo will never hold a contemporaneous before/after transcript taken *across* the swap.
+What it holds instead is the port running live — engine identity, inject lines, capture rows — plus, once the
+copy-first phase runs, evidence that a pristine TS store migrates on a current build.
+
+**§2–§8 (copy-first) stays in scope and is delegated to a subagent.** It is safe with the live engine alive: port
+3749 against a copy at `.tmp/rehearsal-28/<stamp>/store`, the live root read-only, the live pid never signalled.
+The transcript at `docs/evidence/issue-28-dropin-rehearsal/TRANSCRIPT.md` is still `NOT RUN`.

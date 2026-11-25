@@ -266,3 +266,22 @@ Per issue 163, landed 2026-11-24, the placement half of the reason this section 
 and the note reaches the row. The read above is still the one that closes it, and the observable count
 stays a **lower bound** — a command holding `"` or a newline is JSON-escaped in the row join and still never
 matches. Residuals (a) and (b) are untouched.
+
+## Reading rule for the post-fix live check, ruled 2026-11-25
+
+Issue 163 fixed the ordering defect that made this note unreachable for 97.5 % of real shells (`41d0939`). The
+live check afterwards is **corroboration with an asymmetric reading, never a pass condition** — ruled in a
+grilling session, because a bare count cannot do the job.
+
+The escaping ceiling still holds: a command containing `"` or a newline is JSON-escaped in the row join, so
+`includes(rec.command)` fails for it even now. A zero therefore has two possible causes and the count cannot
+separate them.
+
+- **Non-zero `[pid ` rows after a session summary** ⇒ the note reached a row. Positive is informative on its own;
+  nothing else produces that text.
+- **Zero** ⇒ uninformative, not a failure. The exit condition is a command known to be short *and* escape-free: a
+  probe `echo marker-…-$(date +%s)` is inside the 100-byte cap and carries no quote. If a session holding one such
+  command still yields no note, that is a defect. If it holds only long or quoted commands, zero is the ceiling.
+
+Making the count a pass condition would be a criterion satisfiable by the mechanism not running — the same class as
+the two vacuous criteria this issue and 162 were filed to close.

@@ -66,3 +66,23 @@ hook's argument — which is exactly what `test_refresh_rule_lost_block_reinject
 ## Outcome — landed 2026-11-24
 
 Adapter wave with issue 152/155: a refresh keeps a block the engine could not replace, and shell lifecycle rows carry a pid and its probed state. Ledger under `.tmp/progress/`.
+
+## Closed at test level, 2026-11-25 — the live observation is a ceiling, not a debt
+
+Ruled in a grilling session. The keep-on-failure path needs an `inject` call that throws or times out while a block
+is cached. Nothing produces that on demand except failure: killing the engine mid-turn, or a 15 s timeout against a
+stalled child. Every route to the reading is a deliberate break of the thing being measured, on the owner's live
+store, during a turn that would otherwise carry the memory block.
+
+So the reading is not pending; it is unobtainable except by sabotage. Recording it as a ceiling follows issue 163's
+precedent, where escaped commands and double-stamping are ceilings rather than backlog items. A pending item that
+can only be cleared by breaking the system makes the open count lie.
+
+Two things were given up knowingly, and both are already covered:
+
+1. **The rule is pinned by a mutant.** The 152/155 review measured it: reinstating the pre-call delete reds the
+   amended `v2-memory-context` pin on *a failed refresh keeps the block it could not replace*. One mutation away
+   from the defect is the standard this repo holds tests to.
+2. **The transport half is separately pinned.** What a live failure would add is that a transport throw arrives as a
+   throw rather than a status — and that is covered by the wrapper's `injectStatus` producer and, since `a958667`,
+   by issue 162's two wire criteria.
