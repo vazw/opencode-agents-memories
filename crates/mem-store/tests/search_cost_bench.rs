@@ -1301,7 +1301,7 @@ async fn narrow_search_in_shard(
     let content_hits =
         narrow_scan(db, NARROW_CONTENT_SCAN_SQL, &query_json, container_tag, k).await?;
     let tags_hits = narrow_scan(db, NARROW_TAGS_SCAN_SQL, &query_json, container_tag, k).await?;
-    let keyword = vector::keyword_scores(db, query_text, container_tag, k).await?;
+    let keyword_candidates = vector::keyword_scores(db, query_text, container_tag, k).await?;
     let scan_us = scan_started.elapsed().as_secs_f64() * 1_000_000.0;
 
     let mut seen = HashSet::new();
@@ -1310,7 +1310,7 @@ async fn narrow_search_in_shard(
         .into_iter()
         .map(|(id, _)| id)
         .chain(tags_hits.into_iter().map(|(id, _)| id))
-        .chain(keyword.iter().map(|(id, _)| id.clone()))
+        .chain(keyword_candidates.iter().map(|(id, _)| id.clone()))
     {
         if seen.insert(id.clone()) {
             ids.push(id);
@@ -1326,6 +1326,8 @@ async fn narrow_search_in_shard(
         ));
     }
     ids.truncate(1000);
+    // Issue 169: score the decided set exactly, mirroring `search_in_shard`.
+    let keyword = vector::keyword_bumps(db, query_text, &ids).await?;
 
     let hydrate_started = std::time::Instant::now();
     let sql = narrow_hydrate_sql(ids.len());

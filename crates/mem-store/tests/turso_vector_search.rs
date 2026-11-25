@@ -11,10 +11,12 @@ use mem_store::db::{BatchMode, Value};
 use mem_store::schema_migrations::{
     MigrationOptions, apply_schema_migrations, memory_shard_migrations,
 };
+use mem_store::sql;
 use mem_store::vector::{
     MemoryInsert, VectorColumn, exact_scan_kind, get_memories_by_session_id, insert_vector,
     insert_vector_statement, search_in_shard, search_memories_by_content,
 };
+use mem_store::vector_utils::escape_like_pattern;
 
 const NOW_MS: i64 = 1_700_000_000_000;
 
@@ -535,4 +537,323 @@ async fn test_content_read_clamps_the_hydrate_at_a_thousand_ids() {
         results.windows(2).all(|pair| pair[0].id < pair[1].id),
         "equal-similarity rows tie-break by id ascending"
     );
+}
+
+// ---------------------------------------------------------------------------
+// 3/11 — issue 169: the keyword bump is a function of (row, tokens), not of `k`
+// ---------------------------------------------------------------------------
+
+/// A row that is a *candidate* must be scored the same at every candidate
+/// budget: `limit` feeds `k`, which decides membership, not a candidate's own
+/// score. Before issue 169 the victim's `alpha` hit was truncated by the
+/// per-token `LIMIT k = 32` (101 earlier `alpha` matches), so it scored
+/// `0.5·cos + 0.1` at `limit = 10` and `0.5·cos + 0.2` at `limit = 200`.
+///
+/// Fixture: 101 `alpha`-only fillers, then the victim (the 102nd `alpha`
+/// match, and a `beta` match), then the rival (`beta` only). Fillers point at
+/// `[1, 1]` so the victim/rival (nearest at `[1, 0.02]`) stay inside the
+/// returned page at every budget — the failure is the *value*, not a missing
+/// row.
+#[tokio::test]
+async fn test_keyword_bump_is_identical_at_every_candidate_budget() {
+    let config = common::store_config("vec-search-bump-budget");
+    let db = prepared_db(&config, "shard.db", 2).await;
+    let container_tag = "opencode_project_b2c3d4e5f6789012";
+
+    let query_vector = vec![1.0f32, 0.0];
+    let match_vector = vec![1.0f32, 0.02];
+    let filler_vector = vec![1.0f32, 1.0];
+    // `[1, 0.02]` against `[1, 0]`: content similarity `1 / sqrt(1 + 0.02²)`.
+    let cos = 1.0 / (1.0 + 0.02_f64 * 0.02).sqrt();
+
+    const ALPHA_FILLERS: usize = 101;
+    let mut statements = Vec::new();
+    for index in 0..ALPHA_FILLERS {
+        let mut row = record(
+            &format!("mem_fill_{index:03}"),
+            &format!("alpha filler {index:03}"),
+            &filler_vector,
+            container_tag,
+        );
+        row.created_at = NOW_MS + index as i64;
+        row.updated_at = row.created_at;
+        statements.push(insert_vector_statement(&row).expect("statement builds"));
+    }
+    let mut rival = record("mem_rival", "beta rival", &match_vector, container_tag);
+    rival.created_at = NOW_MS + ALPHA_FILLERS as i64;
+    rival.updated_at = rival.created_at;
+    statements.push(insert_vector_statement(&rival).expect("statement builds"));
+    let mut victim = record(
+        "mem_victim",
+        "alpha beta victim",
+        &match_vector,
+        container_tag,
+    );
+    victim.created_at = NOW_MS + ALPHA_FILLERS as i64 + 1;
+    victim.updated_at = victim.created_at;
+    statements.push(insert_vector_statement(&victim).expect("statement builds"));
+    db.batch(statements, BatchMode::Write)
+        .await
+        .expect("seed batch");
+
+    // PRECONDITION: the old per-token `LIMIT 32` scan really does truncate the
+    // victim's `alpha` hit, while `beta` lands at every budget.
+    let pattern = |token: &str| format!("%{}%", escape_like_pattern(token));
+    let scan = |token: &str, limit: i64| {
+        let db = &db;
+        let container_tag = container_tag.to_string();
+        let pattern = pattern(token);
+        async move {
+            db.query(
+                sql::KEYWORD_SCORES_TAGGED,
+                vec![
+                    Value::Text(container_tag),
+                    Value::Text(pattern.clone()),
+                    Value::Text(pattern),
+                    Value::Integer(limit),
+                ],
+            )
+            .await
+            .expect("keyword scan")
+        }
+    };
+    let alpha_hits: Vec<String> = scan("alpha", 32)
+        .await
+        .iter()
+        .filter_map(|row| row.text("id"))
+        .collect();
+    assert_eq!(alpha_hits.len(), 32, "the old `alpha` scan is LIMIT-bound");
+    assert!(
+        !alpha_hits.contains(&"mem_victim".to_string()),
+        "the old LIMIT 32 must exclude the 102nd alpha match: {alpha_hits:?}"
+    );
+    let beta_hits: Vec<String> = scan("beta", 32)
+        .await
+        .iter()
+        .filter_map(|row| row.text("id"))
+        .collect();
+    assert!(
+        beta_hits.contains(&"mem_victim".to_string())
+            && beta_hits.contains(&"mem_rival".to_string()),
+        "beta must land at every budget: {beta_hits:?}"
+    );
+
+    let low = search_in_shard(
+        db.as_ref(),
+        &query_vector,
+        container_tag,
+        10,
+        Some("alpha beta"),
+    )
+    .await
+    .expect("limit 10 search");
+    let high = search_in_shard(
+        db.as_ref(),
+        &query_vector,
+        container_tag,
+        200,
+        Some("alpha beta"),
+    )
+    .await
+    .expect("limit 200 search");
+    let score = |results: &[mem_store::vector::SearchResult], id: &str| {
+        results
+            .iter()
+            .find(|hit| hit.id == id)
+            .unwrap_or_else(|| panic!("{id} is a candidate at every budget: {results:?}"))
+            .similarity
+    };
+
+    // Two tokens: one hit contributes `0.1`, both hits `0.2`.
+    let one_hit = 0.5 * cos + 0.1;
+    let two_hits = 0.5 * cos + 0.2;
+    let low_victim = score(&low, "mem_victim");
+    let high_victim = score(&high, "mem_victim");
+    let low_rival = score(&low, "mem_rival");
+    let high_rival = score(&high, "mem_rival");
+
+    // Both tokens match the victim, and both are present in the query text:
+    // its similarity is `two_hits` at *every* budget. Before issue 169 the
+    // limit-10 call reported `one_hit` because the `alpha` scan's `LIMIT 32`
+    // cut the victim out.
+    assert!(
+        (low_victim - two_hits).abs() < 1e-6,
+        "victim at limit 10: expected {two_hits} (both tokens match it), got {low_victim}"
+    );
+    assert!(
+        (high_victim - two_hits).abs() < 1e-6,
+        "victim at limit 200: expected {two_hits}, got {high_victim} (limit 10 gave {low_victim})"
+    );
+    assert!(
+        (low_rival - one_hit).abs() < 1e-6,
+        "rival at limit 10: expected {one_hit}, got {low_rival}"
+    );
+    assert!(
+        (high_rival - one_hit).abs() < 1e-6,
+        "rival at limit 200: expected {one_hit}, got {high_rival}"
+    );
+    assert_eq!(
+        low_victim, high_victim,
+        "the victim's similarity must not move with the candidate budget"
+    );
+    assert!(
+        low_victim > low_rival,
+        "the victim leads the rival at limit 10 ({low_victim} vs {low_rival})"
+    );
+    assert!(
+        high_victim > high_rival,
+        "the victim leads the rival at limit 200 ({high_victim} vs {high_rival})"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 4/11 — issue 169 GUARD: the bump counts a token whose only match is in `tags`
+// ---------------------------------------------------------------------------
+
+/// GUARD (mutant `M2`: the bump predicate keeps only the `content LIKE ?` half,
+/// e.g. `'' LIKE ?` in the tags slot). A row whose only `alpha` match is its
+/// `tags` column must still earn that token: keyword `0.2 × 1/2 = 0.1`, on top
+/// of the tags channel's own `exact_match_boost` (`0.3 × 1/2 = 0.15`).
+#[tokio::test]
+async fn test_keyword_bump_counts_tags_matches() {
+    let config = common::store_config("vec-search-bump-tags");
+    let db = prepared_db(&config, "shard.db", 2).await;
+    let container_tag = "opencode_project_c3d4e5f678901234";
+    let query_vector = vec![1.0f32, 0.0];
+    let row_vector = vec![1.0f32, 0.02];
+    let cos = 1.0 / (1.0 + 0.02_f64 * 0.02).sqrt();
+
+    let mut row = record(
+        "mem_tags_only",
+        "no query token in this content",
+        &row_vector,
+        container_tag,
+    );
+    row.tags = Some("alpha".to_string());
+    insert_vector(db.as_ref(), &row).await.expect("insert row");
+
+    let results = search_in_shard(
+        db.as_ref(),
+        &query_vector,
+        container_tag,
+        10,
+        Some("alpha beta"),
+    )
+    .await
+    .expect("search");
+    let hit = results
+        .iter()
+        .find(|hit| hit.id == "mem_tags_only")
+        .expect("the tags match is a candidate");
+    // tags channel: `0.3 × exact_match_boost(1 of 2 query words)`;
+    // keyword channel: `0.2 × (1 of 2 tokens matched, in `tags`)`.
+    let expected = 0.5 * cos + 0.3 * 0.5 + 0.2 * 0.5;
+    assert!(
+        (hit.similarity - expected).abs() < 1e-6,
+        "a tags-only token match scores {expected}, got {}",
+        hit.similarity
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 5/11 — issue 169 GUARD: the denominator is every query token
+// ---------------------------------------------------------------------------
+
+/// GUARD (mutant `M3`: the bump divides by the row's matched-token count instead
+/// of `tokens.len()`, so one hit scores the whole channel). A 2-token query
+/// against a row that matches one token contributes `0.2 × 1/2 = 0.1`, never
+/// `0.2 × 1/1`.
+#[tokio::test]
+async fn test_keyword_bump_divides_by_every_token() {
+    let config = common::store_config("vec-search-bump-tokens");
+    let db = prepared_db(&config, "shard.db", 2).await;
+    let container_tag = "opencode_project_d4e5f67890123456";
+    let query_vector = vec![1.0f32, 0.0];
+    let row_vector = vec![1.0f32, 0.02];
+    let cos = 1.0 / (1.0 + 0.02_f64 * 0.02).sqrt();
+
+    insert_vector(
+        db.as_ref(),
+        &record(
+            "mem_one_token",
+            "alpha only here",
+            &row_vector,
+            container_tag,
+        ),
+    )
+    .await
+    .expect("insert row");
+
+    let results = search_in_shard(
+        db.as_ref(),
+        &query_vector,
+        container_tag,
+        10,
+        Some("alpha beta"),
+    )
+    .await
+    .expect("search");
+    let hit = results
+        .iter()
+        .find(|hit| hit.id == "mem_one_token")
+        .expect("the keyword match is a candidate");
+    let expected = 0.5 * cos + 0.2 * (1.0 / 2.0);
+    assert!(
+        (hit.similarity - expected).abs() < 1e-6,
+        "one matched token over a two-token query scores {expected}, got {}",
+        hit.similarity
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 6/11 — issue 169 GUARD: `hits` belongs to the row it was counted on
+// ---------------------------------------------------------------------------
+
+/// GUARD (mutant `M6`: `hits` is attributed by result-row ordinal — the i-th
+/// returned row takes the i-th id from the candidate list — so two rows swap
+/// totals). The three candidates are ordered by content distance *opposite* to
+/// their hit counts, so a positional attribution exchanges the 2-hit and 0-hit
+/// rows. Every row keeps its own score.
+#[tokio::test]
+async fn test_keyword_bump_is_attributed_to_its_own_id() {
+    let config = common::store_config("vec-search-bump-attribution");
+    let db = prepared_db(&config, "shard.db", 2).await;
+    let container_tag = "opencode_project_e5f6789012345678";
+    let query_vector = vec![1.0f32, 0.0];
+
+    // Two hits, one hit, none — while the *distances* order them c, b, a.
+    let rows = [
+        ("mem_a", "alpha beta a", vec![1.0f32, 0.3], 2_usize),
+        ("mem_b", "alpha b", vec![1.0f32, 0.2], 1_usize),
+        ("mem_c", "gamma c", vec![1.0f32, 0.1], 0_usize),
+    ];
+    for (index, (id, content, vector, _)) in rows.iter().enumerate() {
+        let mut row = record(id, content, vector, container_tag);
+        row.created_at = NOW_MS + index as i64;
+        row.updated_at = row.created_at;
+        insert_vector(db.as_ref(), &row).await.expect("insert row");
+    }
+
+    let results = search_in_shard(
+        db.as_ref(),
+        &query_vector,
+        container_tag,
+        10,
+        Some("alpha beta"),
+    )
+    .await
+    .expect("search");
+    for (id, _, vector, hits) in rows {
+        let cos = 1.0 / (1.0 + f64::from(vector[1]).powi(2)).sqrt();
+        let expected = 0.5 * cos + 0.2 * (hits as f64 / 2.0);
+        let hit = results
+            .iter()
+            .find(|hit| hit.id == id)
+            .unwrap_or_else(|| panic!("{id} is a candidate"));
+        assert!(
+            (hit.similarity - expected).abs() < 1e-6,
+            "{id} matched {hits} token(s): expected {expected}, got {}",
+            hit.similarity
+        );
+    }
 }

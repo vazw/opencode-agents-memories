@@ -344,6 +344,29 @@ pub const KEYWORD_SCORES_TAGGED: &str = r#"
           LIMIT ?
         "#;
 
+/// Issue 169: exact keyword hit count over an already-decided candidate set.
+///
+/// Local — no upstream counterpart — so it is self-pinned by
+/// `crates/mem-store/tests/golden_sql.rs`. Placeholder order is
+/// `[pattern, pattern]` × `token_count`, then the ids, and the count is
+/// `2 * token_count + id_count`.
+///
+/// There is deliberately **no** tag predicate: the ids are shard-local and the
+/// scans that produced them already applied it, while hydration keeps its own
+/// `AND container_tag = ?`. Measured through the turso engine, adding it moves
+/// the read plan off the primary-key index from 100 bound ids up and costs
+/// 3-9x (16.2 vs 1.8 ms at 100 ids; 58.0 vs 19.5 ms at 1000) — re-adding it
+/// falsifies the structural bound issue 169 is measured against.
+///
+/// `token_count` is expected to be at least 1; [`crate::vector::keyword_bumps`]
+/// answers an empty token set before calling this.
+pub fn keyword_bump_sql(id_count: usize, token_count: usize) -> String {
+    let term = r"(CASE WHEN content LIKE ? ESCAPE '\' OR IFNULL(tags, '') LIKE ? ESCAPE '\' THEN 1 ELSE 0 END)";
+    let terms = vec![term; token_count].join(" + ");
+    let placeholders = vec!["?"; id_count.min(1000)].join(", ");
+    format!("SELECT id, {terms} AS hits FROM memories WHERE id IN ({placeholders})")
+}
+
 // vector-search.ts L410-417 (getMemoriesBySessionID).
 pub const GET_MEMORIES_BY_SESSION_ID: &str = r#"
       SELECT * FROM memories

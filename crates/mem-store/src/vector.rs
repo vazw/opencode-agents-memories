@@ -374,6 +374,12 @@ pub async fn exact_scan_kind(
 /// content/tags, each hit adds `1 / tokens.len()` on top of the id's
 /// previous score. Insertion-ordered like the JS `Map` (a repeat hit
 /// updates its slot in place); `Vec` + linear update mirrors it.
+///
+/// Issue 169: the returned scores are the upstream `LIMIT k` *provisional*
+/// values — a row deeper than `k` in a token's scan misses that token's bump.
+/// They are kept for `tests/search_cost_bench.rs`'s twin harness;
+/// [`search_in_shard`] spends only the returned **ids** and scores the merged
+/// candidate set with [`keyword_bumps`], which has no `LIMIT`.
 pub async fn keyword_scores(
     db: &dyn Db,
     query_text: Option<&str>,
@@ -413,6 +419,46 @@ pub async fn keyword_scores(
     Ok(scores)
 }
 
+/// Issue 169: exact keyword contribution for an already-decided candidate set.
+///
+/// One statement over the candidate ids — no `LIMIT`, no ordering, and no
+/// `container_tag` predicate (see [`crate::sql::keyword_bump_sql`]) — counts
+/// each token's hit per row and divides by the token count. The value is a
+/// function of `(row, tokens)` only, so a candidate's blended similarity stops
+/// moving with the caller's `page_size`.
+///
+/// An empty id slice or an empty token set answers `Ok(Vec::new())` with **no**
+/// query issued: an empty `IN ()` is a syntax error, not an empty result.
+pub async fn keyword_bumps(
+    db: &dyn Db,
+    query_text: Option<&str>,
+    ids: &[String],
+) -> Result<Vec<(String, f64)>, StoreError> {
+    let tokens = tokenize_query_text(query_text);
+    // Same placeholder ceiling the hydrate applies; ids travel as bound params.
+    let ids = &ids[..ids.len().min(1000)];
+    if tokens.is_empty() || ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let sql = crate::sql::keyword_bump_sql(ids.len(), tokens.len());
+    let mut params = Vec::with_capacity(tokens.len() * 2 + ids.len());
+    for token in &tokens {
+        let pattern = format!("%{}%", escape_like_pattern(token));
+        params.push(Value::Text(pattern.clone()));
+        params.push(Value::Text(pattern));
+    }
+    params.extend(ids.iter().map(|id| Value::Text(id.clone())));
+    let rows = db.query(&sql, params).await?;
+    let bump = 1.0 / tokens.len() as f64;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let id = row.text("id").unwrap_or_default();
+            (id, row.i64("hits").unwrap_or(0) as f64 * bump)
+        })
+        .collect())
+}
+
 /// Upstream `searchInShard` (L99–208), byte-order-faithful. Divergence
 /// (recorded): takes the `Db` seam and does NOT prepare the schema —
 /// preparation is manager-owned since W1.2.
@@ -432,7 +478,9 @@ pub async fn search_in_shard(
     let content_hits =
         exact_scan_kind(db, &query_json, k, container_tag, VectorColumn::Content).await?;
     let tags_hits = exact_scan_kind(db, &query_json, k, container_tag, VectorColumn::Tags).await?;
-    let keyword = keyword_scores(db, query_text, container_tag, k).await?;
+    // Issue 169: only the ids feed the candidate set; the provisional `LIMIT k`
+    // scores are not consumed here (the merged set is scored exactly below).
+    let keyword_candidates = keyword_scores(db, query_text, container_tag, k).await?;
 
     // Insertion-ordered candidate ids (content hits, then tags hits, then
     // keyword ids) — mirrors the JS `Set` merge.
@@ -442,7 +490,7 @@ pub async fn search_in_shard(
         .into_iter()
         .map(|(id, _)| id)
         .chain(tags_hits.into_iter().map(|(id, _)| id))
-        .chain(keyword.iter().map(|(id, _)| id.clone()))
+        .chain(keyword_candidates.iter().map(|(id, _)| id.clone()))
     {
         if seen.insert(id.clone()) {
             ids.push(id);
@@ -454,6 +502,10 @@ pub async fn search_in_shard(
     // Placeholder-count clamp (the frozen hydrate builder clamps the same
     // way; ids stay BOUND PARAMS — never interpolated).
     ids.truncate(1000);
+    // Issue 169: score the decided set exactly. `k` still governs membership
+    // above; this statement has no `LIMIT`, so a candidate's score is a
+    // function of (row, tokens) alone.
+    let keyword = keyword_bumps(db, query_text, &ids).await?;
 
     let filtered = !container_tag.is_empty();
     let sql = crate::sql::hydrate_candidates_sql(ids.len(), filtered);

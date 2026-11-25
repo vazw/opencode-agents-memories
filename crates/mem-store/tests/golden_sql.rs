@@ -1779,3 +1779,177 @@ fn test_golden_sql_stats_memories() {
     assert!(!sql::GET_STATS_MEMORIES.contains("ORDER BY"));
     assert!(!sql::GET_STATS_MEMORIES.contains("*"));
 }
+
+// ---------------------------------------------------------------------------
+// 7/11 — issue 169 GUARD: the bump builder's shape and placeholder count
+// ---------------------------------------------------------------------------
+
+/// GUARD (mutant `M8`: one `CASE` term per token but only one `?` inside it).
+/// The builder must emit exactly one placeholder per bound parameter —
+/// `[pattern, pattern]` × `token_count`, then the ids — so the count tracks the
+/// caller's own param vector instead of a restated literal.
+///
+/// Measured on the emitted string: `8` for `(id_count = 2, token_count = 3)`;
+/// the tag-clause variant would be `9` and is deliberately dropped, so the
+/// statement carries no `container_tag` predicate and no `LIMIT`.
+#[test]
+fn test_keyword_bump_sql_pins_shape_and_placeholder_count() {
+    let id_count = 2usize;
+    let token_count = 3usize;
+    let statement = sql::keyword_bump_sql(id_count, token_count);
+
+    // The caller's param vector, built the way `vector::keyword_bumps` builds it.
+    let params = token_count * 2 + id_count;
+    assert_eq!(
+        statement.matches('?').count(),
+        params,
+        "one placeholder per bound param: {statement}"
+    );
+    assert_eq!(
+        statement.matches('?').count(),
+        2 * token_count + id_count,
+        "two LIKE patterns per token, then one id per candidate: {statement}"
+    );
+    assert_eq!(
+        statement.matches('?').count(),
+        8,
+        "measured on the emitted string for (2, 3): {statement}"
+    );
+
+    let term = r"(CASE WHEN content LIKE ? ESCAPE '\' OR IFNULL(tags, '') LIKE ? ESCAPE '\' THEN 1 ELSE 0 END)";
+    assert_eq!(
+        statement.matches(term).count(),
+        token_count,
+        "one hit-counting term per token: {statement}"
+    );
+    assert!(
+        statement.contains("THEN 1 ELSE 0 END"),
+        "a NULL content must count as a miss, not poison the sum: {statement}"
+    );
+    assert!(
+        statement.contains("FROM memories WHERE id IN (?, ?)"),
+        "the candidates are bound through the primary key: {statement}"
+    );
+    assert!(
+        !statement.contains("container_tag"),
+        "the bump statement must not re-apply the tag predicate (issue 169 design): {statement}"
+    );
+    assert!(
+        !statement.contains("LIMIT"),
+        "the bump must not truncate its candidate set: {statement}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 8/11 — issue 169 GUARD: the bump reads its candidates through the id index
+// ---------------------------------------------------------------------------
+
+/// GUARD (mutant `M7`: the builder emits no `WHERE id IN`, so the statement
+/// reads the whole table). The plan must seek the primary-key index at every
+/// candidate budget, and the answer set must be the candidate count — not the
+/// table's row count.
+#[tokio::test]
+async fn test_keyword_bump_sql_reads_candidates_through_the_id_index() {
+    let dir = common::temp_dir("golden-bump-plan");
+    let config = test_config(&dir, 2);
+    let db = open_db(&config, "shard.db").await;
+    let ddl = sql::memories_ddl(2);
+    batch_write(db.as_ref(), vec![ddl.as_str()]).await;
+    // `INSERT_WITHOUT_TAGS` writes `session_id`, so the v2 migration must run.
+    batch_write(
+        db.as_ref(),
+        vec![sql::MEMORY_SHARD_V2_ALTER, sql::MEMORY_SHARD_V2_INDEX],
+    )
+    .await;
+
+    // One row more than the builder's 1000-id ceiling, so the largest cell's
+    // answer cannot coincide with a table scan's row count.
+    const TABLE_ROWS: usize = 1001;
+    let vector = serde_json::to_string(&vec![1.0f32, 0.0]).unwrap();
+    for index in 0..TABLE_ROWS {
+        db.execute(
+            sql::INSERT_WITHOUT_TAGS,
+            vec![
+                text(format!("mem_{index:04}")),
+                text(format!("row {index:04} filler")),
+                text(&vector),
+                text("opencode_project_a1b2c3d4e5f67890"),
+                Value::Null,
+                text("project"),
+                Value::Integer(100),
+                Value::Integer(100),
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+                Value::Null,
+            ],
+        )
+        .await
+        .expect("seed the plan fixture");
+    }
+
+    let patterns: Vec<Value> = ["alpha", "beta", "gamma"]
+        .iter()
+        .flat_map(|token| {
+            let pattern = format!("%{}%", escape_like_pattern(token));
+            [text(pattern.clone()), text(pattern)]
+        })
+        .collect();
+
+    for id_count in [3usize, 100, 1000] {
+        let statement = sql::keyword_bump_sql(id_count, 3);
+        let ids: Vec<String> = (0..id_count)
+            .map(|index| format!("mem_{index:04}"))
+            .collect();
+        // Row 7 owns the placeholder contract; here the bound params follow the
+        // statement's own placeholder count, so a builder that drops the id
+        // predicate yields a *scan* plan (the failure under test) rather than a
+        // parameter-count error that hides it.
+        let bound = statement.matches('?').count();
+        let mut params = patterns.clone();
+        params.extend(ids.iter().map(|id| text(id.clone())));
+        params.truncate(bound);
+
+        let plan = db
+            .query(&format!("EXPLAIN QUERY PLAN {statement}"), params.clone())
+            .await
+            .expect("plan");
+        let plan_text = plan
+            .iter()
+            .map(|row| row.text("detail").unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            plan_text.contains("USING INDEX sqlite_autoindex_memories_1"),
+            "id_count={id_count}: the candidates must be read through the primary-key index, plan was: {plan_text}"
+        );
+        assert!(
+            plan_text.contains("(id=?)"),
+            "id_count={id_count}: the index must be seeked per bound id, plan was: {plan_text}"
+        );
+        assert!(
+            !plan_text.contains("SCAN memories"),
+            "id_count={id_count}: the statement must not scan the table, plan was: {plan_text}"
+        );
+        println!("issue169 plan id_count={id_count}: {plan_text}");
+
+        let rows = db.query(&statement, params).await.expect("bump query");
+        assert_eq!(
+            rows.len(),
+            id_count,
+            "id_count={id_count}: the answer set is the candidate set, not the {TABLE_ROWS}-row table"
+        );
+        let mut returned: Vec<String> = rows.iter().filter_map(|row| row.text("id")).collect();
+        returned.sort();
+        let mut expected = ids.clone();
+        expected.sort();
+        assert_eq!(
+            returned, expected,
+            "id_count={id_count}: every candidate answers once"
+        );
+    }
+}
