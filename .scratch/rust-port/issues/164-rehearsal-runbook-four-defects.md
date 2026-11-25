@@ -1,6 +1,6 @@
 # 164 — the drop-in rehearsal runbook has four defects that make its own evidence uncollectable
 
-Status: landed — the four cells corrected and individually tested; AC1 (one uninterrupted four-cell rehearsal) still open
+Status: done — four cells corrected; AC1 met by one uninterrupted four-cell run (2026-11-25T06:26:17Z); three new runbook defects found by that run filed as issue 168
 Filed: 2026-11-25, from the copy-first execution of issue 28 (run `20261125T035152Z`)
 
 ## The defects
@@ -52,9 +52,17 @@ relabelled after the fact, and the transcript records both corrections.
 ## Acceptance criteria
 
 1. A rehearsal run from a clean checkout executes `§2a`, `§6a`, `§6b` and `§8` with no manual substitution, and each
-   cell's recorded output is the thing it claims to measure. **NOT YET MET** — the four cells were each executed in
-   isolation against stubs and a scratch engine; no single uninterrupted run has exercised all four in sequence. That
-   run is the remaining measurement, and it needs a store copy plus a scratch engine on a spare port.
+   cell's recorded output is the thing it claims to measure. **MET 2026-11-25T06:26:17Z** — run
+   `.tmp/progress/issue-164-ac1-20261125T062617Z`, report `.tmp/progress/issue-164-ac1-rehearsal.md`. §2a unit copy
+   43 dbs + `-wal`, `unitcopy_failures=0`, 43/43 `integrity_check ok`, copy total 5463 = live 5463. §6a index 200,
+   asset `/web-ui-a55d4d337bfbc403.js` 200/63218 B, `asset_differs_from_index=yes`, both temps deleted in-cell. §6b
+   populated run rc 0 `PASS (11 GET, zero non-GET)`, four path shapes each refusing with its own code and message, no
+   `roster is empty` for a path error. §8 `ts_entries=0`, `diff_rc=0`, `cmp_rc=0` against `live-reference`, negative
+   probe `ts=1`/`diff_rc=1`; live engine 8953 same `lstart`, `.engine.lock` sha unchanged, 43 dbs, live total 5463.
+   No cell method substituted. Disclosed caveats: the recording harness was iterated three times before the evidence
+   run (the cells' logic did not change between attempts, only the harness), port 3761 replaced the runbook's 3749
+   under the task's spare-port constraint, and `§6b`'s rc was read as `${PIPESTATUS[0]}` because the runbook's `| tee`
+   masks it — the last of which is defect 1 of issue 168.
 2. `§6a`'s asset assertion fails when the fetched asset is byte-identical to the index. **MET** — same-bytes stub →
    `ASSET_IS_INDEX STOP` rc 1; a 500-with-body now stops at `ASSET_HTTP` rc 1 before any byte comparison.
 3. `§6b` exits with a distinct code and message when its evidence directory is absent, and never reports
