@@ -1,6 +1,6 @@
 # 165 — `/api/search` can starve the true top-k: it pools a per-shard cap and then sorts
 
-Status: measured — starvation confirmed but by a different mechanism than filed; two premises corrected; root cause filed as issue 169 and sequenced first
+Status: measured — residual starvation confirmed, but the binder is the candidate cap `k`, not the per-shard `truncate`; fix shape rewritten below for replanning
 Filed: 2026-11-25, from the issue 28 copy-first rehearsal (run `20261125T035152Z`), cell S5
 
 ## The observation
@@ -99,3 +99,63 @@ so the criterion as written cannot fail.
 Fix that first; then re-measure this one, because with a deterministic score the residual starvation is the
 `truncate(limit)` cap this issue originally described, and criterion 1's fixture must be rebuilt against a row that
 exists.
+
+## Re-measured 2026-11-25 after issue 169 — the binder is `k`, not `truncate`
+
+Report: `.tmp/progress/issue-165-residual-measurement.md`. Read-only, two §2a unit copies (`43` dbs +`43` WALs each,
+`0` failures, `43/43` integrity ok), scratch engine port 3773 (pid 14702 stopped, port re-confirmed free), live
+engine 8953 and host 8878 never signalled. Measurement taken on a HEAD (`dfe3dc5`) rebuild — see the staging note
+at the end.
+
+169 made the score a function of (memory, query), which is what made this question answerable: before it, the score
+moved with `page_size`, so candidate-set membership and the per-shard `truncate` could not be told apart. They can now.
+
+**Result: 10 true-top-20 rows across two frozen queries (7 on q1, 3 on q2) score above the `pageSize=20` cut and are
+absent from it.** Worst pair, q1: rank 2 at `pageSize=200`, `auto-capture-fb923c74…994d5f`, similarity
+`0.526946152930124`, against the `pageSize=20` 20th result's `0.467455756059875`. q2: `0.5453899894917825` against
+`0.5241423225104129`.
+
+**And the binder is not the mechanism this issue names.** `truncate(limit)` starved nothing: every shard contributed
+exactly `min(limit, rows)` rows at both page sizes (Σ = 387 / 1595, matching the observed totals). The starved rows
+were never candidates at all. All ten live in `project_fd2bfb63318dfd29_shard_0` (2994 rows) and each scores above
+that shard's own contributed 20th (`0.4600335307087969` q1 / `0.5241423225104129` q2), so any one of them would have
+displaced what was served — but none entered the candidate set, because the keyword channel supplies ids under
+`LIMIT k` and these sit at scan positions 54–2437.
+
+**Verified in the source, twice** (`crates/mem-store/src/vector.rs`): `:476` `let k = (limit.saturating_mul(2)).max(32)`
+→ `k = 40` at `pageSize=20`; `:483` feeds candidates from `keyword_scores(db, query_text, container_tag, k)`; and
+`sql.rs:333-337` / `:340-345` are `SELECT id FROM memories WHERE content LIKE ? … LIMIT ?` with **no `ORDER BY`**.
+So the keyword channel contributes at most `k` ids per token, chosen in an unspecified scan order.
+
+A second property follows and is worth recording separately from the starvation: because that order is unspecified,
+the 40 ids chosen are stable only while the storage layout is unchanged. Same query, same score, possibly a different
+served top-20 after a write or compaction. Not proven to flap here — that would need a mutating write, which this
+run was correctly not allowed to make — so it is stated as a consequence of the SQL, not as a measurement.
+
+## Fix shape, rewritten
+
+The earlier fix shape in this issue (merge each shard's top-`page_size`) is already exactly what `truncate` does and
+is therefore not the fix. Two candidates, and the choice is a measurement:
+
+1. **Widen keyword candidate membership to the honest match set.** The bump is now a `CASE WHEN LIKE` over already-
+   decided ids, so the honest set is "every row matching a token in this shard", clamped by the existing 1000-id
+   clamp. Cost was measured *as a rejected alternative for 169*: membership grows to the clamp, ~`+3.2 ms` of hydrate
+   against a 25.7 ms scan and 20.3 ms hydrate at `pageSize=20`, on the bench fixture (955 ids). That is the number
+   this issue now has to either accept or beat.
+2. **Order the candidate query deterministically and cap it there** (`ORDER BY id` or by a stable key). This makes
+   membership reproducible but does not stop starvation — it converts a moving cut into a fixed one. It would be a
+   partial fix that a criterion could mistake for the whole one.
+
+The criterion that separates them: same two queries, same two page sizes, and the count of true-top-20 rows scoring
+above the `pageSize=20` cut must go to **zero**, not merely stop moving. A fix that only stabilises the cut fails.
+
+## Staging note — the fix is not in any deployed engine
+
+MEASURED at `dfe3dc5`: `plugin/engine/linux-x64/opencode-agents-memory` is dated `2026-11-24 20:30:01 +0700` and
+contains **zero** occurrences of `keyword_bump_sql`; `target/release/opencode-agents-memory` is `2026-11-24 20:37:38`
+and equally stale. The 169 commit is `2026-11-25 18:46:12 +0700`. So issue 169 is fixed in source and absent from
+every built engine, and the numbers above came from a fresh HEAD rebuild into scratch.
+
+That is a packaging gap, not a code defect, and restaging is an owner action — the standing directive for this queue
+excludes running `scripts/stage-engine.sh`. Recorded here so a later reader of "169 shipped" does not assume the
+stored engine carries it.
