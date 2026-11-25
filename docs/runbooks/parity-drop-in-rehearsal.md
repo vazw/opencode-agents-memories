@@ -124,6 +124,29 @@ STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 REH=$PWD/.tmp/rehearsal-28/$STAMP
 mkdir -p "$REH"/{store,config,evidence/rest,logs}
 echo "$REH"            # ← record this verbatim; every later command depends on it
+
+# >>> s2-rehearsal-pid
+# argv-exact reader: a rehearsal engine's argv is six elements, so the live
+# three-element form does not transfer. Match the adjacent pair, never a
+# substring, so a `bash -c` wrapper carrying the expanded root is not a match.
+rehearsal_pid() {
+	local p i a
+	local -a args
+	for p in /proc/[0-9]*; do
+		[ -r "$p/cmdline" ] || continue
+		args=()
+		while IFS= read -r -d '' a; do args+=("$a"); done <"$p/cmdline"
+		[ "${#args[@]}" -ge 3 ] || continue
+		case ${args[0]} in */plugin/engine/*/opencode-agents-memory) ;; *) continue ;; esac
+		for ((i = 1; i < ${#args[@]} - 1; i++)); do
+			if [ "${args[i]}" = --storage-root ] && [ "${args[i+1]}" = "$REH/store" ]; then
+				printf '%s\n' "${p#/proc/}"
+				break
+			fi
+		done
+	done
+}
+# <<< s2-rehearsal-pid
 ```
 
 Copy the DBs **and their `-wal` sidecars as one unit**, then everything that is not a DB, a sidecar or a
@@ -266,16 +289,31 @@ byte-identical, because nothing in this run may have written it.
 ## 5. Start the engine against the copy, then read the memory back
 
 ```sh
+# >>> s5-engine-start
 ENGINE=$PWD/plugin/engine/linux-x64/opencode-agents-memory
-"$ENGINE" --mode=standalone --storage-root "$REH/store" --web-port 3749 \
-  > "$REH/logs/engine.log" 2>&1 &
-sleep 3
-pgrep -af -- "--storage-root $REH/store" | tee "$REH/evidence/engine-proc.txt"
-curl -s -o /dev/null -w 'health=%{http_code}\n' http://127.0.0.1:3749/api/health
+(
+  "$ENGINE" --mode=standalone --storage-root "$REH/store" --web-port 3749 \
+    > "$REH/logs/engine.log" 2>&1 &
+  STARTED_PID=$!
+  sleep 3
+  RPID=$(rehearsal_pid)
+  [ "$RPID" = "$STARTED_PID" ] || {
+    kill -TERM "$STARTED_PID" || printf 'note: started pid=%s was already gone\n' "$STARTED_PID" >&2
+    printf 'REHEARSAL-PID: started pid=%s but the argv-exact reader returned "%s"\n' "$STARTED_PID" "$RPID" >&2
+    exit 3
+  }
+  printf '%s\n' "$RPID" > "$REH/evidence/engine-pid.txt"
+  printf 'rehearsal_pid=%s started_pid=%s\n' "$RPID" "$STARTED_PID"
+  ps -o pid=,lstart=,etime= -p "$RPID"
+  curl -s -o /dev/null -w 'health=%{http_code}\n' http://127.0.0.1:3749/api/health
+)
+# <<< s5-engine-start
 ```
 
-Expected: exactly one process line, whose pid you record — **this pid is the only one you may signal**;
-`health=200`. (Verified form: `--mode=standalone --storage-root <root> --web-port <port>` binds and
+Expected: one `rehearsal_pid=<n> started_pid=<n>` line with equal values, one `ps` line, `health=200`, and
+`$REH/evidence/engine-pid.txt` holding that one pid — **this pid is the only one you may signal**. The start
+block runs in a subshell, so a start failure ends the cell with rc 3 rather than the operator's shell.
+(Verified form: `--mode=standalone --storage-root <root> --web-port <port>` binds and
 serves; the default `stdio` mode serves too but ends on stdin EOF.)
 
 First gated call mints the copy's token (a 401 here is the mint, not an error):
@@ -332,10 +370,16 @@ rm -f -- "$IDX" "$ASSET_BODY"
 [ "$ASSET_OK" = 1 ]
 
 # 6b. the pre-registered REST surface (read-only, 41 rows; refuses non-GET)
+# >>> s6b-smoke
 scripts/smoke-rest-surface.sh \
   --live-base-url http://127.0.0.1:3749 \
   --live-token-file "$REH/store/.auth-token" \
-  --evidence-dir "$REH/evidence/rest" | tee "$REH/evidence/rest-summary.log"
+  --evidence-dir "$REH/evidence/rest" > "$REH/evidence/rest-summary.log" 2>&1
+smoke_rc=$?
+cat "$REH/evidence/rest-summary.log"
+echo "smoke_rc=$smoke_rc"
+[ "$smoke_rc" = 0 ]
+# <<< s6b-smoke
 
 # 6c. one add round-trip on the copy, then find it back
 CANARY=rehearsal-28-canary-$STAMP
@@ -355,6 +399,10 @@ index and would otherwise pass both of them; the add answers
 `{"success":true,"data":{"id":"mem_…"}}` and the follow-up search returns that same id
 (`similarity` ≈ 0.6–0.9 — measured 0.606 on a fresh root). `containerTag` must be
 `opencode_<scope>_<16 hex>`; anything else is refused with `Invalid container tag`.
+
+The cell's exit status is the script's own, captured with `smoke_rc=$?` from the redirect and then required
+with `[ "$smoke_rc" = 0 ]`; the script's log is printed in full either way. A non-zero `smoke_rc` ends the
+cell non-zero — a green cell here means the 41 rows ran and passed, not that some downstream writer exited 0.
 
 `smoke-rest-surface.sh` separates a path failure from a data failure by exit code, and names the case in its
 message — distinguishable **by code across classes, by message within one** — a path failure is never
@@ -382,6 +430,13 @@ manual `mkdir` and do not record it as a roster result.
 
 A populated copy is why this step targets `$REH/store` and not a fresh root: the 41 rows assert real
 answers, and an empty store cannot satisfy them.
+
+The other pipes into `tee` in this runbook are display, never the oracle: §2a's unit-copy log (its oracle is
+the `grep -c UNITCOPY_FAILED` count), §2's per-shard rows (the printed `shards=`/`memories=` compared to S0),
+§2's integrity list (two `grep`s on the integrity file), §4's sha256 list (the five-line count), and §6c's
+canary body (`success:true` plus the follow-up search). §5's process listing is gone — the argv-exact reader
+replaced it — and §6b above is the one cell whose oracle *is* the left-hand command's status. The rule: a
+pipe to `tee` is verdict-bearing only when the left-hand command's exit status alone is the cell's oracle.
 
 ## 7. The §0b D3 hatch — confirming the deferral, not re-opening it
 
@@ -415,13 +470,44 @@ Run this **after** §5 and **before** §8 (it needs the first rehearsal engine a
 
 ## 8. Rollback, and the proof the original was never written
 
-Stop the rehearsal engine (its pid only), then restore the scratch config from the copy taken before the
-swap — an exact restore of the live port-installed config (`live-reference`), not an inverse edit:
+Stop the rehearsal engine — its pid only, read back as an argv-exact pair match on `$REH/store` and checked
+against the pid §5 wrote to `$REH/evidence/engine-pid.txt` — then restore the scratch config from the copy
+taken before the swap — an exact restore of the live port-installed config (`live-reference`), not an inverse
+edit:
 
 ```sh
-kill -TERM "$(pgrep -f -- "--storage-root $REH/store" | head -1)"
-sleep 2; pgrep -af -- "--storage-root $REH/store" || echo rehearsal_engine_gone
-! ss -ltn | grep -q '127.0.0.1:3749' && echo port_3749_free_again
+# >>> s8-engine-stop
+(
+  # The engine §5 started is the only process this block may signal. The reader is
+  # argv-exact on "$REH/store", so a `bash -c` wrapper carrying the expanded root is
+  # not a match. Refusals print on stderr and are not a green cell.
+  [ -s "$REH/evidence/engine-pid.txt" ] || {
+    printf 'REHEARSAL-PID: no engine was ever started on %s (no engine-pid.txt; §5 did not run)\n' "$REH/store" >&2
+    exit 3
+  }
+  REH_PID=$(cat "$REH/evidence/engine-pid.txt")
+  RPID=$(rehearsal_pid)
+  if [ -z "$RPID" ]; then
+    printf 'rehearsal_engine_already_gone pid=%s (recorded at §5; the rollback did not stop it)\n' "$REH_PID" >&2
+    exit 4
+  fi
+  [ "$RPID" = "$REH_PID" ] || {
+    printf 'REHEARSAL-PID: argv-exact match pid=%s is not the pid §5 recorded (%s)\n' "$RPID" "$REH_PID" >&2
+    exit 5
+  }
+  kill -TERM "$RPID"
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 0.5
+    [ -z "$(rehearsal_pid)" ] && break
+  done
+  [ -z "$(rehearsal_pid)" ] || {
+    printf 'REHEARSAL-PID: pid=%s still matches after SIGTERM\n' "$RPID" >&2
+    exit 6
+  }
+  echo "rehearsal_engine_stopped pid=$RPID"
+  ! ss -ltn | grep -q '127.0.0.1:3749' && echo port_3749_free_again
+)
+# <<< s8-engine-stop
 
 cp -a "$REH/config/opencode.jsonc" "$REH/config/opencode.jsonc.post-install"
 cp -a "$REH/config/opencode.jsonc.live-reference" "$REH/config/opencode.jsonc"
@@ -431,9 +517,29 @@ cmp "$HOME/.config/opencode/opencode.jsonc" "$REH/config/opencode.jsonc" \
   && echo restore_is_identity_with_live_config
 ```
 
-Expected: `rehearsal_engine_gone`, `port_3749_free_again`, **zero** `opencode-mem@latest` entries, an empty
-diff, `restore_is_identity_with_live_config`, and `opencode.jsonc.post-install` kept so the installed state
-is still on record.
+Expected: `rehearsal_engine_stopped pid=<n>` and `port_3749_free_again` on the stopped path, **zero**
+`opencode-mem@latest` entries, an empty diff, `restore_is_identity_with_live_config`, and
+`opencode.jsonc.post-install` kept so the installed state is still on record.
+
+The stop block ends in one of five outcomes, distinguishable by exit code across classes and by message
+within one. Only the first is a green stop:
+
+- **rc 0, `rehearsal_engine_stopped pid=<n>` then `port_3749_free_again`** — the pid §5 recorded was matched
+  by the argv-exact reader, signalled, and is gone within 5 s.
+- **rc 3, `REHEARSAL-PID: no engine was ever started on <root>`** — `engine-pid.txt` is absent or empty, so
+  §5 never ran. Nothing was signalled.
+- **rc 4, `rehearsal_engine_already_gone pid=<recorded>`** — the sentinel is there but the reader matches
+  nothing: the engine died without this block stopping it. Distinct from rc 3 precisely because the
+  transcript must be able to say "already gone", not "never started", and neither is a pass.
+- **rc 5, `REHEARSAL-PID: argv-exact match pid=<found> is not the pid §5 recorded (<recorded>)`** — something
+  else now matches the scratch root. Nothing is signalled.
+- **rc 6, `REHEARSAL-PID: pid=<n> still matches after SIGTERM`** — the signal was sent and the process
+  outlived it. It is still running; stop it yourself and record the finding.
+
+The block is a subshell, so a refusal's `exit` ends the cell without closing the operator's shell. A refusal
+prints neither `rehearsal_engine_stopped` nor `port_3749_free_again` — those bytes belong to rc 0 alone. The
+recorded pid is the only process this block may signal; the former substring scan read the whole command
+line, so a `bash -c` wrapper carrying the expanded root could be selected instead of the engine.
 
 What is compared, precisely: the restored scratch `opencode.jsonc` against `live-reference`, and
 `live-reference` is a `cp -a` of the **live port-installed** `~/.config/opencode/opencode.jsonc` (4a). On
