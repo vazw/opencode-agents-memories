@@ -1,6 +1,10 @@
-# 165 — `/api/search` can starve the true top-k: it pools a per-shard cap and then sorts
+# 165 — `/api/search` starves the true top-k: the candidate cap `k` drops true-top-20 rows
 
-Status: measured — residual starvation confirmed, but the binder is the candidate cap `k`, not the per-shard `truncate`; fix shape rewritten below for replanning
+> Filename kept for link stability. Retitled 2026-11-25: the earlier title ("pools a per-shard cap and then sorts")
+> described a mechanism that measurement has now ruled out three times. See the two "Measured" sections below.
+
+Status: ready-for-agent — fix shape measured: candidate floor `k ≥ 320` **plus** removal of the insertion-ordered
+`ids.truncate(1000)` clamp; both are required, neither alone reaches zero starvation
 Filed: 2026-11-25, from the issue 28 copy-first rehearsal (run `20261125T035152Z`), cell S5
 
 ## The observation
@@ -159,3 +163,63 @@ every built engine, and the numbers above came from a fresh HEAD rebuild into sc
 That is a packaging gap, not a code defect, and restaging is an owner action — the standing directive for this queue
 excludes running `scripts/stage-engine.sh`. Recorded here so a later reader of "169 shipped" does not assume the
 stored engine carries it.
+
+## Frontier measured 2026-11-25 — the cost of zero starvation, and the second binder under it
+
+Report: `.tmp/progress/issue-165-recall-frontier.md` (177 lines). HEAD `abf257c`, tree clean, release build from
+HEAD (the staged engine is stale — see the earlier staging note), port 3791 free at end, live 8953/8878 never
+signalled. Recall measured against a **scored full-shard reference**: all 2994 rows of `…shard_0` given the blend,
+ordered, top 20 retained. Harness fidelity was checked rather than assumed — its `k=40` shard 20th
+(`0.4600335307087969`) reproduces the earlier engine run bit-for-bit, and five repeats of one request give one
+distinct SHA-256.
+
+| `k` | recall of full-scan top-20 | shard latency (median of 5, warm) |
+|---|---|---|
+| 40 (today) | 12/20 | 73.1 ms |
+| 80 | 13/20 | — |
+| 160 | 18/20 | — |
+| **320** | **20/20** | **238.8 ms** |
+| 640 | 19/20 | — |
+| 1280 | 18/20 | — |
+| 2994 (uncapped) | 18/20 | — |
+
+Whole-request, measured not extrapolated: `pageSize=160` (`k=320`) **504.5 ms**, `pageSize=200` **512.4 ms**, against
+today's `pageSize=20` `242.7 ms` with 7 true-top-20 rows missing. The size-blind extrapolation (36 × 238.8 ms =
+8.59 s) is **unsafe and was discarded** — the median shard holds 10.5 rows — so the request figure is the one to use.
+
+**The curve is non-monotone, and that is the finding, not a flaw in the measurement.** Recall rises 12 → 13 → 18 →
+20 → then FALLS to 19 → 18 → 18 as `k` grows past 320. Cause: `vector.rs:504` `ids.truncate(1000)` cuts in insertion
+order (content hits, then tags hits, then keyword ids), so a larger `k` pushes keyword-only candidates past position
+1000 and drops them. Widening alone therefore **cannot** reach zero starvation, and a fix that only raises `k` will
+look better at 320 than at 1290.
+
+**Fix shape, measured rather than argued.** Two coupled changes, and the criterion tests both:
+
+1. **A candidate floor of 320**, not a multiplier: `k = (limit * 2).max(32)` → a form whose floor is 320, so that
+   `pageSize=20` (the default path, the one that was losing 7 of 20) gets the same candidate width as
+   `pageSize=160`. Cost, measured: shard path 73.1 → 238.8 ms; whole request 242.7 → 504.5 ms.
+2. **Remove the insertion-ordered `truncate(1000)`.** It must either go — chunking hydration and the bump statement
+   into id batches, if the bind limit is the reason it exists — or be replaced by a bound that cannot drop a
+   higher-scoring row for a lower-scoring one. Which of those it is depends on why 1000 exists; the comment says the
+   "frozen hydrate builder clamps the same way", so the bind limit has to be established before choosing. A
+   deterministic *order* before the truncate is **not** sufficient: ordering by id would make the cut reproducible
+   while still cutting true-top-20 rows, which is the partial fix this issue has already rejected once.
+
+**Acceptance criterion, now costed** (replacing my earlier uncosted "must reach zero"):
+
+1. `pageSize=20` serves 20/20 of the scored full-shard reference top-20 on the two frozen queries, at HEAD, measured
+   — RED today at 12/20 (q1) with 7 rows scoring above the served 20th.
+2. Recall is non-decreasing in `k` across 320 / 640 / 1280 / uncapped: no value gives 20/20 and no larger value gives
+   19/20. RED today (20 → 19 → 18 → 18), and this row is the one that keeps the clamp from being "fixed" by masking.
+3. The whole-request latency at `pageSize=20` is recorded before and after, not pinned, and the *change* is stated:
+   measured today 242.7 ms → 504.5 ms at `k=320`. A fix that also removes the cost is welcome; a fix that hides it
+   is not.
+4. The two frozen queries AND one query chosen by the implementer return the same recall result — a single-query
+   fixture cannot distinguish a real fix from a query that happened to work.
+
+## Still open after this
+
+- Issue 169's fix is in source and in no built engine (see the staging note). Nothing above reaches a deployed
+  `plugin/engine/` until it is restaged, which is an owner action.
+- Whether `k=320`'s 2.1× request cost is acceptable is a product call, recorded here with its numbers so it can be
+  reversed on evidence rather than argued from intuition.
