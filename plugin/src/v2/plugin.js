@@ -20,7 +20,7 @@
 //
 // Upstream reference: example/opencode-mem/src/v2/plugin.ts.
 
-import { readSkillCatalogue, server } from "../plugin.js";
+import { logInfo, readSkillCatalogue, server } from "../plugin.js";
 import { registerSkills } from "../skills.js";
 import { registerV2Adapter } from "./adapter.js";
 import { createLegacyClient } from "./legacy-client.js";
@@ -51,7 +51,12 @@ export async function setup(ctx) {
     worktree: ctx?.location?.project?.directory ?? null,
     $: null,
   });
-  const adapterCleanup = await registerV2Adapter(ctx, v1.hooks);
+  // Issue 151: the instrument's writer is handed over only under the debug
+  // flag, so the adapter's flag-off path is the absence of a logger — issue
+  // 153's own rule. Default off; absence is a code path, not an env read.
+  const adapterCleanup = await registerV2Adapter(ctx, v1.hooks, {
+    log: process.env.OPENCODE_MEM_DEBUG_INJECT === "1" ? logInfo : undefined,
+  });
   // Issue 69: the catalogue is the engine's; the host's skill domain is where it
   // becomes visible. Fail-open: no engine, no capability, no transform → no-op.
   const skills = await registerSkills(ctx, {

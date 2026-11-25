@@ -1,6 +1,6 @@
 # 151 — a session with no cached injection gets nothing: the `context`-cache fallback (M1 proper)
 
-Status: needs-info — 2026-11-19 (triage: premise unmeasured; the 16 apparent witnesses are issue 150's silences — they all have auto-capture rows. Needs one instrumented `context` log line + host restart, owner approval)
+Status: needs-info — 2026-11-19 (triage: premise unmeasured; the 16 apparent witnesses are issue 150's silences — they all have auto-capture rows. The instrumented `context` line shipped 2026-11-25 and went live through the host's `plugin/dist/**` watcher with no restart; a reading exists, and the owner-approved reading rule plus its measured population are recorded below.)
 
 *Scope note. Issue 149 decision 2 names this as out of scope: its restore happens on the next prompt, and the
 never-prompted case is excluded. Issue 150 owns the refresh policy for sessions that have been prompted. This issue
@@ -109,3 +109,11 @@ paper over it by building a fallback that a host change might make dead code.
 session, the premise is false and this closes as `done — measurement, not a deliverable`. If it shows `context` firing
 with `contexts.has() === false` for a session that has no prompt history, the premise holds and the fallback design
 starts with a measured population size, not a guess.
+### Instrument shipped — measurement only, no fallback
+
+`plugin/src/v2/adapter.js` logs one `context.hook` line per `context` event under `OPENCODE_MEM_DEBUG_INJECT=1`, carrying `session_id`, `has_block` and `turn_index`.
+
+Pre-registered rule (corrected 2026-11-25, owner-approved; the earlier two-outcome sentence is withdrawn):
+
+> Reading rule (log-only). `has_block:true` = cache present. `has_block:false && turn_index>=1` = a prompt ran in this activation and the refresh answered empty or threw (155). `has_block:false && turn_index==0` = no prompt hook in this activation: either a step of a turn that began in a previous activation (host restart / any write under `plugin/dist/**`) or a prompt that never ran. Separate them with the inject floor: after `inject.requested` turn `t`, a same-activation `context.hook` must read `>= t+1`; a lower value (or any turn decrease) proves a re-instantiation. Only a session with `context.hook` lines and **zero** `inject.requested` lines is "never prompted" (151's premise).
+> Measured 2026-11-25T04:23:49Z, 7 sessions / 140 lines: 64 true (all turn 1), 76 false (all turn 0), 76/76 post-boundary, 0 never-prompted, 0 turn>0 false. 151's premise is therefore *not* witnessed; the 76-lines population is block loss across adapter re-instantiation and is a separate defect to open, **not** a trigger for the query-less fallback.

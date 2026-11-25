@@ -710,3 +710,131 @@ test("test_v2_adapter_next_prompt_refreshes_after_compaction", { timeout: 5000 }
 
   await cleanup();
 });
+// Issue 151: the `context`-hook instrument. One diagnostic line per `context`
+// event, carrying the three fields the population reading needs
+// (`session_id`, `has_block`, `turn_index`). The adapter never reads the
+// debug flag: it branches on whether a logger was injected, so the flag-off
+// path is `if (log)` and its silence is a plain unit assertion here.
+test("test_context_hook_default_is_silence_and_an_injected_logger_is_called", { timeout: 5000 }, async () => {
+  const { registerV2Adapter } = await import(ADAPTER_MODULE);
+
+  // Default arm: no third argument. The mutant that matters here installs a
+  // default writer whose line carries NO event name, so a substring check
+  // would stay green — the stub records the calls themselves.
+  const quiet = createHarness();
+  const quietCleanup = await registerV2Adapter(quiet.ctx, { event: async () => {} });
+  const writes = [];
+  const originalWrite = process.stderr.write;
+  process.stderr.write = (chunk) => {
+    writes.push(String(chunk));
+    return true;
+  };
+  try {
+    const event = { sessionID: "ses-never", system: [] };
+    await quiet.hooks.get("context")(event);
+    assert.deepEqual(event.system, [], "an unprompted session has no block to push");
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+  assert.deepEqual(writes, [], "without a logger the context hook writes nothing");
+  await quietCleanup();
+
+  // Logger arm: one call, the three fields, the state the hook found.
+  const harness = createHarness();
+  const calls = [];
+  const cleanup = await registerV2Adapter(harness.ctx, { event: async () => {} }, {
+    log: (event, fields) => calls.push({ event, fields }),
+  });
+  const event = { sessionID: "ses-never", system: [] };
+  await harness.hooks.get("context")(event);
+  assert.deepEqual(
+    calls,
+    [{ event: "context.hook", fields: { session_id: "ses-never", has_block: false, turn_index: 0 } }],
+    "one line per context event, naming the unprompted session and the empty cache"
+  );
+  assert.deepEqual(event.system, []);
+  await cleanup();
+});
+
+// Issue 151: `has_block:false` alone cannot separate the two populations.
+// `turn_index: 0` is a session no prompt has ever touched (the real gap);
+// `turn_index: 1` with an empty cache is a refresh that answered empty — issue
+// 155's deliberate purge — and counting it as a witness would send the fallback
+// design at a path that works.
+test("test_context_hook_line_names_the_never_prompted_and_empty_refresh_populations", { timeout: 5000 }, async () => {
+  const { registerV2Adapter } = await import(ADAPTER_MODULE);
+  const harness = createHarness();
+  const calls = [];
+  const legacy = {
+    "chat.message": async (input, output) => {
+      if (input.sessionID === "ses-empty") {
+        // The wrapper's empty SUCCESS answer: no part, `injectStatus` empty.
+        Object.defineProperty(output, "injectStatus", { value: "empty", enumerable: false });
+        return;
+      }
+      output.message.parts.push({ type: "text", text: "BLOCK" });
+    },
+    event: async () => {},
+  };
+  const cleanup = await registerV2Adapter(harness.ctx, legacy, {
+    log: (event, fields) => calls.push({ event, fields }),
+  });
+  const context = async (sessionID) => {
+    const event = { sessionID, system: [] };
+    await harness.hooks.get("context")(event);
+    return event.system.map((part) => part.text);
+  };
+
+  // `ses-never` is never prompted: no turn counted, no cache written.
+  await harness.hooks.get("prompt")({ sessionID: "ses-empty", messageID: "m1", prompt: { text: "q" } });
+  await harness.hooks.get("prompt")({ sessionID: "ses-cached", messageID: "m2", prompt: { text: "q" } });
+  await context("ses-never");
+  await context("ses-empty");
+  await context("ses-cached");
+
+  assert.deepEqual(
+    calls.map((call) => call.fields),
+    [
+      { session_id: "ses-never", has_block: false, turn_index: 0 },
+      { session_id: "ses-empty", has_block: false, turn_index: 1 },
+      { session_id: "ses-cached", has_block: true, turn_index: 1 },
+    ],
+    "never prompted reads 0, an empty refresh reads above 0, a cached session reads true"
+  );
+  await cleanup();
+});
+
+// Issue 151: the line is an observation, not a behaviour change. A cached
+// session pushes the identical block with a logger attached, and exactly one
+// call is made per context event.
+test("test_context_hook_logs_without_changing_the_pushed_block", { timeout: 5000 }, async () => {
+  const { registerV2Adapter } = await import(ADAPTER_MODULE);
+  const harness = createHarness();
+  const calls = [];
+  const cleanup = await registerV2Adapter(
+    harness.ctx,
+    {
+      "chat.message": async (_input, output) => {
+        output.message.parts.push({ type: "text", text: "BLOCK" });
+      },
+      event: async () => {},
+    },
+    { log: (event, fields) => calls.push({ event, fields }) }
+  );
+
+  await harness.hooks.get("prompt")({ sessionID: "ses-cached", messageID: "m1", prompt: { text: "q" } });
+  const event = { sessionID: "ses-cached", system: [] };
+  await harness.hooks.get("context")(event);
+
+  assert.deepEqual(
+    event.system,
+    [{ type: "text", text: "BLOCK" }],
+    "the pushed block is byte-identical with a logger attached"
+  );
+  assert.deepEqual(
+    calls,
+    [{ event: "context.hook", fields: { session_id: "ses-cached", has_block: true, turn_index: 1 } }],
+    "exactly one line per context event"
+  );
+  await cleanup();
+});

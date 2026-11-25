@@ -250,7 +250,7 @@ export function logWarn(event, fields = {}) {
   writeStructured("warn", event, fields);
 }
 
-function logInfo(event, fields = {}) {
+export function logInfo(event, fields = {}) {
   writeStructured("info", event, fields);
 }
 

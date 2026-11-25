@@ -23,7 +23,7 @@ import { eventBelongsToLocation, toLegacyEvent } from "./legacy-client.js";
  * idempotent cleanup. Throws only for a contract violation: a host without
  * `ctx.session.hook` is not a V2 host and must not silently load this entry.
  */
-export async function registerV2Adapter(ctx, legacyHooks) {
+export async function registerV2Adapter(ctx, legacyHooks, options = {}) {
   if (typeof ctx?.session?.hook !== "function") {
     throw new TypeError("v2 adapter requires ctx.session.hook");
   }
@@ -63,6 +63,11 @@ export async function registerV2Adapter(ctx, legacyHooks) {
   // Absent hook (older wrapper) means refresh every prompt: the legacy behaviour.
   const shouldRefresh = (arg) =>
     typeof legacyHooks.shouldRefresh === "function" ? legacyHooks.shouldRefresh(arg) !== false : true;
+
+  // Issue 151: the diagnostic writer is INJECTED, never resolved here — the
+  // caller decides whether one exists, so flag-off is `if (log)` rather than an
+  // environment read inside the adapter, and its silence is a plain unit test.
+  const { log } = options;
 
   await ctx.session.hook("prompt", (event) => serialized(event.sessionID, () => onPrompt(event)));
 
@@ -110,6 +115,10 @@ export async function registerV2Adapter(ctx, legacyHooks) {
   }
 
   await ctx.session.hook("context", async (event) => {
+    // Issue 151: measured before the push, so the line records the state the
+    // hook found. Three fields only — no prompt text, no block text, no
+    // directory (memory text is user-private).
+    if (log) log("context.hook", { session_id: event.sessionID, has_block: contexts.has(event.sessionID), turn_index: turns.get(event.sessionID) ?? 0 });
     const injected = contexts.get(event.sessionID);
     if (injected) event.system.push({ type: "text", text: injected });
   });

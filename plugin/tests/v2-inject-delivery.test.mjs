@@ -672,3 +672,85 @@ process.exit(0);
   assert.equal(res.enumerable, false, "the annotation must stay non-enumerable");
   assert.deepEqual(res.keys, ["message"], "enumeration hides the annotation");
 });
+
+// Issue 151: the instrument reaches the LOG only when the wrapper was handed a
+// logger. The drive goes through the staged entry the host actually loads
+// (`dist/v2/plugin.js` → `dist/plugin.js`), because the flag is read at the one
+// registration and the adapter never sees it. No prompt is driven, so no engine
+// child spawns: `assertReaped` is the leak check for a run that started one,
+// never a spawn requirement.
+test("test_context_hook_line_reaches_the_log_only_under_the_flag", { timeout: 30000 }, async (t) => {
+  const tmp = tempRoot("om-context-hook-");
+  const pkgDir = stagePackageTree(tmp);
+  const manifestPath = path.join(tmp, "manifest.json");
+  const resultPath = path.join(tmp, "result.json");
+  stageStubEngine(pkgDir, { manifestPath });
+  t.after(() => {
+    if (fs.existsSync(manifestPath)) return assertReaped(manifestPath);
+    return undefined;
+  });
+  const driverPath = path.join(tmp, "driver.mjs");
+  fs.writeFileSync(
+    driverPath,
+    `import fs from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+process.env.OPENCODE_MEM_STORAGE_ROOT = process.env.DRIVER_STORAGE_ROOT;
+const pkgDir = process.argv[2];
+const hooks = new Map();
+const ctx = {
+  location: { directory: "/work/project", project: { directory: "/work/project" } },
+  session: { hook: async (name, cb) => hooks.set(name, cb), get: async () => ({ location: { directory: "/work/project" } }) },
+  event: { async *subscribe({ signal }) {
+    if (signal.aborted) return;
+    await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+  } },
+};
+const { setup } = await import(pathToFileURL(path.join(pkgDir, "dist/v2/plugin.js")).href);
+const cleanup = await setup(ctx);
+const event = { sessionID: "ses-never", system: [] };
+await hooks.get("context")(event);
+await cleanup();
+fs.writeFileSync(process.env.RESULT, JSON.stringify({ system: event.system, hasHook: hooks.has("context") }));
+process.exit(0);
+`
+  );
+
+  const arm = async (flag) => {
+    const run = await runDriver(driverPath, [pkgDir], envForDriver(tmp, { OPENCODE_MEM_DEBUG_INJECT: flag, RESULT: resultPath }), 20000);
+    assert.equal(run.code, 0, run.stderr);
+    const events = run.stderr.split("\n").flatMap((line) => {
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
+    });
+    return {
+      lines: events.filter((entry) => entry.event === "context.hook"),
+      record: JSON.parse(fs.readFileSync(resultPath, "utf8")),
+    };
+  };
+
+  const on = await arm("1");
+  assert.equal(on.record.hasHook, true, "the staged entry registered the context hook");
+  assert.deepEqual(on.record.system, [], "an unprompted session still receives no block");
+  assert.deepEqual(
+    on.lines,
+    [
+      {
+        level: "info",
+        component: "opencode-mem-plugin",
+        event: "context.hook",
+        session_id: "ses-never",
+        has_block: false,
+        turn_index: 0,
+      },
+    ],
+    "exactly one line per context event, carrying the three fields the population reading needs"
+  );
+
+  const off = await arm("");
+  assert.deepEqual(off.record.system, [], "flag-off pushes the same nothing");
+  assert.deepEqual(off.lines, [], "no line reaches stderr without the flag");
+});
