@@ -26,7 +26,7 @@ Measured on this host, 2026-11-18, before writing this document:
 
 | fact | value |
 |---|---|
-| live engine | pid **4719**, `plugin/engine/linux-x64/opencode-agents-memory --storage-root /home/opencode/.opencode-mem/data` |
+| live engine | pid: read argv-exact by `live_pid` in S0 and recorded verbatim (`plugin/engine/linux-x64/opencode-agents-memory --storage-root /home/opencode/.opencode-mem/data`) |
 | its web port | **3742** (the only listener; `127.0.0.1:3742`) |
 | storage root | `/home/opencode/.opencode-mem/data` — 703 MB, 43 `*.db`, 36 registered shards |
 | memories | 6766 across 36 active shards (`/api/stats` → `data.total`) |
@@ -34,17 +34,17 @@ Measured on this host, 2026-11-18, before writing this document:
 | live `opencode.jsonc` plugin list | already carries the absolute `…/opencode-agents-memory/plugin` entry; **no `opencode-mem@latest`** |
 
 **Hard constraint.** The live storage root is not the fixture. Every command below that writes takes a
-path under `$REH/store` (the copy); the original appears only as a read-only source (`cp -a`, `.backup`
-source, `find`/`stat`) and as read-only HTTP on 3742.
+path under `$REH/store` (the copy); the original appears only as a read-only source (unit copy,
+`find`/`stat`) and as read-only HTTP on 3742.
 
 - Never `rm -rf` anything; a cleanup step is `find <dir> -mindepth 1 -delete`.
-- Never signal, restart or stop pid 4719. The auto-restart budget is spent and a second unexpected engine
-  death ends the session. The rehearsal engine gets its own pid, recorded in the transcript, and is the
-  only process this runbook kills.
+- Never signal, restart or stop the live pid recorded in S0. The auto-restart budget is spent and a second
+  unexpected engine death ends the session. The rehearsal engine gets its own pid, recorded in the
+  transcript, and is the only process this runbook kills.
 - The rehearsal binds **port 3749** (3742 is the live engine; 3750 is used in §7 for a deliberate
   second-engine refusal). Check both are free before starting.
 
-`ps`-level proof that 4719 is unchanged is taken in S0 and re-taken in S8.
+`ps`-level proof that the live pid recorded in S0 is unchanged is taken in S0 and re-taken in §8.
 
 ### S0 — pre-state, before anything is copied or edited
 
@@ -52,7 +52,22 @@ Read-only; these values are the reference every later checkpoint compares agains
 re-run verbatim in §8:
 
 ```sh
-ps -o pid=,lstart=,etime= -p 4719
+# The live pid is READ, never copied into this document: argv-exact, so a shell
+# whose command line merely contains the pattern cannot match itself.
+live_pid() {  # argv-exact: <engine> --storage-root $HOME/.opencode-mem/data
+  local p a0 a1 a2
+  for p in /proc/[0-9]*; do
+    [ -r "$p/cmdline" ] || continue
+    a0= a1= a2=
+    { IFS= read -r -d '' a0; IFS= read -r -d '' a1; IFS= read -r -d '' a2; } <"$p/cmdline" || :
+    case $a0 in */plugin/engine/*/opencode-agents-memory) ;; *) continue ;; esac
+    [ "$a1" = --storage-root ] || continue
+    [ "$a2" = "$HOME/.opencode-mem/data" ] || continue
+    printf '%s\n' "${p#/proc/}"
+  done
+}
+LIVEPID=$(live_pid); echo "live_pid=$LIVEPID"
+ps -o pid=,lstart=,etime= -p "$LIVEPID"
 sha256sum "$HOME/.opencode-mem/data/.engine.lock"
 stat -c '%n %Y' "$HOME/.opencode-mem/data"
 find "$HOME/.opencode-mem/data" -type f -name '*.db' | wc -l
@@ -76,24 +91,25 @@ test -x plugin/engine/linux-x64/opencode-agents-memory && echo engine_ok
 test -f plugin/index.js && echo plugin_ok
 test -f web-ui/dist/index.html && echo web_ok
 test -f "$HOME/.opencode-mem/data/.auth-token" && echo token_ok
-ps -o pid= -p 4719 >/dev/null && echo live_engine_ok
+[ -n "$LIVEPID" ] && echo live_engine_ok
 ! ss -ltn | grep -q '127.0.0.1:3749' && echo port_3749_free
 ! ss -ltn | grep -q '127.0.0.1:3750' && echo port_3750_free
-pgrep -af 'opencode-agents-memory --storage-root /home/opencode/.opencode-mem/data' | wc -l   # 1
+live_pid | wc -l   # expect 1 (argv-exact; a substring scan self-matches)
 ```
 
 Expected: six `*_ok` lines, two `*_free` lines, then `1`. Any missing line ⇒ stop.
 
 **Refusal list — stop rather than proceed if:**
 
-1. pid 4719 is not running, or its `ps -o lstart=` start time differs from the one recorded in S0.
+1. `live_pid` does not print exactly one pid, or that pid's `ps -o lstart=` start time differs from the one
+   recorded in S0.
 2. `plugin/engine/linux-x64/opencode-agents-memory` or `web-ui/dist/index.html` is missing (stage them
    with `plugin/scripts/stage-engine.sh` and `cd web-ui && trunk build`; do not build during the run).
 3. `/api/stats` on 3742 does not answer `success:true` with a numeric `data.total` — the live engine is
    unhealthy and its numbers cannot be the reference.
 4. Port 3749 or 3750 is taken by something that is not this rehearsal.
-5. Any `.backup` in S2 prints `BACKUP_FAILED` (SQLITE_BUSY on the live store: report it, do **not** retry
-   in a loop, and do **not** fall back to `cp -a` of a live `*.db` — that is how a torn copy is made).
+5. Any `UNITCOPY_FAILED` line appears in `$REH/evidence/copy-unit.log`: report it, do **not** retry in a
+   loop, and do **not** fall back to copying a `*.db` without its `-wal` — the db and its `-wal` are one unit.
 6. The copy's counts in S2 do not match S0. This is the whole reason the copy comes first: nothing has
    been uninstalled at this point, so stopping costs nothing.
 7. The engine in S5 exits non-zero, or 3749 never answers `/api/health` 200 within 15 s.
@@ -106,22 +122,27 @@ Layout (one directory per run, gitignored, `.tmp/` is out of the repo by constru
 ```sh
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 REH=$PWD/.tmp/rehearsal-28/$STAMP
-mkdir -p "$REH"/{store,config,evidence,logs}
+mkdir -p "$REH"/{store,config,evidence/rest,logs}
 echo "$REH"            # ← record this verbatim; every later command depends on it
 ```
 
-Copy the DBs with SQLite's online backup API (the live engine keeps writing; `cp -a` on a live `*.db`
-would tear), then everything that is not a DB, a sidecar or a per-process artifact:
+Copy the DBs **and their `-wal` sidecars as one unit**, then everything that is not a DB, a sidecar or a
+per-process artifact:
 
 ```sh
-# 2a. every *.db, consistently, from a read-only open of the live file
+# 2a. every *.db AND its -wal, as one unit (a db copied alone loses whatever the
+#     WAL holds — measured: without the -wal the copy answers "no such table")
 find "$HOME/.opencode-mem/data" -type f -name '*.db' -print0 | sort -z |
 while IFS= read -r -d '' src; do
   rel=${src#"$HOME/.opencode-mem/data"/}
   mkdir -p "$REH/store/$(dirname "$rel")"
-  sqlite3 -readonly "$src" ".backup '$REH/store/$rel'" || echo "BACKUP_FAILED $rel"
-done | tee "$REH/evidence/copy-backup.log"
-echo "backup_failures=$(grep -c BACKUP_FAILED "$REH/evidence/copy-backup.log")"
+  if cp -- "$src" "$REH/store/$rel"; then
+    [ -f "${src}-wal" ] && { cp -- "${src}-wal" "$REH/store/${rel}-wal" || echo "UNITCOPY_FAILED ${rel}-wal"; }
+  else
+    echo "UNITCOPY_FAILED $rel"
+  fi
+done | tee "$REH/evidence/copy-unit.log"
+echo "unitcopy_failures=$(grep -c UNITCOPY_FAILED "$REH/evidence/copy-unit.log")"
 
 # 2b. everything else: store markers, exports, logs — not WAL sidecars, not liveness artifacts
 (
@@ -135,8 +156,22 @@ echo "backup_failures=$(grep -c BACKUP_FAILED "$REH/evidence/copy-backup.log")"
 )
 ```
 
-Why those three exclusions: `*-wal`/`*-shm`/`*-tshm` are derived (the `.backup` already carries their
-content in the consistent base file); `.engine.lock` names a **live** pid and would make the rehearsal
+**Why not `.backup`, and why not `immutable=1`.** The live engine holds its storage root exclusively, and
+`.backup` needs a read lock that hold never grants: in the 2026-11-25 run
+`sqlite3 -readonly "$src" ".backup '…'"` answered `Error: database is locked` on every db attempted
+(`backup_failures=41`, `run-20261125T035152Z/` TRANSCRIPT 101-116), and a plain `SELECT count(*)` failed
+identically (`s2-diagnosis.txt`). *REPORTED, with two counter-probes*: a stock WAL writer holding
+`BEGIN EXCLUSIVE` lets `.backup` complete (`rc=0`), and a whole-file exclusive `fcntl` holder makes it
+answer `unable to open database file`, never `database is locked` — so the blocker is the engine's root
+hold, not "a writer". `immutable=1` is not a workaround either: it declares "this file cannot change and no
+WAL exists", so on a copy that still carries a `-wal` it returns the stale pre-`-wal` base — *measured*:
+89 rows on `project_1b5c40c3136fed58_shard_0.db`, whose `-wal` is 4,111,792 bytes and whose live count is 0
+(`s2-probe-a.txt`). Hence: unit copy, then a WAL replay in `$REH/store` (the first `mode=ro` open does it),
+and every later read is `?mode=ro` too.
+
+Why those exclusions: `*-shm`/`*-tshm` are derived (SQLite rebuilds them on open and a final `mode=ro` close
+removes them again); `*-wal` is copied by 2a only, as part of the db unit — never on its own, never skipped
+when it exists; `.engine.lock` names a **live** pid and would make the rehearsal
 engine refuse its own root (§7); `.auth-token`/`status` are per-process session artifacts — the copy mints
 its own token on its first gated call, so no live secret is duplicated into a scratch tree.
 
@@ -146,7 +181,7 @@ its own token on its first gated call, so no live secret is duplicated into a sc
 # copy side — structural counts
 echo "dbs=$(find "$REH/store" -type f -name '*.db' | wc -l)"
 echo "shard_files=$(find "$REH/store" -type f -name '*_shard_*.db' | wc -l)"
-sqlite3 -readonly "file:$REH/store/metadata.db?immutable=1" \
+sqlite3 -readonly "file:$REH/store/metadata.db?mode=ro" \
   'SELECT count(*) FROM shards WHERE is_active=1; SELECT coalesce(sum(vector_count),0) FROM shards;'
 
 # copy side — actual rows per shard (the registry can drift; rows cannot)
@@ -159,11 +194,17 @@ awk -F'\t' '$2 ~ /^[0-9]+$/ {s+=$2; k++} END {printf "shards=%d memories=%d\n", 
 
 # copy side — every DB opens and is internally consistent
 for db in $(find "$REH/store" -type f -name '*.db' | sort); do
-  printf '%s ' "${db#"$REH/store"/}"; sqlite3 -readonly "file:$db?immutable=1" 'PRAGMA integrity_check;'
+  printf '%s ' "${db#"$REH/store"/}"; sqlite3 -readonly "file:$db?mode=ro" 'PRAGMA integrity_check;'
 done | tee "$REH/evidence/copy-integrity.txt"
 grep -c ' ok$' "$REH/evidence/copy-integrity.txt"
 grep -v ' ok$' "$REH/evidence/copy-integrity.txt"   # must print nothing
 ```
+
+The copy is evidence rather than assumption on three independent readings, the same three the 2026-11-25
+run used: `PRAGMA integrity_check` `ok` on every db, per-shard row counts equal to the live API's total as
+a multiset, and one byte-exact by-id read of the pre-registered memory (§3). The two `cp` calls are **not
+atomic** with the engine's writes — pairing a db with its `-wal` is best-effort, which is exactly why those
+three readings, and not an atomicity claim, are the evidence.
 
 Then compare against the pre-state numbers recorded in S0 (§0).
 
@@ -178,7 +219,7 @@ Pick one existing memory **from the copy** and write its id and a text field int
 the concrete meaning of "still readable": after the swap, that id comes back, carrying that text.
 
 ```sh
-SHARDFILE=$(sqlite3 -readonly "file:$REH/store/metadata.db?immutable=1" \
+SHARDFILE=$(sqlite3 -readonly "file:$REH/store/metadata.db?mode=ro" \
   'SELECT db_path FROM shards WHERE is_active=1 ORDER BY vector_count DESC LIMIT 1;')
 REFDB=$(find "$REH/store" -type f -name "$(basename "$SHARDFILE")" | head -1)
 sqlite3 -readonly "file:$REFDB?mode=ro" \
@@ -264,11 +305,31 @@ prefix. A count that grew is explained only by an `add` this run made, and must 
 ## 6. UI, REST surface, add round-trip
 
 ```sh
-# 6a. the Leptos UI against the Rust server
+# 6a. the Leptos UI against the Rust server.
+#     This build emits root-relative hrefs (`href="/web-ui-<hash>.js"`), so the
+#     old `assets/*.js` grep matched nothing and an empty ASSET made curl refetch
+#     `/` — a vacuous pass. Read the index ONCE into a temp file, take the asset
+#     path from that file's own markup, and require the fetched bytes to DIFFER
+#     from it. The index embeds `window.__OPENCODE_MEM_TOKEN__`, so both temp
+#     files live under $REH/tmp — the one tree §13 never copies — and are
+#     deleted below, never under evidence/ or logs/.
+mkdir -p -- "$REH/tmp"
+IDX="$REH/tmp/index.html"; ASSET_BODY="$REH/tmp/asset.body"; ASSET_OK=1
 curl -s -o /dev/null -w 'index=%{http_code}\n' http://127.0.0.1:3749/          # expect: index=200
-curl -s http://127.0.0.1:3749/ | grep -o -m1 '<title>[^<]*</title>'            # expect: <title>OpenCode Memory Explorer</title>
-ASSET=$(curl -s http://127.0.0.1:3749/ | grep -o 'assets/[^"]*\.js' | head -1)
-curl -s -o /dev/null -w "asset=%{http_code}\n" "http://127.0.0.1:3749/$ASSET"   # expect: asset=200
+curl -s http://127.0.0.1:3749/ > "$IDX"
+grep -o -m1 '<title>[^<]*</title>' "$IDX"                                      # expect: <title>OpenCode Memory Explorer</title>
+ASSET=$(grep -o -m1 'href="/[^"]*\.js"' "$IDX" | sed 's/^href="//; s/"$//')
+[ -n "$ASSET" ] || { echo 'ASSET_EXTRACT_FAILED STOP: the index markup carries no href="/…js"' >&2; ASSET_OK=0; }
+if [ -n "$ASSET" ]; then
+  ASSET_CODE=$(curl -s -o "$ASSET_BODY" -w '%{http_code}' "http://127.0.0.1:3749$ASSET")
+  printf 'asset=%s bytes=%s\n' "$ASSET_CODE" "$(wc -c < "$ASSET_BODY")"
+  [ "$ASSET_CODE" = 200 ] || { echo "ASSET_HTTP STOP: $ASSET returned HTTP $ASSET_CODE" >&2; ASSET_OK=0; }
+  [ -s "$ASSET_BODY" ] || { echo "ASSET_EMPTY STOP: $ASSET returned 0 bytes" >&2; ASSET_OK=0; }
+  cmp -s "$ASSET_BODY" "$IDX" && { echo "ASSET_IS_INDEX STOP: $ASSET served the index bytes" >&2; ASSET_OK=0; }
+fi
+[ "$ASSET_OK" = 1 ] && echo asset_differs_from_index=yes
+rm -f -- "$IDX" "$ASSET_BODY"
+[ "$ASSET_OK" = 1 ]
 
 # 6b. the pre-registered REST surface (read-only, 41 rows; refuses non-GET)
 scripts/smoke-rest-surface.sh \
@@ -286,18 +347,38 @@ curl -s -H "x-opencode-mem-token: $T" \
   jq -r '.data.items[0] | "id=\(.id) similarity=\(.similarity)"'
 ```
 
-Expected: `index=200`, the exact title, `asset=200`; the add answers
+Expected: `index=200`, the exact title, `asset=200 bytes=<n>` and `asset_differs_from_index=yes` (the
+fetched asset's bytes differ from the index's; equal bytes print `ASSET_IS_INDEX` and the cell ends
+non-zero); a non-200 asset answers `ASSET_HTTP STOP: <asset> returned HTTP <code>` and the cell ends
+non-zero — the status is checked before the byte arms, because a 500 body is non-empty and differs from the
+index and would otherwise pass both of them; the add answers
 `{"success":true,"data":{"id":"mem_…"}}` and the follow-up search returns that same id
 (`similarity` ≈ 0.6–0.9 — measured 0.606 on a fresh root). `containerTag` must be
 `opencode_<scope>_<16 hex>`; anything else is refused with `Invalid container tag`.
 
-`smoke-rest-surface.sh` has two outcomes, and they are not interchangeable:
+`smoke-rest-surface.sh` separates a path failure from a data failure by exit code, and names the case in its
+message — distinguishable **by code across classes, by message within one** — a path failure is never
+reported as a data failure:
 
 - **`rc=0` with a PASS line tallying 0 FAIL** — the recorded pass.
-- **`rc=2` with a `STOP:` line** — a populated-arm gate could not pass (measured on an empty scratch root:
-  `STOP: live /api/projects roster is empty`). On a populated copy that specific STOP should not appear;
-  any STOP is recorded verbatim as a finding and is **not** reported as a pass. The script prints the
-  token's length and a 4-character prefix only, never the token.
+- **`rc=3` with `EVIDENCE-DIR: <dir> does not exist`** — path class: the `--evidence-dir` path is absent,
+  **or one of its components is not a directory** (`[ -e ]` is false under `ENOTDIR`, so a parent that is a
+  regular file prints this same message; `ls -d <dir>` names the offending component). §0 creates
+  `"$REH"/{store,config,evidence/rest,logs}`, so this means a wrong `$REH`, a typo, or §0 was skipped; the
+  script refuses and creates nothing. Record it verbatim as a path finding, not a port finding.
+- **`rc=3` with `EVIDENCE-DIR: <dir> is not a directory`** — the `--evidence-dir` path itself exists and is
+  not a directory (a regular file, or a symlink to one).
+- **`rc=3` with `EVIDENCE-DIR: <dir> is not writable`** — it exists as a directory and cannot be written.
+  These two are the rest of the path class; same rule: refused, recorded, never retried in a loop and never
+  reported as an empty roster.
+- **`rc=2` with `STOP: live /api/projects roster is empty`** — data class: the copied store genuinely has
+  no project rows (measured on an empty scratch root). On a populated copy this should not appear; any
+  `STOP:` is recorded verbatim as a finding and is **not** reported as a pass. A second data STOP,
+  `populated arm memories rows=0`, means the roster resolved but the memory arm is empty.
+
+The script prints the token's length and a 4-character prefix only, never the token. An `rc=3` with
+`EVIDENCE-DIR:` that still appears after §0 has run is a **path** finding — do not work around it with a
+manual `mkdir` and do not record it as a roster result.
 
 A populated copy is why this step targets `$REH/store` and not a fresh root: the 41 rows assert real
 answers, and an empty store cannot satisfy them.
@@ -335,7 +416,7 @@ Run this **after** §5 and **before** §8 (it needs the first rehearsal engine a
 ## 8. Rollback, and the proof the original was never written
 
 Stop the rehearsal engine (its pid only), then restore the scratch config from the copy taken before the
-swap — the "reinstall TS" half, as an exact restore rather than an inverse edit:
+swap — an exact restore of the live port-installed config (`live-reference`), not an inverse edit:
 
 ```sh
 kill -TERM "$(pgrep -f -- "--storage-root $REH/store" | head -1)"
@@ -344,12 +425,22 @@ sleep 2; pgrep -af -- "--storage-root $REH/store" || echo rehearsal_engine_gone
 
 cp -a "$REH/config/opencode.jsonc" "$REH/config/opencode.jsonc.post-install"
 cp -a "$REH/config/opencode.jsonc.live-reference" "$REH/config/opencode.jsonc"
-grep -c '"opencode-mem@latest"' "$REH/config/opencode.jsonc"    # expect: the pre-state count (1)
+grep -c '"opencode-mem@latest"' "$REH/config/opencode.jsonc"    # expect: 0 (port-installed live config)
 diff "$REH/config/opencode.jsonc.live-reference" "$REH/config/opencode.jsonc"   # expect: no output
+cmp "$HOME/.config/opencode/opencode.jsonc" "$REH/config/opencode.jsonc" \
+  && echo restore_is_identity_with_live_config
 ```
 
-Expected: `rehearsal_engine_gone`, `port_3749_free_again`, one TS entry back, an empty diff, and
-`opencode.jsonc.post-install` kept so the installed state is still on record.
+Expected: `rehearsal_engine_gone`, `port_3749_free_again`, **zero** `opencode-mem@latest` entries, an empty
+diff, `restore_is_identity_with_live_config`, and `opencode.jsonc.post-install` kept so the installed state
+is still on record.
+
+What is compared, precisely: the restored scratch `opencode.jsonc` against `live-reference`, and
+`live-reference` is a `cp -a` of the **live port-installed** `~/.config/opencode/opencode.jsonc` (4a). On
+this host that file already carries the absolute local `plugin/` path and **no** `opencode-mem@latest`, so
+the correct post-restore state is *no TS entry and an empty diff* — the restore puts back the port-installed
+state; it does not resurrect an upstream entry that is not there. "TS reinstalled = 1" therefore applies
+only where the TS entry *was* the live state: here it never was, and expecting `1` fails on success.
 
 **Original-untouched proof.** The live store is written by its own engine, so bit-for-bit identity is not
 available and must not be claimed. What *is* provable, and what this run takes before the first step and
@@ -357,7 +448,8 @@ after the last:
 
 ```sh
 # re-take the S0 block verbatim
-ps -o pid=,lstart=,etime= -p 4719
+LIVEPID=$(live_pid)
+ps -o pid=,lstart=,etime= -p "$LIVEPID"
 sha256sum "$HOME/.opencode-mem/data/.engine.lock"
 find "$HOME/.opencode-mem/data" -type f -name '*.db' | wc -l
 find "$HOME/.opencode-mem/data" -type f -name '*.legacy.bak' | wc -l
@@ -370,8 +462,8 @@ cmp "$HOME/.config/opencode/opencode.jsonc" "$REH/config/opencode.jsonc.live-ref
 
 Pass conditions, all four:
 
-1. `pid 4719` alive with the **same `lstart`** — the live engine was never restarted, so the migrator
-   never ran against the live root.
+1. the live pid recorded in S0 alive with the **same `lstart`** — the live engine was never restarted, so
+   the migrator never ran against the live root.
 2. `.engine.lock` sha256 unchanged — no second engine ever took that root.
 3. `*.db` count unchanged and `.legacy.bak` count still `0` — nothing was added to or renamed inside the
    live root by this run.
@@ -470,12 +562,24 @@ Step labels map onto the sections one-to-one: `S0`→§0 (pre-state), `S1`→§1
 
 ```sh
 # the transcript is filled in place and is already where it belongs
-cp -a "$REH/evidence/." docs/evidence/issue-28-dropin-rehearsal/raw/
-cp -a "$REH/logs" docs/evidence/issue-28-dropin-rehearsal/logs
-# fill TRANSCRIPT.md (it names these files), then:
-git add docs/evidence/issue-28-dropin-rehearsal docs/runbooks/parity-drop-in-rehearsal.md
-git commit -m "docs(evidence): issue-28 drop-in rehearsal transcript"
-find "$REH" -mindepth 1 -delete       # only after the copy is in the repo and committed
+# landing gate (issue 164): a capture still carrying the index token is never
+# staged — and never copied, so nothing tokened reaches a tracked path either.
+# §6a's temp files now live under $REH/tmp, which this block does not copy, so a
+# hit here means some cell wrote one into logs/ or evidence/ — redact that file
+# and re-run; the scratch tree is kept on refusal.
+TOKEN_HIT=$( { [ -d "$REH/logs" ] && grep -rlF -- '__OPENCODE_MEM_TOKEN__' "$REH/logs"; \
+  [ -d "$REH/evidence" ] && grep -rlF -- '__OPENCODE_MEM_TOKEN__' "$REH/evidence"; } )
+if [ -n "$TOKEN_HIT" ]; then
+  printf 'TOKEN-IN-EVIDENCE STOP: these captures still carry the index token; nothing was copied or staged — redact them, then re-run this block:\n%s\n' "$TOKEN_HIT" >&2
+  false
+else
+  cp -a "$REH/evidence/." docs/evidence/issue-28-dropin-rehearsal/raw/
+  cp -a "$REH/logs" docs/evidence/issue-28-dropin-rehearsal/logs
+  # fill TRANSCRIPT.md (it names these files), then:
+  git add docs/evidence/issue-28-dropin-rehearsal docs/runbooks/parity-drop-in-rehearsal.md
+  git commit -m "docs(evidence): issue-28 drop-in rehearsal transcript"
+  find "$REH" -mindepth 1 -delete     # only after the copy is in the repo and committed
+fi
 ```
 
 The scratch tree is disposable; the transcript is not. Winners and losers of any decision during the run
@@ -487,7 +591,7 @@ On 2026-11-18, against throwaway roots under `.tmp/verify-28/` (never the live s
 
 | form | result |
 |---|---|
-| `sqlite3 -readonly <live-db> ".backup '<dst>'"` with a writer holding the WAL | rc 0, row present in the copy, `integrity_check` `ok`, source sidecars untouched |
+| unit copy of a db **plus its `-wal`** into `$REH/store`, then `mode=ro` | the live engine holds the storage root exclusively, so `.backup` answers `database is locked` on every db and `immutable=1` returns the stale pre-WAL base (`run-20261125T035152Z/s2-probe-a.txt`); the unit copy + scratch replay is the read path — 43/43 `integrity_check ok`, per-shard rows equal to the live API multiset, one byte-exact by-id read |
 | `engine --mode=standalone --storage-root <root> --web-port 3760` | `/api/health` 200 in < 3 s, `/` 200 with `<title>OpenCode Memory Explorer</title>`, exit 0 on SIGTERM |
 | `/api/stats` ungated, then `cat <root>/.auth-token` | `401` first (mint), token length 64 |
 | `POST /api/memories` with `containerTag=opencode_project_0123456789abcdef` | `{"success":true,"data":{"id":"mem_…"}}`; a non-hex-16 tag → `Invalid container tag` |

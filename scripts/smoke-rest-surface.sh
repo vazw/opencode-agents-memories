@@ -177,11 +177,96 @@ selftest() {
 	check_case "unknown-class" "FAIL" "SOMEOTHER" "200" "-" 200 '{}'
 	# 8. sub "-" with matching status asserts on status alone
 	check_case "asserted-no-sub" "ASSERTED" "ASSERTED" "200" "-" 200 'whatever body'
+	# 9. the evidence-dir contract (issue 164): a path failure is rc=3 and a
+	#    data failure is rc=2; neither may wear the other's message.
+	selftest_evidence_dir || rc=1
 	if [ "$rc" -eq 0 ]; then
-		printf 'SMOKE_SELFTEST: PASS (9 cases incl. the wrong-expectation control)\n'
+		printf 'SMOKE_SELFTEST: PASS (derivation + live evidence-dir cases)\n'
 	else
 		printf 'SMOKE_SELFTEST: FAIL\n' >&2
 	fi
+	return "$rc"
+}
+
+# selftest_evidence_dir — re-invokes this script in live mode against a stub
+# answering every path with {"success":true,"data":[]} and 200, so the only
+# variable is the --evidence-dir each case hands over. A path failure reported
+# as `roster is empty` is the defect this test exists to catch.
+selftest_evidence_dir() {
+	local T port stub rc=0
+	T=$(mktemp -d "${TMPDIR:-/tmp}/smoke-evdir.XXXXXX") || return 1
+	port=$(free_port)
+	printf '%064d\n' 0 >"$T/token"
+	node -e '
+		const http = require("http");
+		const body = JSON.stringify({success: true, data: []});
+		http.createServer((q, s) => {
+			s.writeHead(200, {"content-type": "application/json"});
+			s.end(body);
+		}).listen(Number(process.argv[1]), "127.0.0.1");
+	' "$port" &
+	stub=$!
+	for _ in $(seq 1 50); do
+		curl -s --max-time 1 -o /dev/null "http://127.0.0.1:$port/api/health" && break
+		sleep 0.1
+	done
+
+	ev_case() {
+		# ev_case <name> <evidence-dir> <want-rc> <want-text> <forbid-text>
+		local name=$1 dir=$2 want_rc=$3 want=$4 forbid=$5 out got
+		# env -u: without it the child inherits SMOKE_SELFTEST=1 and recurses.
+		out=$(env -u SMOKE_SELFTEST bash "$0" --live-base-url "http://127.0.0.1:$port" \
+			--live-token-file "$T/token" --evidence-dir "$dir" 2>&1)
+		got=$?
+		if [ "$got" -ne "$want_rc" ]; then
+			printf 'FAIL %s: expected rc=%s, got rc=%s\n' "$name" "$want_rc" "$got"
+			printf '%s\n' "$out" | head -5
+			rc=1
+			return 0
+		fi
+		if ! printf '%s' "$out" | grep -qF -- "$want"; then
+			printf 'FAIL %s: output lacks "%s"\n' "$name" "$want"
+			rc=1
+			return 0
+		fi
+		if [ -n "$forbid" ] && printf '%s' "$out" | grep -qF -- "$forbid"; then
+			printf 'FAIL %s: output carries "%s"\n' "$name" "$forbid"
+			rc=1
+			return 0
+		fi
+		printf 'ok   %s -> rc=%s "%s"\n' "$name" "$got" "$want"
+	}
+
+	# (i) a parent is a regular file: ENOTDIR makes [ -e ] false, so the guard
+	#     prints "does not exist" — rc=3 path class, never a roster STOP. The
+	#     full message is pinned so the attribution cannot drift: if the code
+	#     ever learns to distinguish ENOTDIR, this case reds and §6b's outcome
+	#     list must follow.
+	: >"$T/regular-file"
+	ev_case "evidence-dir-parent-is-a-file" "$T/regular-file/evidence" 3 \
+		"EVIDENCE-DIR: $T/regular-file/evidence does not exist (path error, not an empty roster)" 'roster is empty'
+	# (ii) absent (creatable): refused, and nothing is created for it
+	ev_case "evidence-dir-absent" "$T/fresh/evidence" 3 \
+		"EVIDENCE-DIR: $T/fresh/evidence does not exist (path error, not an empty roster)" 'roster is empty'
+	if [ -e "$T/fresh" ]; then
+		printf 'FAIL evidence-dir-absent: the run created %s\n' "$T/fresh"
+		rc=1
+	fi
+	# (iii) present, genuinely empty roster: rc=2 and the roster message only
+	mkdir -p "$T/empty/evidence"
+	ev_case "evidence-dir-present-empty-roster" "$T/empty/evidence" 2 'roster is empty' 'populated arm'
+	# (iv) present but not writable: the path class, rc=3
+	mkdir -p "$T/unwritable/evidence"
+	chmod 0500 "$T/unwritable/evidence"
+	ev_case "evidence-dir-unwritable" "$T/unwritable/evidence" 3 \
+		"EVIDENCE-DIR: $T/unwritable/evidence is not writable (path error, not an empty roster)" 'roster is empty'
+	chmod 0700 "$T/unwritable/evidence"
+
+	kill "$stub" || :
+	wait "$stub" || :
+	chmod -R u+rwx "$T"
+	find "$T" -mindepth 1 -delete
+	rmdir "$T"
 	return "$rc"
 }
 
@@ -190,6 +275,27 @@ selftest() {
 # --------------------------------------------------------------------------
 log() { printf '%s %s\n' "$(date -u '+%H:%M:%S')" "$*" | tee -a "$RUNLOG"; }
 die() { printf 'SMOKE-STOP: %s\n' "$*" >&2; log "STOP: $*"; exit "${2:-2}"; }
+
+# ensure_evidence_dir <dir> — the --evidence-dir contract, checked before
+# anything writes into it: a path failure must never surface as a data failure.
+# rc=3 is the path class and must not be renumbered (the runbook names it).
+# It may not route through die/log: RUNLOG is assigned later in live_run, so
+# before that die -> log -> tee -a "$RUNLOG" aborts under set -u (exit 1).
+ensure_evidence_dir() {
+	local d=$1
+	if [ ! -d "$d" ]; then
+		if [ -e "$d" ]; then
+			printf 'EVIDENCE-DIR: %s is not a directory (path error, not an empty roster)\n' "$d" >&2
+		else
+			printf 'EVIDENCE-DIR: %s does not exist (path error, not an empty roster)\n' "$d" >&2
+		fi
+		exit 3
+	fi
+	if ! : >"$d/.write-probe" || ! rm -- "$d/.write-probe"; then
+		printf 'EVIDENCE-DIR: %s is not writable (path error, not an empty roster)\n' "$d" >&2
+		exit 3
+	fi
+}
 
 free_port() {
 	node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})'
@@ -519,8 +625,11 @@ live_get() {
 }
 
 live_run() {
-	load_table
 	local base=$1 tokenfile=$2 evidence=$3 projid=${4:-}
+	# First statement on purpose: an absent/unwritable evidence dir is a path
+	# error (rc 3), never an empty roster (rc 2).
+	ensure_evidence_dir "$evidence"
+	load_table
 	LIVE_BASE=$base
 	RUNLOG="$evidence/live-readonly-pass.log"
 	CURLLOG="$evidence/live-curl.err"
