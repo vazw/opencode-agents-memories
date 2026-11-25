@@ -492,3 +492,16 @@ state for weeks.
 
 Rules for this file: no blanks, no paraphrases, no computed value standing in for captured output, and no
 edit to an expectation after the fact — a mismatch is recorded as a mismatch, then explained underneath it.
+
+## Correction, 2026-11-25 — the landed `index.html` carried a bearer token, now redacted
+
+`run-20261125T035152Z/index.html` is a `curl` capture of the rehearsal engine's served index, and the mem-web UI injects
+`window.__OPENCODE_MEM_TOKEN__` into that document. The capture therefore landed the scratch instance's token verbatim
+(one 64-hex value, tracked by `cd9094a`). The value has been replaced with `<REDACTED>` in the tracked file.
+
+Severity, measured: it is **not** the live host's token (sha256 prefixes `1367ef89ad81b5cf` vs `25612a61a77a92bd`) and
+it belongs to a scratch engine on port 3749 that no longer exists (`ss -ltnp` → nothing). The only store it opens is the
+rehearsal copy under `.tmp/rehearsal-28/20261125T035152Z`, which is local and gitignored. No rotation is required.
+
+Standing rule for this evidence tree: never land a served index or any response that echoes the token. Record the asset
+paths the cell needs, or redact before writing. See issue 164, cell §6a, which now requires exactly that.
