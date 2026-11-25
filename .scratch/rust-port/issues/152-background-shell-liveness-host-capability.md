@@ -285,3 +285,20 @@ separate them.
 
 Making the count a pass condition would be a criterion satisfiable by the mechanism not running — the same class as
 the two vacuous criteria this issue and 162 were filed to close.
+
+## Positive reading, 2026-11-25 — the note reached a rendered block after the 163 fix
+
+The asymmetric rule above has its informative branch satisfied; no zero is being read as a pass.
+
+MEASURED from `~/.opencode-mem/opencode-mem.log` (read-only), `inject.received` lines whose `block_prefix` carries the
+note's own shape `shell: [pid …]`:
+
+- `2026-11-25T09:17:11.871+07:00`, `block_bytes:2898` — `shell: [pid 26860, exited] command: …`
+- `2026-11-24T23:30:44.558+07:00`, `block_bytes:4047` — `shell: [pid 5388, exited] command: …` (before `41d0939`)
+
+The `09:17:11` block is the reading that counts: `41d0939` (issue 163's ordering fix) landed `2026-11-24T23:44:04+07:00`,
+and this host re-activates the plugin on any `plugin/dist/**` write, so the 09:17 render ran the fixed code. A rendered
+block cannot contain that text unless a capture row carried it, so the path works end to end.
+
+Still a lower bound, for the reason recorded above: commands containing a quote or newline are JSON-escaped in the row
+join and never match. The positive reading needs no such correction — nothing else produces that string.
