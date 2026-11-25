@@ -55,10 +55,13 @@ self-matches through the `bash -c` wrapper; the rehearsal-engine side of §8 was
 This is not hypothetical for a transcript harness, which builds each command with its values expanded — the
 case that produced it. It is also unsafe for an operator pasting a fence into a wrapper.
 
-Fix shape: a `rehearsal_pid()` with the same argv-exact predicate the live pid uses —
-`argv[0]` suffix `plugin/engine/*/opencode-agents-memory`, then `--storage-root`, then `$REH/store` — reading
-`/proc/<pid>/cmdline` for the exact three-element form, and never `head -1` on a substring scan. Both the
-kill and the gone-check use it, so "no match" and "stopped" stay distinguishable.
+Fix shape: a `rehearsal_pid()` with an **argv-pair** scan, not the three-element form this issue first proposed.
+MEASURED (gate round 1, 2026-11-25T06:52:33Z): the live engine's `argc` is 3 (`--storage-root`,
+`/home/opencode/.opencode-mem/data`), but a rehearsal engine started from `plugin/engine/linux-x64/` has
+`argc=6` because `--mode=standalone` comes first — so `argv[1] == --storage-root` matches nothing there and a
+three-element mirror of `live_pid()` would have reproduced defect 2 exactly. The predicate must scan argv for
+the adjacent pair `--storage-root` `$REH/store`, reading `/proc/<pid>/cmdline` NUL-split, and never `head -1` on
+a substring scan. Both the kill and the gone-check use it, so "no match" and "stopped" stay distinguishable.
 
 ## Acceptance criteria
 
