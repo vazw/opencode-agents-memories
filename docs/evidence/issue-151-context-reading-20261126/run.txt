@@ -1,0 +1,16 @@
+files                19  (opencode-mem-2026-11-01.log .. opencode-mem-2026-11-25.log)
+context.hook lines   3135
+inject.requested     2964
+sessions w/ context  62
+sessions w/ inject   337
+
+context.hook (has_block, turn_index) distribution:
+  has_block=False turn=0    n=252
+  has_block=True  turn=1    n=2514
+  has_block=True  turn=2    n=53
+  has_block=True  turn=3    n=29
+  has_block=True  turn=4    n=287
+
+PREMISE CANDIDATES (context.hook lines, zero inject.requested): 0
+
+never-prompted by the rule (no inject AND no auto-capture row): []

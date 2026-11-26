@@ -79,7 +79,10 @@ under `~/.opencode-mem/` written; `git status --porcelain` empty.
 
 **What holds.** The observation reproduces on the rotated log: 141 `context.hook` lines over 7 sessions, 77 of them
 `has_block:false` with `turn_index:0`, 64 true `turn_index:1`, 0 never-prompted sessions, and both exact `1 → 0` drops at
-04:21:45Z. The caches are per `registerV2Adapter` invocation, not module-scoped, and only the returned cleanup clears them
+04:21:45Z. **Population refreshed 2026-11-26** over every `2026-11-*` log (`docs/evidence/issue-151-context-reading-20261126/`):
+3,135 `context.hook` lines / 62 sessions / **252 `has_block:false, turn_index:0`** / 0 `has_block:false` at `turn_index >= 1`
+/ 0 never-prompted. Issue 151 closed as measurement on that reading, so this population now belongs solely to this issue.
+The caches are per `registerV2Adapter` invocation, not module-scoped, and only the returned cleanup clears them
 (`contexts` is otherwise only `set` or `delete`), so a `turn_index` decrease for one session is possible only through that
 cleanup. The chain is `plugin/src/plugin.js:1951` → `:1953` `mod.setup(ctx)` → `plugin/src/v2/plugin.js:57-59` capturing
 the adapter cleanup → `:65-68` returning a function that awaits it.

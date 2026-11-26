@@ -1,6 +1,11 @@
 # 151 — a session with no cached injection gets nothing: the `context`-cache fallback (M1 proper)
 
-Status: needs-info — 2026-11-19 (triage: premise unmeasured; the 16 apparent witnesses are issue 150's silences — they all have auto-capture rows. The instrumented `context` line shipped 2026-11-25 and went live through the host's `plugin/dist/**` watcher with no restart; a reading exists, and the owner-approved reading rule plus its measured population are recorded below.)
+Status: done — measurement, not a deliverable (2026-11-26). The approved reading rule was re-run over the whole log:
+**3,135 `context.hook` lines, 62 sessions, 0 sessions with a `context` event and zero `inject.requested`**. The premise
+is not witnessed, so the fallback would be dead code. Evidence and the re-entry trigger:
+`docs/evidence/issue-151-context-reading-20261126/`. The 252 `has_block:false, turn_index:0` lines are issue 166's
+population, not this issue's.
+Previous status: needs-info — 2026-11-19 (triage: premise unmeasured; the 16 apparent witnesses are issue 150's silences — they all have auto-capture rows. The instrumented `context` line shipped 2026-11-25 and went live through the host's `plugin/dist/**` watcher with no restart; a reading exists, and the owner-approved reading rule plus its measured population are recorded below.)
 
 *Scope note. Issue 149 decision 2 names this as out of scope: its restore happens on the next prompt, and the
 never-prompted case is excluded. Issue 150 owns the refresh policy for sessions that have been prompted. This issue
@@ -117,3 +122,26 @@ Pre-registered rule (corrected 2026-11-25, owner-approved; the earlier two-outco
 
 > Reading rule (log-only). `has_block:true` = cache present. `has_block:false && turn_index>=1` = a prompt ran in this activation and the refresh answered empty or threw (155). `has_block:false && turn_index==0` = no prompt hook in this activation: either a step of a turn that began in a previous activation (host restart / any write under `plugin/dist/**`) or a prompt that never ran. Separate them with the inject floor: after `inject.requested` turn `t`, a same-activation `context.hook` must read `>= t+1`; a lower value (or any turn decrease) proves a re-instantiation. Only a session with `context.hook` lines and **zero** `inject.requested` lines is "never prompted" (151's premise).
 > Measured 2026-11-25T04:23:49Z, 7 sessions / 140 lines: 64 true (all turn 1), 76 false (all turn 0), 76/76 post-boundary, 0 never-prompted, 0 turn>0 false. 151's premise is therefore *not* witnessed; the 76-lines population is block loss across adapter re-instantiation and is a separate defect to open, **not** a trigger for the query-less fallback.
+
+### Reading 2026-11-26 — re-run over the whole log; the premise is closed as not witnessed
+
+Same rule, larger population. `docs/evidence/issue-151-context-reading-20261126/` (`read.py`, `run.txt`), read-only over
+every `~/.opencode-mem/opencode-mem-2026-11-*.log`:
+
+| quantity | value |
+|---|---|
+| `context.hook` lines | 3,135 |
+| `inject.requested` lines | 2,964 |
+| sessions with a `context` event | 62 |
+| **sessions with `context` lines and zero `inject.requested`** | **0** |
+| never-prompted (also zero auto-capture rows) | 0 |
+| `has_block:false` at `turn_index >= 1` | 0 |
+
+Line shapes: `false,0` 252 · `true,1` 2,514 · `true,2` 53 · `true,3` 29 · `true,4` 287.
+
+So the inverted world resolved the way the rule predicted: **the premise is false on this population**, and a query-less
+fallback would serve nobody. The 252 `false,0` lines grew from the 76 recorded above and remain **issue 166's** — every
+one of those sessions has `inject.requested` lines, so it was prompted and lost its block to an adapter re-instantiation,
+not to a missing prompt hook.
+
+Re-entry trigger: `read.py` reports a non-empty `PREMISE CANDIDATES` list. Until then this issue stays closed.
