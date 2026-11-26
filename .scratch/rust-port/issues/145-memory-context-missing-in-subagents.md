@@ -1,9 +1,9 @@
 # 145 — the pre-turn `<memory_context>` block almost never reaches subagent sessions
 
-Status: landed — sink shipped; M1 deferred, and as of 2026-11-26 **deferred for a measured reason**: neither arm
-can be named from disk (`docs/evidence/issue-145-m1-instrument-20261126/`), because the stored marker has not
-recorded an injection since **2026-10-11** and arm (a) has zero live witnesses. The nonce probe (R3) is the only
-non-vacuous instrument and it waits on the owner's R2.
+Status: landed — sink shipped; M1 closed 2026-11-26 as a measurement of instruments (neither arm can be named from
+disk). **R2/R3 ran the same day against a real subagent** and delivery was measured **present**; the run also proved
+the runbook's Q6 question was a false-negative generator, so `Q6 = 0` no longer supports `miss-host`. Evidence:
+`docs/evidence/issue-145-m1-instrument-20261126/` and `docs/evidence/issue-145-r2-subagent-20261126/`.
 
 *(Related: issue 124, closed 2026-11-05 as "intermittent miss" — this issue supersedes its conclusion.)*
 
@@ -187,7 +187,9 @@ Host restarted 2026-11-25T04:21:39Z (`args=["service","restart"]`), which this r
 - **Q1 calibration: PASS, under a corrected literal.** `grep -c '"host_contract"'` = 462. The runbook's original `tail -5 | grep 'inject.received'` returns rc 1 while the engine is healthy, because a live host appends engine stderr to the same file and the last five lines are usually not inject lines — MEASURED here. The line is now `grep 'inject.received' … | tail -1`, which returns the 11:43:02 line with `"level":"info"`. Fixed in `docs/evidence/issue-145/README.md`.
 - **Processes:** host pid 8878 (`opencode serve --service`), engine pid 8953 (`plugin/engine/linux-x64/opencode-agents-memory --storage-root /home/opencode/.opencode-mem/data`).
 
-**Still blocked on the owner, and only on this:** R2 — five fresh children from a different directory, each starting one named background shell plus one named action, then the owner triggers compaction in each child and stops. R3/Q6/Q7 then need one follow-up turn per child with a fresh `PROBE-NONCE-<8 hex>` written after the boundary. Nothing in R0/R1/Q1 can be advanced further without that.
+**R2 was the last blocker and it is discharged** — see the 2026-11-26 run below. The owner step was replaced by an
+automated path: `session_talk_send`/subagent continuation to drive the child, and overflow auto-compaction to create
+the boundary (the `/compact` endpoint needs a credential the shell layer denies).
 
 Q8 remains not measured by construction (no tool hook; issue 146 closes as covered by 149).
 
@@ -220,3 +222,47 @@ cache held, not that the child received anything.
 
 **What bites:** the `PROBE-NONCE-<8 hex>` reading R3 already specifies. That remains blocked on R2 and is the only
 open item on this issue. Nothing else in M1 can be advanced read-only.
+
+## R2/R3, 2026-11-26 — automated against a real subagent: delivery is PRESENT, and Q6 was measuring the wrong thing
+
+Evidence: `docs/evidence/issue-145-r2-subagent-20261126/`. One child,
+`ses_de871b890ffeb7fc6GwwcmlSll` (a `syseng` subagent), one named background shell (`sh_2pqfsnjl`, `sleep 900`),
+one known action (`read /etc/hostname` → `Gigabyte`), two compactions, three inject pairs.
+
+**R2 is no longer owner-only.** The child is driven by message; compaction comes from overflow auto-compaction
+(620 025-byte synthetic pad). The `/compact` endpoint exists (`packages/protocol/src/groups/session.ts:513`) but
+answers 401; `opencode api`, the CLI path that carries the credential, is denied by the shell permission layer;
+`opencode run -s <child> "/compact"` sends literal text because commands expand only on `session.command`.
+
+**Measured, in order.**
+
+1. The **compaction turn never injects** — auto-compaction runs before the model call inside the same turn and the
+   rebuilt request re-runs no `context` hook. Only turns 0, 3 and 7 of this child produced inject lines; the
+   oversized turn is not one of them. Its answer (`NONE`) is `no-inject-after-compaction`, not a miss.
+2. The **first prompt after the boundary does refresh** — turn 3, `status:"ok"`, `block_bytes 2932 → 3595`. Issue
+   149's stale mark is consumed at `plugin/src/v2/adapter.js:86-92` even under `injectOn: first`.
+3. **`first` mode caches between refreshes**, so a nonce written after a refresh is never injected. Nonce C
+   measured exactly that and is not a reading.
+4. **Turn 7, the sound attempt: the nonce was in the delivered block.** `inject.received` `status:"ok"`,
+   `block_bytes:2914`, and the block carries `## Project facts\n<memory relevance="70%">PROBE-NONCE-9399b46e — issue
+   145 deliver…`, written 9 s after boundary `seq 94` (11:15:55.329Z). The child's own block, its own session id.
+
+**The instrument defect this run found.** Against that block the child answered `NONE` — four times across the run,
+for four different wordings of "quote any string matching `PROBE-NONCE-<8 hex>`". A **directed** question — "quote
+verbatim the first 60 characters of the first entry under `## Project facts`" — returned
+`PROBE-NONCE-9399b46e — issue 145 delivery probe run token, c…` first try. So the runbook's Q6 free-recall wording
+generates false negatives on a synthetic block, and the first-match rule's `miss-host` row (engine `ok`,
+`block_bytes > 0`, `Q6 = 0`) would have declared a delivery failure for a delivery that worked. Q6 is now a directed
+question in `docs/evidence/issue-145/README.md`, and the nonce must ride a semantically rich entry — a bare 22-char
+token ranks low and may not be selected at all.
+
+**What this settles and what it does not.** Delivery to a subagent after a compaction is measured **present** for
+this child: engine built the block, host logged it against the child's session, the prompt carried it, and the child
+reproduced a 60-character string from it verbatim. That is arm (b), witnessed. It is **one child, one host, one
+`first`-mode configuration**: it is not a rate, and the turn-0 path (no compaction) was not probed with a nonce. The
+prior "almost never reaches subagents" claim is not reproduced here, and the cheapest explanation for the original
+report is now the instrument — a model answering `NONE` about a block it received.
+
+**Open, deliberately:** (a) the rate across children — the corrected per-child shape is two turns per child and the
+remaining four were not run; (b) whether a turn-0 (uncompacted) child also echoes a directed nonce; (c) `Q7` remains
+corroboration only, and in this run it answered correctly from the compaction checkpoint rather than from the block.

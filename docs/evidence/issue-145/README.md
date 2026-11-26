@@ -146,11 +146,21 @@ boundary, the post-compaction block is its only possible source.
 
 Q6 (block delivered after compaction; corroboration only — the captured render is the authority):
 
-1. Write a fresh nonce to memory, project scope: `PROBE-NONCE-<8 hex>`.
-2. Send the child one follow-up: end its wait, then ask it to quote any string matching `PROBE-NONCE-<8 hex>` it can
-   find in its context, or answer `NONE`. Name the pattern, never the value.
-3. Record the child's answer verbatim. Echo ⇒ Q6 ≥ 1. `NONE` ⇒ Q6 = 0.
+1. Write a fresh nonce to memory, project scope: `PROBE-NONCE-<8 hex>`, **inside a semantically rich entry** (a bare
+   token ranks low and may not be selected into the block). Write it in the window between the boundary and the
+   question turn: before the boundary it is not a valid instrument, and after the refresh turn it is never injected
+   at all, because `first` mode replays the cached block until the next compaction
+   (`plugin/src/v2/adapter.js:86-92`).
+2. Send the child one follow-up that asks a **directed** question, not a pattern search: name the heading — e.g.
+   "quote verbatim the first 60 characters of the first entry under `## Project facts`" — and never state the value.
+3. Record the child's answer verbatim. Verbatim echo ⇒ Q6 ≥ 1. `NONE` ⇒ Q6 = 0.
 4. Delete the memory entry.
+
+**MEASURED 2026-11-26 (`docs/evidence/issue-145-r2-subagent-20261126/`): the earlier free-recall wording of this step
+is a false-negative generator.** Four questions of the form "quote any string matching `PROBE-NONCE-<8 hex>`" all
+answered `NONE`, one of them against a context whose delivered block provably contained the token; a directed read of
+the same block returned it verbatim first try. A `NONE` from a pattern-search question therefore does **not** support
+`miss-host`, and the first-match reading rule must not be applied to one.
 
 Q7 (last action named by the child; corroboration only — the captured render is the authority):
 
