@@ -1,6 +1,9 @@
 # 145 — the pre-turn `<memory_context>` block almost never reaches subagent sessions
 
-Status: landed — sink shipped; M1 deferred pending the post-restart measurement
+Status: landed — sink shipped; M1 deferred, and as of 2026-11-26 **deferred for a measured reason**: neither arm
+can be named from disk (`docs/evidence/issue-145-m1-instrument-20261126/`), because the stored marker has not
+recorded an injection since **2026-10-11** and arm (a) has zero live witnesses. The nonce probe (R3) is the only
+non-vacuous instrument and it waits on the owner's R2.
 
 *(Related: issue 124, closed 2026-11-05 as "intermittent miss" — this issue supersedes its conclusion.)*
 
@@ -8,6 +11,13 @@ Status: landed — sink shipped; M1 deferred pending the post-restart measuremen
 
 Ground truth is the query issue 124 established: a session received the block iff one of its stored
 messages carries the literal `<memory_context>` marker (`session_message.data LIKE '%<memory_context>%'`).
+
+> **Re-derived 2026-11-26 — the marker does not measure delivery, and has not since 2026-10-11.** The strict shape,
+> `type='synthetic' AND data LIKE '{"text":"<memory_context>%'`, is **8 rows in 8 sessions, all on 2026-10-11**, and
+> nothing after. The loose predicate this section's table uses is 1,645 rows of which **1,500 are assistants quoting
+> the tag back** (runbook Trap B) — good for "this session had the tag in context at some point", useless for dating a
+> delivery, attributing it to an `inject.received` line, or reading anything from its absence. Every row below is
+> inside that loose reading. Evidence: `docs/evidence/issue-145-m1-instrument-20261126/` (same finding as issue 148).
 
 **Today, 2026-11-18:**
 
@@ -110,10 +120,14 @@ zero `opencode-mem-plugin` lines**, so the telemetry does not exist on disk.
 - [ ] `inject.received` and `inject.requested` are readable on disk after a spawn (path recorded in the issue
       comment, with the verbatim lines from one child that missed and one that hit).
 - [ ] The losing arm (a) or (b) is named with evidence, and only that arm is fixed.
+      **2026-11-26: not satisfiable by reading.** Arm (a) has 0 non-fixture witnesses (all 353 `status:"error"`
+      lines are plugin-test fixture ids on 2026-11-19); arm (b) cannot be separated from marker-persistence noise
+      (179 marker-less children, all with `ok` lines). The arm can only be named by the R3 nonce probe.
 - [ ] A test fails on the pre-fix tree for a **child** session and passes after, with the RED output pasted
       (`plugin/tests/*.test.mjs`, wasm-free, `node --test`).
-- [ ] Post-fix measurement, same query as above: N children spawned, N blocks delivered, for N ≥ 3, in the
-      issue comment.
+- [ ] Post-fix measurement: N children spawned, N blocks delivered, for N ≥ 3 — measured by a **nonce the child
+      must echo**, not by the stored marker (which has not recorded an injection since 2026-10-11; see the
+      re-derivation at the top).
 - [ ] No behaviour change for root sessions: their block count per turn stays as it is (21 of today's 75
       injects were root-side, and those already work).
 
@@ -136,7 +150,7 @@ Wave status: OPEN. Step 0c item 2 read unreadable (`database is locked (5)` whil
 - Step 0c seed: item 4 post-exit COUNT `1`; item 6 nonce COUNT `1`. Item 2 immediate read unreadable, recorded, not a seed failure. Drain path not labelled.
 - Step 8 probe: three of three children carry the nonce (`nonce_count=1`), history heading `## Recent sessions`, block 328 bytes, `status:"ok"`, `host_contract:"setup"`. Block-level delivery on a prompted session only. Probe heading regex corrected from a line-anchored form, which could not match the engine's one-line heading. First run `rc=7` kept in `.tmp/progress/145-r29-probe.txt`.
 - Shell half unmet: crates/mem-bridge/src/inject.rs carries no background-shell section, so a child cannot be told which shell it left running; filed as issue 146 (146-inject-block-lacks-shell-section.md).
-- M1 gap deferred. The arm (a)/(b) question is unresolved on current evidence. Runbook: `docs/evidence/issue-145/README.md`.
+- M1 gap deferred. The arm (a)/(b) question is unresolved on current evidence. Runbook: `docs/evidence/issue-145/README.md`. **2026-11-26: still unresolved, and now with a measured reason — see `## M1, 2026-11-26` below.**
 
 ## Evidence 2026-11-18 (issue 145, r32)
 
@@ -162,7 +176,7 @@ plus the reviewed working-tree change; nothing was reverted. Scratch only; live 
 - Step 8, scratch block delivery: probe rc 0 `PROBE OK`; seed COUNT `1` (rc 0, read post-exit). Per child `nonce_count=1`, heading `## Recent sessions`, 328 bytes, `block_sha256=8d0625a58822a7c2a5e047033cafcf64b97a3e99c6481aafa02c000116634790` (identical for all three). Block-level delivery on a prompted session only; stored-message delivery is the R3 runbook's job. Scratch sink lines carry `"host_contract":"setup"`, verbatim: `[2026-11-19T00:40:07.749+07:00] inject.received: {"block_bytes":328,"component":"opencode-mem-plugin","handling_ms":15,"host_contract":"setup","level":"info","session_id":"ses_probe_child_1","status":"ok"}`.
 - Step 7 / 8b probe guard: `grep -n 'plugin/undefined' plugin/tests/probe-145-guard.test.mjs` → no output, rc `1`; marker count `5` rc 0; guard GREEN `ℹ tests 2 ℹ pass 2 ℹ fail 0` rc 0. Mutant `reap-guard-deleted` → `✖ test_probe_refuses_without_seed_exit_line`, `AssertionError [ERR_ASSERTION]: code=0 stderr=`; mutant `root-guard-deleted` → `✖ test_probe_refuses_without_driver_storage_root`, `AssertionError [ERR_ASSERTION]: code=0 stderr=`. Probe header cites `startBridge` at `plugin/src/plugin.js:898`; the tree measures `909` (`async function startBridge(state) {`). A comment, not a gate.
 - Shell half unmet: crates/mem-bridge/src/inject.rs carries no background-shell section, so a child cannot be told which shell it left running; filed as issue 146 (146-inject-block-lacks-shell-section.md).
-- M1 gap deferred. The arm (a)/(b) question is unresolved on current evidence. Runbook: `docs/evidence/issue-145/README.md`.
+- M1 gap deferred. The arm (a)/(b) question is unresolved on current evidence. Runbook: `docs/evidence/issue-145/README.md`. **2026-11-26: still unresolved, and now with a measured reason — see `## M1, 2026-11-26` below.**
 
 ## Preflight 2026-11-25 — the post-restart run is unblocked except for the owner's R2
 
@@ -176,3 +190,33 @@ Host restarted 2026-11-25T04:21:39Z (`args=["service","restart"]`), which this r
 **Still blocked on the owner, and only on this:** R2 — five fresh children from a different directory, each starting one named background shell plus one named action, then the owner triggers compaction in each child and stops. R3/Q6/Q7 then need one follow-up turn per child with a fresh `PROBE-NONCE-<8 hex>` written after the boundary. Nothing in R0/R1/Q1 can be advanced further without that.
 
 Q8 remains not measured by construction (no tool hook; issue 146 closes as covered by 149).
+
+## M1, 2026-11-26 — neither arm can be named from disk, and both readings that appeared to name it are dead
+
+Evidence: `docs/evidence/issue-145-m1-instrument-20261126/` (`read.py`, `run.txt`, `README.md`). Read-only;
+`opencode.db` opened `mode=ro`.
+
+**The marker never recorded an injection after 2026-10-11.** With the shape that actually represents one —
+`type='synthetic' AND data LIKE '{"text":"<memory_context>%'` — the database holds **8 rows in 8 sessions, all on
+2026-10-11 13:29–15:47Z**, and nothing since. That re-derives the runbook's Trap A and issue 148 here. The predicate
+this issue's 2026-11-18 table used is loose: 1,645 rows, of which **1,500 are assistant messages quoting the tag
+back** (276 sessions). It can say a session had the tag in context at some point; it cannot date a delivery,
+attribute one to an `inject.received` line, or make its absence mean anything.
+
+**Arm (a) has zero live witnesses.** All 353 `status:"error"` lines in the whole log history sit on 2026-11-19 and
+all 353 belong to three plugin-test fixture ids (`ses-1` 224, `sess-1` 128, `e2e-sess` 1). Non-fixture sessions
+with an error line: **0**. That one log file carries 5,046 fixture inject lines; the other 24 carry none. The
+"chat-path timeout" population this issue's arm table describes was test output written to the production log.
+
+**Arm (b) cannot be separated from persistence noise.** In the runbook's window (before 2026-11-25), 179 child
+sessions have `ok` lines and no loose match, 67 have both, and **none** has an error line — so the split is not
+arm (a), and no session in the window carries the strict injected shape (0 of 246), so there is no delivery-dated
+signal to separate them by.
+
+**Neither log line can carry the verdict either** (READ): `inject.received` is written at `plugin.js:1457`, before
+the parts push at `:1472`; `context.hook` is written at `adapter.js:121`, before the `event.system.push` at
+`:123`. A mutant deleting either push leaves both logs identical — they attest that the engine answered and the
+cache held, not that the child received anything.
+
+**What bites:** the `PROBE-NONCE-<8 hex>` reading R3 already specifies. That remains blocked on R2 and is the only
+open item on this issue. Nothing else in M1 can be advanced read-only.

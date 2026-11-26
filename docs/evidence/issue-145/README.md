@@ -226,6 +226,11 @@ as of the 2026-11-19 baseline, and its count at N = 5 is the R3 result. Issue 14
 
 Recorded in the issue, not decided in advance.
 
+> **2026-11-26 re-derivation (`docs/evidence/issue-145-m1-instrument-20261126/`).** Arm (a) has **no live witness**:
+> all 353 `status:"error"` lines in the log history are plugin-test fixture ids (`ses-1`, `sess-1`, `e2e-sess`) on
+> 2026-11-19, and that one log file carries 5,046 fixture inject lines while the other 24 carry none. Arm (b) has no
+> on-disk signal: the strict injected-marker shape is 8 rows, all 2026-10-11. Only the nonce separates them.
+
 - `miss-engine` with `status:"error"`: the chat-path timeout (arm (a)). `CHAT_INJECT_REQUEST_TIMEOUT_MS` is a separate design.
 - `miss-host`: attach/deliver (arm (b) candidate) — the engine returned a block that never reached the child.
 - `miss-engine` with `status:"ok"`: neither arm; opens a new item.

@@ -1,0 +1,34 @@
+========================================================================
+1. What the stored marker actually records
+========================================================================
+STRICT (an injected block):
+  rows 8  sessions 8  2026-10-11 13:29:17 .. 2026-10-11 15:47:50
+  by month {'2026-10': 8}
+LOOSE (issue 145's headline predicate), by message type:
+  assistant    rows= 1500 sessions=276
+  synthetic    rows=   57 sessions=11
+  user         rows=   52 sessions=45
+  compaction   rows=   36 sessions=8
+  => dominated by assistants quoting the tag back (runbook Trap B).
+
+========================================================================
+2. Arm (a): is there a live status:"error" witness?
+========================================================================
+error lines total   353   by day {'2026-11-19': 353}
+fixture ids         353   non-fixture sessions: 0
+fixture lines per log file (non-`ses_` session id):
+  opencode-mem-2026-11-19.log  5046
+
+========================================================================
+3. Arm (b): can a host-side drop be distinguished at all?
+========================================================================
+child sessions with inject.received before 2026-11-25   246
+    179  NO loose marker  | no error
+     67  loose marker     | no error
+  of those, sessions with the STRICT injected shape     0
+
+today: context.hook sessions 48 (children 41), has_block:true 47, inject ok>0 72
+
+Neither log line can fail on a host-side drop (READ):
+  plugin.js:1457  writes inject.received BEFORE the parts push at :1472
+  adapter.js:121  logs context.hook BEFORE event.system.push at :123
