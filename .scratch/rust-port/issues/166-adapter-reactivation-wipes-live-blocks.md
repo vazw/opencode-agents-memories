@@ -1,9 +1,12 @@
 # 166 — a plugin re-activation wipes the cached block for every live session mid-turn
 
-Status: ready-for-agent — 2026-11-26 owner answered the blocking question: deploys are **not** followed by host
-restarts (*"no, we'll ship the plugin later"*). So the adapter must survive re-activation itself; the fix is the
+Status: **closed 2026-11-26** — fixed by PRD 171 §4. The adapter now rehydrates a lost block on a cache-empty
+`context` event: replay the V1 inject with no query text, at most once per session per activation, behind a
+fail-closed host read. See `## Closeout 2026-11-26` at the end of this file.
+Prior status (the owner's answer that unblocked it): 2026-11-26 deploys are **not** followed by host restarts
+(*"no, we'll ship the plugin later"*), so the adapter must survive re-activation itself; the fix is the
 cache-empty path in the `context` hook — the same code surface as issue 151 and PRD 171 §4. **One fix, three
-triggers**, and it lands in PRD 171 §4 rather than as a second patch. The original `ready-for-human` triage follows,
+triggers**, and it landed in PRD 171 §4 rather than as a second patch. The original `ready-for-human` triage follows,
 superseded only on the point it was waiting for.
 Filed: 2026-11-25, from the issue-151 instrument (`DEBUG` `.tmp/progress/issue-151-context-instrument.debug-1.md`)
 
@@ -108,3 +111,57 @@ practice, recovers at the next prompt, and closes as *measurement, not a deliver
 cache-empty path in its `context` hook — which is **issue 151's M1**, the same code surface (`adapter.js:117-124`) arriving
 by a different trigger. 166 and 151 are therefore one fix but two issues: 151 stays `needs-info`, because its trigger
 (compaction, sessions that did prompt) is distinct from this one's (re-activation).
+
+## Closeout 2026-11-26 — fixed by PRD 171 §4
+
+Shipped with PRD 171 §4. Blueprint `.tmp/blueprints/blueprint-20261126-0917-issue-171-s4-context-fallback.md`
+(body `81cb1a0bfd7e`, SYS-APPROVED 2026-11-26T09:25Z, revised once after a rejection on 11 points); review round 2
+**APPROVED** (`.tmp/reviews/review-20261126-issue-171-s4-round2.md`). Two files: `plugin/src/v2/adapter.js` +66/−3,
+`plugin/tests/v2-plugin-adapter.test.mjs` +320/−1.
+
+**Disposition 3 was taken, not 1 or 2** — the owner refused disposition 1 (*"no, we'll ship the plugin later"*), and
+disposition 2 (persist `contexts` across activations) was falsified twice: the maps are per `registerV2Adapter`
+invocation, so a fresh revision needs a busted module URL and module-level state dies with re-evaluation, and
+`globalThis` would leak a previous revision's block into the new one.
+
+**What the fix does.** On a `context` event with no cached block, the adapter replays the V1 inject with an **empty
+parts array** — `queryFromParts` (`plugin/src/plugin.js:1639`) yields `undefined`, `injectParams` (`:1665`) omits
+`include.query`, so the engine answers from the container-tag list and no text is synthesised. Guarded fail-closed by
+`ctx.session.context` returning at least one message; memoised in `rehydrated` **before** the first `await`, so it runs
+at most once per session per activation; `withdrawn` refuses a block the engine has emptied; `disposed` short-circuits
+after teardown; the post-`await` write is conditional on `!contexts.has && !withdrawn.has` so a prompt landing during
+the probe always wins.
+
+**Acceptance criteria, re-derived against what shipped.**
+
+1. *"A test re-instantiates the adapter mid-turn and asserts the session's block survives"* — **not satisfied as
+   written, and deliberately so.** Nothing can make the block survive an in-process re-activation (see disposition 2),
+   so the shipped contract is that the next model step **rebuilds** it. Tests pin the rebuild, not survival:
+   `test_v2_context_fallback_rehydrates_a_lost_block`, `..._requires_host_evidence_of_a_turn`,
+   `..._runs_at_most_once_per_session_per_activation`, `..._memoizes_before_the_first_await`,
+   `..._leaves_a_withdrawn_block_withdrawn`, `..._never_serves_another_session_block`,
+   `..._does_not_overwrite_a_newer_prompt_block`. RED on the pre-fix tree: `# pass 13 # fail 7`; GREEN after: `# pass 20
+   # fail 0`.
+2. *"No `context` event for a session with a completed prompt reads `has_block:false` unless a refresh answered empty"*
+   — **not verifiable in this tree**, and the reason is measured: the population is not separable in-process. Every one
+   of the 252 `has_block:false, turn_index:0` lines belongs to a **prompted** session, so the host read is true for all
+   of them — including the 18 host-restart and 29 ordinary-cold partitions. The observation that settles it is
+   post-deploy and is written into the blueprint's `[TEST PLAN & ACCEPTANCE CRITERIA]`: a session whose first
+   `context.hook` in an activation reads `has_block:false, turn_index:0` followed in the same activation by
+   `has_block:true, turn_index:0`, plus an `inject.requested` with `query_chars:0` and no `turn_index`. Zero such
+   sequences ⇒ the host read returns no messages mid-turn ⇒ dead code ⇒ close §4 as measurement.
+3. *"The deploy path is documented: a write under `plugin/dist/**` is a contract boundary, not a no-op"* — **open.**
+   The only written record is the approved blueprint's Step 8, which lives under gitignored `.tmp/` and will not
+   survive cleanup. `shortcut: the dist-write contract boundary is documented only in gitignored .tmp; add a tracked
+   note (plugin/README or the adapter's header) when plugin docs are next touched. Ceiling: the fact is unrecorded;
+   upgrade path: three lines beside the existing dist-sync invariant.`
+
+**Accepted ceilings, recorded not hidden.** The fallback fires on every cache-less `turn_index:0` event of a session
+with ≥1 host message — including the 29 ordinary-cold lines — and injects one project-listing block on that session's
+first model step after activation. `withdrawn` dies with the activation, so a withdrawal recorded before a dist write
+is not seen by the next one; it is self-correcting because the replayed inject asks the same engine, which answers
+`empty` again unless its state legitimately changed. `hasPriorTurn` has **no timeout**, so a hanging
+`ctx.session.context` parks the model step. The replay costs one inject request — and possibly one engine start — on
+the model-request critical path, once per session per activation, failing open on error. The replayed path writes the
+wrapper's own `inject.requested` (`query_chars:0`, no `turn_index`) and `inject.received`
+(`host_contract:"setup"`), so a future audit must not read a fallback-written `inject.requested` as a prompt.

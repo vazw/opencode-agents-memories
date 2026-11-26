@@ -37,6 +37,11 @@ const ADAPTER_MODULE = "../src/v2/adapter.js";
 function createHarness() {
   const hooks = new Map();
   const getCalls = [];
+  // PRD 171 §4: the host transcript the adapter's fallback probes. The default
+  // arm is `[]` — a session with no conversation — so a row that reads an
+  // uncached session proves the fail-closed floor, not a lucky lookup.
+  const contextCalls = [];
+  let transcript = [];
   let nextEvent = null;
   let handled = null;
   let closed = false;
@@ -48,6 +53,10 @@ function createHarness() {
     session: {
       hook: async (name, callback) => {
         hooks.set(name, callback);
+      },
+      context: async (input) => {
+        contextCalls.push(input);
+        return transcript;
       },
       get: async (input) => {
         getCalls.push(input);
@@ -93,7 +102,17 @@ function createHarness() {
     await seen;
   }
 
-  return { ctx, hooks, getCalls, closed: () => closed, deliver };
+  return {
+    ctx,
+    hooks,
+    getCalls,
+    contextCalls,
+    closed: () => closed,
+    deliver,
+    setTranscript: (messages) => {
+      transcript = messages;
+    },
+  };
 }
 
 test("test_v2_adapter_prompt_hook_runs_the_v1_chat_message_hook", { timeout: 5000 }, async () => {
@@ -391,6 +410,9 @@ test("test_v2_adapter_cleanup_aborts_the_subscription_and_is_idempotent", { time
 
   await cleanup();
   assert.equal(harness.closed(), true, "cleanup aborts the controller and awaits the watcher");
+  // PRD 171 §4: a host transcript exists AFTER teardown, so only the disposed
+  // flag stands between this late hook and a fallback replay.
+  harness.ctx.session.context = async () => [{ type: "user", text: "x" }];
   assert.deepEqual(
     await readContext("ses-1"),
     [],
@@ -836,5 +858,302 @@ test("test_context_hook_logs_without_changing_the_pushed_block", { timeout: 5000
     [{ event: "context.hook", fields: { session_id: "ses-cached", has_block: true, turn_index: 1 } }],
     "exactly one line per context event"
   );
+  await cleanup();
+});
+
+// PRD 171 §4 (issues 151/166): a `context` event with no cached block is not
+// always "no memory to inject" — a plugin re-activation (a `dist/**` write, no
+// host restart) clears `contexts` mid-turn. The adapter replays the V1 inject
+// with NO query text, at most once per session per activation, and only for a
+// session the host still has a transcript for. Every row below reads the
+// harness's default `[]` transcript unless it sets one, so an accidental
+// fallback in a pre-existing row would have to beat the fail-closed floor.
+test("test_v2_context_fallback_rehydrates_a_lost_block", { timeout: 5000 }, async () => {
+  const { registerV2Adapter } = await import(ADAPTER_MODULE);
+  const harness = createHarness();
+  harness.setTranscript([{ type: "user", text: "an earlier turn" }]);
+  let calls = 0;
+  const seen = [];
+  const legacy = {
+    "chat.message": async (input, output) => {
+      calls += 1;
+      // Snapshot at entry: the query-less pin is the length the WRAPPER sees,
+      // before this hook appends anything.
+      seen.push({ input, partsAtEntry: output.message.parts.length });
+      output.message.parts.push({ type: "text", text: calls === 1 ? "block A" : "rehydrated" });
+    },
+    event: async () => {},
+  };
+  const readContext = async (sessionID) => {
+    const event = { sessionID, system: [] };
+    await harness.hooks.get("context")(event);
+    return event.system.map((part) => part.text);
+  };
+
+  const cleanupA = await registerV2Adapter(harness.ctx, legacy);
+  await harness.hooks.get("prompt")({ sessionID: "ses-1", messageID: "m1", prompt: { text: "q" } });
+  assert.equal(calls, 1);
+  assert.deepEqual(await readContext("ses-1"), ["block A"], "activation A serves its own cache");
+
+  // The re-activation seam: the fake `session.hook` overwrites the map entry,
+  // so the second adapter starts with empty state beside a live transcript.
+  const cleanupB = await registerV2Adapter(harness.ctx, legacy);
+  harness.contextCalls.length = 0;
+
+  assert.deepEqual(
+    await readContext("ses-1"),
+    ["rehydrated"],
+    "a cache-less context event for a prompted session replays the V1 inject"
+  );
+  assert.equal(harness.contextCalls.length, 1, "the fallback probed the host exactly once");
+  assert.deepEqual(
+    await readContext("ses-1"),
+    ["rehydrated"],
+    "the rehydrated block is cached, so the next model step reads it from memory"
+  );
+  assert.equal(
+    harness.contextCalls.length,
+    1,
+    "the second event is served from the cache, never a second replay or host read"
+  );
+
+  // The replay is query-less BY CONSTRUCTION: an empty parts array makes
+  // `queryFromParts` (plugin.js:1639) undefined and `injectParams` (:1665)
+  // omit `include.query`, so the engine lists the container's tags instead of
+  // scoring a search. The prompt call is the in-instance positive control.
+  assert.equal(seen[1].partsAtEntry, 0, "the replay carries no query text");
+  assert.equal(seen[0].partsAtEntry, 1, "the prompt path carries its original part");
+  assert.deepEqual(seen[1].input, { sessionID: "ses-1" }, "the replay passes the session id, nothing else");
+
+  await cleanupB();
+  await cleanupA();
+});
+
+test("test_v2_context_fallback_requires_host_evidence_of_a_turn", { timeout: 5000 }, async () => {
+  const { registerV2Adapter } = await import(ADAPTER_MODULE);
+  const harness = createHarness();
+  harness.ctx.session.context = async ({ sessionID }) =>
+    sessionID === "ses-known" ? [{ type: "user", text: "an earlier turn" }] : [];
+  const cleanup = await registerV2Adapter(harness.ctx, {
+    "chat.message": async (_input, output) => {
+      output.message.parts.push({ type: "text", text: "BLOCK" });
+    },
+    event: async () => {},
+  });
+  const readContext = async (sessionID) => {
+    const event = { sessionID, system: [] };
+    await harness.hooks.get("context")(event);
+    return event.system.map((part) => part.text);
+  };
+
+  assert.deepEqual(
+    await readContext("ses-known"),
+    ["BLOCK"],
+    "the control: the fallback is live in this very adapter"
+  );
+  assert.deepEqual(
+    await readContext("ses-fresh"),
+    [],
+    "a session with no host transcript gets nothing"
+  );
+
+  await cleanup();
+});
+
+test("test_v2_context_fallback_runs_at_most_once_per_session_per_activation", { timeout: 5000 }, async () => {
+  const { registerV2Adapter } = await import(ADAPTER_MODULE);
+  const harness = createHarness();
+  harness.setTranscript([{ type: "user", text: "an earlier turn" }]);
+  let calls = 0;
+  const cleanup = await registerV2Adapter(harness.ctx, {
+    "chat.message": async () => {
+      calls += 1; // answers nothing: an empty engine state, not an error
+    },
+    event: async () => {},
+  });
+  const readContext = async (sessionID) => {
+    const event = { sessionID, system: [] };
+    await harness.hooks.get("context")(event);
+    return event.system.map((part) => part.text);
+  };
+
+  assert.deepEqual(await readContext("ses-1"), []);
+  assert.deepEqual(await readContext("ses-1"), []);
+  assert.deepEqual(await readContext("ses-1"), []);
+  assert.equal(calls, 1, "one replay per session per activation, not one per model step");
+  assert.equal(harness.contextCalls.length, 1, "and one host read behind it");
+
+  await cleanup();
+});
+
+// The same memo, observed where its placement is visible: row 16's events are
+// sequential, so moving `rehydrated.add` after the host-read await would still
+// read 1 there. Two OVERLAPPING events are the distinguishing input — with the
+// memo before the first await the second event sees the mark and returns; with
+// it after, both park on the host read and both replay (2 reads, 2 injects).
+// The reviewer's probe (.tmp/scratch/review171s4-concurrency-probe.mjs) measured
+// exactly that pair; this row ships the assertion through the existing fake.
+test("test_v2_context_fallback_memoizes_before_the_first_await", { timeout: 5000 }, async () => {
+  const { registerV2Adapter } = await import(ADAPTER_MODULE);
+  const harness = createHarness();
+  let hostReads = 0;
+  let releaseHostRead;
+  const hostGate = new Promise((resolve) => {
+    releaseHostRead = resolve;
+  });
+  // A resolvable gate, never a timer: the host read parks until the test
+  // releases it, and the release happens only after both hooks were invoked.
+  harness.ctx.session.context = async () => {
+    hostReads += 1;
+    await hostGate;
+    return [{ type: "user", text: "an earlier turn" }];
+  };
+  let calls = 0;
+  const cleanup = await registerV2Adapter(harness.ctx, {
+    "chat.message": async (_input, output) => {
+      calls += 1;
+      output.message.parts.push({ type: "text", text: "BLOCK" });
+    },
+    event: async () => {},
+  });
+
+  // An async function body runs to its first await before returning, so `p1` is
+  // already parked inside the host read when `p2` is invoked, and the gate is
+  // released only on the next line, after both. No scheduling assumption.
+  const first = { sessionID: "ses-1", system: [] };
+  const second = { sessionID: "ses-1", system: [] };
+  const p1 = harness.hooks.get("context")(first);
+  const p2 = harness.hooks.get("context")(second);
+  releaseHostRead();
+  await Promise.all([p1, p2]);
+
+  assert.equal(hostReads, 1, "the second overlapping event must not park on a second host read");
+  assert.equal(calls, 1, "and must not run a second replay");
+  assert.deepEqual(
+    first.system.map((part) => part.text),
+    ["BLOCK"],
+    "the control: the first event's replay served the block"
+  );
+
+  await cleanup();
+});
+
+test("test_v2_context_fallback_leaves_a_withdrawn_block_withdrawn", { timeout: 5000 }, async () => {
+  const { registerV2Adapter } = await import(ADAPTER_MODULE);
+  const harness = createHarness();
+  harness.setTranscript([{ type: "user", text: "an earlier turn" }]);
+  let mode = "empty";
+  const cleanup = await registerV2Adapter(harness.ctx, {
+    "chat.message": async (input, output) => {
+      if (mode === "empty") {
+        // What the wrapper records for an empty SUCCESS (plugin.js:1466).
+        Object.defineProperty(output, "injectStatus", { value: "empty", enumerable: false });
+        return;
+      }
+      output.message.parts.push({
+        type: "text",
+        text: input.sessionID === "ses-withdrawn" ? "resurrected" : "CONTROL",
+      });
+    },
+    event: async () => {},
+  });
+  const readContext = async (sessionID) => {
+    const event = { sessionID, system: [] };
+    await harness.hooks.get("context")(event);
+    return event.system.map((part) => part.text);
+  };
+
+  await harness.hooks.get("prompt")({ sessionID: "ses-withdrawn", messageID: "m1", prompt: { text: "q" } });
+  mode = "answer";
+
+  assert.deepEqual(
+    await readContext("ses-withdrawn"),
+    [],
+    "a block a prompt withdrew in this activation is not replayed back in"
+  );
+  assert.deepEqual(
+    await readContext("ses-control"),
+    ["CONTROL"],
+    "the control: the same adapter rehydrates a session with no withdrawal"
+  );
+
+  await cleanup();
+});
+
+test("test_v2_context_fallback_never_serves_another_session_block", { timeout: 5000 }, async () => {
+  const { registerV2Adapter } = await import(ADAPTER_MODULE);
+  const harness = createHarness();
+  harness.setTranscript([{ type: "user", text: "an earlier turn" }]);
+  const answers = ["A", "B"];
+  let calls = 0;
+  const cleanup = await registerV2Adapter(harness.ctx, {
+    "chat.message": async (_input, output) => {
+      output.message.parts.push({ type: "text", text: answers[calls] ?? "?" });
+      calls += 1;
+    },
+    event: async () => {},
+  });
+  const readContext = async (sessionID) => {
+    const event = { sessionID, system: [] };
+    await harness.hooks.get("context")(event);
+    return event.system.map((part) => part.text);
+  };
+
+  assert.deepEqual(await readContext("ses-1"), ["A"], "the first session reads its own answer");
+  assert.deepEqual(await readContext("ses-2"), ["B"], "the second reads its own, never the first's");
+
+  await cleanup();
+});
+
+test("test_v2_context_fallback_does_not_overwrite_a_prompt_that_landed_while_it_awaited", { timeout: 5000 }, async () => {
+  const { registerV2Adapter } = await import(ADAPTER_MODULE);
+  const harness = createHarness();
+  harness.setTranscript([{ type: "user", text: "an earlier turn" }]);
+  let release;
+  let parkedResolve;
+  const parked = new Promise((resolve) => {
+    parkedResolve = resolve;
+  });
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const cleanup = await registerV2Adapter(harness.ctx, {
+    "chat.message": async (_input, output) => {
+      // The replay is the query-less shape: empty parts at entry.
+      if (output.message.parts.length === 0) {
+        parkedResolve();
+        await gate;
+        output.message.parts.push({ type: "text", text: "fallback-block" });
+        return;
+      }
+      output.message.parts.push({ type: "text", text: "prompt-block" });
+    },
+    event: async () => {},
+  });
+  const readContext = async (sessionID) => {
+    const event = { sessionID, system: [] };
+    await harness.hooks.get("context")(event);
+    return event.system.map((part) => part.text);
+  };
+
+  const inFlight = harness.hooks.get("context")({ sessionID: "ses-1", system: [] });
+  let parkedSeen = false;
+  await Promise.race([
+    parked.then(() => {
+      parkedSeen = true;
+    }),
+    new Promise((resolve) => setTimeout(resolve, 1000)),
+  ]);
+  assert.equal(parkedSeen, true, "the cache-less event enters the replay (this row's premise)");
+  await harness.hooks.get("prompt")({ sessionID: "ses-1", messageID: "m1", prompt: { text: "q" } });
+  release();
+  await inFlight;
+
+  assert.deepEqual(
+    await readContext("ses-1"),
+    ["prompt-block"],
+    "a prompt that filled the cache while the replay awaited wins"
+  );
+
   await cleanup();
 });

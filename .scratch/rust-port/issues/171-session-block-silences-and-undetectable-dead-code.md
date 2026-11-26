@@ -1,8 +1,8 @@
 # 171 — session-block silences and the checks that cannot see them
 
-Status: ready-for-agent — **§4 only**. Progress: §1 `cdc57da`, §2 `c28375f`, §3 `3b3827c` shipped; §5 **closed as
-measurement** 2026-11-26 (the activation-boundary row already existed and its mutant reds — see §5). Remaining work: a
-cached-block fallback in the V2 adapter's `context` hook (`plugin/src/v2/adapter.js:117-124`).
+Status: **all five sections closed 2026-11-26.** Shipped: §1 `cdc57da`, §2 `c28375f`, §3 `3b3827c`, §4 (the V2
+adapter `context`-hook fallback, with issue 166 — see `## §4 closeout` at the end of this file). Closed as
+**measurement**: §5 (the activation-boundary row already existed and its mutant reds). No open work in this PRD.
 Filed: 2026-11-26, consolidating the recorded-but-unfixed findings from the issue-165 wave and its neighbours.
 
 > A PRD, not five tickets. Each finding below is independently closable and independently testable at an **existing**
@@ -197,3 +197,53 @@ implementation, not merely on the absence of the right one. Every row below name
   tickets for four sentences produces four waves and one real fix.
 - The measured sizes are recorded in the source issues and are not restated as pass conditions here: no count, pid or
   duration from this PRD may become a literal in a test.
+
+## §4 closeout 2026-11-26 — the context-hook fallback, shipped
+
+Blueprint `.tmp/blueprints/blueprint-20261126-0917-issue-171-s4-context-fallback.md`, body `81cb1a0bfd7e`,
+`SYS-APPROVED 2026-11-26T09:25Z` after one gate rejection (11 required modifications, all satisfied in substance).
+Review rounds: 1 **REJECTED** on a surviving mutant, 2 **APPROVED**. `plugin/src/v2/adapter.js` +66/−3;
+`plugin/tests/v2-plugin-adapter.test.mjs` +320/−1. Adapter suite RED on the pre-fix tree `# pass 13 # fail 7` → GREEN
+`# pass 20 # fail 0`; regressions 24/0, 12/0, 13/0.
+
+**What shipped.** On a `context` event with no cached block the adapter replays the V1 inject with empty parts (so
+`queryFromParts` → `undefined` and `injectParams` omits `include.query` — query-less by construction), guarded
+fail-closed by `ctx.session.context` returning ≥1 message, memoised in `rehydrated` before the first `await`,
+refusing a `withdrawn` session, short-circuited by `disposed` after teardown, and writing post-`await` only when no
+prompt has landed. Nine named mutants M1–M9, each killed by a named row, plus the moved-`add` ordering arm that
+round 1's rejection forced into existence: sequential `context` events cannot distinguish it, so
+`test_v2_context_fallback_memoizes_before_the_first_await` parks the host read and starts two overlapping events,
+asserting one host read and one replay.
+
+**Three corrections to this PRD's own text, carried here rather than edited into the approved blueprint body.**
+
+1. **Testing Decision 4 / user story 4 is superseded by measurement, not honoured.** It asked that "no cache and no
+   prior prompt yields something"; the shipped row asserts a session with no host transcript gets **nothing**. That is
+   issue 151's 2026-11-18 ruling applied — 0 witnesses of a session reaching `context` with no prior prompt
+   (`docs/evidence/issue-151-context-reading-20261126/README.md:16-17`). The `:178`-family row's assertion is
+   unchanged; what it now proves narrows to "a session with no host transcript gets nothing", and the two conditions
+   co-vary only by assumption because a fresh session's `ctx.session.context` return has never been sampled.
+2. **The blueprint's Step 4 sentence is wrong about its own mutant.** It claimed deleting `rehydrated.add` **or moving
+   it after the await** would show `3 calls`. A sequential row distinguishes only the deletion; the move needs the
+   concurrent pair above. Round 1 measured the gap (`19 pass / 0 fail` under the moved mutant) and round 2 measured
+   the fix (`19 pass / 1 fail`, `2 !== 1`).
+3. **The host read is not the discriminator issue 151 lacked.** All 252 `has_block:false, turn_index:0` lines belong
+   to prompted sessions, so the read is true for every one of them; it is a fail-closed floor, and the **memo** bounds
+   cost. The fallback therefore fires on the 29 ordinary-cold-cache lines too, injecting one project-listing block on
+   that session's first model step after activation.
+
+**Inverted world (unchanged, and the way this section could still become a measurement).** Post-deploy, a session whose
+first `context.hook` in an activation reads `has_block:false, turn_index:0` must be followed in the same activation by
+`has_block:true, turn_index:0` for that session, with an `inject.requested` carrying `query_chars:0` and no
+`turn_index`. **Zero such sequences ⇒ `ctx.session.context` returns no messages mid-turn ⇒ the whole section is dead
+code and closes as measurement.** The method has no declaration in this tree or in `@opencode-ai/plugin@1.19.0`; the
+only in-tree use is `plugin/src/v2/legacy-client.js:167`, and issue 112 measured its return shape as
+`[compaction, idle]` — the latest completed compaction, not the live turn. When the deploy lands, classify the
+`has_block:false, turn_index:0` population into its three partitions (dist-write wipe / host restart / ordinary cold)
+and re-run that check before closing the last door on this PRD.
+
+**Left open by this wave, recorded as debt.** `shortcut: the dist-write contract boundary (a plugin/dist/** write
+re-activates the plugin in-process and clears the adapter caches) is documented only in gitignored .tmp; add a tracked
+note when plugin docs are next touched. Ceiling: deploy practice is unrecorded; upgrade path: three lines beside the
+dist-sync invariant.` The three dist-sync rows stay **expected-red until deploy** (`cp plugin/src/v2/adapter.js
+plugin/dist/v2/adapter.js`) — outside this wave's grant, since a dist write is itself the trigger.

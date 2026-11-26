@@ -45,6 +45,12 @@ export async function registerV2Adapter(ctx, legacyHooks, options = {}) {
   // asks again even in `first` mode, where a live cache would otherwise replay
   // the block that refresh failed to replace.
   const retry = new Set();
+  // PRD 171 §4 (issues 151/166): one fallback replay per session per
+  // activation, the sessions a prompt withdrew in this one, and the flag a
+  // late hook reads after cleanup. All three die with the activation.
+  const rehydrated = new Set();
+  const withdrawn = new Set();
+  let disposed = false;
   // Same-session prompts run one after another (a promise chain per session),
   // so an older completion can never overwrite a newer prompt's cache.
   // Different sessions never wait on each other.
@@ -109,9 +115,59 @@ export async function registerV2Adapter(ctx, legacyHooks, options = {}) {
       .join("\n");
     if (injected) contexts.set(event.sessionID, injected);
     // An empty SUCCESS also reports a purge, an expiry or a scope change, so
-    // the withdrawn block is dropped. Anything else keeps it.
-    if (status === "empty") contexts.delete(event.sessionID);
+    // the withdrawn block is dropped. Anything else keeps it. PRD 171 §4: the
+    // withdrawal is also marked, so the fallback cannot replay it back in.
+    if (status === "empty") {
+      contexts.delete(event.sessionID);
+      withdrawn.add(event.sessionID);
+    }
     if (!injected && status !== "empty" && contexts.has(event.sessionID)) retry.add(event.sessionID);
+  }
+
+  // PRD 171 §4 / issues 151+166: a context event with no cached block is not
+  // always "no memory to inject" — a plugin re-activation clears `contexts`
+  // mid-turn. The replay is QUERY-LESS by construction: an output whose
+  // `message.parts` is empty makes `queryFromParts` (plugin.js:1639) return
+  // undefined, so `injectParams` (plugin.js:1665) omits `include.query` and the
+  // engine answers from `list_memories_by_container_tag`, never a scored search.
+  async function rehydrate(sessionID) {
+    if (withdrawn.has(sessionID) || rehydrated.has(sessionID)) return undefined;
+    if (typeof legacyHooks["chat.message"] !== "function") return undefined;
+    // BEFORE any await: one probe per session per activation, never one per step.
+    rehydrated.add(sessionID);
+    // Fail-closed floor: no host transcript means no evidence of a session to
+    // serve. It is not the re-activation discriminator — every measured
+    // cache-less line belongs to a prompted session — it only refuses a
+    // genuinely empty one.
+    if (!(await hasPriorTurn(sessionID))) return undefined;
+    const output = { message: { parts: [] } };
+    try {
+      await legacyHooks["chat.message"]({ sessionID }, output);
+    } catch {
+      return undefined; // fail open on any engine error
+    }
+    const injected = output.message.parts
+      .filter((part) => part?.type === "text")
+      .map((part) => part.text)
+      .join("\n");
+    if (!injected) {
+      if (output.injectStatus === "empty") withdrawn.add(sessionID);
+      return undefined;
+    }
+    // A prompt that filled the cache, or a withdrawal, while we awaited wins.
+    if (contexts.has(sessionID) || withdrawn.has(sessionID)) return undefined;
+    contexts.set(sessionID, injected);
+    return injected;
+  }
+
+  async function hasPriorTurn(sessionID) {
+    try {
+      if (typeof ctx?.session?.context !== "function") return false;
+      const messages = await ctx.session.context({ sessionID });
+      return Array.isArray(messages) && messages.length > 0;
+    } catch {
+      return false;
+    }
   }
 
   await ctx.session.hook("context", async (event) => {
@@ -119,7 +175,11 @@ export async function registerV2Adapter(ctx, legacyHooks, options = {}) {
     // hook found. Three fields only — no prompt text, no block text, no
     // directory (memory text is user-private).
     if (log) log("context.hook", { session_id: event.sessionID, has_block: contexts.has(event.sessionID), turn_index: turns.get(event.sessionID) ?? 0 });
-    const injected = contexts.get(event.sessionID);
+    // PRD 171 §4: cleanup is the contract that drops the block; a late hook
+    // must not reopen the path it closed.
+    if (disposed) return;
+    let injected = contexts.get(event.sessionID);
+    if (!injected) injected = await rehydrate(event.sessionID);
     if (injected) event.system.push({ type: "text", text: injected });
   });
 
@@ -173,10 +233,13 @@ export async function registerV2Adapter(ctx, legacyHooks, options = {}) {
   return async () => {
     controller.abort();
     await watcher;
+    disposed = true;
     contexts.clear();
     turns.clear();
     queues.clear();
     stale.clear();
     retry.clear();
+    rehydrated.clear();
+    withdrawn.clear();
   };
 }
