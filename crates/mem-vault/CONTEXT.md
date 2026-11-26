@@ -93,11 +93,15 @@ be read as a second rotation design.
 ## Purge stance
 
 The purge erasure leg is **not shipped yet** — W8b owns it (D-11, D-13 … D-16,
-D-18). The gap is live: W8a's feeder writes vault content, so `purge.completed`'s
-`not_erased` is **not** complete without a vault entry. Until W8b lands, a purge
-leaves this tier's bytes in place and over-reports completeness; `mem-bridge`'s
-purge is proved unable to touch these directories only because no erasure path
-exists yet — that is the residual, not a guarantee.
+D-18). W8a's feeder writes vault content, so `purge.completed`'s `not_erased`
+names this tier explicitly and answers `erased: "Unknown"` (ADR-0019 D-19-9):
+the report says the vault was not established erased, rather than leaving the
+tier out or claiming `No`. `Unknown` stays until W8b ships the leg; only then do
+`Yes` and `No` become reachable, and what `Yes` is worth changes at W8c
+(key-generation destruction). No erasure path exists yet, so a purge today
+leaves this tier's bytes in place and says so; `mem-bridge`'s purge is proved
+unable to touch these directories only because that path does not exist — the
+residual, not a guarantee.
 
 ## Accepted, documented, not mitigated
 

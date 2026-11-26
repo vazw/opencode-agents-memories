@@ -288,6 +288,8 @@ async fn test_purge_keeps_a_fact_sourced_only_by_a_surviving_milestone() {
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
 async fn test_purge_report_always_names_the_surviving_tier() {
+    use mem_bridge::purge::{Erased, NOT_ERASED};
+
     // The accessor is the subject: the CLI JSON is built FROM it, so the two
     // cannot drift. `NOT_ERASED` is the single source in mem-bridge.
     let report = mem_bridge::purge::PurgeReport::default();
@@ -296,14 +298,44 @@ async fn test_purge_report_always_names_the_surviving_tier() {
         !not_erased.is_empty(),
         "not_erased is mandatory and non-empty"
     );
-    assert_eq!(not_erased.len(), 2, "exactly two surviving tiers");
+    assert_eq!(not_erased.len(), 3, "three named rows: shard, recap, vault");
     assert_eq!(not_erased[0].tier, "memories-shard");
+    assert_eq!(not_erased[0].erased, Erased::No);
+    assert!(
+        not_erased[0].reason.contains("Phase 4"),
+        "D-19-9: the condition is named"
+    );
     assert_eq!(not_erased[1].tier, "milestones-recap");
-    assert!(!not_erased[0].reason.is_empty(), "the reason is non-empty");
-    assert!(!not_erased[1].reason.is_empty(), "the reason is non-empty");
     assert_eq!(
-        mem_bridge::purge::NOT_ERASED,
-        [not_erased[0], not_erased[1]],
+        not_erased[1].erased,
+        Erased::No,
+        "D-19-8: retained, so the answer is known"
+    );
+    assert_eq!(not_erased[2].tier, "vault");
+    assert_eq!(
+        not_erased[2].erased,
+        Erased::Unknown,
+        "D-19-9: named, pending W8b"
+    );
+    assert!(
+        not_erased.iter().all(|entry| !entry.reason.is_empty()),
+        "every reason is non-empty"
+    );
+    assert_eq!(
+        not_erased
+            .iter()
+            .filter(|entry| entry.erased == Erased::Unknown)
+            .count(),
+        1,
+        "D-19-9 last clause: no other tier answers Unknown"
+    );
+    assert!(
+        !not_erased.iter().any(|entry| entry.erased == Erased::Yes),
+        "nothing can establish Yes before W8b"
+    );
+    assert_eq!(
+        NOT_ERASED.as_slice(),
+        not_erased,
         "the accessor returns the constant"
     );
 
@@ -312,8 +344,7 @@ async fn test_purge_report_always_names_the_surviving_tier() {
     let report = mem_bridge::purge::purge_session(&seeded.store, None, &request())
         .await
         .expect("purge");
-    assert_eq!(report.not_erased()[0].tier, "memories-shard");
-    assert_eq!(report.not_erased()[1].tier, "milestones-recap");
+    assert_eq!(report.not_erased(), NOT_ERASED.as_slice());
 }
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
@@ -1422,9 +1453,16 @@ async fn test_purge_session_process_exits_zero_and_reports_counts() {
         .as_array()
         .expect("not_erased is an array");
     assert!(!not_erased.is_empty(), "not_erased is mandatory");
-    assert_eq!(not_erased.len(), 2, "exactly two surviving tiers");
+    assert_eq!(not_erased.len(), 3, "three surviving tiers");
     assert_eq!(not_erased[0]["tier"], "memories-shard");
+    assert_eq!(not_erased[0]["erased"], "No");
     assert_eq!(not_erased[1]["tier"], "milestones-recap");
+    assert_eq!(not_erased[1]["erased"], "No");
+    assert_eq!(not_erased[2]["tier"], "vault");
+    assert_eq!(
+        not_erased[2]["erased"], "Unknown",
+        "D-19-9: the vault is named, not omitted"
+    );
     for tier in not_erased {
         assert!(
             tier["reason"]
@@ -1432,7 +1470,21 @@ async fn test_purge_session_process_exits_zero_and_reports_counts() {
                 .is_some_and(|reason| !reason.is_empty()),
             "every reason is non-empty"
         );
+        assert!(
+            tier["erased"]
+                .as_str()
+                .is_some_and(|erased| !erased.is_empty()),
+            "every row carries the tri-state: {stdout}"
+        );
     }
+    assert_eq!(
+        not_erased
+            .iter()
+            .filter(|tier| tier["erased"] == "Unknown")
+            .count(),
+        1,
+        "no other tier answers Unknown"
+    );
 
     // Rows really gone.
     let store = episodic_store(&dir).await;
@@ -1693,10 +1745,8 @@ async fn test_purge_does_not_touch_the_vault_directories() {
 
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines.len(), 1, "exactly one stdout line: {stdout}");
-    assert!(
-        !stdout.contains("vault"),
-        "the report must not name a tier that holds nothing: {stdout}"
-    );
+    // D-19-9: the vault row is STANDING, not conditional on this run finding
+    // rows — "we did not look" must never render as "nothing there".
     let event: serde_json::Value = serde_json::from_str(lines[0]).expect("JSON line");
     assert_eq!(event["event"], "purge.completed");
     assert_eq!(event["outcome"], "erased");
@@ -1707,9 +1757,16 @@ async fn test_purge_does_not_touch_the_vault_directories() {
     let not_erased = event["not_erased"]
         .as_array()
         .expect("not_erased is an array");
-    assert_eq!(not_erased.len(), 2, "exactly two surviving tiers");
+    assert_eq!(not_erased.len(), 3, "three surviving tiers");
     assert_eq!(not_erased[0]["tier"], "memories-shard");
+    assert_eq!(not_erased[0]["erased"], "No");
     assert_eq!(not_erased[1]["tier"], "milestones-recap");
+    assert_eq!(not_erased[1]["erased"], "No");
+    assert_eq!(not_erased[2]["tier"], "vault");
+    assert_eq!(
+        not_erased[2]["erased"], "Unknown",
+        "capitalised as ADR-0019 spells it, not \"unknown\""
+    );
 
     assert_eq!(
         std::fs::read(vault_dir.join("vault.db")).expect("read back the vault-shaped file"),

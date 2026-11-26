@@ -41,13 +41,15 @@
 //!
 //! # Purge
 //!
-//! W8a has landed, so the premise of the old sentence is gone: the vault now
-//! holds content for any session that marked it, and `purge.completed`'s
-//! `not_erased` is **no longer** complete or true without naming the vault. The
-//! W8b leg (D-11, D-13 … D-16, D-18) is not shipped, so the gap is live: a
-//! purge run today erases no vault rows and does not say so. `mem-bridge`'s
-//! purge is proved unable to reach these directories only because no erasure
-//! path exists yet — that is the residual, not a guarantee.
+//! W8a's feeder writes vault content, so `purge.completed`'s `not_erased` names
+//! this tier explicitly and answers `erased: "Unknown"` (ADR-0019 D-19-9): the
+//! report says the vault was not established erased, rather than leaving the
+//! tier out or claiming `No`. `Unknown` stays until W8b ships the leg (D-11,
+//! D-13 … D-16, D-18); only then do `Yes` and `No` become reachable, and what
+//! `Yes` is worth changes at W8c (key-generation destruction). No erasure path
+//! exists yet, so a purge today leaves this tier's bytes in place and says so;
+//! `mem-bridge`'s purge is proved unable to touch these directories only
+//! because that path does not exist — the residual, not a guarantee.
 //!
 //! # Identity drift (accepted, documented, not mitigated)
 //!

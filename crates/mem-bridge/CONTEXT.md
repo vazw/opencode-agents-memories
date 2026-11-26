@@ -241,7 +241,8 @@ the `-32002` code row, the exit-code-75 row, the status-file-format row.
   creates the file). Exit codes: **0** erased, **64** usage/confirmation/
   scope, **74** store-or-IO, **75** busy. Success prints exactly one JSON
   line with counts and a mandatory, non-empty `not_erased` array naming the
-  surviving legacy `memories` shard.
+  three surviving tiers, each with `erased: Yes|No|Unknown`; only the vault
+  answers `Unknown` until W8b.
 - **Chat capture gate** (issue 98) — `chatMessage.enabled` is enforced on the
   chat-capture path only: `CaptureService::chat_capture_enabled` is the single
   resolved value (builder `with_chat_capture_enabled`, default `true` =

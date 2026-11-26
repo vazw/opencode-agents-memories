@@ -19,8 +19,9 @@
 //!
 //! The vault, the host transcript, logs, exports, media, `facts.db` and the
 //! memories shards are outside the sweep by construction; `not_erased` names
-//! the two tiers that survive a purge so the report is never readable as a
-//! complete erasure.
+//! the three tiers that survive a purge — each with `erased: Yes|No|Unknown`,
+//! the vault answering `Unknown` until W8b — so the report is never readable
+//! as a complete erasure.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -412,6 +413,11 @@ fn now_unix_millis() -> i64 {
 /// Prints EXACTLY one stdout line on success: labels and counts, never content
 /// and never paths (the `purge.completed` grammar).
 fn print_completed(report: &SweepReport) {
+    println!("{}", completed_line(report));
+}
+
+/// The one `sweep.completed` line, as a value so a test can read it.
+fn completed_line(report: &SweepReport) -> serde_json::Value {
     let labels =
         |tiers: &[Tier]| -> Vec<&'static str> { tiers.iter().map(|tier| tier.as_str()).collect() };
     let failures: Vec<serde_json::Value> = report
@@ -424,9 +430,15 @@ fn print_completed(report: &SweepReport) {
     let not_erased: Vec<serde_json::Value> = report
         .not_erased()
         .iter()
-        .map(|entry| serde_json::json!({ "tier": entry.tier, "reason": entry.reason }))
+        .map(|entry| {
+            serde_json::json!({
+                "tier": entry.tier,
+                "erased": entry.erased.as_str(),
+                "reason": entry.reason,
+            })
+        })
         .collect();
-    let line = serde_json::json!({
+    serde_json::json!({
         "event": "sweep.completed",
         "outcome": "swept",
         "vacuumed": labels(&report.vacuumed),
@@ -436,6 +448,29 @@ fn print_completed(report: &SweepReport) {
         "baks_bytes": report.baks_bytes,
         "milestone_compacted": report.milestone_compacted,
         "not_erased": not_erased,
-    });
-    println!("{line}");
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sweep_completed_serializes_the_vault_tri_state() {
+        let line = completed_line(&SweepReport::default());
+        assert_eq!(line["event"], "sweep.completed");
+        let rows = line["not_erased"]
+            .as_array()
+            .expect("not_erased is an array");
+        assert_eq!(rows.len(), 3, "three surviving tiers, vault included");
+        assert_eq!(rows[0]["erased"], "No");
+        assert_eq!(rows[1]["erased"], "No");
+        assert_eq!(rows[2]["tier"], "vault");
+        assert_eq!(rows[2]["erased"], "Unknown");
+        assert_eq!(
+            rows.iter().filter(|row| row["erased"] == "Unknown").count(),
+            1,
+            "no other tier answers Unknown"
+        );
+    }
 }

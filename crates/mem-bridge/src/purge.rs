@@ -47,10 +47,12 @@
 //!
 //! # What is never erased
 //!
-//! The legacy tier-1 `memories` shard, and the merged milestone recap with its
-//! embedding (the scrub is text-only). Every success line carries a mandatory,
-//! non-empty `not_erased` array naming both tiers, so `purge.completed` is
-//! never readable as a complete erasure.
+//! The legacy tier-1 `memories` shard, the merged milestone recap with its
+//! embedding (the scrub is text-only), and the vault (W8b has not shipped its
+//! erasure leg). Every success line carries a mandatory, non-empty
+//! `not_erased` array naming all three tiers with `erased: Yes|No|Unknown` —
+//! only the vault answers `Unknown` — so `purge.completed` is never readable
+//! as a complete erasure.
 //!
 //! # Exit codes
 //!
@@ -109,11 +111,38 @@ impl FactsLeg {
     }
 }
 
+/// Whether a purge erased a named tier's content.
+///
+/// ADR-0019 D-19-9: `Unknown` is scoped to the vault tier; no other tier ever
+/// answers it — `Unknown` where the answer is a known `No` would be a new lie.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Erased {
+    /// The tier's content for this request is gone.
+    Yes,
+    /// The tier's content survives (a named residual).
+    No,
+    /// The tool cannot establish the answer. Vault only, until W8b.
+    Unknown,
+}
+
+impl Erased {
+    /// The wire label, capitalised exactly as ADR-0019 spells it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Yes => "Yes",
+            Self::No => "No",
+            Self::Unknown => "Unknown",
+        }
+    }
+}
+
 /// One tier a purge deliberately did NOT erase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NotErasedTier {
     /// The tier name.
     pub tier: &'static str,
+    /// Whether that tier's content was erased by this report's run.
+    pub erased: Erased,
     /// Why it survives, and when it is in scope.
     pub reason: &'static str,
 }
@@ -122,15 +151,24 @@ pub struct NotErasedTier {
 ///
 /// A survivor the report does not name is the same lie one level up: the
 /// contributor scrub keeps the milestone row, its merged summary and its
-/// embedding, so both tiers are named.
-pub const NOT_ERASED: [NotErasedTier; 2] = [
+/// embedding, and W8a's feeder writes the vault while W8b owns its erasure
+/// leg, so all three tiers are named — the vault answering `Unknown` rather
+/// than being left out.
+pub const NOT_ERASED: [NotErasedTier; 3] = [
     NotErasedTier {
         tier: "memories-shard",
+        erased: Erased::No,
         reason: "no per-session provenance; Phase 4",
     },
     NotErasedTier {
         tier: "milestones-recap",
+        erased: Erased::No,
         reason: "the merged milestone summary and its embedding survive a contributor scrub; no re-summarization, no re-embed (owner ruling 2026-10-21)",
+    },
+    NotErasedTier {
+        tier: "vault",
+        erased: Erased::Unknown,
+        reason: "W8a writes vault rows; the W8b purge leg is not shipped, so a purge leaves this tier's rows in place",
     },
 ];
 
@@ -151,8 +189,9 @@ impl PurgeReport {
         self.episodic.is_empty() && self.facts.is_empty()
     }
 
-    /// The tiers this purge did NOT erase (always the two survivor entries —
-    /// the shard and the merged milestone recap — so a success is never a
+    /// The tiers this purge did NOT erase (always the three named entries —
+    /// the shard, the merged milestone recap and the vault, the last answering
+    /// [`Erased::Unknown`] until W8b — so a success is never a
     /// complete-erasure claim).
     pub fn not_erased(&self) -> &'static [NotErasedTier] {
         &NOT_ERASED
@@ -429,6 +468,7 @@ fn print_completed(request: &PurgeRequest, report: &PurgeReport) {
         .map(|entry| {
             serde_json::json!({
                 "tier": entry.tier,
+                "erased": entry.erased.as_str(),
                 "reason": entry.reason,
             })
         })
