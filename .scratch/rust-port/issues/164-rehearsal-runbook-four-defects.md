@@ -85,7 +85,7 @@ example, if `§2a`'s live writer can never contend on a supported path) — reco
 
 ## Wave landed 2026-11-25 — blueprint `073462ef9d95`, review-2 APPROVED
 
-Two files changed against `bf15e14`: `docs/runbooks/parity-drop-in-rehearsal.md` and `scripts/smoke-rest-surface.sh`.
+Two files changed against `fb28fc2`: `docs/runbooks/parity-drop-in-rehearsal.md` and `scripts/smoke-rest-surface.sh`.
 No new files. Gate history: plan rejected twice (round 1 on seven items, round 2 on one numeral), approved round 3;
 implementation rejected once (a documented message no execution had ever produced, plus a fail-open security control
 and an unbounded HTTP status), approved on re-review.
@@ -113,7 +113,7 @@ What each cell now does, and the proof:
 and a token gate sits before the evidence tree can be staged. The gate was proven by planting a token: it refuses with
 `TOKEN-IN-EVIDENCE STOP` naming the file and stages nothing. Reason: the mem-web index embeds
 `window.__OPENCODE_MEM_TOKEN__`, and a capture once committed one (`run-20261125T035152Z/index.html`, redacted in
-`bf15e14`). Cleanup-after-use loses on SIGKILL; containment does not.
+`fb28fc2`). Cleanup-after-use loses on SIGKILL; containment does not.
 
 **Three non-blocking findings remain open**, each with the reviewer's own fix shape, and none affects a criterion:
 the handoff's line anchors are stale after the last edit; §13's gate treats a `grep` scan failure (rc 2) as "no hits",

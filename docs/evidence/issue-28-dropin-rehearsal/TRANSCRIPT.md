@@ -497,7 +497,7 @@ edit to an expectation after the fact — a mismatch is recorded as a mismatch, 
 
 `run-20261125T035152Z/index.html` is a `curl` capture of the rehearsal engine's served index, and the mem-web UI injects
 `window.__OPENCODE_MEM_TOKEN__` into that document. The capture therefore landed the scratch instance's token verbatim
-(one 64-hex value, tracked by `cd9094a`). The value has been replaced with `<REDACTED>` in the tracked file.
+(one 64-hex value, tracked by `161685c`). The value has been replaced with `<REDACTED>` in the tracked file.
 
 Severity, measured: it is **not** the live host's token (sha256 prefixes `1367ef89ad81b5cf` vs `25612a61a77a92bd`) and
 it belongs to a scratch engine on port 3749 that no longer exists (`ss -ltnp` → nothing). The only store it opens is the
