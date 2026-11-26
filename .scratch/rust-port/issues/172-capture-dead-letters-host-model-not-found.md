@@ -1,9 +1,45 @@
 # 172 — auto-capture dead-letters every attempt: `host_model_not_found` for `opencode-go/beam-free`
 
 Status: needs-triage — filed 2026-11-26 from a post-restart health check; no fix attempted.
-Filed: 2026-11-26
+Filed: 2026-11-26 — **the original premise is falsified; see the correction below before reading on.**
 
-## What was observed
+## Correction 2026-11-26 14:05 — "zero successful captures" was a census artifact
+
+The original filing counted `capture.*` **JSON event names** and concluded that the capture path had never had a
+success. That count was right and the conclusion was wrong: the log carries auto-capture in **two different line
+shapes**, and only one of them is a JSON `capture.*` event. Whole-log census by line family, MEASURED over 10,798
+lines:
+
+| line family | count |
+|---|---|
+| `Auto-capture memory persisted` | **146** |
+| `Auto-capture provider ready` | 15 |
+| `Auto-capture skipped` (`reason: provider_skip`) | 4 |
+| `Auto-capture provider failed` | 4 |
+| `Auto-capture final error` | 3 |
+| `capture.dead_lettered` (JSON) | 3 |
+
+So capture succeeds overwhelmingly. Store growth corroborates it: `GET /api/memories` reports **`total` 5,845**, up
+from 5,601 when the census for issue 167 was taken, and a further capture landed 40 s later (5,846). The plain-text
+family is not a JSON event at all — no `level`, no `component` — which is exactly why a `capture\.[a-z_]+` grep could
+not see it. **Rule: census by line family, never by the one event shape you expect.**
+
+What survives of the original observation, MEASURED:
+
+- The three `host_model_not_found` 404s are real (2026-11-25 21:50:29, 2026-11-25 23:52:38, 2026-11-26 10:40:40),
+  all `providerID=opencode-go;modelID=beam-free`, all classed `config`, each followed by an `Auto-capture final
+  error` — those three captures are lost, and 3 failures against 146 successes needs corroborating evidence before
+  it is called a systematic defect.
+- Retries **do** happen. The fourth failure (`2026-11-26T13:59:52`, `errorKind: network`, `reason:
+  summarizer_failed`, captureId `01a216a7-16d3-7524-9ab9-f5b6faf05546`) was persisted at `14:00:20` **under the same
+  captureId**, across the engine restart. The original claim "dead_lettered means no retry" is therefore true only of
+  the config-class failures, not of the network-class one.
+
+Revised reading: the host resolves a summarizer model per request, and only some requests ask for `beam-free`. The
+question is no longer "which capture path is intended" but "which sessions resolve to `beam-free`, and is that the
+intended default?" — 3 dead letters against 146 successes is a narrow, intermittent defect, not a silent total loss.
+
+## What was observed (original filing, premise now corrected)
 
 The live log (`~/.opencode-mem/opencode-mem.log`, read-only) holds exactly **three** `capture.*` events, and every one
 of them is a failure:
@@ -45,14 +81,17 @@ see the triage question below.
   manual API block may be the intended path. Deciding this needs the owner.
 - **How often capture is supposed to fire.** Three events in ~15 h could be every session end or a small fraction of
   them; the log does not say what triggers it, so the loss rate is not yet bounded.
-- **Whether the dead letters are retried.** `capture.retry_scheduled` does not appear in the log at all, so nothing was
-  scheduled — but that is an absence of evidence, not a measured retry policy.
+- **Whether the dead letters are retried.** `capture.retry_scheduled` does not appear in the log at all. Superseded
+  by the correction: retry behaviour is visible directly (the 13:59:52 network failure persisted at 14:00:20 under the
+  same captureId), so the absence of that event name means nothing.
 
 ## The triage question
 
-Which capture path is intended: the host-model path (`opencodeProvider`/`opencodeModel` at `:86`, currently broken), or
-the manual API path (`memoryApiKey`/`memoryApiUrl`/`memoryModel` at `:107`)? The answer decides whether this is a
-one-line config fix or a deeper wiring question, and it is the owner's call rather than a code question.
+Revised after the correction: which sessions resolve to `beam-free`? The host-model path works for 146 of 150
+attempts, so this is not "pick a capture path" — it is "why does one model id 404 on some requests". The owner-level
+part is narrower: is `opencodeModel: beam-free` (`opencode-mem.jsonc:86`) still intended, given it produces a
+`host_model_not_found` 404 whenever the host reaches for it, while the other attempts resolve a different summarizer
+and succeed? A config answer, not a code question.
 
 ## Not in scope
 
