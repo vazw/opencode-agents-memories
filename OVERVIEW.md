@@ -201,3 +201,31 @@ _Maintain backward compatibility with the OpenCode host environment. This projec
 
 
 > Deferred to hardening (Phase 7): auto-update, i18n, request-timeout polish, bundle-boundary/loader-contract parity audit, drop-in rehearsal — see roadmap §Sequencing 7, W7.1–W7.2.
+
+## Scope ruling 2026-11-26 — post-pin upstream features
+
+The vendored clone moved from `1ddfdad`/v2.33.0 to `9086c65`/v2.39.0 (117 → 140 test files), adding 30 test
+files that describe capabilities this port does not build. **Owner ruling 2026-11-26: none of them is in
+scope**, except where an accepted ADR already mandates the work — and the one such item is not an upstream
+feature (`ADR-0019` D-19-9, filed as issue 173). Audit and per-file grounds:
+`docs/evidence/feature-gap-audit-20261126/FINDINGS.md`.
+
+Each row below is a **non-goal with a re-open trigger**, not a backlog item. A re-open trigger firing means a
+new issue is filed and this table is amended; until then the parity matrix records the upstream test as
+`N-A`-by-ruling.
+
+| upstream capability (post-pin) | why it is not built here | re-open trigger |
+|---|---|---|
+| `memoryBackend: "markdown"` — `.md` files as the store, watcher, write-through, `/api/markdown/*` | the shard engine is the single source of truth; a second store doubles the migration and encryption surface | a user asks for folder-as-store, or a config carrying the key is seen outside the upstream clone |
+| dreaming — `dreaming.*`, interval consolidation, related-threshold grouping, `/api/dreaming/*` | dedup and retention exist; an interval LLM merge needs the trash tier this port does not have | the duplicate rate outruns what dedup absorbs |
+| memory trash + restore — `/api/memories/trash`, `/api/memories/{id}/restore` | delete is intentionally hard; export/import is the recovery path | someone loses a memory they needed back |
+| `updateOnCapture` — add / update / supersede at capture | capture is add-only by design; dedup cleans the duplicates it creates | duplicate volume demonstrably exceeds dedup |
+| providers `api-route`, `cheaper-inference`, `runcrate` | this port ships the OVERVIEW §4.1 providers plus the host's; every provider is a credential and failure surface | one is required for a real deployment |
+| `embeddingIdleTimeoutMs` — release the ONNX model when idle | upstream's default is `0` (disabled), so default behaviour already matches | measured RSS after an embed pass proves the release matters |
+| WAL-index (`-shm`) quarantine and single retry | recovery is turso's own open path until shown otherwise on this stack | a torn `-shm` is reproduced here |
+| provenance attributes (`id`/`created`/`project`) on injected memories | the block's bytes are spent on content; the model cites memories by text today | a measurement shows the host model asking for ids |
+| capture-provider readiness toast and provider fallback order | the engine publishes `auto_capture_provider_status` in `hello` (`crates/mem-core/src/config/schema.rs:479`); the dead letter is the user-visible substitute | provider misconfiguration becomes a recurring question |
+
+`OVERVIEW.md` stays the scope authority: the 5 epics above are unchanged and fully implemented. This section
+exists so "upstream has it" is not mistaken for "this port owes it".
+

@@ -34,6 +34,22 @@ it: no script diffs `ls tests/*.test.ts` against the pinned list.
 
 ---
 
+## 0b. Owner ruling, 2026-11-26 — what happens to these gaps
+
+Decided after reading this report; recorded here so the findings and their dispositions do not drift apart.
+
+- **Scope:** upstream 2.33→2.39 features are **out of scope**, except where an accepted ADR already
+  mandates the work. The non-goal list, each entry with its re-open trigger, lives in `OVERVIEW.md`
+  §"Scope ruling 2026-11-26". G1, G2, G3, G5, G6, G7, G8, G9 and G10 therefore become `N-A`-by-ruling
+  dispositions in the parity matrix, **not** issues.
+- **In scope, filed:** G4 →
+  `.scratch/rust-port/issues/173-purge-report-does-not-name-the-vault-tier.md`.
+- **G11 withdrawn** as a false positive (§5): upstream does not exempt pinned rows from the age cutoff
+  either. The audit's only `partial` row is gone; nothing else changed rank.
+- **Re-pin** (`docs/agents/testing.md` + `docs/agents/upstream-tests-*.txt` to `9086c65`/140) happens
+  **after** this ruling, writing one disposition per upstream file, with `N-A` rows citing the OVERVIEW
+  ruling rather than "unspecified".
+
 ## 1. Upstream coverage — the 30 files with no disposition
 
 Derivation (MEASURED):
@@ -57,7 +73,7 @@ comm -23 /tmp/up140.txt <(awk -F'|' '/^\| `tests\//{gsub(/`| /,"",$2); print $2}
 | 9 | `update-on-capture.test.ts` | none (`git grep -i updateOnCapture` → 0) | **gap** — add/update/supersede on capture absent |
 | 10 | `embedding-idle-dispose.test.ts` | none (`git grep -n idle crates/mem-embed/src` → 0) | **gap** — model never released |
 | 11 | `memory-provenance.test.ts` | `crates/mem-bridge/src/inject.rs:1277` emits only `relevance="N%"` | **gap** — id/created/project attributes absent |
-| 12 | `memory-injection-eligibility.test.ts` | `crates/mem-bridge/src/inject.rs:472–502` (age cutoff, session exclusion) | **partial** — pinned exemption not visible in the inject path |
+| 12 | `memory-injection-eligibility.test.ts` | `crates/mem-bridge/src/inject.rs:472–502` (age cutoff, session exclusion); `crates/mem-bridge/tests/inject_chat_gates.rs:67`, `:597` | **covered-by — audit error, corrected 2026-11-26 (see §5)**. The first draft claimed upstream exempts pinned rows from the age cutoff and the port does not. Upstream's own oracle refutes that: `tests/fixtures/memory-injection-eligibility.mjs:189` adds `too-old-pinned` with `pinned: true`, and `result.ageFiltered` (`:192`, asserted at test `:66-69`) is `["recent"]` — the pinned-but-too-old row is **excluded** when the cutoff is on, and only reappears when it is disabled. The port behaves identically |
 | 13 | `api-route-provider.test.ts` | none; `ProviderKind` has 8 kinds (`crates/mem-ai/src/provider/registry.rs:55`) | **gap** — provider absent |
 | 14 | `cheaper-inference-provider.test.ts` | none | **gap** — provider absent |
 | 15 | `runcrate-provider.test.ts` | none | **gap** — provider absent |
@@ -77,9 +93,10 @@ comm -23 /tmp/up140.txt <(awk -F'|' '/^\| `tests\//{gsub(/`| /,"",$2); print $2}
 | 29 | `memory-recall.test.ts` | recall gates live in `crates/mem-bridge/src/inject.rs` + `plugin/src/plugin.js:1034–1047`; owned by issues 63/98 (both `done`) | **covered-by, no row** |
 | 30 | `profile-inject-empty-memories.test.ts` | `crates/mem-bridge/tests/inject_profile.rs:582` (profile-only block) | **covered-by** — row absent |
 
-Count: **3 N-A**, **5 covered-by / covered-by-different-design**, **1 partial**, **1 uncertain**, **19
-gaps** (grouped into 8 features). `READ` for the counterpart cells; each counterpart path was opened or
-grepped, not assumed.
+Count after the §5 correction: **4 N-A**, **7 covered-by / covered-by-different-design**, **1 uncertain**,
+**1 low**, **17 gaps** (nine feature groups). `READ` for the counterpart cells; each counterpart path was
+opened or grepped, not assumed — the one cell that was *not* opened (row 12) was wrong, which is the
+argument for the rule.
 
 **Why the pin could not have caught these — INFERRED.** Re-pinning the matrix (issue 71's territory;
 issue 28 is the owner's rehearsal) only *creates the rows*. A row that is written honestly for #1–#17
@@ -296,13 +313,20 @@ Rank = user-visible value. Each carries the observation that would close it as *
 - **Inverted world:** issue 172's dead-letter line is ruled a sufficient user-visible substitute.
 - **Disposition:** **addition to issue 172** (or 63) rather than a new issue.
 
-### G11 — Injection eligibility: pinned memories are not exempt from the age cutoff
-- **Partial (READ/INFERRED):** `crates/mem-bridge/src/inject.rs:478-502` applies `age_cutoff` and
-  `excluded_session`; the inject path never reads `is_pinned` (`git grep -n pinned crates/mem-bridge/src
-  crates/mem-store/src/vector.rs` → only listing/tool paths at `vector.rs:929`, `tools/memories.rs:285`).
-  Upstream eligibility keeps pinned rows regardless of cutoff (`memory-injection-eligibility.test.ts:67`).
-- **Inverted world:** a Rust test that pins a row older than `max_age_days` and observes it injected.
-- **Disposition:** **new small issue** or a `covered-by` row once that test exists.
+### G11 — withdrawn: the audit's claim was wrong (corrected 2026-11-26)
+
+The first draft filed "pinned memories are not exempt from the injection age cutoff" as a partial gap,
+claiming upstream keeps them. **MEASURED, and false.** Upstream's fixture
+(`example/opencode-mem/tests/fixtures/memory-injection-eligibility.mjs:189`) adds `too-old-pinned` with
+`pinned: true`; `ageFiltered` (`:192`) is asserted equal to `["recent"]` at test `:66-69` — the pinned row is
+filtered out while the cutoff is enabled and returns only when it is disabled (`ageDisabled`). The Rust port
+applies the same cutoff (`crates/mem-bridge/src/inject.rs:478-502`) and pins it with
+`test_assemble_drops_rows_older_than_max_age_days` (`crates/mem-bridge/tests/inject_chat_gates.rs:67`) and
+`test_max_age_days_drops_old_tier1_rows` (`:597`). Behaviour matches; row 12 of §1 is `covered-by`, not a gap.
+
+Lesson kept deliberately: this was the report's only `partial` cell and it was the only cell whose
+counterpart was inferred from a test *name* rather than opened. A gap claim is a claim about the oracle, not
+about our code.
 
 ### G12 — Matrix and docs corrections (no code)
 - Re-pin `docs/agents/testing.md` + `docs/agents/upstream-tests-*.txt` to `9086c65`/140 (30 new rows; the
