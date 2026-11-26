@@ -247,3 +247,11 @@ re-activates the plugin in-process and clears the adapter caches) is documented 
 note when plugin docs are next touched. Ceiling: deploy practice is unrecorded; upgrade path: three lines beside the
 dist-sync invariant.` The three dist-sync rows stay **expected-red until deploy** (`cp plugin/src/v2/adapter.js
 plugin/dist/v2/adapter.js`) — outside this wave's grant, since a dist write is itself the trigger.
+
+**Post-deploy observation: MEASURED, 2026-11-26.** The dist write at 16:43:05.435 +0700 re-activated the plugin live;
+1.5 s later `ses_e9d5dd698…` read `has_block:false, turn_index:0` (its `turn_index` had been 8), 8 ms later
+`inject.requested` carried `query_chars:0`, no `turn_index`, `host_contract:"setup"`, and 3.7 s later the same session
+read `has_block:true, turn_index:0` and stayed true across seven further steps. So `ctx.session.context` **does** return
+messages mid-turn on this host — the claim neither review could verify — and issue 166 reproduced live and was repaired
+in the same second. One sequence, one session: it proves the mechanism fires, not a rate. Evidence, script included:
+`docs/evidence/issue-171-s4-postdeploy-20261126/`.

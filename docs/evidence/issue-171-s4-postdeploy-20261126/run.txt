@@ -1,0 +1,22 @@
+# frozen 2026-11-26T09:44Z (16:44 +07), in the second minute after the dist write
+# dist mtime: 2026-11-26 16:43:05.435 +0700
+
+window: every context.hook / inject.requested line at or after 2026-11-26T16:43:00
+logs read: 25
+
+2026-11-26T16:43:00.979+07:00  hook  ses_de9bf3787ffe6Scue7uLjjNHgU  has_block=true  turn_index=18
+2026-11-26T16:43:01.457+07:00  hook  ses_e9d5dd698ffe5lUV7W7s2KDpbh  has_block=true  turn_index=8
+2026-11-26T16:43:06.990+07:00  hook  ses_e9d5dd698ffe5lUV7W7s2KDpbh  has_block=false turn_index=0
+2026-11-26T16:43:06.998+07:00  inject ses_e9d5dd698ffe5lUV7W7s2KDpbh  query_chars=0 turn_index=- host_contract=setup
+2026-11-26T16:43:10.710+07:00  hook  ses_e9d5dd698ffe5lUV7W7s2KDpbh  has_block=true  turn_index=0
+2026-11-26T16:43:14.007+07:00  hook  ses_e9d5dd698ffe5lUV7W7s2KDpbh  has_block=true  turn_index=0
+2026-11-26T16:43:20.643+07:00  hook  ses_e9d5dd698ffe5lUV7W7s2KDpbh  has_block=true  turn_index=0
+2026-11-26T16:43:27.918+07:00  hook  ses_e9d5dd698ffe5lUV7W7s2KDpbh  has_block=true  turn_index=0
+2026-11-26T16:43:30.228+07:00  hook  ses_e9d5dd698ffe5lUV7W7s2KDpbh  has_block=true  turn_index=0
+2026-11-26T16:43:40.929+07:00  hook  ses_e9d5dd698ffe5lUV7W7s2KDpbh  has_block=true  turn_index=0
+2026-11-26T16:43:43.818+07:00  hook  ses_e9d5dd698ffe5lUV7W7s2KDpbh  has_block=true  turn_index=0
+2026-11-26T16:43:55.455+07:00  hook  ses_e9d5dd698ffe5lUV7W7s2KDpbh  has_block=true  turn_index=0
+
+observation per session:
+  ses_e9d5dd698ffe5lUV7W7s2KDpbh  false/0 at 2026-11-26T16:43:06.990+07:00  ->  true/0 at 2026-11-26T16:43:10.710+07:00  query-less inject at 2026-11-26T16:43:06.998+07:00
+  complete sequences: 1

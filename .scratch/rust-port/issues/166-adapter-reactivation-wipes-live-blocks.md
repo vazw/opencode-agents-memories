@@ -165,3 +165,8 @@ is not seen by the next one; it is self-correcting because the replayed inject a
 the model-request critical path, once per session per activation, failing open on error. The replayed path writes the
 wrapper's own `inject.requested` (`query_chars:0`, no `turn_index`) and `inject.received`
 (`host_contract:"setup"`), so a future audit must not read a fallback-written `inject.requested` as a prompt.
+
+**Live reproduction and repair, 2026-11-26 16:43 +0700.** The deploy of the fixed adapter at `16:43:05.435` cleared the
+live caches exactly as this issue describes: `ses_e9d5dd698…` went from `has_block:true, turn_index:8` to
+`has_block:false, turn_index:0` within 1.5 s, the fallback replayed a query-less inject 8 ms later, and the session read
+`has_block:true, turn_index:0` from 16:43:10.710 onward. Evidence: `docs/evidence/issue-171-s4-postdeploy-20261126/`.
