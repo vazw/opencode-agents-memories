@@ -18,6 +18,18 @@ Measured 2026-10-31:
 | dimensions | 768 = the store's current width | `crates/mem-core/src/config/normalize.rs` |
 | pooling / prefixes | preset `multilingual-e5` → mean + `query: ` / `passage: ` | same, `normalize.rs:353-358` |
 
+**Erratum 2026-11-26 — the two Thai rows concern a corpus this store does not hold, and their source is gone.**
+The cited source `.tmp/scratch/search-embedding-models-20261031.md` no longer exists (`.tmp` is
+gitignored), and the harness behind both numbers was never tracked, so neither figure can be
+reproduced from this repository. A census of the store
+(`docs/evidence/embedding-language-census-20261126/`) finds **0 rows containing Thai, Han, Kana,
+Hangul, Cyrillic, Arabic, Hebrew or Devanagari script** across 5,601 memories, and **0 of 417
+captured prompts** in a non-Latin script. The figures are kept because they were measured on Thai
+MIRACL; they are not evidence for a swap in a store that holds no such text. Independently of
+language, e5 caps at 512 tokens while nomic declares `n_positions: 8192`, and 206 rows exceed 1,800
+characters — the swap would truncate rows the current model embeds whole. Re-entry conditions are
+stated in that evidence directory.
+
 The store is 768-wide in every shard, so the swap needs **no store migration**
 — only a re-embed of each scope's vectors into the new model space.
 

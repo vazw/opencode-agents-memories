@@ -1,6 +1,9 @@
 # 167 — re-try the local multilingual-e5-base now that the truncation cap ships
 
-Status: ready-for-human (owner decision: local over hosted, planned 2026-11-25)
+Status: wontfix — closed 2026-11-26 as measurement, not a deliverable. The store holds no non-Latin script content
+(0 rows of 5,601) and the prompts none either (0 of 417); the 75.27-vs-0.19 bar rests on a harness that was never
+tracked and is now gone. Re-entry gate, measurement and the truncation arithmetic:
+`docs/evidence/embedding-language-census-20261126/`.
 Filed: 2026-11-25
 
 ## Why this exists
@@ -68,3 +71,42 @@ inputs, and the defect is in the measurement, not the model.
 
 - Hosted embedding providers (owner selected local on cost, egress and width).
 - Issue 166 (adapter re-activation wiping live blocks).
+
+## Closure 2026-11-26 — measurement, not a deliverable
+
+Full evidence: `docs/evidence/embedding-language-census-20261126/` (`census.py`, `run.txt`, `README.md`). Read-only
+over a §2a copy of the live store; live engine and host untouched.
+
+**The premise does not hold in this store.** Across 5,601 memories and 417 captured prompts, rows containing Thai, Han,
+Kana, Hangul, Cyrillic, Arabic, Hebrew or Devanagari script: **0** (0.00 %). The 75.27 figure was measured on Thai
+MIRACL, a corpus with no counterpart here. Its harness lived in `.tmp/scratch/search-embedding-models-20261031.md`,
+which is gone, and no NDCG code exists anywhere in `crates/`, `tests/`, `scripts/` or `docs/` — so the bar this issue
+asked to re-derive cannot be re-derived at all.
+
+| gate | threshold | measured |
+|---|---|---|
+| non-Latin-script share of memories | ≥ 1 % trips | **0.00 %** |
+| highest per-project non-Latin-script share | ≥ 50 % trips | **0.00 %** (all 36 shards) |
+| non-Latin-script share of captured prompts | ≥ 1 % trips | **0.00 %** |
+
+**The swap's cost is real and points the other way.** e5 caps at 512 tokens with head+tail truncation; nomic declares
+`n_positions: 8192`. 206 of 5,601 rows exceed 1,800 chars, 3 exceed 4,096, longest 6,603 — the current model embeds all
+of them whole, e5 would not. This argument survives a store that did contain non-Latin script.
+
+**Two caveats stated as limits, not smoothed over.** The prompt store is pruned: its 417 rows span
+`2026-10-26T07:09Z .. 2026-10-31T07:27Z` (six calendar days), so they describe recent usage, not history. And 39.96 % of
+memory rows carry non-ASCII characters — but that is typography and Western European orthography (`—` 2,784, `→` 1,966,
+`…` 625, `§` 436, `é` 447), not language; hence the gate is script-aware and density-filtered, and Greek is excluded
+because its 37 rows are Δ/Σ/λ/µ notation.
+
+**Method note worth keeping.** The first census run for this issue watched only non-Latin ranges and reported 99.95 %
+ASCII — it could not see em dashes. The byte-vs-character cross-check
+`length(cast(content as blob)) > length(content)` returned 2,238 rows and exposed the error. The second instrument
+caught the first; the census now prints that cross-check on every run.
+
+**Deliberately not built:** the nomic-vs-e5 retrieval canary harness, the model swap, the 280 MB e5 download, any
+`scripts/` change, any engine restaging. Recorded so omission is not later mistaken for oversight.
+
+**Re-entry.** Reopen when any gate trips: re-run `census.py` against a fresh copy. The gate is mechanical to check (one
+command, stdlib only, no network) but not automatic — nothing runs it, because no language column is persisted. That
+limitation is stated in the evidence README rather than papered over.
