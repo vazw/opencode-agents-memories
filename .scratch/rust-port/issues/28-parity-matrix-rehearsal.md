@@ -1,9 +1,10 @@
 # 28 — W7.2 · Parity matrix & drop-in rehearsal
 
-Status: ready-for-human — 2026-11-25 (copy-first phase executed: the store migrates and serves, with one cell
-unobtainable on this machine (`S5 .legacy.bak`, migrated in place elsewhere) and one real finding filed as issue 165;
-four runbook defects filed as 164. §11 live swap: ruled superseded, see `## Owner ruling 2026-11-25`. The 23 missing
-matrix rows are **issue 71**. §0b D3 hatch: reconfirmed deferred. Owner must rule on the `S5 .legacy.bak` cell.)
+Status: ready-for-human — 2026-11-26 (**S5 `.legacy.bak` is now observed, not substituted**; owner ruled B and the
+probe ran, evidence in `docs/evidence/issue-28-dropin-rehearsal/S5-legacy-bak-20261126/`). Remaining human step is the
+live swap repeat under §11. Copy-first phase executed 2026-11-25: the store migrates and serves, with one real finding
+filed as issue 165 and four runbook defects filed as 164. §11 live swap: ruled superseded, see
+`## Owner ruling 2026-11-25`. The 23 missing matrix rows are **issue 71**. §0b D3 hatch: reconfirmed deferred.)
 
 ## What to build
 
@@ -107,13 +108,15 @@ index/js/wasm/css all `200` with the exact title; a second engine refused (`rc=7
 with the `<memory_context>` frame. Post-run live invariants unchanged: same `lstart`, `.engine.lock` sha256,
 root `%Y`, 43 databases, 0 `.legacy.bak`, live config `cmp` rc=0.
 
-**Two cells fail, and only one of them is a defect.**
+**Two cells failed in the 2026-11-25 run. Only one is a defect; the other is now measured.**
+*(Updated 2026-11-26: S5 below is resolved by observation — see `### RULED`. The heading keeps its original framing so
+the 2026-11-25 transcript lines up with it.)*
 
-1. **S5 `.legacy.bak` = 0 — unobtainable on this machine, not a failure of the port.** `.turso-migrated` reads
-   `completedAt 2026-10-30T15:14:45.697Z` with shard paths under a *different* home (`/home/vaz/.opencode-mem/data`),
-   so `legacy_migrator` returns early and the `.bak` family was reaped by the erase sweep. The cell cannot be
-   satisfied on a store migrated in place elsewhere. **Owner question:** accept `completedAt` plus the early-return
-   as the "migration path exists" evidence, or require a rehearsal against a store that was never migrated.
+1. **S5 `.legacy.bak` = 0 — unobtainable on the live store, now OBSERVED on a copy (see `### RULED` below).**
+   `.turso-migrated` reads `completedAt 2026-10-30T15:14:45.697Z` with shard paths under a *different* home
+   (`/home/vaz/.opencode-mem/data`), so `legacy_migrator` returns early and the `.bak` family was reaped by the erase
+   sweep. The cell cannot be satisfied on a store migrated in place elsewhere; it was satisfied instead by driving the
+   real binary against a copy whose shard was put back into the legacy shape.
 
 ### Decision brief for that ruling — 2026-11-26, read from the code
 
@@ -146,6 +149,30 @@ Two real options:
 Recommendation: **B**, because it is the last unobtainable cell in the 110-file matrix and the probe also exercises
 migration on real data. A is the right answer only if "evidence by substitute, documented" is acceptable for this
 matrix — the owner's call, which is what this section is waiting for.
+
+### RULED 2026-11-26 — owner chose B. Executed; the cell is OBSERVED.
+
+Evidence: `docs/evidence/issue-28-dropin-rehearsal/S5-legacy-bak-20261126/` (`README.md`, `run.txt`).
+
+**The brief above was wrong about the trigger, and the probe found out why.** Deleting a sidecar does not reach the
+rename: `migrate_memory_shard:405-416` sees a shard that still reads as vector-ready, writes a fresh complete sidecar,
+and returns — no rename. The shard must be **not vector-ready** for `:505-521` to run, so the legacy shape has to be
+restored instead: drop `shard_metadata` (the schema in `turso_legacy_migrator.rs:22-42` is "no shard_metadata table").
+
+**A second finding, larger than the cell: standalone boot never runs the ready gate.** A spare-port engine against a
+non-ready copy ran 81 s, healthy, and produced no sidecar and no rename. `ensure_ready()` has no boot caller — only
+`crates/mem-bridge/src/reap.rs:142` and `reembed.rs:174` (and the memory service) call it. **A restarted engine does
+not migrate a legacy store; only the migration operations do.** The rehearsal runbook should say so.
+
+What the run produced (MEASURED, `--mode=reap-shards`, dry run, rc 0): one `.legacy.bak` of 27,181,056 B holding the
+shard's **2,959** rows; the rebuilt shard at 2,959 rows with `embedding_dimensions=768`; sidecar
+`sourceCount 2959 / expectedCount 2959 / importedCount 2959 / status complete`; `.turso-migrated` rewritten with 36
+probe paths and `completedAt 2026-11-26T08:29:02.809Z`; store total 5,463 rows before and after (backup excluded); the
+other 35 shards took the `:405` sidecar-only branch in the same run, giving the two branches side by side.
+
+Caveat to carry: the legacy shape was constructed, not inherited — real rows, real vectors, real binary, real rename,
+synthetic trigger. Live root untouched (health 200, marker mtime still Nov 16, 0 `.legacy.bak` under
+`~/.opencode-mem/data/projects`).
 2. **S5 recall rank 1 — real, and filed.** The frozen query (`97 sites across 8 crates`) did not return the
    pre-registered id anywhere in the 20 results. Not retuned, per the runbook. Filed as **issue 165** with the
    mechanism it exposed (`/api/search` pools a per-shard cap and then sorts) and the observation that would
