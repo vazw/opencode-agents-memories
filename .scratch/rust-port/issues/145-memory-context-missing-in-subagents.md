@@ -1,9 +1,11 @@
 # 145 — the pre-turn `<memory_context>` block almost never reaches subagent sessions
 
-Status: landed — sink shipped; M1 closed 2026-11-26 as a measurement of instruments (neither arm can be named from
-disk). **R2/R3 ran the same day against a real subagent** and delivery was measured **present**; the run also proved
-the runbook's Q6 question was a false-negative generator, so `Q6 = 0` no longer supports `miss-host`. Evidence:
-`docs/evidence/issue-145-m1-instrument-20261126/` and `docs/evidence/issue-145-r2-subagent-20261126/`.
+Status: **closed 2026-11-26 — measurement, not a fix.** The reported symptom ("the pre-turn block almost never
+reaches subagent sessions") is not reproducible, and the instrument that reported it was measuring the wrong thing.
+The block **is** delivered to a subagent's model call; it is simply **never persisted**, so it cannot appear in the
+transcript UI or in `session_message` on a V2 host — absence there is by design (issues 151/166), not evidence of a
+miss. Evidence: `docs/evidence/issue-145-m1-instrument-20261126/` (why the stored marker cannot measure delivery) and
+`docs/evidence/issue-145-r2-subagent-20261126/` (five children, boundaries, refreshes, and the nonce run).
 
 *(Related: issue 124, closed 2026-11-05 as "intermittent miss" — this issue supersedes its conclusion.)*
 
@@ -273,3 +275,34 @@ this run it answered correctly from the compaction checkpoint rather than from t
 the token must appear in `inject.received`'s `block_prefix` **before** the child is asked anything. Without it the
 question's answer is unreadable, and a `NONE` from it is evidence of nothing. Free-recall wording, "first entry
 under a heading", and lexical hooks are all ranking-dependent and all produced false negatives here.
+
+## Closeout, 2026-11-26 — closed as a measurement
+
+**Why this closes without a code change.** The issue asserted a delivery defect. Five children, six compaction
+boundaries and one log-carried nonce later, the defect has no witness and no plausible instrument left:
+
+- the stored `<memory_context>` marker has recorded no injection since 2026-10-11, and every loose match is text
+  pollution (M1, `docs/evidence/issue-145-m1-instrument-20261126/`);
+- arm (a), the chat-path miss, has zero live witnesses — all 353 `status:"error"` lines in the log history are
+  plugin-test fixtures;
+- the nonce instrument, as written, produced false negatives against a block that provably contained the token.
+
+**What is measured, and it is green.** Post-compaction refresh fired for **6 of 6 boundaries** across five children —
+`inject.received`, `status:"ok"`, `turn_index:2`, and every one of those blocks carried a `Recent actions` section the
+turn-0 block did not have. One child quoted a 60-character string from its delivered block verbatim, with the same
+block present in `inject.received` against its session id.
+
+**Why the reporter saw nothing in the UI.** The V2 adapter delivers the block as a synthetic part for the model call
+and never persists it (`strict` marker rows: 0 in all five children). The transcript UI and `session_message` therefore
+can never show it, however many times it is delivered. "I don't see it" is the expected observation on a V2 host, and
+it is the same fact that made issues 151 and 166 unfalsifiable from disk.
+
+**Inverted world — what would reopen this.** (1) A real child session whose `inject.received` carries a nonce inside
+its `block_prefix` **and** that child cannot quote it on request; or (2) any `inject.received` for a real (non-fixture)
+session with `status != "ok"`. Neither has been observed. Both are checkable in one command each.
+
+**Debt recorded, not fixed.** The probe cannot reliably place a token in the block (engine selection ranking) and
+cannot verify inclusion once it sits past the log's `block_prefix` truncation. A future run needs a higher-ranked
+entry or an engine-side debug surface that returns the whole built block; neither exists today. The turn-0
+(uncompacted) path was never probed with a nonce — that is the only remaining blind spot, and it is a question about
+first-turn delivery, not about compaction.
