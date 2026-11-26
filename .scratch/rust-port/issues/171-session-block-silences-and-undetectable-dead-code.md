@@ -1,9 +1,8 @@
 # 171 — session-block silences and the checks that cannot see them
 
-Status: ready-for-agent — work creates/edits: an `rc 1` outcome row in `docs/runbooks/parity-drop-in-rehearsal.md` §8's prose;
-a narrowed `#![allow(dead_code)]` scope under `crates/mem-store/src/` (currently 14 modules); a
-`search` wire-method row for `ScopeSelection::AllProjects` in `crates/mem-bridge/tests/wire_methods.rs`; a cached-block
-fallback in the V2 adapter's `context` hook; and an activation-boundary test over that adapter's `contexts`/`turns` maps.
+Status: ready-for-agent — **§4 only**. Progress: §1 `cdc57da`, §2 `c28375f`, §3 `3b3827c` shipped; §5 **closed as
+measurement** 2026-11-26 (the activation-boundary row already existed and its mutant reds — see §5). Remaining work: a
+cached-block fallback in the V2 adapter's `context` hook (`plugin/src/v2/adapter.js:117-124`).
 Filed: 2026-11-26, consolidating the recorded-but-unfixed findings from the issue-165 wave and its neighbours.
 
 > A PRD, not five tickets. Each finding below is independently closable and independently testable at an **existing**
@@ -44,8 +43,10 @@ Close each gap at the seam that already exists, and prove each fix by making the
   and asserts rows come back — the regression that a press of a "collapse the empty-tag branch" refactor would cause.
 - The V2 adapter's `context` hook gains a defined behaviour when no cached block exists, so a session is never silently
   empty for the whole turn.
-- The adapter's caches gain a test at the activation boundary, so "re-activation wipes the block" is a measured property
-  with a failing mutant rather than a log-reading.
+- The adapter's caches **already had** the activation-boundary test, which is why §5 closed as measurement rather than
+  work: `plugin/tests/v2-plugin-adapter.test.mjs:364` drives construct → `context` → disposal → `context` and reds on
+  the block-drop assertion when `contexts.clear()` is removed. The gap was that nobody had shown the row bites, not
+  that the row was missing.
 
 ## User Stories
 
@@ -146,9 +147,19 @@ implementation, not merely on the absence of the right one. Every row below name
    no cache and no prior prompt yields something; a withdrawn block yields nothing; a cached block is unchanged.
    **Mutants:** a fallback that fires on the withdrawn block; a fallback that returns the previous session's block.
    Prior art: the adapter wave that shipped the block-lifecycle behaviours, and the inject-status end-to-end row.
-5. **Activation boundary.** Seam: the same adapter test surface — construct, drive a `context` event, invoke the disposal
-   function, drive another `context` event. **Mutant:** a disposal function that does not clear the map, and one that
-   clears a map the fallback then cannot rebuild. Prior art: the same file's existing lifecycle rows.
+5. **Activation boundary — CLOSED 2026-11-26 as measurement; no deliverable.** The planned seam already contained the
+   row. `plugin/tests/v2-plugin-adapter.test.mjs:364`
+   (`test_v2_adapter_cleanup_aborts_the_subscription_and_is_idempotent`) runs exactly the sequence this section asked
+   for: register → `prompt` caches `["cached before cleanup"]` → `readContext("ses-1")` returns it → `await cleanup()`
+   (the teardown at `plugin/src/v2/adapter.js:173-181`) → `readContext("ses-1")` asserts `[]` with the message
+   *"cleanup drops the cached block, so a late context hook injects nothing"*.
+   **MEASURED, mutant killed:** deleting `contexts.clear();` (the only line removed, `adapter.js:176`) reddens the row at
+   `:394` — `actual: ['cached before cleanup']`, `expected: []`, `AssertionError … cleanup drops the cached block, so a
+   late context hook injects nothing` — `rc 1`; restoring leaves `git diff --stat plugin/src/v2/adapter.js` empty and the
+   row green again (`pass 1 / fail 0`). So the PRD's stated risk ("staying a log-reading instead of a property") was
+   already false: the property was pinned and the mutant dies on it.
+   The section's **second** mutant — "a disposal that clears a map the fallback then cannot rebuild" — is §4's, cannot
+   be written before §4 exists, and stays open there.
 
 ## Measurement first — what would close each section as *measurement, not a deliverable*
 
@@ -161,8 +172,11 @@ implementation, not merely on the absence of the right one. Every row below name
 - **`context` fallback:** closes as not-a-defect if the measured population of cache-less sessions is empty once
   re-activation is understood. The measured population is 76 events over 7 sessions, all of them re-activation
   artefacts — which is why the fix order matters, and why the *trigger* is deployment rather than compaction.
-- **Activation boundary:** closes as not-a-defect if the disposal path cannot run while a session is live. The measured
-  plugin-load count against the session count says it can.
+- **Activation boundary — CLOSED 2026-11-26 as measurement, by a different route than predicted.** The route written
+  here was "not-a-defect if the disposal path cannot run while a session is live", and it is excluded: the measured
+  plugin-load count against the session count says it can. What actually closed the section is that the row it would
+  have written already existed and its mutant dies on it — so the deliverable is zero lines, and the risk the section
+  described was already covered.
 
 ## Out of Scope
 
