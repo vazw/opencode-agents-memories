@@ -114,6 +114,38 @@ root `%Y`, 43 databases, 0 `.legacy.bak`, live config `cmp` rc=0.
    so `legacy_migrator` returns early and the `.bak` family was reaped by the erase sweep. The cell cannot be
    satisfied on a store migrated in place elsewhere. **Owner question:** accept `completedAt` plus the early-return
    as the "migration path exists" evidence, or require a rehearsal against a store that was never migrated.
+
+### Decision brief for that ruling — 2026-11-26, read from the code
+
+The cell is unobtainable here for a **code-level** reason, not an incidental one. Three gates, all MEASURED by
+reading `crates/mem-store/src/legacy_migrator.rs`:
+
+1. `run_legacy_turso_migration:933` returns early when `read_marker(...).is_some() && all_shards_complete(...)`.
+2. Even with the marker deleted, `migrate_memory_shard:380` returns at once when
+   `is_shard_migration_complete(db_path, ...)` — a `.turso-migrate.json` sidecar with `status: complete`, a matching
+   count, and a shard that reads as Turso-ready (`:214-240`).
+3. The rename that creates the cell lives at `:505-520`, **on the conversion path only** — so an already-converted
+   shard can never produce a `.legacy.bak`, however the marker is treated.
+
+Measured on the live root (read-only): 16 sidecars, every one `"status": "complete"` (sample:
+`sourceCount 4 / expectedCount 4 / importedCount 4`), and the marker's shard paths are `/home/vaz/...`, i.e. the data
+was converted on the other machine. **Deleting `.turso-migrated` alone would therefore change nothing** — that is the
+one thing to know before choosing.
+
+Two real options:
+
+- **A — `covered-by`, zero new work.** Accept `completedAt 2026-10-30T15:14:45.697Z` plus the early-return as "the
+  migration ran on this data", and dispose the cell `covered-by` `crates/mem-store/tests/turso_legacy_migrator.rs`,
+  whose three tests (`:230`, `:364`, `:524`) build a legacy shard and assert the `.legacy.bak` rename. The matrix
+  closes with one substituted cell, documented and checkable, and no observation of the live data.
+- **B — observe it for real, ~15 min, no owner risk.** Take one copy (five rehearsal stamps already exist under
+  `.tmp/rehearsal-28/`, 3.4 G), delete **one shard's sidecar** (not the marker) so gate 2 fails for that shard, start
+  an engine on a spare port against the copy, and watch `projects/<shard>.db.legacy.bak` appear with the count
+  preserved. This is the only way the cell is observed rather than substituted.
+
+Recommendation: **B**, because it is the last unobtainable cell in the 110-file matrix and the probe also exercises
+migration on real data. A is the right answer only if "evidence by substitute, documented" is acceptable for this
+matrix — the owner's call, which is what this section is waiting for.
 2. **S5 recall rank 1 — real, and filed.** The frozen query (`97 sites across 8 crates`) did not return the
    pre-registered id anywhere in the 20 results. Not retuned, per the runbook. Filed as **issue 165** with the
    mechanism it exposed (`/api/search` pools a per-shard cap and then sorts) and the observation that would

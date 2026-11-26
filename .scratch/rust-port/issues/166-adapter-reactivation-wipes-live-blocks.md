@@ -1,6 +1,10 @@
 # 166 — a plugin re-activation wipes the cached block for every live session mid-turn
 
-Status: ready-for-human — 2026-11-26 (triage `.tmp/progress/issue-166-triage.debug-1.md`: the observation reproduces, but the mechanism is host-side and **no code in this tree calls the cleanup**, so the fix surface is outside the repository. Needs one operator answer: **is every `plugin/dist/**` deploy followed by a host restart?** Yes ⇒ `wontfix` as *measurement* — the loss is bounded by deploy practice and recovers at the next prompt. No ⇒ the adapter's `context` hook needs a cache-empty path, which is the same code surface as issue 151. See `## Triage 2026-11-26` for the corrected population.)
+Status: ready-for-agent — 2026-11-26 owner answered the blocking question: deploys are **not** followed by host
+restarts (*"no, we'll ship the plugin later"*). So the adapter must survive re-activation itself; the fix is the
+cache-empty path in the `context` hook — the same code surface as issue 151 and PRD 171 §4. **One fix, three
+triggers**, and it lands in PRD 171 §4 rather than as a second patch. The original `ready-for-human` triage follows,
+superseded only on the point it was waiting for.
 Filed: 2026-11-25, from the issue-151 instrument (`DEBUG` `.tmp/progress/issue-151-context-instrument.debug-1.md`)
 
 ## The observation

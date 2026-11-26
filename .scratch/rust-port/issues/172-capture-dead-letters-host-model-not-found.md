@@ -1,7 +1,17 @@
 # 172 — auto-capture dead-letters every attempt: `host_model_not_found` for `opencode-go/beam-free`
 
-Status: needs-triage — filed 2026-11-26 from a post-restart health check; no fix attempted.
+Status: wontfix — 2026-11-26 owner ruling: `opencodeModel: beam-free` is a deliberate model choice, not a defect.
 Filed: 2026-11-26 — **the original premise is falsified; see the correction below before reading on.**
+
+## Owner ruling 2026-11-26
+
+`beam-free` at `opencode-mem.jsonc:86` is an intentional model selection, not a misconfiguration. Owner's words:
+*"172 yeah, just a choice."* The three `host_model_not_found` dead letters are the accepted cost of that choice,
+against **146** persisted captures. Nothing to fix; the issue stays open only as the record of the contract.
+
+Reopen trigger (written down so a future reader does not re-litigate the choice): dead letters stop being rare —
+i.e. `Auto-capture provider failed` approaches the count of `Auto-capture memory persisted`, or the 404 arrives with a
+reason other than `host_model_not_found`.
 
 ## Correction 2026-11-26 14:05 — "zero successful captures" was a census artifact
 
