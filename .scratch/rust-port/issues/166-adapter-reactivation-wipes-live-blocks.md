@@ -1,6 +1,6 @@
 # 166 — a plugin re-activation wipes the cached block for every live session mid-turn
 
-Status: needs-triage
+Status: ready-for-human — 2026-11-26 (triage `.tmp/progress/issue-166-triage.debug-1.md`: the observation reproduces, but the mechanism is host-side and **no code in this tree calls the cleanup**, so the fix surface is outside the repository. Needs one operator answer: **is every `plugin/dist/**` deploy followed by a host restart?** Yes ⇒ `wontfix` as *measurement* — the loss is bounded by deploy practice and recovers at the next prompt. No ⇒ the adapter's `context` hook needs a cache-empty path, which is the same code surface as issue 151. See `## Triage 2026-11-26` for the corrected population.)
 Filed: 2026-11-25, from the issue-151 instrument (`DEBUG` `.tmp/progress/issue-151-context-instrument.debug-1.md`)
 
 ## The observation
@@ -67,3 +67,37 @@ the fixed cost of carrying state across revisions is not bought.
 
 - Issue 151's never-prompted premise (measured 0 witnesses; see its tracker note).
 - The hosted/local embedding model question.
+
+## Triage 2026-11-26 — `ready-for-human`, premise partially confirmed
+
+Full record: `.tmp/progress/issue-166-triage.debug-1.md`. Re-derived read-only; pid 8953 and 8878 not signalled; nothing
+under `~/.opencode-mem/` written; `git status --porcelain` empty.
+
+**What holds.** The observation reproduces on the rotated log: 141 `context.hook` lines over 7 sessions, 77 of them
+`has_block:false` with `turn_index:0`, 64 true `turn_index:1`, 0 never-prompted sessions, and both exact `1 → 0` drops at
+04:21:45Z. The caches are per `registerV2Adapter` invocation, not module-scoped, and only the returned cleanup clears them
+(`contexts` is otherwise only `set` or `delete`), so a `turn_index` decrease for one session is possible only through that
+cleanup. The chain is `plugin/src/plugin.js:1951` → `:1953` `mod.setup(ctx)` → `plugin/src/v2/plugin.js:57-59` capturing
+the adapter cleanup → `:65-68` returning a function that awaits it.
+
+**What does not hold as filed — three corrections.**
+
+1. **The cited mechanism was upstream's.** The `## The mechanism, MEASURED` section above quotes
+   `packages/plugin/src/promise/adapter.ts:717-719`, `packages/core/src/plugin.ts:141-156` and
+   `packages/core/src/plugin/supervisor.ts:245-257`. **No `packages/` directory exists in this repository.** Those paths
+   describe the project this repo ports, and the section is superseded on that point by this triage, not deleted: the
+   behaviour it describes is real, its source citation was not this tree's.
+2. **No code in this tree calls the cleanup.** `plugin/index.js` only re-exports the definition; the tests and `dist/`
+   mirror it. The activation boundary is the **host's**, so any fix that changes when the cleanup runs is not ours to
+   make here.
+3. **The 76-line population is three different things**, not one: 18 host-restart lines, 31 dist-write wipe lines, and 29
+   ordinary cold-cache lines (78 counted in the re-derivation; the filed 76 is within the same family, not the same set).
+   The filed **"119 plugin loads" does not reproduce at all** — it is 714 host log lines divided by 6 plugin ids, a line
+   count whose per-line meaning was never settled. Treat the load figure as withdrawn.
+
+**Disposition.** `ready-for-human` because the one decisive input is an operator statement, not a measurement this tree can
+produce: whether every `plugin/dist/**` deploy is followed by a host restart. If yes, the defect is bounded by deploy
+practice, recovers at the next prompt, and closes as *measurement, not a deliverable*. If no, the adapter needs a
+cache-empty path in its `context` hook — which is **issue 151's M1**, the same code surface (`adapter.js:117-124`) arriving
+by a different trigger. 166 and 151 are therefore one fix but two issues: 151 stays `needs-info`, because its trigger
+(compaction, sessions that did prompt) is distinct from this one's (re-activation).
