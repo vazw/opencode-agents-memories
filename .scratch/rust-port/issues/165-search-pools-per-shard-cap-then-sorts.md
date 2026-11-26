@@ -3,10 +3,10 @@
 > Filename kept for link stability. Retitled 2026-11-25: the earlier title ("pools a per-shard cap and then sorts")
 > described a mechanism that measurement has now ruled out three times. See the two "Measured" sections below.
 
-Status: ready-for-agent — **code shipped and reviewed** (one blend-ordered statement per shard). The `k` cap, the per-channel
-candidate union and the `ids.truncate(1000)` clamp are all deleted; both were required, neither alone reached zero starvation.
-**Remaining before closure: Step 11, the engine-HTTP before/after measurement backing AC1 and AC3 — syseng-owned.** It blocks
-issue closure, not the code deliverable. The widened-cap shape in the frontier section is SUPERSEDED.
+Status: done — shipped in `9ed1a27`, reviewed `STATUS: APPROVED`, and Step 11's engine-HTTP measurement is complete:
+AC1/AC2/AC3/AC4 **MET**, AC5 `NOT MEASURED` at HTTP level (structural statement property, owned by the `mem-store` tests).
+The `k` cap, the per-channel candidate union and the `ids.truncate(1000)` clamp are all deleted; both were required, neither
+alone reached zero starvation. The widened-cap shape in the frontier section remains SUPERSEDED.
 Filed: 2026-11-25, from the issue 28 copy-first rehearsal (run `20261125T035152Z`), cell S5
 
 ## The observation
@@ -316,3 +316,36 @@ Implementation reviewed `STATUS: APPROVED` (review-2 + F4 re-review). Blueprint 
 now unreferenced in the tree; it stays as a `pub` upstream-parity port, and the module-wide `#![allow(dead_code)]` in
 `crates/mem-store/src/vector.rs:17` means no lint would report it going dead — recorded, not fixed (narrowing 14 module
 allows is out of scope).
+
+## Step 11 — engine-HTTP measurement, both arms
+
+Full report: `.tmp/progress/issue-165-blend-ordered.step11.md`. Both arms are release builds run **sequentially** on their own
+spare port against one shared §2a copy of the live store (43 dbs + 43 wals, 5601 rows, 27 shards with rows, integrity `ok`,
+zero drift across arms). BEFORE `3366acef` at `831e3a4`, AFTER `5cf77127` at `9ed1a27` — distinguished at the *binary* level,
+not by label: BEFORE carries 0 `blend_ordered_sql` and 4 `keyword_scores` symbols, AFTER carries the statement.
+
+| criterion | verdict | grounds |
+|---|---|---|
+| AC1 exact served page | MET | AFTER 20/20 ids **in order** for all three queries; BEFORE 1/20 (7 ids never served) on q1 and 8/20 (3 missing) on q2 |
+| AC2 stated tolerance | MET | tolerance `1e-6`; measured max abs Δ `5.97e-08` over 60 items; smallest adjacent top-20 gap `8.49e-05` |
+| AC3 latency, no regression | MET | medians 250.07→204.59, 327.21→274.31, 265.61→219.97 ms (n=5, −16…−18 %) |
+| AC4 exact `total` | MET | `total` 5601 at pageSize 20/40/200; 29-page walk = 5601 distinct, 0 dup, 0 missing; BEFORE moves 387→1595 |
+| AC5 no `vector32(?)` hot path | NOT MEASURED | structural statement property, not an HTTP observable; owned by the `mem-store` statement tests |
+
+**Why the tolerance cannot be hiding the result.** `1e-6` is 17× the measured error but 85× *smaller* than the smallest adjacent
+similarity gap in any of the three top-20s, and no rank-20 tie exists — so an ordering error could not pass. The reference is
+independent of the search path: it walks the copy, decodes the f32 vectors itself, and applies the production weights in Python;
+it never calls `search_in_shard`. The only shared input is the query vector, whose f32 bits were reproduced identically twice.
+
+**The chosen query does not discriminate** and is recorded as such: BEFORE is already exact on `shard consolidation rollback
+custody`, because the pooled union happened to cover its top-20. It is retained as a passing control; the discriminating
+evidence rests on the two frozen queries. Stated rather than dropped.
+
+**Latency, read correctly.** These are API numbers, not the harness figures (A 209.03 / B 452.10 / C20 122.59 ms, which measured
+the store layer without HTTP). BEFORE is reported as measured at 250–327 ms; 209 ms is not a pass condition. 5-sample medians
+on one host with the live engine still serving its own traffic to both arms — read as "≈17 % faster under the same conditions".
+
+**Added-read cost, now measured.** `NEEDLE_SOURCE_SQL` reads 17.49 ms summed over 27 populated shards (13.65 ms on the
+3068-row shard), plus 2/10/10 `instr` terms per query. This is the cost the 22.6 µs/row decomposition did **not** cover (it was
+taken with no containment needles), and it is measured on host `sqlite3`, not turso — so it bounds the added read rather than
+predicting the engine. If it ever matters, the blueprint's one-line remedy is caching needles per shard for the process lifetime.
