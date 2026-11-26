@@ -1,6 +1,6 @@
 # 173 — a purge success report does not name the vault tier (ADR-0019 D-19-9 unimplemented)
 
-Status: ready-for-agent — 2026-11-26. Work: `crates/mem-bridge/src/purge.rs` (`NotErasedTier` gains an
+Status: done — landed in 1db9d57 (2026-11-27). Work: `crates/mem-bridge/src/purge.rs` (`NotErasedTier` gains an
 `erased` tri-state; `NOT_ERASED` grows a `vault` entry answered `Unknown`), `crates/mem-bridge/src/sweep.rs`
 (`not_erased` serialization), one bridge test asserting the vault appears as `Unknown` and no other tier
 does, `crates/mem-vault/CONTEXT.md`'s "no longer complete or true" paragraph.
@@ -78,3 +78,19 @@ make the vault answer reachable and turn this into "the entry exists elsewhere".
 - `crates/mem-bridge/src/purge.rs:95-101`, `:126-138`; `crates/mem-bridge/src/sweep.rs:42`, `:424-438`.
 - `crates/mem-vault/src/lib.rs:44-47`.
 - Audit: `docs/evidence/feature-gap-audit-20261126/FINDINGS.md` §4.2, G4.
+
+## Comments
+
+- **2026-11-27 — closed, landed in `1db9d57`** (untagged commit by design; the status write is this
+  follow-up). `NOT_ERASED` is now `[NotErasedTier; 3]` with `vault` last answering `Erased::Unknown`;
+  `Erased { Yes, No, Unknown }` serialises capitalised on both `purge.completed` and `sweep.completed`;
+  `mem-vault/CONTEXT.md:98` and `mem-vault/src/lib.rs:44-47` no longer say the report is incomplete.
+  No `Yes` is constructible and no `vault.db` open was added — W8b, the erasure leg, remains unshipped
+  and out of scope here.
+- Review outcome: `APPROVED`
+  (`.tmp/progress/issue173-vault-tier-r2.review-1.md`, reviewer re-ran the criteria on `1db9d57` itself:
+  `purge_cli` 32, `mem-vault` 18+2, fmt 0, both clippy gates 0, both prose guards exit 1 after the edit),
+  plus three mutation probes that each reddened the named test — vault row deleted, `Unknown`→`No`,
+  `erased` dropped from the JSON map.
+- Residual, deliberately not filed: `crates/mem-episodic/src/purge.rs:30` and its `CONTEXT.md:54` still say
+  "both" about their own pair of survivors, which is literally true there and unaffected by the third row.
