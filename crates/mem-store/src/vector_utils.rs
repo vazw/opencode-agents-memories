@@ -8,8 +8,6 @@
 //! function's `Text` branch. The Float32Array/ArrayBuffer/view branches of
 //! the upstream JS are N-A: the `Value` seam has no such variants (recorded).
 
-#![allow(dead_code)]
-
 use crate::db::Value as DbValue;
 
 /// Upstream `vectorToJson` — kept in `vector.rs` (serde_json maps non-finite

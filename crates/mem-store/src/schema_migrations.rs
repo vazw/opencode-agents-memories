@@ -23,8 +23,6 @@
 //! `StoreError::NoExclusiveRoot` **before** its checkpoint and before the copy,
 //! leaving the database byte-identical and creating no `.bak`.
 
-#![allow(dead_code)]
-
 use std::path::{Path, PathBuf};
 
 use crate::connection::ConnectionManager;

@@ -15,8 +15,6 @@
 //! manager, step 4). Failure clears both the cell and `ready`, so a retry
 //! re-runs EVERY step (upstream `initPromise = null` in the catch).
 
-#![allow(dead_code)]
-
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 

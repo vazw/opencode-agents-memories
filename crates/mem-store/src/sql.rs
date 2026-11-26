@@ -6,8 +6,6 @@
 //! must run on `turso` unchanged; a mismatch with upstream bytes is a
 //! blocking defect. Constants are named after their upstream site.
 
-#![allow(dead_code)]
-
 // schema-migrations.ts L88-93 (memoryShardMigrations v1 stmt 1).
 pub fn shard_metadata_ddl() -> &'static str {
     r#"

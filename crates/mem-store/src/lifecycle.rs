@@ -7,8 +7,6 @@
 //! waves; the store-side trio (connections, shard manager, ready gate)
 //! is complete for this crate's state.
 
-#![allow(dead_code)]
-
 use crate::connection::ConnectionManager;
 use crate::error::StoreError;
 use crate::ready::ReadyGate;

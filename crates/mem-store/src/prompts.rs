@@ -2,8 +2,6 @@
 //! updates secondary prompt metadata (user_prompts rows) through one
 //! injectable trait; the real user-prompts wiring arrives in W3.1.
 
-#![allow(dead_code)]
-
 use crate::db::BoxFuture;
 use crate::error::StoreError;
 

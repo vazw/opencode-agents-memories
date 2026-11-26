@@ -23,8 +23,6 @@
 //! [`observe_process`]) and never inside the decision, so every cell of the
 //! platform × token table is unit-testable on a single host.
 
-#![allow(dead_code)]
-
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;

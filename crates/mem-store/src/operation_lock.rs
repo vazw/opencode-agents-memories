@@ -14,8 +14,6 @@
 //! previous owner's lock (`read_live_lock`). Where the token is unobservable
 //! the verdict stays conservative — see `platform::decide_liveness`.
 
-#![allow(dead_code)]
-
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};

@@ -20,8 +20,6 @@
 //! swapped handle is adopted and re-initialized) without holding std
 //! guards across `.await`.
 
-#![allow(dead_code)]
-
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

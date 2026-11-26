@@ -8,8 +8,6 @@
 //! the tools/API wave. `ensureTursoReady` is NOT called here (the gate is
 //! invoked by callers, mirroring the later wiring).
 
-#![allow(dead_code)]
-
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

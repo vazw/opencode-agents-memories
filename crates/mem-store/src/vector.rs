@@ -14,8 +14,6 @@
 //! upstream feeds (`vectorToJson` + serde_json, with NaN/Infinity mapping
 //! to `null` like `JSON.stringify`).
 
-#![allow(dead_code)]
-
 use crate::db::{BatchMode, Db, DbHandle, Row, Statement, Value};
 use crate::error::StoreError;
 use crate::vector_utils::{

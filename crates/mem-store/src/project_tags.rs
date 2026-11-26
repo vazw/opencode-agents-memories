@@ -6,8 +6,6 @@
 //! production env/git probe per call (upstream `getProjectTagInfo` with
 //! `CONFIG` injected).
 
-#![allow(dead_code)]
-
 use std::path::Path;
 
 use mem_core::env::ProcessEnv;

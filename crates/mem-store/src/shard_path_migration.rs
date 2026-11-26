@@ -10,8 +10,6 @@
 //! [`ShardRegistry`]; per-move/target failure logging stays (warn) +
 //! `rollbackFailed` semantics are upstream verbatim.
 
-#![allow(dead_code)]
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -227,17 +225,16 @@ async fn rollback_archived(
     Ok(())
 }
 
-/// What a rollback did: whether any per-item step failed (`rollbackFailed`
-/// upstream) and, for the recovery path, the FIRST such error so a typed
+/// What a rollback did: the FIRST per-item step error, if any, so a typed
 /// refusal (ADR-0022 R-22-2's `ActiveShardConflict`) reaches the caller
 /// instead of being flattened into "rollback could not restore every shard".
+/// `None` means every step succeeded (upstream `rollbackFailed` false).
 struct RollbackOutcome {
-    failed: bool,
     first_error: Option<StoreError>,
 }
 
-/// Upstream `rollbackSwap` — `failed` when any per-item failure was logged,
-/// carrying the first error for the journal/recovery decision.
+/// Upstream `rollbackSwap` — carries the first per-item failure for the
+/// journal/recovery decision; the journal is kept unless every step succeeded.
 async fn rollback_swap(
     connections: &ConnectionManager,
     registry: &dyn ShardRegistry,
@@ -299,10 +296,7 @@ async fn rollback_swap(
         })?;
         std::fs::write(state_path, body).map_err(StoreError::from)?;
     }
-    Ok(RollbackOutcome {
-        failed: rollback_failed,
-        first_error,
-    })
+    Ok(RollbackOutcome { first_error })
 }
 
 /// Upstream `recoverInterruptedSwap`: journal missing -> Ok; parse +
@@ -544,10 +538,6 @@ pub struct PathMigrationService {
     tags: Arc<dyn ProjectTagSource>,
     prompts: Arc<dyn PromptPathUpdater>,
     probe: Arc<dyn ProcessProbe>,
-}
-
-async fn count_connected(connections: &ConnectionManager, db_path: &Path) -> u64 {
-    count_live_memories(connections, db_path).await
 }
 
 impl PathMigrationService {

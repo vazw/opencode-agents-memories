@@ -15,8 +15,6 @@
 //! `closeAllSync` is N-A (handles release on Drop and `Drop` cannot fail,
 //! so the upstream close-catch/log branches have no failure case).
 
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};

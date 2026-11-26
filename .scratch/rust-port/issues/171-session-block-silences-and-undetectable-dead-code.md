@@ -103,7 +103,18 @@ Close each gap at the seam that already exists, and prove each fix by making the
   than edited.
 - **Dead-code suppression is narrowed per module, not removed wholesale.** The crate legitimately suppresses the lint in
   modules holding protocol-shaped items; the change is to stop the suppression covering modules where an orphan is a
-  real defect. The already-orphaned store function stays, documented as a deliberate upstream-parity port — the finding
+  real defect.
+  **MEASURED 2026-11-26, and it corrects this section's premise.** Stripping all fourteen module-level
+  `#![allow(dead_code)]` in a throwaway worktree and running `cargo clippy -p mem-store` produced exactly **two**
+  diagnostics, both in one file and both private: `shard_path_migration.rs:549 count_connected` (a one-line wrapper over
+  `count_live_memories`, zero callers) and `shard_path_migration.rs:234 RollbackOutcome::failed` (written, never read —
+  callers branch on `first_error`). It did **not** produce one for `keyword_scores`, the case that motivated the section:
+  that item is `pub` in a `pub mod`, and rustc exempts that visibility *before* the `allow` is consulted. So the hiding
+  mechanism is **visibility, not the suppression**: deleting fourteen `allow` lines buys coverage of private orphans in
+  those modules and would still have missed the orphan this section was written for. The section therefore shrinks to:
+  remove the two now-visible dead items, strip the module-level allows, and keep the gate green — with the pub-orphan
+  class explicitly left uncovered, because the instrument that would cover it is a visibility audit (`pub(crate)` where
+  the item has no external consumer) and not a lint configuration. The already-orphaned store function stays, documented as a deliberate upstream-parity port — the finding
   is that nothing could have noticed it, not that keeping it is wrong.
 - **The bridge keeps the conditional container-tag clause.** An empty tag means "every project", and the clause is
   load-bearing for that scope. The decision recorded by this PRD is explicitly **not** to collapse it; the test exists to
