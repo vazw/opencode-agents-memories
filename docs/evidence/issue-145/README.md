@@ -162,6 +162,13 @@ answered `NONE`, one of them against a context whose delivered block provably co
 the same block returned it verbatim first try. A `NONE` from a pattern-search question therefore does **not** support
 `miss-host`, and the first-match reading rule must not be applied to one.
 
+**And only read Q6 at all when the log proves inclusion.** Before asking the child anything, require the token to
+appear inside `inject.received`'s `block_prefix` for that session; if it does not, the entry may never have been
+selected into the block and the answer carries no information — record `inconclusive`, not `Q6 = 0`. In the second
+batch (four more children) this held for the refresh but not for any nonce entry, and their `NONE` answers were
+correctly read as inconclusive. Free recall, "first entry under `<heading>`", and lexical hooks are all
+ranking-dependent; none of them is a delivery test on its own.
+
 Q7 (last action named by the child; corroboration only — the captured render is the authority):
 
 Ask the same follow-up, in the same turn, what the child's last action before compaction was — the file it read, the

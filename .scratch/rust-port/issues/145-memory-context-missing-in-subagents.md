@@ -263,6 +263,13 @@ reproduced a 60-character string from it verbatim. That is arm (b), witnessed. I
 prior "almost never reaches subagents" claim is not reproduced here, and the cheapest explanation for the original
 report is now the instrument — a model answering `NONE` about a block it received.
 
-**Open, deliberately:** (a) the rate across children — the corrected per-child shape is two turns per child and the
-remaining four were not run; (b) whether a turn-0 (uncompacted) child also echoes a directed nonce; (c) `Q7` remains
-corroboration only, and in this run it answered correctly from the compaction checkpoint rather than from the block.
+**Open, deliberately:** (a) the delivery **rate** — the refresh leg is 6/6 boundaries across five children, but the
+nonce only rode one child's block, so delivery-to-model stands at 1 verified and 4 inconclusive (c4 answered `NONE`
+against a block whose truncation hides whether the entry was in it; ranking, not delivery, is the likely cause);
+(b) whether a turn-0 (uncompacted) child also echoes a directed nonce; (c) `Q7` remains corroboration only, and in
+this run it answered correctly from the compaction checkpoint rather than from the block.
+
+**Instrument rule this run produced** (worth more than the rate): a nonce reading requires a log-side witness —
+the token must appear in `inject.received`'s `block_prefix` **before** the child is asked anything. Without it the
+question's answer is unreadable, and a `NONE` from it is evidence of nothing. Free-recall wording, "first entry
+under a heading", and lexical hooks are all ranking-dependent and all produced false negatives here.

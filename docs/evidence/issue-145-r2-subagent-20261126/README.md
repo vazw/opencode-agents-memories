@@ -69,3 +69,35 @@ did not happen.
 
 Corrected per-child shape: pad turn → verify boundary in `session_message` → write the nonce as a
 semantically rich memory (a bare token ranks low and may not be selected) → ask a **directed** question.
+
+## Second batch — four more children, and a model-free way to read the refresh
+
+Children 2–5 (`ses_de7eedf22ffe…`, `…21ffe…`, `…12ffe…`, `…11ffe…`), same protocol, action tokens
+`/proc/version`, `/etc/os-release`, `/etc/shells`, `/proc/cmdline`. Each got one 620 025-byte pad turn and then
+one prompt after the boundary.
+
+| child | boundary (UTC) | turn-0 block | post-boundary block | sections |
+|---|---|---|---|---|
+| c2 | 13:35:25.072 | 3598 B | **3231 B** | `Project facts, Recent sessions` → `+ Recent actions` |
+| c3 | 13:35:25.188 | 3598 B | **3702 B** | same gain |
+| c4 | 13:35:17.695 | 3598 B | **3139 B** | same gain |
+| c5 | 13:35:25.127 | 3598 B | **3245 B** | same gain |
+
+All four post-boundary injects are `status:"ok"`, all at `turn_index:2`. **6/6 boundaries across five children
+produced a post-boundary inject** when a prompt followed, and every one of them produced a block that the turn-0
+block could not have been: the `Recent actions` section is new, and the byte counts move. That is a model-free
+reading — it needs no question answered.
+
+Delivery-to-model is **not** re-established for these four. A nonce was written for c4 only; it does not appear in
+that child's truncated `block_prefix`, and the child answered `NONE` to a directed question and to a lexical one
+("an entry that mentions a probe run for child 4"). Two explanations remain and this run does not separate them:
+selection ranking left the entry out of the block, or the entry was in the block beyond the truncation and the
+model did not report it. So c4's `NONE` is **inconclusive, not a miss** — the same trap the pilot exposed.
+
+### What a future run needs
+
+The instrument that worked is the one with a log-side witness: write the nonce, then **require the token to appear
+in `inject.received`'s `block_prefix` before asking the child anything**. If it is not there, the probe is
+inconclusive and no reading may be taken from the answer. That check only works when the entry lands early in the
+block, so a reliable run also needs a way to raise its rank — or an engine-side debug surface that returns the
+whole built block, which does not exist today.
