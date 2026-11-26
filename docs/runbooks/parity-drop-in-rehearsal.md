@@ -521,11 +521,23 @@ Expected: `rehearsal_engine_stopped pid=<n>` and `port_3749_free_again` on the s
 `opencode-mem@latest` entries, an empty diff, `restore_is_identity_with_live_config`, and
 `opencode.jsonc.post-install` kept so the installed state is still on record.
 
-The stop block ends in one of five outcomes, distinguishable by exit code across classes and by message
+The stop block ends in one of six outcomes, distinguishable by exit code across classes and by message
 within one. Only the first is a green stop:
 
 - **rc 0, `rehearsal_engine_stopped pid=<n>` then `port_3749_free_again`** — the pid §5 recorded was matched
   by the argv-exact reader, signalled, and is gone within 5 s.
+- **rc 1, `rehearsal_engine_stopped pid=<n>` and no `port_3749_free_again`** — the engine was matched,
+  signalled and is gone, but `127.0.0.1:3749` is still bound by something else. The block prints no message
+  for this outcome: its last command is `! ss -ltn | grep -q '127.0.0.1:3749' && echo port_3749_free_again`,
+  and when the port is bound that negation fails, so the `echo` never runs and the subshell exits 1. The
+  missing `port_3749_free_again` is the whole signal, so a transcript that carries
+  `rehearsal_engine_stopped` and then silence is this outcome, not a truncation. It is not a pass: the stop
+  succeeded and the *port* did not, so §9 cannot bind 3749 for a fresh engine, and whatever holds it must be
+  identified before the rehearsal continues. One caveat belongs with it — if `ss` is missing or unable to
+  list sockets, the pipeline yields nothing, the negated test succeeds, and the cell prints
+  `port_3749_free_again` **falsely**. That is a known false-green in the same idiom used at `:95-96`, recorded
+  rather than repaired here; `ss` is present on this host, and the rehearsal's own preflight does not assert
+  its presence.
 - **rc 3, `REHEARSAL-PID: no engine was ever started on <root>`** — `engine-pid.txt` is absent or empty, so
   §5 never ran. Nothing was signalled.
 - **rc 4, `rehearsal_engine_already_gone pid=<recorded>`** — the sentinel is there but the reader matches

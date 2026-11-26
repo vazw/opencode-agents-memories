@@ -93,6 +93,14 @@ Close each gap at the seam that already exists, and prove each fix by making the
 - **§8's outcome prose is documentation, so it carries no behavioural oracle of its own.** Its acceptance is that the
   prose lists all six result codes the shipped fence can emit, with one meaning each; the fence's behaviour is already
   covered by issue 168's fifteen executed rows and is not re-litigated here.
+  *Closed 2026-11-26:* the six are 0, 1, 3, 4, 5 and 6 — the explicit `exit` branches plus rc 0 and the implicit rc 1
+  from the block's final `! ss -ltn | grep -q … && echo …`. rc 1 means the engine was stopped but the port stayed bound,
+  and the block prints no message for it. MEASURED on a throwaway listener: port bound → rc 1, empty output; port free →
+  rc 0 plus the echo. Documented in the runbook, which also records a **gap left unfixed**: with `ss` absent or unable to
+  list sockets, the pipeline yields nothing, the negated test succeeds and the cell prints `port_3749_free_again`
+  falsely — measured, rc 0 with the green line and a `command not found` on stderr. The same idiom appears at `:95-96`,
+  so a fix would touch three sites and change cell behaviour that issue 168's mutant rows pin; it is recorded here rather
+  than edited.
 - **Dead-code suppression is narrowed per module, not removed wholesale.** The crate legitimately suppresses the lint in
   modules holding protocol-shaped items; the change is to stop the suppression covering modules where an orphan is a
   real defect. The already-orphaned store function stays, documented as a deliberate upstream-parity port — the finding
