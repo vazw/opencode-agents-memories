@@ -732,6 +732,77 @@ async fn test_search_scope_project_excludes_another_projects_rows() {
 }
 
 // ---------------------------------------------------------------------------
+// T12b — all-projects search spans the user scope too
+// ---------------------------------------------------------------------------
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_search_all_projects_includes_the_user_scope() {
+    let project_hash = "aaaa0000000000a1";
+    let user_hash = "cccc0000000000a2";
+    let fixture = wire_fixture(
+        "wire-search-all",
+        vec![("/probe/a", project_hash)],
+        Some("probe@example.com"),
+    )
+    .await;
+    let project_shard =
+        common::create_shard(&fixture.shards, Scope::Project, project_hash, 0).await;
+    let mut project_row = common::new_insert(
+        "search-all-project",
+        "project needle",
+        &MapScopeResolver::project_tag(project_hash),
+    );
+    project_row.vector = unit_vector(0);
+    project_row.tags_vector = Some(unit_vector(0));
+    common::insert_row(&fixture.shards, &project_shard, &project_row).await;
+    let user_shard = common::create_shard(&fixture.shards, Scope::User, user_hash, 0).await;
+    let mut user_row = common::new_insert(
+        "search-all-user",
+        "user needle",
+        &format!("opencode_user_{user_hash}"),
+    );
+    user_row.vector = unit_vector(0);
+    user_row.tags_vector = Some(unit_vector(0));
+    common::insert_row(&fixture.shards, &user_shard, &user_row).await;
+
+    let response = dispatch(
+        &fixture.engine,
+        "search",
+        json!({
+            "session_id": "session-search-all",
+            "project_id": "/probe/a",
+            "scope": "all-projects",
+            "query": "needle",
+        }),
+    )
+    .await;
+    let result = result(&response);
+    assert_eq!(
+        result["count"], 2,
+        "all-projects search must keep the user scope; binding the project tag drops it"
+    );
+    let items = result["items"].as_array().expect("items");
+    let mut ids: Vec<&str> = items
+        .iter()
+        .map(|item| item["id"].as_str().expect("id"))
+        .collect();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        vec!["search-all-project", "search-all-user"],
+        "all-projects search must keep the user scope; binding the project tag drops it"
+    );
+    for item in items {
+        assert!(
+            item["similarity"].as_f64().expect("similarity") > 0.99,
+            "both scopes must come back through the ranked search path; got similarity {} for {}",
+            item["similarity"],
+            item["id"]
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // T13 — the search parameter order: session → project → scope → query → limit
 // ---------------------------------------------------------------------------
 
