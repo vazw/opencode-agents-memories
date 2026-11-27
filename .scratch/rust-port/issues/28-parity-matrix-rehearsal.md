@@ -1,10 +1,17 @@
 # 28 — W7.2 · Parity matrix & drop-in rehearsal
 
-Status: ready-for-human — 2026-11-26 (**S5 `.legacy.bak` is now observed, not substituted**; owner ruled B and the
-probe ran, evidence in `docs/evidence/issue-28-dropin-rehearsal/S5-legacy-bak-20261126/`). Remaining human step is the
-live swap repeat under §11. Copy-first phase executed 2026-11-25: the store migrates and serves, with one real finding
-filed as issue 165 and four runbook defects filed as 164. §11 live swap: ruled superseded, see
-`## Owner ruling 2026-11-25`. The 23 missing matrix rows are **issue 71**. §0b D3 hatch: reconfirmed deferred.)
+Status: done — closed 2026-11-27 with named residuals (transcript closure section names each). **AC1** met by issue 71
+(`done`, `9c102d8`) at the 110-row target and extended beyond it by `70222e9`: the registry is re-pinned to the clone's
+HEAD, 140/140 rows (port 93, covered-by 17, N-A 30), `0 missing, 0 unknown`. **AC2** met on the copy-first phase —
+2026-11-25 run, 54 evidence files, store migrates and serves — with both failed cells resolved: `.legacy.bak` observed
+2026-11-26 (owner ruled B, evidence in `docs/evidence/issue-28-dropin-rehearsal/S5-legacy-bak-20261126/`) and the frozen
+`$Q_REF` rank-1 recall owned and closed by issue 165 (`done`, `9ed1a27`). §11 live swap stays **superseded**, not
+deferred: `opencode.jsonc` has run the local `plugin/` since the 2026-10-30 migration, and `scripts/live-swap.sh
+--dry-run` now records `rc=0 failures=0 warnings=0` with four start-condition pendings (2026-11-27T05:39:00Z). **AC3**
+met: §0b D3 hatch reconfirmed deferred, trigger (b) material, per its own close condition "closed-or-confirmed".
+Residuals accepted rather than deferred — no foreign runner, no built upstream Svelte dist, no power-loss simulation,
+single-owner store only; all named in the transcript's `## Closure, 2026-11-27` table. One real finding was filed as
+issue 165 and four runbook defects as 164, both `done`.
 
 ## What to build
 
@@ -12,9 +19,9 @@ The final gate: a coverage matrix for **all 110 upstream `*.test.ts` files** wit
 
 ## Acceptance criteria
 
-- [ ] Parity matrix document — **moved to issue 71** (matrix completed by issue 71: 110/110; 15 rows were still missing at r1).
-- [ ] Drop-in rehearsal transcript: same project dir, TS removed, Rust installed → memories intact, UI functional, capture/injection working.
-- [ ] §0b D3 hatch closed or expressly reconfirmed as deferred.
+- [x] Parity matrix document — **moved to issue 71** (matrix completed by issue 71: 110/110; 15 rows were still missing at r1). **Extended 2026-11-27 by `70222e9` to the clone's HEAD: 140/140 rows (port 93, covered-by 17, N-A 30), `0 missing, 0 unknown`.**
+- [x] Drop-in rehearsal transcript: same project dir, TS removed, Rust installed → memories intact, UI functional, capture/injection working. **Met on the copy-first phase (run `20261125T035152Z`, 54 evidence files) with named residuals; see `docs/evidence/issue-28-dropin-rehearsal/TRANSCRIPT.md` §Closure.**
+- [x] §0b D3 hatch closed or expressly reconfirmed as deferred. **Reconfirmed deferred 2026-11-26, trigger (b) material.**
 
 ## Blocked by
 
@@ -184,3 +191,22 @@ reports a path failure as an empty roster, and §8's restore expectation is inve
 
 **Not run:** §9, §10, §11 (the last ruled superseded above). §13's landing was done by the orchestrator rather than
 by the script; one artifact (`probe-b/x.db`, 1.3 MB) is deliberately untracked and regenerable.
+
+## Comments
+
+- **2026-11-27 — closed on the owner's instruction ("go on a dry-run and close it").** Before closing, the one
+  owner-executed cell that is safe with the live system up was actually run: `scripts/live-swap.sh --dry-run` →
+  `rc=0`, `failures=0 warnings=0 pending=false-start-conditions=4` at `2026-11-27T05:39:00Z`. The four pendings are
+  `--backup`/`--swap`/`--rollback` preconditions, not findings: engine pid 8646 running, OpenCode pids 12743/8555
+  running, store lock held by 8646, and no ONNX cache at `/tmp/.opencode-mem-onnx/Xenova/nomic-embed-text-v1`.
+  Preflight read 44 DBs / 1,151 files / 37 project shards / `nonempty_wal=42` / 12.2 GB store against 143 GB free,
+  need ~24.4 GB; staged engine sha256 `10845711a561eac7…3431843fc2`. Recorded in the transcript's S11 row.
+- Two observations from that run, filed as notes rather than defects: `--dry-run` still plans §8 as "replace
+  `opencode-mem@latest` with the local plugin" although its own §1b already reports the local path is in place (a
+  no-op step whose plan text should say so), and the live `embeddingModel` is still
+  `Xenova/nomic-embed-text-v1` — the owner's separate e5-base swap has not run and must not be confused with this
+  closure, since it rewrites the embeddings of the store this rehearsal read.
+- Closing rationale, in the transcript's own terms: the verdict row `issue 28 closable … no` was written before its
+  two premises resolved, and the file's rule forbids editing an expectation after the fact — so the row stands and
+  the closure is recorded under `## Closure, 2026-11-27` with a per-cell residual table. Nothing there is deferred:
+  each unattainable cell (foreign runner, upstream Svelte dist, power loss, multi-user store) is accepted by name.

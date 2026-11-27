@@ -465,7 +465,7 @@ system's** injection; it does not exercise the rehearsal copy.
 
 | step | value |
 |---|---|
-| `scripts/live-swap.sh --dry-run` | NOT RUN — owner-executed |
+| `scripts/live-swap.sh --dry-run` | **rc=0, `failures=0 warnings=0 pending=false-start-conditions=4`** — run 2026-11-27T05:39:00Z with the live engine (pid 8646) and OpenCode (pids 12743, 8555) up, which is the mode the script allows beside a live system. The four pendings are the start conditions for `--backup`/`--swap`/`--rollback`, not failures: engine running, OpenCode running, store lock held by pid 8646, and no ONNX cache at `/tmp/.opencode-mem-onnx/Xenova/nomic-embed-text-v1` (the swap provisions it, ~38 s, and it must be re-provisioned after every reboot). Preflight read: 44 DBs / 1,151 files / 37 project shards, `wal state: nonempty_wal=42 derived_sidecars=17`, store 12.2 GB with 143 GB free against a 24.4 GB need, staged engine sha256 `10845711a561eac7…3431843fc2`. Two observations for the runbook rather than defects here: `--dry-run` still plans §8 as "replace `opencode-mem@latest` with the local plugin" although §1b already reports `opencode.jsonc already references the local plugin path` — that step is a no-op today and its plan text should say so; and the live `embeddingModel` is `Xenova/nomic-embed-text-v1`, which the owner's separate e5-base swap will change. |
 | one capture in a real session (`user-prompts.db` count grows) | NOT RUN — owner-executed |
 | one injection in a real session | NOT RUN — owner-executed; but see S10: the live log holds the frame |
 | live `live_total` + one recall-by-content on 3742 | NOT RUN — owner-executed |
@@ -505,3 +505,43 @@ rehearsal copy under `.tmp/rehearsal-28/20261125T035152Z`, which is local and gi
 
 Standing rule for this evidence tree: never land a served index or any response that echoes the token. Record the asset
 paths the cell needs, or redact before writing. See issue 164, cell §6a, which now requires exactly that.
+
+## Closure, 2026-11-27 — issue 28 closed, residuals accepted by name
+
+The verdict row above is left exactly as written (the file's own rule: a mismatch is recorded, never edited after the
+fact). It says `closable: no` for two reasons, and both have since resolved:
+
+1. **`.legacy.bak` "unobtainable on this machine"** — satisfied by **observation** the next day at
+   `S5-legacy-bak-20261126/`: the staged binary converted a real 2,959-row shard, `bak=0 → bak=1`, rebuilt it at
+   `embedding_dimensions=768`, and rewrote `.turso-migrated` (`completedAt 2026-11-26T08:29:02.809Z`). That is the
+   evidence the 2026-11-25 ruling asked for, obtained on a copy without touching the live root.
+2. **"needs S11 too"** — S11 is **superseded**, not owed: `opencode.jsonc` has referenced the local `plugin/` since
+   the 2026-10-30 migration and carries no `opencode-mem` reference. Re-running the swap would redo a completed
+   migration on the only copy of the user's memory.
+
+Rehearsal-side close-out measured 2026-11-27: `scripts/live-swap.sh --dry-run` → `rc=0`, `failures=0 warnings=0
+pending=false-start-conditions=4` (the four pendings are `--backup`/`--swap`/`--rollback` preconditions with the live
+system up: engine pid 8646, OpenCode pids 12743/8555, store lock, no ONNX cache). The parity half of AC1 is now
+stronger than the issue asked: `70222e9` re-pinned the registry to the clone's HEAD, 140/140 rows
+(port 93, covered-by 17, N-A 30), `0 missing, 0 unknown`.
+
+Residuals, accepted rather than deferred — each is unattainable on this host by construction, not by effort:
+
+| residual cell | disposition |
+|---|---|
+| Svelte dist loads against the Rust server (S9) | accepted, not run — no built upstream dist exists; building it means Bun inside `example/`, which this repo forbids as routine tooling. Endpoint parity is S6's evidence and is green. |
+| Windows / macOS runners (S10) | accepted, not run — no runner on this host; the port's platform surface is Linux-only by build. |
+| multi-user / shared store (S10) | accepted, not run — every path is single-owner by design; the engine documents no multi-process access. |
+| power loss during migration (S10) | accepted, not run — not simulated; turso's own open path is the recovery claim. |
+| capture / injection / live_total / `--backup` owner steps (S11) | superseded with §11, except the dry-run now captured above; the live system's injection frame and capture `+1` are measured in S10/S8 rather than on the copy. |
+| rank-1 recall with the frozen `$Q_REF` (verdict row) | owned outside this rehearsal: the search-starvation defect is issue 165, `done`, shipped `9ed1a27`. |
+
+Reading: the rehearsal proved what it set out to prove on the copy — a pristine TS store opens in the Rust engine at the
+same total and per-shard multiset, UI and REST serve, one canary round-trips, a second engine is refused, and the live
+root is untouched. What it cannot prove here is a foreign platform, a foreign UI dist, or a power cut. Those are named
+above instead of being allowed to hold the issue open indefinitely.
+
+**Safe next step, unrelated and later:** the dry-run also reports the live `embeddingModel =
+Xenova/nomic-embed-text-v1` and no ONNX cache. The owner's separate e5-base swap (`scripts/adopt-embedding-model.sh`)
+changes embeddings in the same store this rehearsal read; it must run with OpenCode stopped, and after — not before —
+this evidence was taken.
