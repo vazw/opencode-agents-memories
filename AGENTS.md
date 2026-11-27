@@ -9,7 +9,7 @@ OpenCode **plugin-loader contract** — `plugin/` must export `type PluginModule
 Plugin; tui?: never }` (ADR-0007 §Context, guarded upstream by `tests/plugin-loader-contract.test.ts`) —
 and the **REST API** (ADR-0003 keeps the upstream Svelte build a drop-in UI over it). Everything else is
 ours alone: **no upstream counterpart** exists for the wrapper↔engine stdio protocol (ADR-0007 D-43 —
-equal major + wrapper floor), nor for the on-disk format (shard v3, prompts v2; no downgrade path, and
+equal major + wrapper floor), nor for the on-disk format (shard v4, prompts v4; no downgrade path, and
 a root written by a newer build refuses to open — issue 43 decisions 2–3). Upstream is a behavioural
 reference, never a co-tenant of the storage root. Beyond its two tiers the model grows per-project
 episodic/session memory, the durable facts DB (`facts.db`), the encrypted vault (`vault.db` per scope),

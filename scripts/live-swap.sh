@@ -35,6 +35,9 @@ BACKUP_ROOT=$HOME/.opencode-mem-backups
 PLUGIN_DIR=$REPO_ROOT/plugin
 ENGINE_NAME=opencode-agents-memory
 PROVISIONER=$REPO_ROOT/scripts/provision-onnx-cache.sh
+# --verify reads store versions from private copies under the repo's gitignored
+# .tmp: one copy at a time, deleted in the same call.
+VERIFY_COPY_ROOT=$REPO_ROOT/.tmp
 
 # §7: the tool embedder reads $TMPDIR/.opencode-mem-onnx/<embeddingModel>, and
 # the canonical tokenizer is v2.0 — a v1.0 tokenizer answers -32603.
@@ -217,7 +220,8 @@ MODES
                 1. the engine process count for the store (expect 1),
                 2. that engine's parent — must be the OpenCode host (the
                    one-process discriminator; if it is not, stop and record),
-                3. the store versions: metadata 2, prompts 2, shards 3 lazily,
+                3. the store versions: metadata 2, prompts 4, shards 4 (a
+                   positive version = the port has touched the DB),
                 4. web health on the engine's actual port (the engine's own
                    --web-port when its cmdline names one; otherwise
                    --web-port, then OPENCODE_MEM_WEB_PORT, then 3742),
@@ -602,10 +606,81 @@ db_files() {
 	find "$dir" -type f -name '*.db' | sort
 }
 
+# db_user_version <db> — PRAGMA user_version read from a private copy.
+#
+# The live engine holds an exclusive lock, so opening the live file answers
+# `database is locked`; a copy reads the committed value without touching the
+# store. The -wal is mandatory: a db-only copy answers whatever page 1 the last
+# checkpoint left (a live shard measured 0), which is not the committed value.
+#
+# Prints a non-negative integer, or a non-integer token when the DB cannot be
+# read. Callers treat anything but a positive integer as untouched.
 db_user_version() {
-	local db=$1 out=''
-	out=$(sqlite3 -readonly "$db" 'PRAGMA user_version;' 2>&1 || true)
+	local db=$1 base='' dir='' out='' trial=0
+	base=$(basename -- "$db") || {
+		printf 'copy-error: basename'
+		return 0
+	}
+	# A checkpoint can race the two cp calls and leave a stale page 1 beside a
+	# next-generation WAL; that answer is a valid-but-stale 0, so retry on any
+	# non-positive integer, not only on non-integers. A persistent 0 is a
+	# genuine untouched/unreadable result and is returned as 0.
+	while [ "$trial" -lt 3 ]; do
+		trial=$((trial + 1))
+		dir=$(mktemp -d "$VERIFY_COPY_ROOT/live-swap-verify.XXXXXX") || {
+			printf 'copy-error: mktemp'
+			return 0
+		}
+		if ! cp -a --reflink=auto -- "$db" "$dir/$base"; then
+			find "$dir" -depth -delete ||
+				printf 'live-swap: cannot remove the verify copy %s\n' "$dir" >&2
+			printf 'copy-error: cp'
+			return 0
+		fi
+		if [ -f "$db-wal" ] && ! cp -a --reflink=auto -- "$db-wal" "$dir/$base-wal"; then
+			find "$dir" -depth -delete ||
+				printf 'live-swap: cannot remove the verify copy %s\n' "$dir" >&2
+			printf 'copy-error: cp-wal'
+			return 0
+		fi
+		if [ -f "$db-journal" ] && ! cp -a --reflink=auto -- "$db-journal" "$dir/$base-journal"; then
+			find "$dir" -depth -delete ||
+				printf 'live-swap: cannot remove the verify copy %s\n' "$dir" >&2
+			printf 'copy-error: cp-journal'
+			return 0
+		fi
+		out=$(sqlite3 -readonly "$dir/$base" 'PRAGMA user_version;' 2>&1) || out="sqlite-error: $out"
+		find "$dir" -depth -delete ||
+			printf 'live-swap: cannot remove the verify copy %s\n' "$dir" >&2
+		case $out in
+		'' | *[!0-9]* | 0) continue ;;
+		*) break ;;
+		esac
+	done
 	printf '%s' "$out"
+}
+
+# version_is_current <v> — the port has touched a DB iff the answer is a
+# positive integer: metadata migrates at store init and shards at init / first
+# write, so 0 (or an error token) means this build never initialised it.
+version_is_current() {
+	case ${1:-} in
+	'' | *[!0-9]* | 0*) return 1 ;;
+	esac
+	return 0
+}
+
+# sweep_stale_verify_copies — reclaim a copy a killed --verify left behind.
+# A loop, not one find: `find -maxdepth 1 ... -delete` never descends and
+# -delete refuses a non-empty directory, so it would delete nothing. Only a copy
+# older than an hour is removed; a newer one may belong to a concurrent verify.
+sweep_stale_verify_copies() {
+	local d=''
+	for d in "$VERIFY_COPY_ROOT"/live-swap-verify.*; do
+		[ -d "$d" ] || continue
+		[ -n "$(find "$d" -maxdepth 0 -mmin +60 -print -quit)" ] || continue
+		find "$d" -depth -delete || die "cannot remove the stale verify copy $d — remove it by hand"
+	done
 }
 
 count_lines() {
@@ -1214,6 +1289,8 @@ run_verify_mode() {
 	if ! command -v jq >/dev/null 2>&1; then
 		die '--verify needs jq to read the JSON envelopes (install jq)'
 	fi
+	mkdir -p "$VERIFY_COPY_ROOT"
+	sweep_stale_verify_copies
 	heading 'verify (runbook §9b/§10) — after OpenCode started'
 
 	local -a engines=()
@@ -1300,7 +1377,7 @@ run_verify_mode() {
 			hits=$(printf '%s' "$PROBE_BODY" | jq -r '.data.items | length')
 			top=$(printf '%s' "$PROBE_BODY" | jq -r '.data.items[0].similarity // "n/a"')
 			if [ "$hits" -gt 0 ]; then
-				ck_ok "search works: $hits hit(s), top similarity $top (runbook: rank 1 ≈0.54)"
+				ck_ok "search works: $hits hit(s), top similarity $top (top similarity is model-dependent: e5 ≈0.8, nomic ≈0.54)"
 				ck_info "top id: $(printf '%s' "$PROBE_BODY" | jq -r '.data.items[0].id // "n/a"')"
 			else
 				ck_warn 'search answered 200 with no hits — search is wired; the probe query simply is not in this store'
@@ -1322,13 +1399,16 @@ run_verify_mode() {
 			ck_fail "add answered HTTP ${HTTP_CODE}: $(printf '%s' "$PROBE_BODY" | head -c 300) — a -32603 here is the cache (§7)"
 		fi
 		if [ -n "$canary_id" ]; then
-			probe "$port" /api/search --get --data-urlencode "q=$canary" -H "x-opencode-mem-token: $token"
+			# Scoped to the tag the row was stored in: untagged search merges 37
+			# shards, and under e5 the gibberish canary ranks 3 of 201 inside its
+			# own tag yet never enters the untagged global top page.
+			probe "$port" /api/search --get --data-urlencode "q=$canary" --data-urlencode "tag=$CONTAINER_TAG" -H "x-opencode-mem-token: $token"
 			if printf '%s' "$PROBE_BODY" | jq -e --arg id "$canary_id" '[.data.items[].id] | index($id) != null' >/dev/null 2>&1; then
 				local rank=''
 				rank=$(printf '%s' "$PROBE_BODY" | jq -r --arg id "$canary_id" '[.data.items[].id] | index($id) + 1')
-				ck_ok "the canary is findable (rank $rank) — add then search round-trips"
+				ck_ok "the canary is findable in its own tag $CONTAINER_TAG (rank $rank) — add then search round-trips"
 			else
-				ck_fail 'the canary was stored but not found by search'
+				ck_fail "the canary was stored but not found in its own tag $CONTAINER_TAG — the row is absent or the tag filter is broken"
 			fi
 		fi
 	fi
@@ -1337,34 +1417,49 @@ run_verify_mode() {
 	local meta=$DATA_DIR/metadata.db prompts=$DATA_DIR/user-prompts.db version=''
 	if [ -f "$meta" ]; then
 		version=$(db_user_version "$meta")
-		if [ "$version" = 2 ]; then
-			ck_ok 'metadata.db is version 2 (migrated)'
+		if version_is_current "$version"; then
+			ck_ok "metadata.db is version $version (this build's known max is 2, §6)"
 		else
-			ck_fail "metadata.db is version ${version:-unknown}, expected 2 — the port has not touched the store (open the memory tool once, §6)"
+			ck_fail "metadata.db answered version '${version}' — 0, empty or unreadable means the port has not touched this store (open the memory tool once, §6)"
 		fi
 	else
 		ck_fail "metadata.db not found: $meta"
 	fi
 	if [ -f "$prompts" ]; then
 		version=$(db_user_version "$prompts")
-		if [ "$version" = 2 ]; then
-			ck_ok 'user-prompts.db is version 2'
+		if version_is_current "$version"; then
+			ck_ok "user-prompts.db is version $version (known max 4)"
 		else
-			ck_warn "user-prompts.db is version ${version:-unknown}, expected 2 — it stamps on the first web read with ?includePrompts=true (§6)"
+			ck_warn "user-prompts.db answered version '${version}' — it stamps on the first web read with ?includePrompts=true (§6)"
 		fi
 	fi
-	local -a shards=()
-	local shard='' v3='' v2='' other=0
+	local -a shards=() observed=()
+	local shard='' shown='' bad=0
 	mapfile -t shards < <(find "$DATA_DIR/projects" -maxdepth 1 -type f -name '*.db' 2>/dev/null | sort || true)
 	for shard in "${shards[@]}"; do
 		version=$(db_user_version "$shard")
-		case $version in
-		3) v3=$((v3 + 1)) ;;
-		2) v2=$((v2 + 1)) ;;
-		*) other=$((other + 1)) ;;
-		esac
+		if version_is_current "$version"; then
+			observed+=("$version")
+			if [ "$version" -lt 4 ]; then
+				# positive but below this build's max: v4 adds
+				# source_prompt_created_at on the shard's next write.
+				ck_warn "project shard ${shard##*/} is version $version (< 4) — v4 adds source_prompt_created_at on its next write"
+			fi
+		else
+			bad=$((bad + 1))
+			ck_warn "project shard ${shard##*/} answered version '$version'"
+		fi
 	done
-	ck_info "project shards: total=${#shards[@]} v3=$v3 v2=$v2 other=$other (2->3 is lazy, on the first write to that project, §6)"
+	if [ "${#shards[@]}" -eq 0 ]; then
+		ck_warn 'no project shards'
+	elif [ "$bad" -gt 0 ]; then
+		ck_fail "$bad of ${#shards[@]} project shards answered version 0/unreadable — the port has not written those projects (§6)"
+	else
+		# "touched", not "migrated": a shard at v3 is positive but lacks v4's
+		# source_prompt_created_at, so >= 1 proves touch only.
+		shown=$(printf '%s\n' "${observed[@]}" | sort -un | tr '\n' ' ' | sed 's/ *$//')
+		ck_ok "all ${#shards[@]} project shards have been touched (observed versions: $shown)"
+	fi
 
 	heading 'status file (bridge-schema §7)'
 	local status_file=$DATA_DIR/status status_pid=''
@@ -1568,4 +1663,6 @@ main() {
 	exit 0
 }
 
-main "$@"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+	main "$@"
+fi
