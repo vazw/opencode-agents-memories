@@ -226,7 +226,7 @@ MODES
                    --web-port when its cmdline names one; otherwise
                    --web-port, then OPENCODE_MEM_WEB_PORT, then 3742),
                 5. the token at <store>/data/.auth-token, minted by the 401,
-                6. one search, one add canary, one search for the canary,
+                6. one search, one add canary, the canary in the tag's listing, and tag-filter controls,
                 7. the status file: absent, or naming a dead pid.
               Then prints the MANUAL two-workspace `memory list-shards`
               instruction — the live discriminator this script cannot run.
@@ -1394,21 +1394,79 @@ run_verify_mode() {
 		if [ "$HTTP_CODE" = 200 ] && printf '%s' "$PROBE_BODY" | jq -e '.success == true' >/dev/null 2>&1; then
 			canary_id=$(printf '%s' "$PROBE_BODY" | jq -r '.data.id // empty')
 			ck_ok "add works: canary stored as ${canary_id:-<no id in the envelope>} (tag $CONTAINER_TAG)"
-			ck_info "the canary is one real memory row; delete it in the web UI if you do not want it"
+			ck_info "each --verify stores one more canary row in $CONTAINER_TAG; nothing prunes it automatically — delete it in the web UI (two-step confirm) if you like, the gate does not depend on its rank"
 		else
 			ck_fail "add answered HTTP ${HTTP_CODE}: $(printf '%s' "$PROBE_BODY" | head -c 300) — a -32603 here is the cache (§7)"
 		fi
 		if [ -n "$canary_id" ]; then
-			# Scoped to the tag the row was stored in: untagged search merges 37
-			# shards, and under e5 the gibberish canary ranks 3 of 201 inside its
-			# own tag yet never enters the untagged global top page.
-			probe "$port" /api/search --get --data-urlencode "q=$canary" --data-urlencode "tag=$CONTAINER_TAG" -H "x-opencode-mem-token: $token"
-			if printf '%s' "$PROBE_BODY" | jq -e --arg id "$canary_id" '[.data.items[].id] | index($id) != null' >/dev/null 2>&1; then
-				local rank=''
-				rank=$(printf '%s' "$PROBE_BODY" | jq -r --arg id "$canary_id" '[.data.items[].id] | index($id) + 1')
-				ck_ok "the canary is findable in its own tag $CONTAINER_TAG (rank $rank) — add then search round-trips"
+			# 1a listing, positive — the row this run stored is on its own tag's
+			# first page: pinned-first, then createdAt descending, so a fresh
+			# unpinned row is the first unpinned entry. Exact id only, never a
+			# substring of content. `includePrompts=false` is sent because with no
+			# `tags` filter prompts are included by default and would eat slots.
+			# pageSize=200 is the server's hard max (api/mod.rs:561); a scope with
+			# 200+ pinned rows above the canary would red falsely — a named limit.
+			local total='' neg_tag=''
+			probe "$port" "/api/memories?tag=$CONTAINER_TAG&pageSize=200&includePrompts=false" -H "x-opencode-mem-token: $token"
+			if [ "$HTTP_CODE" != 200 ] || ! printf '%s' "$PROBE_BODY" | jq -e '.success == true' >/dev/null 2>&1; then
+				ck_fail "the listing with tag=$CONTAINER_TAG answered HTTP ${HTTP_CODE}: $(printf '%s' "$PROBE_BODY" | head -c 300)"
+			elif printf '%s' "$PROBE_BODY" | jq -e --arg id "$canary_id" '.success == true and (.data.total >= 1) and ([.data.items[].id] | index($id) != null)' >/dev/null 2>&1; then
+				total=$(printf '%s' "$PROBE_BODY" | jq -r '.data.total' || printf '0\n')
+				ck_ok "the canary row $canary_id is listed under $CONTAINER_TAG (total $total, first 200 entries)"
 			else
-				ck_fail "the canary was stored but not found in its own tag $CONTAINER_TAG — the row is absent or the tag filter is broken"
+				total=$(printf '%s' "$PROBE_BODY" | jq -r '.data.total // 0' || printf '0\n')
+				case $total in '' | *[!0-9]*) total=0 ;; esac
+				if [ "$total" -lt 1 ]; then
+					ck_fail "the listing with tag=$CONTAINER_TAG answered total $total (expected >= 1) — the tag filter is broken or the row was stored elsewhere"
+				else
+					ck_fail "the canary row $canary_id is not in the first 200 listing entries of $CONTAINER_TAG (total $total) — the row landed in another scope, was not committed, or the scope holds >= 200 pinned rows above it"
+				fi
+			fi
+
+			# 1a’ listing, negative: a tag that cannot exist must be empty. An
+			# omitted tag answers the unfiltered set (measured), so dropping the
+			# filter reds this control on behaviour, not on a request-log grep.
+			# ponytail: 2^-64 of projects could own this tag; the FAIL line names
+			# it, so a collision is diagnosable rather than silent.
+			neg_tag="${CONTAINER_TAG%_*}_0000000000000000"
+			probe "$port" "/api/memories?tag=$neg_tag&pageSize=200&includePrompts=false" -H "x-opencode-mem-token: $token"
+			if [ "$HTTP_CODE" != 200 ] || ! printf '%s' "$PROBE_BODY" | jq -e '.success == true' >/dev/null 2>&1; then
+				ck_fail "the listing with tag=$neg_tag answered HTTP ${HTTP_CODE}: $(printf '%s' "$PROBE_BODY" | head -c 300)"
+			elif printf '%s' "$PROBE_BODY" | jq -e '.success == true and (.data.total == 0)' >/dev/null 2>&1; then
+				ck_ok "the listing with tag $neg_tag is empty (total 0) — the tag filter scopes the listing"
+			else
+				total=$(printf '%s' "$PROBE_BODY" | jq -r '.data.total // 0' || printf '0\n')
+				case $total in '' | *[!0-9]*) total=0 ;; esac
+				ck_fail "the listing with tag $neg_tag answered total $total (expected 0) — the tag filter is not honored in the listing"
+			fi
+
+			# 1b search, positive: the search path answers for the tag. No id, no
+			# rank, no similarity — those are model- and accumulation-dependent.
+			probe "$port" /api/search --get --data-urlencode "q=$canary" --data-urlencode "tag=$CONTAINER_TAG" -H "x-opencode-mem-token: $token"
+			if [ "$HTTP_CODE" != 200 ] || ! printf '%s' "$PROBE_BODY" | jq -e '.success == true' >/dev/null 2>&1; then
+				ck_fail "search with tag=$CONTAINER_TAG answered HTTP ${HTTP_CODE}: $(printf '%s' "$PROBE_BODY" | head -c 300)"
+			elif printf '%s' "$PROBE_BODY" | jq -e '.success == true and (.data.total >= 1)' >/dev/null 2>&1; then
+				total=$(printf '%s' "$PROBE_BODY" | jq -r '.data.total' || printf '0\n')
+				ck_ok "search is scoped to $CONTAINER_TAG: total $total"
+			else
+				total=$(printf '%s' "$PROBE_BODY" | jq -r '.data.total // 0' || printf '0\n')
+				case $total in '' | *[!0-9]*) total=0 ;; esac
+				ck_fail "search with tag=$CONTAINER_TAG answered total $total (expected >= 1) — the search path or the tag filter is broken"
+			fi
+
+			# 1c search, negative: the tag filter is honored. This proves the
+			# MEMORY filter only: for a nonexistent tag the prompt branch takes a
+			# None project path and searches captured prompts globally, so a prompt
+			# hit would also count. Named residual, not a blocker.
+			probe "$port" /api/search --get --data-urlencode "q=$canary" --data-urlencode "tag=$neg_tag" -H "x-opencode-mem-token: $token"
+			if [ "$HTTP_CODE" != 200 ] || ! printf '%s' "$PROBE_BODY" | jq -e '.success == true' >/dev/null 2>&1; then
+				ck_fail "the tag-filter control answered HTTP ${HTTP_CODE}: $(printf '%s' "$PROBE_BODY" | head -c 300)"
+			elif printf '%s' "$PROBE_BODY" | jq -e '.success == true and (.data.total == 0)' >/dev/null 2>&1; then
+				ck_ok "the tag filter is honored: tag $neg_tag answered total 0 (memory entries)"
+			else
+				total=$(printf '%s' "$PROBE_BODY" | jq -r '.data.total // 0' || printf '0\n')
+				case $total in '' | *[!0-9]*) total=0 ;; esac
+				ck_fail "the tag filter is not honored: tag $neg_tag answered total $total (expected 0) — an ignored tag would merge other scopes"
 			fi
 		fi
 	fi

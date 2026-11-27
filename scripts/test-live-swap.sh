@@ -860,36 +860,62 @@ const dir = process.argv[2];
 const read = (name, dflt) => {
   try { return fs.readFileSync(path.join(dir, name), 'utf8').trim(); } catch (e) { return dflt; }
 };
-const unrelated = Array.from({ length: 20 }, (_, i) => ({ id: 'unrelated-' + i, similarity: 0.8 }));
+// `pos` is the scoped page: the row this run stored, then six older rows.
+const pos = [{ id: 'canary-1', similarity: 0.9 }].concat(
+  Array.from({ length: 6 }, (_, i) => ({ id: 'prior-' + i, similarity: 0.5 })));
+// `wrong` carries the same CONTENT under another id: only an exact-id match passes.
+const wrongPos = () => Array.from({ length: 6 }, (_, i) => ({ id: 'prior-' + i, similarity: 0.5 })).concat(
+  [{ id: 'decoy-1', similarity: 0.5, content: read('canary', '') }]);
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   fs.appendFileSync(path.join(dir, 'requests'), req.method + ' ' + url.pathname + url.search + '\n');
-  if (read('mode', 'ok') === 'hang') { return; }
+  const mode = read('mode', 'ok');
+  if (mode === 'hang') { return; }
   const send = (code, body) => {
     res.writeHead(code, { 'content-type': 'application/json' });
     res.end(JSON.stringify(body));
   };
+  const tag = url.searchParams.get('tag') || '';
+  const posted = read('tag', '');
+  const items = mode === 'wrong' ? wrongPos() : pos;
+  // An OMITTED tag models the unfiltered set (measured: dropping `tag` answers
+  // the global set), so a negative probe that forgets tag=NEG_TAG reds on
+  // behaviour alone. Only a present tag other than `posted` is empty.
+  const scoped = tag === '' || tag === posted;
   if (url.pathname === '/api/health') { return send(200, { success: true, status: 'ok' }); }
   if (url.pathname === '/api/stats') { return send(401, { success: false }); }
   if (url.pathname === '/api/memories' && req.method === 'POST') {
+    if (mode === 'addfail') { return send(500, { success: false }); }
     let body = '';
     req.on('data', (c) => { body += c; });
     req.on('end', () => {
-      try { fs.writeFileSync(path.join(dir, 'tag'), JSON.parse(body).containerTag || ''); } catch (e) { }
+      try {
+        const sent = JSON.parse(body);
+        fs.writeFileSync(path.join(dir, 'tag'), sent.containerTag || '');
+        fs.writeFileSync(path.join(dir, 'canary'), sent.content || '');
+      } catch (e) { }
       send(200, { success: true, data: { id: 'canary-1' } });
     });
     return;
   }
+  if (url.pathname === '/api/memories') {
+    // The healthy listing demands the tag AND includePrompts=false. Stricter
+    // than the engine (a tags filter already drops prompts) on purpose: an
+    // omission of either parameter must red, not pass.
+    const prompts = url.searchParams.get('includePrompts');
+    const listed = mode === 'alltags' || (scoped && (tag === '' || prompts === 'false'));
+    return send(200, { success: true, data: { items: listed ? items : [], total: listed ? items.length : 0 } });
+  }
   if (url.pathname === '/api/search') {
+    if (mode === 'searchfail') { return send(500, { success: false }); }
     const q = url.searchParams.get('q') || '';
-    const tag = url.searchParams.get('tag') || '';
     if (!q.startsWith('live-swap canary')) {
-      return send(200, { success: true, data: { items: [{ id: 'unrelated-1', similarity: 0.7 }] } });
+      return send(200, { success: true, data: { items: [{ id: 'unrelated-1', similarity: 0.7 }], total: 1 } });
     }
-    if (read('mode', 'ok') === 'wrong' || tag === '' || tag !== read('tag', '')) {
-      return send(200, { success: true, data: { items: unrelated } });
-    }
-    return send(200, { success: true, data: { items: [{ id: 'canary-1', similarity: 0.9 }] } });
+    // A server that ignores the tag: both negatives still answer, and the
+    // search total is 20 (the shape of the measured global set).
+    if (mode === 'alltags') { return send(200, { success: true, data: { items: pos, total: 20 } }); }
+    return send(200, { success: true, data: { items: scoped ? items : [], total: scoped ? items.length : 0 } });
   }
   send(404, { success: false });
 });
@@ -978,11 +1004,58 @@ case_20_rows() {
 		return 1
 	fi
 	case $out in
-	*'[ ok ] the canary is findable in its own tag'*) ;;
-	*)
-		bfail 'the canary was not reported findable in its own tag'
+	*'[ ok ] the canary is findable'*)
+		bfail 'the rank-based canary leg survived — the gate must use the listing, not a rank'
 		return 1
 		;;
+	*) ;;
+	esac
+	# (a) the row this run stored is in its own tag's listing — exact id, page 1.
+	case $out in
+	*'[ ok ] the canary row canary-1 is listed under opencode_project_4182e0858e0c93a1 (total 7, first 200 entries)'*) ;;
+	*)
+		bfail 'the canary row was not reported in its own tag listing'
+		return 1
+		;;
+	esac
+	# the other three healthy legs. Sited here, on the healthy run, before `out`
+	# is reassigned to the `wrong` run below — that run carries no `the canary row`.
+	case $out in
+	*'[ ok ] the listing with tag opencode_project_0000000000000000 is empty (total 0) — the tag filter scopes the listing'*) ;;
+	*)
+		bfail 'the listing tag-filter control did not report the negative tag empty'
+		return 1
+		;;
+	esac
+	case $out in
+	*'[ ok ] search is scoped to opencode_project_4182e0858e0c93a1: total 7'*) ;;
+	*)
+		bfail 'the scoped search leg did not report its total'
+		return 1
+		;;
+	esac
+	case $out in
+	*'[ ok ] the tag filter is honored: tag opencode_project_0000000000000000 answered total 0 (memory entries)'*) ;;
+	*)
+		bfail 'the search tag-filter control did not report the negative tag empty'
+		return 1
+		;;
+	esac
+	# the accumulation truth: one row per --verify, nothing prunes it, and the
+	# gate never depends on where that row ranks.
+	case $out in
+	*'[info] each --verify stores one more canary row'*) ;;
+	*)
+		bfail 'the accumulation info line is missing'
+		return 1
+		;;
+	esac
+	case $out in
+	*'the canary is one real memory row'*)
+		bfail 'the old one-row canary info wording survived'
+		return 1
+		;;
+	*) ;;
 	esac
 	case $out in
 	*'failures=0'*) ;;
@@ -1039,6 +1112,12 @@ case_20_rows() {
 		bfail "the canary search did not carry the tag the row was stored in ($posted)"
 		return 1
 	fi
+	# the positive listing must be scoped on the wire. Here, not at :987: `posted`
+	# is assigned above, so this greps the real tag instead of `tag=`.
+	if ! grep -qF "GET /api/memories?tag=$posted&pageSize=200&includePrompts=false" "$dir/requests"; then
+		bfail 'the positive listing did not carry tag + pageSize=200 + includePrompts=false'
+		return 1
+	fi
 
 	# (b) a row absent from its own scoped page is a FAIL.
 	printf '%s\n' 'wrong' >"$dir/mode"
@@ -1049,9 +1128,9 @@ case_20_rows() {
 		return 1
 	fi
 	case $out in
-	*'[FAIL] the canary was stored but not found in its own tag'*) ;;
+	*'[FAIL] the canary row canary-1 is not in the first 200 listing entries of opencode_project_4182e0858e0c93a1 (total 7)'*) ;;
 	*)
-		bfail 'a canary missing from its own scoped page was not reported FAIL'
+		bfail 'a canary absent from its own listing page was not reported FAIL'
 		return 1
 		;;
 	esac
@@ -1061,6 +1140,72 @@ case_20_rows() {
 		return 1
 		;;
 	*) ;;
+	esac
+	printf '%s\n' 'ok' >"$dir/mode"
+
+	# (a) a failed add is a FAIL line, never a green run; and with no id there is
+	# no listing leg to report.
+	printf '%s\n' 'addfail' >"$dir/mode"
+	invoke_timeout 60 --verify --rehearse "$r"
+	out=$case_out
+	if [ "$case_rc" -eq 124 ]; then
+		bfail 'the --verify invocation timed out'
+		return 1
+	fi
+	case $out in
+	*'[FAIL] add answered HTTP 500'*) ;;
+	*)
+		bfail 'a failed add was not reported as a FAIL line'
+		return 1
+		;;
+	esac
+	case $out in
+	*'[ ok ] the canary row'*)
+		bfail 'a canary row was reported listed although the add failed'
+		return 1
+		;;
+	*) ;;
+	esac
+	printf '%s\n' 'ok' >"$dir/mode"
+
+	# (d) a server that ignores the tag reds BOTH filter controls: the listing
+	# answers 7 and the search 20 for every tag.
+	printf '%s\n' 'alltags' >"$dir/mode"
+	invoke_timeout 60 --verify --rehearse "$r"
+	out=$case_out
+	if [ "$case_rc" -eq 124 ]; then
+		bfail 'the --verify invocation timed out'
+		return 1
+	fi
+	case $out in
+	*'[FAIL] the listing with tag opencode_project_0000000000000000 answered total 7 (expected 0) — the tag filter is not honored in the listing'*) ;;
+	*)
+		bfail 'an unfiltered listing was not reported FAIL'
+		return 1
+		;;
+	esac
+	case $out in
+	*'[FAIL] the tag filter is not honored: tag opencode_project_0000000000000000 answered total 20 (expected 0) — an ignored tag would merge other scopes'*) ;;
+	*)
+		bfail 'an unfiltered search was not reported FAIL'
+		return 1
+		;;
+	esac
+
+	# (c) a broken search path is a FAIL line, not a silent skip.
+	printf '%s\n' 'searchfail' >"$dir/mode"
+	invoke_timeout 60 --verify --rehearse "$r"
+	out=$case_out
+	if [ "$case_rc" -eq 124 ]; then
+		bfail 'the --verify invocation timed out'
+		return 1
+	fi
+	case $out in
+	*'[FAIL] search with tag=opencode_project_4182e0858e0c93a1 answered HTTP 500'*) ;;
+	*)
+		bfail 'a 500 from the search path was not reported FAIL'
+		return 1
+		;;
 	esac
 	printf '%s\n' 'ok' >"$dir/mode"
 

@@ -299,7 +299,7 @@ endpoints, not the port's web server.
 | 9 | search | `memory` tool `mode:"search"` for `W8 brute-force search cost benchmark shard layout` | rank 1 `mem_1792900662953_j6e64unbf`, similarity ≈0.54 (JSON-RPC; REST measured 0.5619 on the restored copy) |
 | 10 | profile | `memory` tool `mode:"profile"` | non-null profile (version 157 at 2026-10-30T14:05Z; changes as it learns) |
 | 11 | web UI | open `http://127.0.0.1:3742` (the engine's default; `OPENCODE_MEM_WEB_PORT` overrides) | HTTP 200, `OpenCode Memory Explorer` shell; `/api/health` = `{"success":true,"status":"ok","authEnabled":false}`; `/api/stats` total = memory count |
-| 12 | add + search | the §7 curl pair, or `memory` tool `mode:"add"` then `mode:"search"` for the canary | add 200 / `success:true`; canary is rank 1 (similarity ≈0.79–0.90) |
+| 12 | add + search | the §7 curl pair, or `memory` tool `mode:"add"` then `mode:"search"` for the canary | add 200 / `success:true`; `--verify` proves the stored row is in its tag's listing and that the `tag` filter is honored; rank is not a pass criterion (rank 1 pre-e5, 2026-10-30; under e5 the same template measured rank 33 of 200 at `pageSize` 50, `.tmp/scratch/probe28/q.txt`) |
 | 13 | capture | a real session with a prompt | a row appears in `user-prompts.db` (count grows past 1,745) and, with the provider configured, an auto-captured memory |
 | 14 | injection | start a second session in the same project | memory context is prepended (the response reflects stored facts); `injectProfile: true` also injects the profile block |
 | 15 | compaction | let a session compact (or trigger it) | the `experimental.session.compacting` hook runs and the compaction summary is produced; no engine error |
