@@ -13,6 +13,7 @@ pub mod compaction;
 pub mod composition;
 pub mod cross_tier;
 pub mod db_lane;
+pub mod embedding_identity;
 pub mod engine;
 pub mod error_map;
 pub mod host_endpoint;

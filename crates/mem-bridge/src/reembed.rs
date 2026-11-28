@@ -16,7 +16,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use mem_core::config::Config;
-use mem_core::embedding::EmbeddingIdentity;
 use mem_core::scope::extract_scope_from_container_tag;
 use mem_embed::EmbeddingServiceOptions;
 use mem_embed::embedder::BoxFuture;
@@ -32,7 +31,8 @@ use mem_store::platform::{Platform, SystemProcessProbe};
 use mem_store::ready::build_ready_gate_with_encryption;
 use mem_store::shard_manager::{ShardManager, ShardRegistry};
 
-use crate::composition::embedder_from_config;
+use crate::composition::embedder_from_resolved;
+use crate::embedding_identity::resolve_effective_embedding;
 use crate::engine::structured_stderr;
 
 /// The one field the CLI surface needs: the scope's container tag.
@@ -150,12 +150,15 @@ pub fn run(config: &Config, storage_root: &Path, request: &ReembedRequest) -> i3
             Platform::current(),
             Arc::new(TursoConnectFactory),
         ));
+        // Issue 177: ONE resolution feeds the identity and the embedder, so
+        // the document names the dtype the loader actually loads.
+        let (load_options, embedding_identity) = resolve_effective_embedding(config);
         let shards = Arc::new(ShardManager::new(
             storage_root.to_path_buf(),
             store_config.clone(),
             connections.clone(),
             Arc::new(SystemProcessProbe),
-            Some(EmbeddingIdentity::from_config(config)),
+            Some(embedding_identity),
         ));
         let registry: Arc<dyn ShardRegistry> = shards.clone();
         // W3 pins the encryption slot exactly like the engine's composition.
@@ -176,7 +179,7 @@ pub fn run(config: &Config, storage_root: &Path, request: &ReembedRequest) -> i3
         // `Embedder` skips the document prefix that the identity covers. The
         // handle is kept so the run's truncation totals can be reported after
         // the migration (the service owns the same `Arc`).
-        let embedder = embedder_from_config(config);
+        let embedder = embedder_from_resolved(config, load_options);
         let re_embedder: Arc<dyn ReEmbedder> = Arc::new(ServiceReEmbedder {
             service: EmbeddingService::new(
                 EmbeddingServiceOptions::from_config(config),

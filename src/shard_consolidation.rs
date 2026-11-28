@@ -1298,7 +1298,9 @@ fn apply_plan(
 }
 
 fn expected_embedding(config: &mem_core::config::Config) -> Result<EmbeddingExpectation, Refusal> {
-    let identity = mem_core::embedding::EmbeddingIdentity::from_config(config);
+    // Issue 177: the identity must name the dtype the loader resolves from the
+    // cache, not the configured one (Auto/unset resolve to the cached dtype).
+    let identity = mem_bridge::embedding_identity::resolve_effective_embedding(config).1;
     let fingerprint = identity.fingerprint().map_err(|error| {
         Refusal::new(
             EXIT_EMBEDDING_REFUSAL,
@@ -1663,7 +1665,8 @@ fn write_groups(
         store_config.clone(),
         connections,
         Arc::new(SystemProcessProbe),
-        Some(mem_core::embedding::EmbeddingIdentity::from_config(config)),
+        // Issue 177: the same cache-resolved identity the embedder loads.
+        Some(mem_bridge::embedding_identity::resolve_effective_embedding(config).1),
     );
     let capacity = store_config.max_vectors_per_shard as usize;
     let mut written = Vec::with_capacity(groups.len());

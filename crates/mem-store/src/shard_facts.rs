@@ -199,6 +199,13 @@ pub async fn claim_identity(db: &dyn Db, fingerprint: &str) -> Result<Fingerprin
 /// a fingerprint naming a model the config never had. `WithheldEncoding` when
 /// `fingerprint()` returns `Err`: no empty string is ever written (an empty
 /// fingerprint is unequal forever and would force a re-embed on every open).
+///
+/// **Residual (issue 177, still open):** this gate compares `dimensions` and
+/// `model` only — never `dtype`. A shard whose vectors came from another
+/// effective dtype but which was stamped q8 is therefore accepted. The
+/// fingerprint is the only provenance record of the dtype, and this issue adds
+/// no dtype validation here; a future issue may compare
+/// `identity.dtype` against the stored fingerprint's.
 pub fn claimable_fingerprint(
     identity: Option<&mem_core::embedding::EmbeddingIdentity>,
     dimensions: u32,
@@ -270,12 +277,18 @@ pub async fn prepare_write_shard(
     let facts = model_facts_cached(db, cache, db_path).await?;
     let authority = judge_model_facts(&facts, identity, model);
     warn_model_equality(&authority, Some(mismatch.shard_id), model);
-    if let ModelAuthority::Mismatch { stored_model } = &authority {
+    if let ModelAuthority::Mismatch {
+        stored_model,
+        stored_fingerprint,
+    } = &authority
+    {
         return Err(model_mismatch_error(
             vec![ShardModelMismatchEntry {
                 id: mismatch.shard_id,
                 stored_model: stored_model.clone(),
                 expected: model.to_string(),
+                stored_fingerprint: stored_fingerprint.clone(),
+                expected_fingerprint: identity.and_then(|identity| identity.fingerprint().ok()),
             }],
             mismatch.container_tag_prefix,
             mismatch.scope,
@@ -309,12 +322,21 @@ async fn prepare_shard_facts(
     let facts = read_model_facts(db).await?;
     let authority = judge_model_facts(&facts, identity, model);
     warn_model_equality(&authority, mismatch.map(|context| context.shard_id), model);
-    if let (ModelAuthority::Mismatch { stored_model }, Some(context)) = (&authority, mismatch) {
+    if let (
+        ModelAuthority::Mismatch {
+            stored_model,
+            stored_fingerprint,
+        },
+        Some(context),
+    ) = (&authority, mismatch)
+    {
         return Err(model_mismatch_error(
             vec![ShardModelMismatchEntry {
                 id: context.shard_id,
                 stored_model: stored_model.clone(),
                 expected: model.to_string(),
+                stored_fingerprint: stored_fingerprint.clone(),
+                expected_fingerprint: identity.and_then(|identity| identity.fingerprint().ok()),
             }],
             context.container_tag_prefix,
             context.scope,
@@ -405,7 +427,13 @@ pub enum ModelAuthority {
     /// configured one — legacy, warned about, allowed (R-1).
     ModelEquality { stored_model: Option<String> },
     /// Positive evidence that the shard belongs to another model.
-    Mismatch { stored_model: Option<String> },
+    ///
+    /// `stored_fingerprint` survives the judgement so the refusal can name the
+    /// differing fields; the comparison itself is unchanged.
+    Mismatch {
+        stored_model: Option<String>,
+        stored_fingerprint: Option<String>,
+    },
 }
 
 /// Reads both identity facts in ONE statement (never two round trips: the pair
@@ -589,12 +617,14 @@ pub fn judge_model_facts(
             } else {
                 ModelAuthority::Mismatch {
                     stored_model: facts.stored_model.clone(),
+                    stored_fingerprint: facts.fingerprint.clone(),
                 }
             };
         }
         return match facts.stored_model.as_deref() {
             Some(stored) if stored != configured_model => ModelAuthority::Mismatch {
                 stored_model: facts.stored_model.clone(),
+                stored_fingerprint: facts.fingerprint.clone(),
             },
             _ => ModelAuthority::ModelEqualityNoIdentity {
                 stored_model: facts.stored_model.clone(),
@@ -604,6 +634,7 @@ pub fn judge_model_facts(
     match facts.stored_model.as_deref() {
         Some(stored) if stored != configured_model => ModelAuthority::Mismatch {
             stored_model: facts.stored_model.clone(),
+            stored_fingerprint: None,
         },
         stored => ModelAuthority::ModelEquality {
             stored_model: stored.map(str::to_string),

@@ -7,7 +7,7 @@ mod common;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mem_core::config::EmbeddingPooling;
+use mem_core::config::{EmbeddingPooling, LocalOnnxDtype};
 use mem_core::embedding::EmbeddingIdentity;
 use mem_store::db::{BatchMode, BoxFuture, Db, DbHandle, ExecResult, Row, Statement, Value};
 use mem_store::error::{ShardModelMismatch, ShardModelMismatchEntry, StoreError};
@@ -26,11 +26,15 @@ fn test_mismatch_display_names_every_shard_and_the_command() {
                 id: 3,
                 stored_model: Some("foreign-model".to_string()),
                 expected: "Xenova/nomic-embed-text-v1".to_string(),
+                stored_fingerprint: None,
+                expected_fingerprint: None,
             },
             ShardModelMismatchEntry {
                 id: 4,
                 stored_model: None,
                 expected: "Xenova/nomic-embed-text-v1".to_string(),
+                stored_fingerprint: None,
+                expected_fingerprint: None,
             },
         ],
         remedy: remedy.to_string(),
@@ -64,6 +68,88 @@ fn test_mismatch_display_names_every_shard_and_the_command() {
         std::mem::size_of::<StoreError>() <= 112,
         "StoreError grew past W1's measured 112-byte high-water mark: {}",
         std::mem::size_of::<StoreError>()
+    );
+}
+
+/// Issue 177 — a dtype-only mismatch must name the differing field instead of
+/// rendering two identical model names. Both orientations are asserted, and an
+/// equal-fingerprint pair appends no clause at all.
+#[test]
+fn mismatch_display_names_differing_fields() {
+    let q8_identity = EmbeddingIdentity {
+        dtype: Some(LocalOnnxDtype::Q8),
+        ..identity("test-model", 2)
+    };
+    let null_identity = identity("test-model", 2);
+    let q8_fingerprint = q8_identity.fingerprint().expect("identity serializes");
+    let null_fingerprint = null_identity.fingerprint().expect("identity serializes");
+    assert_ne!(q8_fingerprint, null_fingerprint);
+
+    let remedy =
+        "opencode-agents-memory --mode=reembed-scope --scope opencode_project_a1b2c3d4e5f67890";
+    let report = ShardModelMismatch {
+        shards: vec![
+            ShardModelMismatchEntry {
+                id: 3,
+                stored_model: Some("test-model".to_string()),
+                expected: "test-model".to_string(),
+                stored_fingerprint: Some(q8_fingerprint.clone()),
+                expected_fingerprint: Some(null_fingerprint.clone()),
+            },
+            ShardModelMismatchEntry {
+                id: 4,
+                stored_model: Some("test-model".to_string()),
+                expected: "test-model".to_string(),
+                stored_fingerprint: Some(null_fingerprint.clone()),
+                expected_fingerprint: Some(q8_fingerprint.clone()),
+            },
+            ShardModelMismatchEntry {
+                id: 5,
+                stored_model: Some("test-model".to_string()),
+                expected: "test-model".to_string(),
+                stored_fingerprint: Some(q8_fingerprint.clone()),
+                expected_fingerprint: Some(q8_fingerprint.clone()),
+            },
+        ],
+        remedy: remedy.to_string(),
+    };
+    let display = report.to_string();
+
+    // The model clause is unchanged and still present for every shard.
+    assert_eq!(
+        display
+            .matches("stored model 'test-model', expected 'test-model'")
+            .count(),
+        3,
+        "{display}"
+    );
+    // Stored q8 / expected null.
+    assert!(
+        display.contains(
+            "shard 3 (stored model 'test-model', expected 'test-model'); \
+                          differing fields: dtype \"q8\" vs null"
+        ),
+        "{display}"
+    );
+    // Stored null / expected q8 — the write-path orientation of the fix.
+    assert!(
+        display.contains(
+            "shard 4 (stored model 'test-model', expected 'test-model'); \
+                          differing fields: dtype null vs \"q8\""
+        ),
+        "{display}"
+    );
+    // Equal fingerprints append nothing.
+    assert!(
+        display.contains(
+            "shard 5 (stored model 'test-model', expected 'test-model'); re-embed the scope:"
+        ),
+        "the equal-fingerprint shard must not gain a differing-fields clause: {display}"
+    );
+    assert_eq!(
+        display.matches("differing fields:").count(),
+        2,
+        "exactly the two unequal pairs carry a clause: {display}"
     );
 }
 
@@ -117,6 +203,7 @@ fn test_judge_model_facts_truth_table() {
         ),
         ModelAuthority::Mismatch {
             stored_model: Some("test-model".to_string()),
+            stored_fingerprint: Some(foreign_fingerprint.clone()),
         }
     );
 
@@ -132,6 +219,7 @@ fn test_judge_model_facts_truth_table() {
         ),
         ModelAuthority::Mismatch {
             stored_model: Some("foreign-model".to_string()),
+            stored_fingerprint: Some(configured_fingerprint.clone()),
         }
     );
 
@@ -203,6 +291,7 @@ fn test_judge_model_facts_truth_table() {
         ),
         ModelAuthority::Mismatch {
             stored_model: Some("legacy-unknown".to_string()),
+            stored_fingerprint: None,
         }
     );
 }

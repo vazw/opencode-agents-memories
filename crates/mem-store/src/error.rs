@@ -11,13 +11,16 @@
 //! non-`Clone` `#[from]` fields — a clone of the richer error would lose the
 //! chain anyway.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// One shard whose stored embedding identity disagrees with the configured
 /// one (W3's model authority).
 ///
-/// Carries ids, model names and the expected model only: never content and
-/// never a path (the refusal is answered on the HTTP surface).
+/// Carries ids and model names, plus the two identity fingerprints when the
+/// judgement read them. A fingerprint records the model, pooling, prefix and
+/// dtype names only: never memory content and never a path (the refusal is
+/// answered on the HTTP surface).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShardModelMismatchEntry {
     /// The registry row id of the mismatched shard.
@@ -26,6 +29,10 @@ pub struct ShardModelMismatchEntry {
     pub stored_model: Option<String>,
     /// The configured model the shard had to prove.
     pub expected: String,
+    /// The shard's stored fingerprint, when the judgement read one.
+    pub stored_fingerprint: Option<String>,
+    /// The configured identity's fingerprint, when the judgement had one.
+    pub expected_fingerprint: Option<String>,
 }
 
 /// The model-authority refusal: every mismatched shard of one scope, plus the
@@ -62,8 +69,70 @@ impl std::fmt::Display for ShardModelMismatch {
                     shard.id, shard.expected
                 )?,
             }
+            // A dtype-only mismatch would otherwise render as two identical
+            // model names: name the fingerprint fields that differ.
+            if let (Some(stored), Some(expected)) =
+                (&shard.stored_fingerprint, &shard.expected_fingerprint)
+                && stored != expected
+            {
+                match differing_fields(stored, expected) {
+                    Some(fields) => write!(formatter, "; differing fields: {fields}")?,
+                    None => write!(
+                        formatter,
+                        "; stored fingerprint '{stored}', expected '{expected}'"
+                    )?,
+                }
+            }
         }
         write!(formatter, "; re-embed the scope: {}", self.remedy)
+    }
+}
+
+/// The fingerprint fields two JSON documents disagree on, rendered as
+/// `{key} {stored} vs {expected}` and joined by `", "`.
+///
+/// A field held by only one side renders as `absent`; `serde_json::Value`'s
+/// Display quotes strings, so `dtype: Some(Q8)` vs `dtype: None` reads
+/// `dtype "q8" vs null`. `None` when nothing differs, or when either side is
+/// not a JSON object — the caller then prints the raw pair rather than an
+/// empty or misleading clause.
+fn differing_fields(stored: &str, expected: &str) -> Option<String> {
+    let stored: serde_json::Value = serde_json::from_str(stored).ok()?;
+    let expected: serde_json::Value = serde_json::from_str(expected).ok()?;
+    let (serde_json::Value::Object(stored), serde_json::Value::Object(expected)) =
+        (stored, expected)
+    else {
+        return None;
+    };
+    let keys: BTreeSet<&str> = stored
+        .keys()
+        .map(String::as_str)
+        .chain(expected.keys().map(String::as_str))
+        .collect();
+    let differing: Vec<String> = keys
+        .into_iter()
+        .filter_map(|key| match (stored.get(key), expected.get(key)) {
+            (stored_value, expected_value) if stored_value == expected_value => None,
+            (stored_value, expected_value) => Some(format!(
+                "{key} {} vs {}",
+                render_fingerprint_value(stored_value),
+                render_fingerprint_value(expected_value)
+            )),
+        })
+        .collect();
+    if differing.is_empty() {
+        None
+    } else {
+        Some(differing.join(", "))
+    }
+}
+
+/// One side of a differing field; a key absent from that document renders as
+/// `absent`.
+fn render_fingerprint_value(value: Option<&serde_json::Value>) -> String {
+    match value {
+        Some(value) => value.to_string(),
+        None => "absent".to_string(),
     }
 }
 

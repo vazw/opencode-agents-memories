@@ -322,13 +322,24 @@ impl ProductionMemory {
     }
 
     /// The typed refusal for one shard of `shard`'s scope.
-    fn refusal(&self, shard: &ShardRef, shard_id: i64, stored_model: Option<String>) -> PortError {
+    fn refusal(
+        &self,
+        shard: &ShardRef,
+        shard_id: i64,
+        stored_model: Option<String>,
+        stored_fingerprint: Option<String>,
+    ) -> PortError {
         let config = self.manager.config();
         PortError::ModelMismatch(Box::new(shard_facts::model_mismatch(
             vec![ShardModelMismatchEntry {
                 id: shard_id,
                 stored_model,
                 expected: config.embedding_model.clone(),
+                stored_fingerprint,
+                expected_fingerprint: self
+                    .manager
+                    .embedding_identity()
+                    .and_then(|identity| identity.fingerprint().ok()),
             }],
             &config.container_tag_prefix,
             shard.scope,
@@ -349,13 +360,13 @@ impl ProductionMemory {
                 scope_hash = %shard.scope_hash,
                 "update_memory: shard carries no registry id; refusing"
             );
-            return Err(self.refusal(shard, 0, None));
+            return Err(self.refusal(shard, 0, None, None));
         };
         let db = match self.open(shard).await {
             Ok(db) => db,
             Err(error) => {
                 tracing::warn!(error = %error, "update_memory: shard unavailable; refusing");
-                return Err(self.refusal(shard, shard_id, None));
+                return Err(self.refusal(shard, shard_id, None, None));
             }
         };
         let facts = match shard_facts::model_facts_cached(
@@ -368,7 +379,7 @@ impl ProductionMemory {
             Ok(facts) => facts,
             Err(error) => {
                 tracing::warn!(error = %error, "update_memory: shard facts unreadable; refusing");
-                return Err(self.refusal(shard, shard_id, None));
+                return Err(self.refusal(shard, shard_id, None, None));
             }
         };
         let config = self.manager.config();
@@ -379,9 +390,10 @@ impl ProductionMemory {
         );
         shard_facts::warn_model_equality(&authority, Some(shard_id), &config.embedding_model);
         match authority {
-            ModelAuthority::Mismatch { stored_model } => {
-                Err(self.refusal(shard, shard_id, stored_model))
-            }
+            ModelAuthority::Mismatch {
+                stored_model,
+                stored_fingerprint,
+            } => Err(self.refusal(shard, shard_id, stored_model, stored_fingerprint)),
             _ => Ok(shard_id),
         }
     }
@@ -469,11 +481,20 @@ impl MemoryPort for ProductionMemory {
                 &config.embedding_model,
             );
             shard_facts::warn_model_equality(&authority, Some(shard_id), &config.embedding_model);
-            if let ModelAuthority::Mismatch { stored_model } = authority {
+            if let ModelAuthority::Mismatch {
+                stored_model,
+                stored_fingerprint,
+            } = authority
+            {
                 entries.push(ShardModelMismatchEntry {
                     id: shard_id,
                     stored_model,
                     expected: config.embedding_model.clone(),
+                    stored_fingerprint,
+                    expected_fingerprint: self
+                        .manager
+                        .embedding_identity()
+                        .and_then(|identity| identity.fingerprint().ok()),
                 });
             }
         }

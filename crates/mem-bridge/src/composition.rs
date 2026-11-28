@@ -233,7 +233,11 @@ pub async fn build_composed_runtime(
         probe.clone(),
         // The ONE production wiring (AC9): the identity is derived from the
         // resolved config, the same authority the store config came from.
-        Some(mem_core::embedding::EmbeddingIdentity::from_config(config)),
+        // Issue 177: this is the SAME resolution the local loader uses (the
+        // embedder is built by `embedder_from_config`, which takes the options
+        // half of the same helper), so the document cannot name a dtype the
+        // loader never loads.
+        Some(crate::embedding_identity::resolve_effective_embedding(config).1),
     ));
     // Issue 70: the inventory/migration tag source and the profile write's
     // learning lock. Both read the SAME prefix/overrides the resolver uses,
@@ -486,7 +490,24 @@ pub fn local_cache_root(config: &Config) -> PathBuf {
 /// The default embedding loader: Local ONNX unless a remote url+key pair
 /// is set (matching `EmbeddingService`'s branch, but handing the raw
 /// `Arc<dyn Embedder>` every W5.3 seam expects).
+///
+/// The local arm takes the options half of
+/// [`crate::embedding_identity::resolve_effective_embedding`], so the loader
+/// and the store identity are one resolution (issue 177).
 pub fn embedder_from_config(config: &Config) -> Arc<dyn mem_embed::embedder::Embedder> {
+    embedder_from_resolved(
+        config,
+        crate::embedding_identity::resolve_effective_embedding(config).0,
+    )
+}
+
+/// [`embedder_from_config`] with the local loader options already resolved by
+/// the caller — the seam re-embed and consolidation use so their embedder and
+/// their shard identity come from the SAME resolution.
+pub fn embedder_from_resolved(
+    config: &Config,
+    local_options: mem_embed::local::LocalLoadOptions,
+) -> Arc<dyn mem_embed::embedder::Embedder> {
     match (
         config.embedding_api_url.clone(),
         config.embedding_api_key.clone(),
@@ -501,9 +522,7 @@ pub fn embedder_from_config(config: &Config) -> Arc<dyn mem_embed::embedder::Emb
             Arc::new(mem_embed::remote::ReqwestTransport::new()),
             mem_embed::remote::retry::system_sleep(),
         )),
-        _ => Arc::new(mem_embed::local::LocalOnnxEmbedder::new(
-            local_load_options_from_config(config),
-        )),
+        _ => Arc::new(mem_embed::local::LocalOnnxEmbedder::new(local_options)),
     }
 }
 
