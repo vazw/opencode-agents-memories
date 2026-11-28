@@ -1,8 +1,8 @@
 # 174 — user_prompts carries no identity, so the learner cannot select by user
 
-Status: **needs-info** — the shape (a `user_id` column vs a read-time join) and whether a
-multi-identity engine is in scope are owner rulings; proposed ADR-0034 below. `ready-for-agent` once
-that ruling lands.
+Status: **ready-for-agent** — owner ruled 2026-11-28 (grilling): multi-identity **in scope**; shape
+**A**, a write-time `user_id` column whose value is the **resolved email**; the identity is resolved
+**once at accept** and reused by the prompt row and the memory row. ADR-0034 recorded. See §Rulings.
 Filed: 2026-11-28 from the profile-learner review (this file, 175, 176, 177). No code changed.
 
 ## The defect
@@ -79,7 +79,10 @@ cannot do for an override store.
 1. `user_prompts` gains a `user_id` column applied by `apply_user_prompts_schema` (v4 → v5 and fresh
    DB both end at v5 with the column present); the fresh-file DDL and the upgrade leg agree.
 2. `ProfileLearning::record` persists the capture's **resolved** identity (the `resolve_user_id_with`
-   precedence) — never the composition-time string.
+   precedence) — never the composition-time string. The resolution happens **once at accept** (the
+   capture is accepted, scope resolved via the engine's `scope_resolver`, the resolved email threaded
+   into both the prompt row and the memory row) so the two rows cannot disagree; `record` does not
+   resolve a second time.
 3. `get_prompts_for_user_learning(limit, user_id)` and `count_unanalyzed_for_user_learning(user_id)`
    filter on it; the unfiltered arms are deleted, not kept beside the new ones.
 4. The two-identity test above exists and is non-vacuous: **removing the `user_id = ?` predicate
@@ -100,19 +103,40 @@ Neither holds.
 
 None. 175 depends on this; 176 backfills what this leaves `NULL`.
 
-## Proposed ADR-0034 (outline only — do not write it)
+## Rulings (2026-11-28, owner, grilling)
+
+- **Multi-identity in scope.** The live store already carries two identities
+  (`vaz@siamstr.com`, `jakkaphat.j@bangmod.co.th`); `identity.rs:7-10` already treats that as
+  legitimate. The learner is the one consumer that asserted a single one.
+- **Shape A, email-valued.** `user_prompts.user_id` stores the resolved email — `resolve_user_id_with`
+  already returns the git email (or `userEmailOverride`, else `"unknown"`), and `user_profiles.user_id`
+  already holds emails, so the names agree. A row that resolves to `"unknown"` stores `NULL`, never a
+  fake identity.
+- **Resolve once at accept.** The scope is resolved a single time on the accept path and the email is
+  reused by the prompt row and the memory row, so the two rows cannot name different identities — the
+  same single-source principle that fixed 177's dtype. A second resolution inside `record` is rejected
+  as the same drift class.
+
+## Proposed ADR-0034
+
+Recorded as `docs/adr/0034-prompt-ledger-identity.md` (accepted 2026-11-28).
 
 **Title:** The prompt ledger carries the identity that produced each row.
 **Context:** `identity.rs` permits several identities per host; the learner asserts one; the ledger has
 no identity column.
-**Decision:** (A) `user_prompts.user_id` at v5, stamped at record time from the resolved identity; the
-learner selects and marks by identity. Existing profile keying is unchanged.
+**Decision:** (A) `user_prompts.user_id` at v5, carrying the resolved email, stamped at record time from
+the identity resolved once on the accept path; the learner selects and marks by identity. Existing
+profile keying is unchanged.
 **Consequences:** one schema version (no downgrade, per the storage-format rule); a v4 store gains
 `NULL` rows that 176 must disposition; the resolver stays the single authority (no SQL-side identity).
-**Rejected:** read-time join (B); project-scoped selection (wrong axis, falsified above).
+
+**Rejected:** read-time join (B); project-scoped selection (wrong axis, falsified above); independent resolution inside `record`.
 
 ## Comments
 
 - 2026-11-28 — filed from the learner review. `needs-info` because the A/B and the scope of
   multi-identity are the owner's call, and the ADR is not yet accepted. The evidence above is
   read-only; nothing in the live store was opened or written.
+- 2026-11-28 — grilling resolved every branch: multi-identity in scope, shape A with an email-valued
+  `user_id`, one resolution at accept reused by both rows. `ready-for-agent`; ADR-0034 recorded. 175
+  consumes this column, 176 dispositions the `NULL` rows it leaves behind.

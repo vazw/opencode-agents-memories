@@ -1,7 +1,8 @@
 # 175 — the profile learner is a singleton, so it can only ever analyze one identity
 
-Status: **needs-info** — blocked on 174's schema ruling and the same multi-identity scope question.
-`ready-for-agent` once 174 lands and the registry shape (A/B below) is chosen.
+Status: **ready-for-agent** — owner ruled 2026-11-28 (grilling): multi-identity in scope; the learner is
+**one** object whose round takes the identity per call, and the tick runs one round per identity the
+ledger reports. See §Rulings. 174 (the column) gates the wiring.
 Filed: 2026-11-28, with 174/176/177. No code changed.
 
 ## The defect
@@ -28,7 +29,22 @@ the singleton, whose identity is A) or still pooled into A (if not). Either way 
 `identity.rs:7-10` describes is not served. On a genuinely single-identity store this is a no-op — the
 defect is latent until a second identity exists.
 
-## Options
+## Rulings (2026-11-28, owner, grilling)
+
+- **Multi-identity in scope** (174 §Rulings); the live store already carries two.
+- **Chosen mechanism (C), not A or B.** The round already ignores the due session and selects the
+  global unanalyzed set, so the ledger — not the session — is the authoritative source of which
+  identities have work. `LearningRound::run(now, user_id)` takes the identity per call (the stored
+  field is used only for the profile get/write at six sites); `ProfileLearning::run_due` asks the
+  ledger for `DISTINCT user_id WHERE user_learning_captured = 0` and runs one round per identity. One
+  learner object, no registry, no `session → identity` map, no composition-time knowledge, and it
+  dedupes to one round per identity even when several sessions arm.
+- **A rejected:** a registry needs dynamic construction and lifecycle because identities arrive with
+  captures, for no capability C lacks. **B rejected:** sessions are not tagged with identity, and the
+  round does not process per-session, so B reintroduces the session→directory→identity lookup the
+  ledger already answers.
+
+## Options (historical — superseded by C above)
 
 **A — one learner per identity, built lazily on first `record`.** A registry
 `HashMap<String, Arc<ProfileLearning>>` (or `Arc<Mutex<…>>`) on the runtime; each learner owns its own
@@ -49,11 +65,13 @@ reds.
 
 1. `ComposedRuntime` exposes the learner registry (or the chosen per-identity equivalent), and the tick
    drives every due identity, not one.
-2. `record`/`arm` associate the session with the identity resolved for that capture — the same
-   `resolve_user_id_with` precedence, not `com.current_dir()` re-derived per tick.
-3. The two-identity-same-tick test above exists and is non-vacuous: **delete the session→identity
-   routing and one identity's prompt is attributed to the other (or zero rounds complete), and the
-   test reds.** State that in the test comment.
+2. The tick runs one round per identity with unanalyzed prompts: `run_due` enumerates
+   `DISTINCT user_id` from the ledger (after 174's column) and calls `run(now, user_id)` for each; the
+   round no longer stores a `user_id`. No `session → identity` association is required or added.
+3. The two-identity-same-tick test above exists and is non-vacuous: **drop the per-identity enumeration
+   (run the single stored identity, or pass one identity for all rows) and the second identity's prompt
+   is either never analysed or attributed to the first, and the test reds.** State that in the test
+   comment.
 4. Single-identity behaviour is unchanged: `test_composition_passes_an_explicit_identity`
    (`crates/mem-bridge/tests/profile_learning_wiring.rs:605`) and
    `test_unknown_identity_builds_no_learner` (`:543`) stay green (adjust signatures only as 174 forces).
@@ -80,3 +98,6 @@ Redesigning the idle scheduler; per-project profiles; the web surface's own iden
 - 2026-11-28 — filed from the learner review. `needs-info`: the registry shape (A/B) and whether
   multi-identity is in scope are the owner's ruling, and 174 gates it. Read-only evidence; no live
   store touched.
+- 2026-11-28 — grilling chose mechanism C (parameterized round + `DISTINCT user_id` enumeration), not
+  A or B. `ready-for-agent`; the residual (baked-in `user_id` at `learning_service.rs:199,217-228`)
+  is removed by moving it to the `run` argument.
