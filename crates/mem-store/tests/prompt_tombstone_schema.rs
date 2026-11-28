@@ -57,9 +57,9 @@ async fn test_user_prompts_v4_creates_the_tombstone_table() {
     .await
     .expect("the prompts fold reaches its maximum");
 
-    assert_eq!(USER_PROMPTS_MAX_KNOWN, 4, "the constant moved WITH the leg");
-    assert_eq!(version, 4);
-    assert_eq!(user_version(db.as_ref()).await, 4);
+    assert_eq!(USER_PROMPTS_MAX_KNOWN, 5, "the constant moved WITH the leg");
+    assert_eq!(version, 5);
+    assert_eq!(user_version(db.as_ref()).await, 5);
     assert!(table_exists(db.as_ref(), "prompt_tombstones").await);
 
     drop(db);
@@ -78,7 +78,7 @@ async fn test_the_tombstone_column_set_is_id_and_deletion_time_only() {
         Some(exclusive_root(&config.storage_path).as_ref()),
     )
     .await
-    .expect("stamp v4");
+    .expect("stamp the set's maximum");
 
     let info = db
         .query("PRAGMA table_info(prompt_tombstones)", Vec::new())
@@ -108,7 +108,7 @@ async fn test_the_tombstone_column_set_is_id_and_deletion_time_only() {
 }
 
 #[mem_store::tokio::test(crate = "mem_store::tokio")]
-async fn test_a_four_file_is_refused_by_a_three_only_build() {
+async fn test_a_newer_file_is_refused_by_a_three_only_build() {
     let config = store_config("prompt-tombstone-refuse");
     let db = open_real_db(&config, "user-prompts.db")
         .await
@@ -119,7 +119,7 @@ async fn test_a_four_file_is_refused_by_a_three_only_build() {
         Some(exclusive_root(&config.storage_path).as_ref()),
     )
     .await
-    .expect("stamp v4");
+    .expect("stamp the set's maximum");
 
     let refused = apply_user_prompts_schema(
         db.as_ref(),
@@ -127,11 +127,11 @@ async fn test_a_four_file_is_refused_by_a_three_only_build() {
         Some(exclusive_root(&config.storage_path).as_ref()),
     )
     .await
-    .expect_err("a three-only build refuses a v4 file");
+    .expect_err("a three-only build refuses a newer file");
     match refused {
         StoreError::SchemaNewerThanBuild {
             found, supported, ..
-        } => assert_eq!((found, supported), (4, 3)),
+        } => assert_eq!((found, supported), (5, 3)),
         other => panic!("expected SchemaNewerThanBuild, got {other:?}"),
     }
 

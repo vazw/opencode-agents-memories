@@ -20,6 +20,13 @@ pub const USER_PROMPTS_V2_COLUMNS: [(&str, &str); 3] = [
     ("model_id", "TEXT"),
 ];
 
+/// The v5 column set: `(name, declaration)` in ALTER order.
+///
+/// Issue 174: the resolved user identity, nullable because every pre-v5 row
+/// predates it (the boot backfill stamps what it can; a NULL row is selected
+/// by no learner).
+pub const USER_PROMPTS_V5_COLUMNS: [(&str, &str); 1] = [("user_id", "TEXT")];
+
 /// One `ALTER TABLE user_prompts ADD COLUMN` statement.
 pub fn user_prompts_v2_alter(name: &str, declaration: &str) -> String {
     format!("ALTER TABLE user_prompts ADD COLUMN {name} {declaration}")

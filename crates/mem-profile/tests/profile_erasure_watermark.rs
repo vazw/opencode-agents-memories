@@ -83,7 +83,7 @@ async fn seed_profile(store: &ProfileStore) -> String {
 
 async fn seed_prompt(manager: &UserPromptManager) -> String {
     manager
-        .save_prompt("session-48", "message-48", "/probe", "probe prompt")
+        .save_prompt("session-48", "message-48", "/probe", "probe prompt", None)
         .await
         .expect("seed the prompt")
 }

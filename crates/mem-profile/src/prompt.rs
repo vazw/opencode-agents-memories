@@ -214,15 +214,20 @@ impl UserPromptManager {
     /// rejection lands. It uses ONLY the locked W2.3 privacy surface and keeps
     /// upstream's sentence `Private content blocked`; the persisted content is
     /// the stripped form (private spans never reach storage).
+    ///
+    /// Issue 174: `user_id` is the accept-time resolved identity, or `None`
+    /// when nothing resolved (the row is then invisible to every learner). A
+    /// retry of an existing `(session_id, message_id)` NEVER rewrites it.
     pub async fn save_prompt(
         &self,
         session_id: &str,
         message_id: &str,
         project_path: &str,
         content: &str,
+        user_id: Option<&str>,
     ) -> Result<String, ProfileError> {
         let content = self.gate_private_content(content)?;
-        self.persist_prompt(session_id, message_id, project_path, &content)
+        self.persist_prompt(session_id, message_id, project_path, &content, user_id)
             .await
     }
 
@@ -253,15 +258,20 @@ impl UserPromptManager {
         message_id: &str,
         project_path: &str,
         content: &str,
+        user_id: Option<&str>,
     ) -> Result<String, ProfileError> {
         let db = self.ready().await?;
         let id = next_prompt_id();
         let now = now_millis();
+        let identity = match user_id {
+            Some(user_id) => Value::Text(user_id.to_string()),
+            None => Value::Null,
+        };
         let inserted = db
             .execute(
                 "
-      INSERT INTO user_prompts (id, session_id, message_id, project_path, content, created_at, captured)
-      SELECT ?, ?, ?, ?, ?, ?, 0
+      INSERT INTO user_prompts (id, session_id, message_id, project_path, content, created_at, captured, user_id)
+      SELECT ?, ?, ?, ?, ?, ?, 0, ?
       WHERE NOT EXISTS (
         SELECT 1 FROM user_prompts WHERE session_id = ? AND message_id = ?
       )
@@ -273,6 +283,7 @@ impl UserPromptManager {
                     Value::Text(project_path.to_string()),
                     Value::Text(content.to_string()),
                     Value::Integer(now),
+                    identity,
                     Value::Text(session_id.to_string()),
                     Value::Text(message_id.to_string()),
                 ],
@@ -684,34 +695,104 @@ impl UserPromptManager {
         Ok(rows.iter().map(row_to_prompt).collect())
     }
 
-    /// Upstream `countUnanalyzedForUserLearning`.
-    pub async fn count_unanalyzed_for_user_learning(&self) -> Result<i64, ProfileError> {
+    /// Upstream `countUnanalyzedForUserLearning`, scoped to ONE identity
+    /// (issue 174): a NULL row belongs to no learner.
+    pub async fn count_unanalyzed_for_user_learning(
+        &self,
+        user_id: &str,
+    ) -> Result<i64, ProfileError> {
         let db = self.ready().await?;
         let row = query_one(
             db.as_ref(),
-            "SELECT COUNT(*) as count FROM user_prompts WHERE user_learning_captured = 0",
-            Vec::new(),
+            "SELECT COUNT(*) as count FROM user_prompts WHERE user_id = ? AND user_learning_captured = 0",
+            vec![Value::Text(user_id.to_string())],
         )
         .await?;
         Ok(row.and_then(|row| row.i64("count")).unwrap_or(0))
     }
 
-    /// Upstream `getPromptsForUserLearning(limit)` (oldest first).
+    /// Upstream `getPromptsForUserLearning(limit)` (oldest first), scoped to
+    /// ONE identity (issue 174).
     pub async fn get_prompts_for_user_learning(
         &self,
         limit: i64,
+        user_id: &str,
     ) -> Result<Vec<UserPrompt>, ProfileError> {
         let db = self.ready().await?;
         let rows = db
             .query(
                 "SELECT * FROM user_prompts
-      WHERE user_learning_captured = 0
+      WHERE user_id = ? AND user_learning_captured = 0
       ORDER BY created_at ASC
       LIMIT ?",
-                vec![Value::Integer(limit)],
+                vec![Value::Text(user_id.to_string()), Value::Integer(limit)],
             )
             .await?;
         Ok(rows.iter().map(row_to_prompt).collect())
+    }
+
+    /// The unanalyzed identities a learner may run for (issue 174; issue 175
+    /// enumerates them). A NULL identity is nobody's row.
+    pub async fn distinct_user_ids_for_learning(&self) -> Result<Vec<String>, ProfileError> {
+        let db = self.ready().await?;
+        let rows = db
+            .query(
+                "SELECT DISTINCT user_id FROM user_prompts
+      WHERE user_learning_captured = 0 AND user_id IS NOT NULL
+      ORDER BY user_id",
+                Vec::new(),
+            )
+            .await?;
+        Ok(rows.iter().filter_map(|row| row.text("user_id")).collect())
+    }
+
+    /// The pre-v5 rows' distinct `project_path`s (issue 176 backfill): each is
+    /// resolved on its own, never from the launch identity.
+    pub async fn project_paths_without_identity(&self) -> Result<Vec<String>, ProfileError> {
+        let db = self.ready().await?;
+        let rows = db
+            .query(
+                "SELECT DISTINCT project_path FROM user_prompts
+      WHERE user_id IS NULL AND project_path IS NOT NULL",
+                Vec::new(),
+            )
+            .await?;
+        Ok(rows
+            .iter()
+            .filter_map(|row| row.text("project_path"))
+            .collect())
+    }
+
+    /// Stamps every still-unstamped row of one path. Guarded `user_id IS NULL`
+    /// so two concurrent boots converge and a resolved row is never rewritten.
+    pub async fn stamp_identity_for_project_path(
+        &self,
+        project_path: &str,
+        user_id: &str,
+    ) -> Result<u64, ProfileError> {
+        let db = self.ready().await?;
+        let result = db
+            .execute(
+                "UPDATE user_prompts SET user_id = ? WHERE user_id IS NULL AND project_path = ?",
+                vec![
+                    Value::Text(user_id.to_string()),
+                    Value::Text(project_path.to_string()),
+                ],
+            )
+            .await?;
+        Ok(result.changes)
+    }
+
+    /// How many rows still carry no identity (the backfill's report field).
+    pub async fn count_without_identity(&self) -> Result<i64, ProfileError> {
+        let db = self.ready().await?;
+        let row = query_one(
+            db.as_ref(),
+            "SELECT COUNT(*) as count FROM user_prompts WHERE user_id IS NULL",
+            Vec::new(),
+        )
+        .await?;
+        Ok(row.and_then(|row| row.i64("count")).unwrap_or(0))
     }
 
     /// Upstream `markMultipleAsUserLearningCaptured` (empty list = no-op).

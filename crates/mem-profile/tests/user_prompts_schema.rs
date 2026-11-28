@@ -128,7 +128,7 @@ async fn test_ready_upgrades_a_legacy_prompts_file_to_the_current_schema() {
     assert_eq!(row.i64("capture_attempts"), Some(0));
 
     let id = manager
-        .save_prompt("session-new", "message-new", "/tmp/proj", "hello")
+        .save_prompt("session-new", "message-new", "/tmp/proj", "hello", None)
         .await
         .expect("a save after the upgrade succeeds");
     let saved = query_one(

@@ -71,7 +71,13 @@ async fn test_save_prompt_rejects_fully_private_content() {
 
     let error = fixture
         .manager
-        .save_prompt("s", "m", "/p", "before <private>secret token</private>")
+        .save_prompt(
+            "s",
+            "m",
+            "/p",
+            "before <private>secret token</private>",
+            None,
+        )
         .await;
 
     assert!(error.is_ok(), "a partially private prompt stays storable");
@@ -79,7 +85,13 @@ async fn test_save_prompt_rejects_fully_private_content() {
 
     let blocked = fixture
         .manager
-        .save_prompt("s", "m2", "/p", "<private>whole thing is secret</private>")
+        .save_prompt(
+            "s",
+            "m2",
+            "/p",
+            "<private>whole thing is secret</private>",
+            None,
+        )
         .await;
     let error = blocked.expect_err("fully private content must be rejected");
     assert_eq!(error.to_string(), "Private content blocked");
@@ -107,7 +119,7 @@ async fn test_save_prompt_rejects_content_left_only_with_redaction_marker() {
         let message_id = format!("m{index}");
         let result = fixture
             .manager
-            .save_prompt("s", &message_id, "/p", &content)
+            .save_prompt("s", &message_id, "/p", &content, None)
             .await;
         let error = result.expect_err("content left only with redaction markers is blocked");
         assert_eq!(error.to_string(), "Private content blocked");
@@ -126,6 +138,7 @@ async fn test_save_prompt_strips_private_span_before_persisting() {
             "m",
             "/p",
             "keep this <private>hide that</private> and this",
+            None,
         )
         .await
         .expect("partial private span persists its stripped form");
@@ -145,7 +158,7 @@ async fn test_save_prompt_persists_plain_content_unchanged() {
 
     let id = fixture
         .manager
-        .save_prompt("s", "m", "/p", content)
+        .save_prompt("s", "m", "/p", content, None)
         .await
         .expect("plain content persists");
 

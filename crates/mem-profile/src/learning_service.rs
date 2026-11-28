@@ -38,14 +38,23 @@ pub const UPDATE_MAX_RETRIES: usize = 2;
 
 /// The prompt-side boundary (real adapter: [`UserPromptManager`]).
 ///
+/// Every count and select is scoped to ONE identity (issue 174): identity is a
+/// storage predicate, not a post-filter, so an other-identity row can never be
+/// selected or marked by this round.
+///
 /// [`UserPromptManager`]: crate::prompt::UserPromptManager
 pub trait PromptLedger: Send + Sync {
-    fn count_unanalyzed(&self) -> BoxFuture<'_, Result<i64, ProfileError>>;
-    fn get_prompts_for_learning(
-        &self,
+    fn count_unanalyzed<'a>(&'a self, user_id: &'a str)
+    -> BoxFuture<'a, Result<i64, ProfileError>>;
+    fn get_prompts_for_learning<'a>(
+        &'a self,
         limit: i64,
-    ) -> BoxFuture<'_, Result<Vec<UserPrompt>, ProfileError>>;
+        user_id: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<UserPrompt>, ProfileError>>;
     fn mark_many(&self, ids: Vec<String>) -> BoxFuture<'_, Result<(), ProfileError>>;
+    /// The identities a learner may run for (issue 175 enumerates them). No
+    /// default body: an omitted impl must never silently mean "no identities".
+    fn distinct_user_ids_for_learning(&self) -> BoxFuture<'_, Result<Vec<String>, ProfileError>>;
 }
 
 /// The profile-side boundary (real adapter: [`ProfileStore`]).
@@ -338,13 +347,16 @@ impl LearningRound {
         // Count.
         // The ledger boundary owns the `count`/`select`/`mark` events (the
         // fixture mocks emit them); the service owns `acquired` and `log`.
-        let count = self.ledger.count_unanalyzed().await?;
+        let count = self.ledger.count_unanalyzed(&self.user_id).await?;
         if count < self.threshold {
             return Ok(LearningOutcome::BelowThreshold { count });
         }
 
         // Select.
-        let prompts = self.ledger.get_prompts_for_learning(self.threshold).await?;
+        let prompts = self
+            .ledger
+            .get_prompts_for_learning(self.threshold, &self.user_id)
+            .await?;
         if prompts.is_empty() {
             return Ok(LearningOutcome::NoPrompts);
         }
@@ -595,15 +607,27 @@ impl PromptLedgerAdapter {
 }
 
 impl PromptLedger for PromptLedgerAdapter {
-    fn count_unanalyzed(&self) -> BoxFuture<'_, Result<i64, ProfileError>> {
-        Box::pin(async move { self.manager.count_unanalyzed_for_user_learning().await })
+    fn count_unanalyzed<'a>(
+        &'a self,
+        user_id: &'a str,
+    ) -> BoxFuture<'a, Result<i64, ProfileError>> {
+        Box::pin(async move {
+            self.manager
+                .count_unanalyzed_for_user_learning(user_id)
+                .await
+        })
     }
 
-    fn get_prompts_for_learning(
-        &self,
+    fn get_prompts_for_learning<'a>(
+        &'a self,
         limit: i64,
-    ) -> BoxFuture<'_, Result<Vec<UserPrompt>, ProfileError>> {
-        Box::pin(async move { self.manager.get_prompts_for_user_learning(limit).await })
+        user_id: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<UserPrompt>, ProfileError>> {
+        Box::pin(async move {
+            self.manager
+                .get_prompts_for_user_learning(limit, user_id)
+                .await
+        })
     }
 
     fn mark_many(&self, ids: Vec<String>) -> BoxFuture<'_, Result<(), ProfileError>> {
@@ -612,6 +636,10 @@ impl PromptLedger for PromptLedgerAdapter {
                 .mark_multiple_as_user_learning_captured(&ids)
                 .await
         })
+    }
+
+    fn distinct_user_ids_for_learning(&self) -> BoxFuture<'_, Result<Vec<String>, ProfileError>> {
+        Box::pin(async move { self.manager.distinct_user_ids_for_learning().await })
     }
 }
 

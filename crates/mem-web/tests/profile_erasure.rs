@@ -191,7 +191,7 @@ async fn test_prompt_port_delete_prompt_erases_the_profile() {
     // Prompt first, profile second: the profile's watermark is >= the prompt's
     // created_at, so the prompt is a contributing one.
     let prompt_id = manager
-        .save_prompt("session-48", "message-48", "/probe", "probe prompt")
+        .save_prompt("session-48", "message-48", "/probe", "probe prompt", None)
         .await
         .expect("save the prompt");
     let profile_id = seed_profile(&store).await;

@@ -64,7 +64,7 @@ impl Fixture {
     async fn new_prompt(&self, session_id: &str, content: &str) -> String {
         let message_id = format!("msg-{}-{}", mem_profile::ids::now_millis(), content.len());
         self.manager
-            .save_prompt(session_id, &message_id, "/tmp/proj", content)
+            .save_prompt(session_id, &message_id, "/tmp/proj", content, None)
             .await
             .expect("save prompt")
     }

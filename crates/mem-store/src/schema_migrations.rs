@@ -33,7 +33,9 @@ use crate::sqlite_files::{
     FILE_LOCK_RETRY_DELAYS_MS, RetryContext, copy_sqlite_database, remove_sqlite_database,
     rename_sqlite_database, with_sqlite_file_lock_retry,
 };
-use crate::user_prompts_sql::{USER_PROMPTS_V2_COLUMNS, user_prompts_v2_alter};
+use crate::user_prompts_sql::{
+    USER_PROMPTS_V2_COLUMNS, USER_PROMPTS_V5_COLUMNS, user_prompts_v2_alter,
+};
 
 /// A single versioned schema step; statements run as ONE write batch.
 #[derive(Debug, Clone)]
@@ -59,12 +61,13 @@ pub struct MigrationOptions {
 
 /// Highest `metadata.db` schema version this build knows.
 pub const METADATA_MAX_KNOWN: i64 = 2;
-/// Highest `user_prompts` schema version this build knows: 4 because
-/// [`apply_user_prompts_schema`] applies v2, v3 and v4 itself, so the migration
+/// Highest `user_prompts` schema version this build knows: 5 because
+/// [`apply_user_prompts_schema`] applies v2 through v5 itself, so the migration
 /// slice (`user_prompts_migrations`) stays v1 — the same split
 /// [`EPISODIC_MAX_KNOWN`]` = 8` records. v4 is the issue-143 prompt tombstone
-/// (`prompt_tombstones`, see [`PROMPT_TOMBSTONE_DDL`]).
-pub const USER_PROMPTS_MAX_KNOWN: i64 = 4;
+/// (`prompt_tombstones`, see [`PROMPT_TOMBSTONE_DDL`]); v5 (issue 174) is the
+/// nullable `user_id` identity column (`USER_PROMPTS_V5_COLUMNS`).
+pub const USER_PROMPTS_MAX_KNOWN: i64 = 5;
 /// Highest `user_profiles` schema version this build knows: v2 is the sweep
 /// stamp's `sweep_state` table (issue 43 W6c).
 pub const USER_PROFILES_MAX_KNOWN: i64 = 2;
@@ -748,8 +751,9 @@ pub async fn apply_episodic_schema(
 ///
 /// - **Precondition:** `options.max_known` is [`USER_PROMPTS_MAX_KNOWN`], this
 ///   set's maximum, and the file is not newer than it.
-/// - **Postcondition:** `PRAGMA user_version == 3`, every column of
-///   [`USER_PROMPTS_V2_COLUMNS`] exists.
+/// - **Postcondition:** `PRAGMA user_version == 5`, every column of
+///   [`USER_PROMPTS_V2_COLUMNS`] and [`USER_PROMPTS_V5_COLUMNS`] exists, and the
+///   v3 sweep table, the v4 tombstone table are present.
 /// - **Convergence** exists only for the crash window between the v2 ALTER
 ///   batch and the version pragma: a file already carrying the columns
 ///   converges silently. A file stamped 2 with columns missing is **not**
@@ -832,6 +836,37 @@ pub async fn apply_user_prompts_schema(
             });
         }
         version = 4;
+    }
+
+    // The v5 leg (issue 174): the nullable `user_id` identity column. The v2
+    // shape — probe-then-ALTER, one pragma, no backup. Nothing is backfilled
+    // here: a pre-v5 row's identity is unknown until the boot backfill resolves
+    // its own `project_path`, and a fabricated default would be a wrong identity
+    // no test could distinguish from a resolved one.
+    if options.max_known >= 5 && version < 5 {
+        let mut missing: Vec<Statement> = Vec::new();
+        for (name, declaration) in USER_PROMPTS_V5_COLUMNS {
+            if !table_has_column(db, "user_prompts", name).await? {
+                missing.push(Statement::new(
+                    user_prompts_v2_alter(name, declaration),
+                    Vec::new(),
+                ));
+            }
+        }
+        if !missing.is_empty() {
+            db.batch(missing, BatchMode::Write).await?;
+        }
+        db.execute(&set_user_version_statement(5).sql, Vec::new())
+            .await?;
+        let stamped = get_user_version(db).await?;
+        if stamped != 5 {
+            return Err(StoreError::Internal {
+                message: format!(
+                    "user_prompts v5 apply did not stamp user_version = 5 (found {stamped})"
+                ),
+            });
+        }
+        version = 5;
     }
     Ok(version)
 }

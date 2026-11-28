@@ -69,7 +69,7 @@ struct SpyLedger {
 }
 
 impl PromptLedger for SpyLedger {
-    fn count_unanalyzed(&self) -> BoxFuture<'_, Result<i64, ProfileError>> {
+    fn count_unanalyzed(&self, _user_id: &str) -> BoxFuture<'_, Result<i64, ProfileError>> {
         let count = self.prompts.len() as i64;
         Box::pin(async move { Ok(count) })
     }
@@ -77,9 +77,14 @@ impl PromptLedger for SpyLedger {
     fn get_prompts_for_learning(
         &self,
         _limit: i64,
+        _user_id: &str,
     ) -> BoxFuture<'_, Result<Vec<UserPrompt>, ProfileError>> {
         let prompts = self.prompts.clone();
         Box::pin(async move { Ok(prompts) })
+    }
+
+    fn distinct_user_ids_for_learning(&self) -> BoxFuture<'_, Result<Vec<String>, ProfileError>> {
+        Box::pin(async { Ok(Vec::new()) })
     }
 
     fn mark_many(&self, _ids: Vec<String>) -> BoxFuture<'_, Result<(), ProfileError>> {

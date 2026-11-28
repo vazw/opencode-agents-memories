@@ -37,7 +37,13 @@ impl Fixture {
         );
         let id = self
             .manager
-            .save_prompt("session-path-test", &message_id, project_path, "hello")
+            .save_prompt(
+                "session-path-test",
+                &message_id,
+                project_path,
+                "hello",
+                None,
+            )
             .await
             .expect("save prompt");
         self.manager

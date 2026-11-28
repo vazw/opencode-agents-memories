@@ -235,7 +235,13 @@ async fn test_migrated_root_profile_is_erased_by_the_prompt_path() {
         let store = ProfileStore::new(root.clone(), config.clone(), ProfileConfig::default());
         let manager = UserPromptManager::new(root.clone(), config.clone(), 3);
         let prompt_id = manager
-            .save_prompt("session-48", "message-48", "/probe", "migrated prompt")
+            .save_prompt(
+                "session-48",
+                "message-48",
+                "/probe",
+                "migrated prompt",
+                None,
+            )
             .await
             .expect("seed the prompt");
         store
@@ -287,7 +293,7 @@ async fn test_retention_prune_does_not_erase_profiles() {
     ));
     let manager = UserPromptManager::new(root.clone(), config, 3);
     let prompt_id = manager
-        .save_prompt("session-48", "message-48", "/probe", "old prompt")
+        .save_prompt("session-48", "message-48", "/probe", "old prompt", None)
         .await
         .expect("seed the prompt");
     let profile_id = store
@@ -356,6 +362,7 @@ async fn test_retention_prune_spares_profile_when_prompt_postdates_watermark() {
             "message-48",
             "/probe",
             "post-watermark prompt",
+            None,
         )
         .await
         .expect("seed the prompt");
@@ -444,7 +451,13 @@ async fn test_retention_prune_ignores_a_failing_eraser() {
     let config = common::store_config(root.clone());
     let manager = UserPromptManager::new(root.clone(), config, 3);
     let prompt_id = manager
-        .save_prompt("session-48", "message-48", "/probe", "failing erase prompt")
+        .save_prompt(
+            "session-48",
+            "message-48",
+            "/probe",
+            "failing erase prompt",
+            None,
+        )
         .await
         .expect("seed the prompt");
 

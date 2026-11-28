@@ -24,6 +24,7 @@ pub mod jsonrpc;
 pub mod manual_provider;
 pub mod profile_learning;
 pub mod project_scope;
+pub mod prompt_identity_backfill;
 pub mod purge;
 pub mod reap;
 pub mod recall;

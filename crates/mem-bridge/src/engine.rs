@@ -654,8 +654,18 @@ impl Engine {
 
         let params: CaptureParams =
             serde_json::from_value(request.params.clone()).unwrap_or_default();
+        // Issue 174: ONE accept-time identity resolution. Its value is written
+        // into the durable inbox payload (the memory row's source) and passed
+        // to `record` (the prompt row's source), so the two rows cannot
+        // disagree — even when the entry is replayed after the git identity
+        // changed.
+        let identity = runtime.capture.resolve_identity(&params.project_id);
         use crate::capture::ObjError;
-        match runtime.capture.enqueue(&params).await {
+        match runtime
+            .capture
+            .enqueue_with_identity(&params, identity.as_deref())
+            .await
+        {
             Ok(()) => {}
             Err(ObjError::Full) => {
                 return Response::error(
@@ -684,9 +694,12 @@ impl Engine {
         let capture = runtime.capture.clone();
         let learning = runtime.learning.clone();
         let learned_params = params.clone();
+        let learned_identity = identity;
         self.spawn_tracked(async move {
             if let Some(learning) = learning.as_ref() {
-                let _ = learning.record(&learned_params).await;
+                let _ = learning
+                    .record(&learned_params, learned_identity.as_deref())
+                    .await;
                 let _ = learning.arm(&learned_params.session_id, mem_profile::ids::now_millis());
             }
             let _ = capture.drain_once().await;
@@ -1788,6 +1801,43 @@ pub async fn run_in_runtime(
     // finished — durability is unaffected.
     if let Some(runtime) = &composed {
         engine.schedule_startup_drain(runtime.capture.clone());
+        // Issue 176: the v4→v5 prompt-identity backfill. Scheduled AFTER
+        // `Engine::from_composed` (and therefore after the composition-time
+        // startup audit emitted its inventory), and owned clones only:
+        // `spawn_tracked` needs a `'static` future. It opens an EXISTING
+        // `user-prompts.db`; the module's `is_file()` gate is what keeps a
+        // fresh root untouched. A failure never fails startup.
+        let prompts = runtime.prompts.clone();
+        let storage_root = runtime.storage_root.clone();
+        let resolver = runtime.scope_resolver.clone();
+        let config = core_config.clone();
+        engine.spawn_tracked(async move {
+            match crate::prompt_identity_backfill::maybe_backfill_prompt_identities(
+                &storage_root,
+                &prompts,
+                &config,
+                resolver.as_ref(),
+            )
+            .await
+            {
+                Ok(Some(report)) => structured_stderr(
+                    "profile.prompt_identity_backfill",
+                    "info",
+                    "profile",
+                    crate::prompt_identity_backfill::backfill_event_detail(&report),
+                ),
+                // Fresh root: nothing emitted, nothing created.
+                Ok(None) => {}
+                // Fixed detail: `ProfileError`'s display text can carry a path
+                // or SQL, and neither belongs on any channel.
+                Err(_) => structured_stderr(
+                    "profile.prompt_identity_backfill_failed",
+                    "warn",
+                    "profile",
+                    serde_json::json!({ "component": "profile" }),
+                ),
+            }
+        });
         let scheduler = Arc::new(ConsolidationScheduler::new(
             runtime.store.clone(),
             runtime.scope_resolver.clone(),

@@ -682,7 +682,7 @@ mod tests {
         // the prompt's created_at, i.e. the prompt is a contributing one.
         let prompt_id = runtime
             .prompts
-            .save_prompt("session-48", "message-48", "/probe", "probe prompt")
+            .save_prompt("session-48", "message-48", "/probe", "probe prompt", None)
             .await
             .expect("save the prompt");
         let profile_id = runtime

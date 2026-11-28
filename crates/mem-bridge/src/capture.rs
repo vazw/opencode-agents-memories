@@ -780,18 +780,59 @@ impl CaptureService {
     }
 
     /// Durably enqueues one parsed capture (idempotent on `capture_id`).
+    ///
+    /// Unstamped (legacy) form: the entry carries no identity key, so the drain
+    /// resolves the scope itself exactly as before issue 174.
     pub async fn enqueue(&self, params: &CaptureParams) -> Result<(), ObjError> {
-        let payload = params_payload(params);
+        self.enqueue_payload(params, params_payload(params)).await
+    }
+
+    /// Durably enqueues one parsed capture with the accept-time identity stamp
+    /// (issue 174): `Some(email)` or an explicit `null`, written beside the
+    /// params as `resolvedUserId`. The drain prefers the stamp over its own
+    /// re-resolution, so the memory row and the prompt row cannot disagree even
+    /// on a later replay.
+    pub async fn enqueue_with_identity(
+        &self,
+        params: &CaptureParams,
+        identity: Option<&str>,
+    ) -> Result<(), ObjError> {
+        let mut payload = params_payload(params);
+        if let Some(object) = payload.as_object_mut() {
+            let stamped = match identity {
+                Some(email) => Json::String(email.to_string()),
+                None => Json::Null,
+            };
+            object.insert("resolvedUserId".to_string(), stamped);
+        }
+        self.enqueue_payload(params, payload).await
+    }
+
+    async fn enqueue_payload(&self, params: &CaptureParams, payload: Json) -> Result<(), ObjError> {
         self.inbox
             .enqueue(InboxNewEntry {
                 capture_id: params.capture_id.clone(),
                 project_id: params.project_id.clone(),
                 session_id: params.session_id.clone(),
                 agent_id: params.agent_id.clone(),
-                payload: payload.clone(),
+                payload,
             })
             .await
             .map_err(ObjError::from)
+    }
+
+    /// The accept-time identity for a project (issue 174), resolved through the
+    /// ONE composition resolver — the same value `scope.user_email` holds, with
+    /// the empty case mapped to `None` instead of `resolve_user_id_with`'s
+    /// `"unknown"`: an unresolved identity is stored as SQL NULL, never as the
+    /// composition-time literal.
+    pub fn resolve_identity(&self, project_id: &str) -> Option<String> {
+        self.scope_resolver
+            .resolve(project_id)
+            .ok()
+            .and_then(|scope| scope.user_email)
+            .map(|email| email.trim().to_string())
+            .filter(|email| !email.is_empty())
     }
 
     /// The inbox (durable-replay diagnostics + tests).
@@ -857,7 +898,7 @@ impl CaptureService {
     ) -> EntryOutcome {
         let params = mem_store::serde_json::from_value::<CaptureParams>(entry.payload.clone())
             .unwrap_or_default();
-        let scope = match self.scope_resolver.resolve(&params.project_id) {
+        let mut scope = match self.scope_resolver.resolve(&params.project_id) {
             Ok(scope) => scope,
             Err(_) => {
                 return self
@@ -865,6 +906,7 @@ impl CaptureService {
                     .await;
             }
         };
+        apply_stamped_identity(entry, &mut scope);
         let Some((summary, tags)) = summary_with_extracted_tags(&params) else {
             return self
                 .record_failure(entry, Failure::of("summary_missing"))
@@ -960,8 +1002,9 @@ impl CaptureService {
             .unwrap_or_default();
 
         // 1. The scope (an engine-prevented blank arriving here is a
-        // corrupt payload: fail closed as a consumed attempt).
-        let scope = match self.scope_resolver.resolve(&params.project_id) {
+        // corrupt payload: fail closed as a consumed attempt). Issue 174: the
+        // accept-time stamp, when present, overwrites the re-resolution.
+        let mut scope = match self.scope_resolver.resolve(&params.project_id) {
             Ok(scope) => scope,
             Err(_) => {
                 return self
@@ -969,6 +1012,7 @@ impl CaptureService {
                     .await;
             }
         };
+        apply_stamped_identity(entry, &mut scope);
 
         // 2. Private content is stripped from every free text BEFORE any
         // durable write. D-52-3 site 1: the injection filter wraps that
@@ -1833,6 +1877,27 @@ fn capture_summary_input(
 
 fn params_payload(params: &CaptureParams) -> Json {
     mem_store::serde_json::to_value(params).unwrap_or(Json::Null)
+}
+
+/// The identity stamp carried by an inbox entry's payload (issue 174).
+///
+/// `None` = no key: a legacy entry, so the drain resolves the scope itself
+/// exactly as before. `Some(None)` = stamped unknown (stored as NULL).
+/// `Some(Some(email))` = the accept-time identity.
+fn stamped_identity(entry: &InboxEntry) -> Option<Option<String>> {
+    match entry.payload.get("resolvedUserId") {
+        None => None,
+        Some(Json::String(email)) => Some(Some(email.clone())),
+        Some(_) => Some(None),
+    }
+}
+
+/// Overwrites the drain's own resolution with the accept-time stamp, so the
+/// memory row's `user_email` cannot disagree with the prompt row's `user_id`.
+fn apply_stamped_identity(entry: &InboxEntry, scope: &mut ResolvedProjectScope) {
+    if let Some(identity) = stamped_identity(entry) {
+        scope.user_email = identity;
+    }
 }
 
 /// The episodic staging record (project/session/agent scope triple, the

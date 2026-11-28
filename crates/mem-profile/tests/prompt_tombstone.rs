@@ -22,7 +22,7 @@ fn fixture() -> (PathBuf, UserPromptManager) {
 
 async fn seed_prompt(manager: &UserPromptManager) -> String {
     manager
-        .save_prompt("session-143", "message-143", "/probe", "probe prompt")
+        .save_prompt("session-143", "message-143", "/probe", "probe prompt", None)
         .await
         .expect("seed the prompt")
 }

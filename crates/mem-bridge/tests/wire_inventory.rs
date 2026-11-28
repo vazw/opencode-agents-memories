@@ -228,6 +228,7 @@ async fn test_migrate_moves_the_orphaned_shard_and_rewrites_the_prompt_path() {
             "message-prompt",
             &old_path,
             "prompt content",
+            None,
         )
         .await
         .expect("seed the prompt row");

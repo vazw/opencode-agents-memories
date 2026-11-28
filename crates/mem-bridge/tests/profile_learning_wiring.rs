@@ -25,6 +25,10 @@ mod common;
 /// testing shutdown.
 static NEVER_SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
+/// The identity the record-path fixtures stamp (the learner's round is built
+/// for it, so the record tests prove the ARGUMENT is what lands).
+const TEST_IDENTITY: &str = "probe@example.com";
+
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -131,13 +135,14 @@ struct OnePromptLedger {
 }
 
 impl PromptLedger for OnePromptLedger {
-    fn count_unanalyzed(&self) -> BoxFuture<'_, Result<i64, ProfileErrorAlias>> {
+    fn count_unanalyzed(&self, _user_id: &str) -> BoxFuture<'_, Result<i64, ProfileErrorAlias>> {
         Box::pin(async { Ok(1) })
     }
 
     fn get_prompts_for_learning(
         &self,
         _limit: i64,
+        _user_id: &str,
     ) -> BoxFuture<'_, Result<Vec<UserPrompt>, ProfileErrorAlias>> {
         let prompt = self.prompt.clone();
         Box::pin(async move { Ok(vec![prompt]) })
@@ -145,6 +150,12 @@ impl PromptLedger for OnePromptLedger {
 
     fn mark_many(&self, _ids: Vec<String>) -> BoxFuture<'_, Result<(), ProfileErrorAlias>> {
         Box::pin(async { Ok(()) })
+    }
+
+    fn distinct_user_ids_for_learning(
+        &self,
+    ) -> BoxFuture<'_, Result<Vec<String>, ProfileErrorAlias>> {
+        Box::pin(async { Ok(Vec::new()) })
     }
 }
 
@@ -420,10 +431,13 @@ async fn test_record_filters_injected_blocks_before_write() {
     );
 
     let outcome = learning
-        .record(&params(
-            Some("p-filter"),
-            "<!-- OMO_INTERNAL_INITIATOR -->\nplease fix the parser",
-        ))
+        .record(
+            &params(
+                Some("p-filter"),
+                "<!-- OMO_INTERNAL_INITIATOR -->\nplease fix the parser",
+            ),
+            Some(TEST_IDENTITY),
+        )
         .await;
     assert!(
         matches!(outcome, RecordOutcome::Recorded { .. }),
@@ -431,7 +445,7 @@ async fn test_record_filters_injected_blocks_before_write() {
     );
 
     let rows = prompts
-        .get_prompts_for_user_learning(10)
+        .get_prompts_for_user_learning(10, TEST_IDENTITY)
         .await
         .expect("the ledger reads");
     assert_eq!(rows.len(), 1);
@@ -456,10 +470,16 @@ async fn test_record_is_idempotent_on_message_id_retry() {
     );
 
     let first = learning
-        .record(&params(Some("p-retry"), "the same turn"))
+        .record(
+            &params(Some("p-retry"), "the same turn"),
+            Some(TEST_IDENTITY),
+        )
         .await;
     let second = learning
-        .record(&params(Some("p-retry"), "the same turn"))
+        .record(
+            &params(Some("p-retry"), "the same turn"),
+            Some(TEST_IDENTITY),
+        )
         .await;
 
     let RecordOutcome::Recorded {
@@ -477,7 +497,7 @@ async fn test_record_is_idempotent_on_message_id_retry() {
     assert_eq!(first_id, second_id, "one promptId is one row");
 
     let rows = prompts
-        .get_prompts_for_user_learning(10)
+        .get_prompts_for_user_learning(10, TEST_IDENTITY)
         .await
         .expect("the ledger reads");
     assert_eq!(rows.len(), 1, "a retry must not duplicate the row");
@@ -495,15 +515,63 @@ async fn test_record_skips_a_capture_without_prompt_id() {
         1,
     );
 
-    let outcome = learning.record(&params(None, "a turn without an id")).await;
+    let outcome = learning
+        .record(&params(None, "a turn without an id"), Some(TEST_IDENTITY))
+        .await;
     assert_eq!(outcome, RecordOutcome::SkippedNoPromptId);
     assert_eq!(sink.count("profile.learning_record_skipped"), 1);
 
     let rows = prompts
-        .get_prompts_for_user_learning(10)
+        .get_prompts_for_user_learning(10, TEST_IDENTITY)
         .await
         .expect("the ledger reads");
     assert!(rows.is_empty(), "no synthetic id may be invented");
+}
+
+/// Issue 174: `record` persists the identity it is GIVEN, never the round's
+/// own — the accept-time resolution is the single source of both rows.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_record_persists_the_accept_time_identity() {
+    let dir = common::TestDir::new("profile-learning-record-identity");
+    let sink = Arc::new(SpySink::default());
+    let (learning, prompts, _writes) = build_learner(
+        dir.path(),
+        sink,
+        SpyGateway::counting(),
+        one_prompt_ledger(),
+        1,
+    );
+    assert_eq!(
+        learning.user_id(),
+        "",
+        "the learner itself carries no identity in this fixture"
+    );
+
+    let outcome = learning
+        .record(&params(Some("p-identity"), "a turn"), Some("a@x"))
+        .await;
+    assert!(
+        matches!(outcome, RecordOutcome::Recorded { .. }),
+        "{outcome:?}"
+    );
+
+    assert_eq!(
+        prompts
+            .get_prompts_for_user_learning(10, "a@x")
+            .await
+            .expect("select under the record argument")
+            .len(),
+        1,
+        "the row carries the identity passed to record"
+    );
+    assert!(
+        prompts
+            .get_prompts_for_user_learning(10, TEST_IDENTITY)
+            .await
+            .expect("select under the round's identity")
+            .is_empty(),
+        "record never substitutes the round's identity"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -785,7 +853,7 @@ async fn test_learning_canary_never_enters_any_log_channel() {
 
     // Both the recording path and the failing round run.
     let outcome = learning
-        .record(&params(Some("p-canary"), "CANARY-PROMPT-7f3a"))
+        .record(&params(Some("p-canary"), "CANARY-PROMPT-7f3a"), None)
         .await;
     assert!(
         matches!(outcome, RecordOutcome::Recorded { .. }),
@@ -813,6 +881,213 @@ async fn test_learning_canary_never_enters_any_log_channel() {
     assert!(
         !spy.all_text().contains("CANARY-PROMPT-7f3a"),
         "no spy event may carry the prompt body"
+    );
+}
+
+/// Issue 174: the resolved identity is storage, never diagnostics. The
+/// existing canary covers the prompt BODY; this one covers the identity on
+/// every channel the learner can reach — the dynamic spy sink AND the process
+/// `LogSink` file, with a positive control proving the file route is live.
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_learning_identity_never_enters_any_log_channel() {
+    const CANARY_IDENTITY: &str = "canary-identity@example.invalid";
+
+    let _ = sink();
+    let dir = common::TestDir::new("profile-learning-identity-canary");
+    let spy = Arc::new(SpySink::default());
+    let (learning, prompts, _writes) = build_learner(
+        dir.path(),
+        spy.clone(),
+        SpyGateway::failing(),
+        one_prompt_ledger(),
+        1,
+    );
+
+    let outcome = learning
+        .record(
+            &params(Some("p-identity-canary"), "a canary turn"),
+            Some(CANARY_IDENTITY),
+        )
+        .await;
+    assert!(
+        matches!(outcome, RecordOutcome::Recorded { .. }),
+        "{outcome:?}"
+    );
+    // Storage is the ONE place the identity belongs.
+    assert_eq!(
+        prompts
+            .get_prompts_for_user_learning(10, CANARY_IDENTITY)
+            .await
+            .expect("select by the canary identity")
+            .len(),
+        1,
+        "the identity must reach the row — absence below is not absence everywhere"
+    );
+
+    assert!(learning.arm("session-1", 0));
+    let tick = learning.run_due(10_000, &NEVER_SHUTDOWN).await;
+    assert_eq!(tick.failed, 1, "the provider fault is typed, not a panic");
+
+    mem_core::logging::log("identity-canary-control", None);
+    let text = sink_text();
+    assert!(
+        text.contains("identity-canary-control"),
+        "the control line must land in the sink file before the absence is read"
+    );
+    assert!(
+        !text.contains(CANARY_IDENTITY),
+        "the identity must never reach the log file"
+    );
+    assert!(spy.emitted() >= 1, "the learner reports through the sink");
+    assert!(
+        !spy.all_text().contains(CANARY_IDENTITY),
+        "no event detail may carry the identity"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The static half of the identity canary: a literal-aware source scan
+// ---------------------------------------------------------------------------
+
+const SRC: &str = include_str!("../src/profile_learning.rs");
+const FORBIDDEN: [&str; 6] = [
+    "tracing::",
+    "structured_stderr",
+    "mem_core::logging",
+    "println!",
+    "eprintln!",
+    "dbg!",
+];
+
+/// Length of the char literal starting at `at` (`at` is the opening `'`), or
+/// `None` when this `'` is a lifetime tick rather than a literal.
+fn char_literal_len(src: &[char], at: usize) -> Option<usize> {
+    let mut j = at + 1;
+    if src.get(j) == Some(&'\\') {
+        j += 1;
+        if src.get(j) == Some(&'u') && src.get(j + 1) == Some(&'{') {
+            j += 2;
+            while j < src.len() && src[j] != '}' {
+                j += 1;
+            }
+            j += 1;
+        } else {
+            j += 1;
+        }
+    } else {
+        j += 1;
+    }
+    (src.get(j) == Some(&'\'')).then_some(j + 1 - at)
+}
+
+/// The source with comments dropped and literal CONTENTS blanked (quotes
+/// kept, byte offsets stable), so a token may appear in prose but never hide
+/// behind a string or sit inside one.
+fn code_only(text: &str) -> String {
+    let src: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < src.len() {
+        match src[i] {
+            '/' if src.get(i + 1) == Some(&'/') => {
+                while i < src.len() && src[i] != '\n' {
+                    i += 1;
+                }
+            }
+            '/' if src.get(i + 1) == Some(&'*') => {
+                let mut depth = 1usize;
+                i += 2;
+                while i < src.len() && depth > 0 {
+                    if src[i] == '/' && src.get(i + 1) == Some(&'*') {
+                        depth += 1;
+                        i += 2;
+                    } else if src[i] == '*' && src.get(i + 1) == Some(&'/') {
+                        depth -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            '"' => {
+                out.push('"');
+                i += 1;
+                while i < src.len() {
+                    if src[i] == '\\' {
+                        out.push(' ');
+                        out.push(' ');
+                        i += 2;
+                    } else if src[i] == '"' {
+                        out.push('"');
+                        i += 1;
+                        break;
+                    } else {
+                        out.push(' ');
+                        i += 1;
+                    }
+                }
+            }
+            '\'' => match char_literal_len(&src, i) {
+                Some(len) => {
+                    out.push('\'');
+                    for _ in 1..len - 1 {
+                        out.push(' ');
+                    }
+                    out.push('\'');
+                    i += len;
+                }
+                None => {
+                    out.push('\'');
+                    i += 1;
+                }
+            },
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+fn forbidden_hits(text: &str) -> Vec<&'static str> {
+    let code = code_only(text);
+    FORBIDDEN
+        .iter()
+        .copied()
+        .filter(|token| code.contains(token))
+        .collect()
+}
+
+/// Issue 174 (r4): the scan must be literal- and comment-aware — a line-prefix
+/// stripper hides a real call behind a `//` in a URL literal, and a raw
+/// `contains` reds on the module doc. All eight cases run in one test.
+#[test]
+fn test_identity_scan_strips_comments_but_reds_on_code() {
+    // (a) the real file is clean.
+    assert_eq!(forbidden_hits(SRC), Vec::<&str>::new());
+    // (b) the stripping is load-bearing: the module doc names the tokens.
+    assert!(SRC.contains("tracing::") && SRC.contains("structured_stderr"));
+    // (c) a leading-comment mention stays green.
+    assert!(forbidden_hits("//! no tracing:: here").is_empty());
+    assert!(forbidden_hits("/// docs: no structured_stderr").is_empty());
+    // (d) plain code reds.
+    assert_eq!(
+        forbidden_hits("fn f() { tracing::info!(\"x\"); }"),
+        vec!["tracing::"]
+    );
+    // (e) THE ADVERSARY: a literal before the call must not hide it.
+    assert!(forbidden_hits("let u = \"http://x\"; tracing::info!(\"y\");").contains(&"tracing::"));
+    // (f) literal contents are blanked, so a message naming a token stays green.
+    assert!(forbidden_hits("let s = \"tracing::\";").is_empty());
+    // (g) char literal vs lifetime, and a macro inside code after a char.
+    assert!(forbidden_hits("let c = '/'; // dbg!\n").is_empty());
+    assert!(forbidden_hits("let r = 'a'; eprintln!(\"x\");").contains(&"eprintln!"));
+    // (h) no multi-hash raw string in the scanned file: the scanner's
+    // documented gap stays loud the day one appears.
+    assert!(
+        !SRC.contains("r#\"") && !SRC.contains("br#\""),
+        "extend the scanner before adding r#…"
     );
 }
 

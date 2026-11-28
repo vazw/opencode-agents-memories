@@ -168,7 +168,11 @@ impl ProfileLearning {
     /// boilerplate never reaches disk and private spans are stripped; the
     /// store's own gate is the second gate. Absent prompt id or blank result ⇒
     /// no row, a typed skip (D-3).
-    pub async fn record(&self, params: &CaptureParams) -> RecordOutcome {
+    ///
+    /// Issue 174: `user_id` is the accept-time identity the engine resolved
+    /// ONCE for this capture. This method performs no resolution and never
+    /// puts it in an event detail or log (the identity canary pins that).
+    pub async fn record(&self, params: &CaptureParams, user_id: Option<&str>) -> RecordOutcome {
         let Some(prompt_id) = params.prompt_id() else {
             self.events.emit(
                 "profile.learning_record_skipped",
@@ -198,6 +202,7 @@ impl ProfileLearning {
                 &prompt_id,
                 &params.project_id,
                 &filtered,
+                user_id,
             )
             .await
         {

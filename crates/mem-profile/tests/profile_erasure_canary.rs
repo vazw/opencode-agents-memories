@@ -78,6 +78,7 @@ async fn test_profile_erasure_canary_asserts_logical_erasure_and_measures_byte_r
             "canary-message",
             "/canary",
             "canary prompt",
+            None,
         )
         .await
         .expect("seed the prompt");
