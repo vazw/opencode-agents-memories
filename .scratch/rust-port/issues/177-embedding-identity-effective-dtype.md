@@ -1,12 +1,13 @@
 # 177 — the store identity names the configured dtype while the loader loads the cache-resolved one
 
-Status: **ready-for-agent** — fully specified, no owner ruling needed. Creates
-`crates/mem-bridge/src/embedding_identity.rs` with `resolve_effective_embedding(config) -> (LocalLoadOptions,
-EmbeddingIdentity)` (name is the contract; identical helper may live beside `local_load_options_from_config`),
-threads it through `crates/mem-bridge/src/composition.rs`, `crates/mem-bridge/src/reembed.rs`,
-`src/shard_consolidation.rs`, and extends `ShardModelMismatchEntry` + its `Display` in
-`crates/mem-store/src/error.rs`. Tests: `identity_dtype_resolves_from_cache` (mem-bridge) and
-`mismatch_display_names_differing_fields` (mem-store).
+Status: **done** — landed in `596aadd` (2026-11-28). Work: `crates/mem-bridge/src/embedding_identity.rs`
+(`resolve_effective_embedding(config) -> (LocalLoadOptions, EmbeddingIdentity)` resolving `None`/`Some(Auto)`
+through the cache), wired at `crates/mem-bridge/src/composition.rs`, `crates/mem-bridge/src/reembed.rs`,
+`src/shard_consolidation.rs` and `crates/mem-web/src/api/store_adapter.rs`; `ModelAuthority::Mismatch` and
+`ShardModelMismatchEntry` carry stored+expected fingerprints and `Display` names the differing fields.
+Tests: `identity_dtype_resolves_from_cache` / `identity_dtype_resolves_auto_from_cache` (mem-bridge) and
+`mismatch_display_names_differing_fields` (mem-store), each with a recorded mutant. Residual OPEN (not this
+issue): `claimable_fingerprint` still gates on dimensions/model only, not dtype — stated in code.
 Filed: 2026-11-28 from the live write-refusal diagnosis (`docs/evidence/embedding-identity-2026-11-28/MEASUREMENT.md`),
 which found the config-side origin and scoped this code hardening. The config fix (`e99bcc0`) is the
 unblock; this issue is the seam that let a one-line regression become a 38-shard refusal.
