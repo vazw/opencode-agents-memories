@@ -61,7 +61,7 @@ impl ProfileService {
         let user_id = scope
             .user_email
             .clone()
-            .unwrap_or_else(|| "unknown".to_string());
+            .unwrap_or_else(|| crate::identity::UNKNOWN_USER_ID.to_string());
         let profile = self
             .profiles
             .get_active_profile(&user_id)

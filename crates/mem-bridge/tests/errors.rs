@@ -365,6 +365,7 @@ async fn oracle_runtime(storage_root: &std::path::Path) -> mem_bridge::engine::E
         recall: fixture.recall,
         skills: None,
         tools: None,
+        learning: None,
     }
 }
 

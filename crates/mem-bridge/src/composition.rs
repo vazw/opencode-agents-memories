@@ -32,6 +32,7 @@ use mem_store::shard_manager::ShardManager;
 use crate::capture::{CaptureService, CaptureWriterDeps, DefaultTier1Writer};
 use crate::compaction::CompactionPolicy;
 use crate::inject::InjectService;
+use crate::profile_learning::{ProfileLearning, build_profile_learning};
 
 /// Production prompt stamp source wrapping `UserPromptManager` (issue 39).
 pub struct ProductionPromptStampSource {
@@ -120,6 +121,12 @@ pub struct ComposedRuntime {
     /// keeps the UNWRAPPED `base` (D-52-7): a wrapped consolidation summarizer
     /// turns a legacy marker-bearing memory into a silent permanent skip.
     pub provider: Option<Arc<dyn crate::capture_provider::StructuredCapture>>,
+    /// Issue 48 (A1): the ONE wired learner — prompt recording, the idle
+    /// debounce and the round driver. `None` when the identity is unknown or
+    /// no provider arm exists (one text-free event was emitted). The engine
+    /// copies this into `EngineRuntime` and drives it from `capture` and the
+    /// 250 ms tick.
+    pub learning: Option<Arc<ProfileLearning>>,
 }
 
 /// Builds the runtime over `storage_root` from the resolved config.
@@ -361,6 +368,27 @@ pub async fn build_composed_runtime(
     let consolidation_runner: Arc<dyn crate::engine::ConsolidationRunner> =
         Arc::new(crate::engine::DefaultConsolidationRunner::new(consolidator));
 
+    // Issue 48 (A1): the ONE learner. The identity precedence is the hoisted
+    // resolver's (D-5) — never re-implemented here — over the launch cwd, the
+    // same directory `main.rs` gives the web surface. `provider.host` is the
+    // native arm (D-7); with no host the manual block is the native arm, and
+    // with neither nothing is built.
+    let learning = {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let resolved_user_id =
+            crate::identity::resolve_user_id_with(config, resolver.as_ref(), &cwd);
+        build_profile_learning(
+            config,
+            &resolved_user_id,
+            prompts.clone(),
+            profile.clone(),
+            learning_lock.clone(),
+            provider.as_ref().and_then(|capture| capture.host.clone()),
+            Arc::new(LearningLogSink),
+        )
+        .map(Arc::new)
+    };
+
     Ok(ComposedRuntime {
         capture: Arc::new(capture),
         inject: Arc::new(inject),
@@ -382,7 +410,19 @@ pub async fn build_composed_runtime(
         learning_lock,
         summarizer_available: summarizer_probe.is_some(),
         provider: capture_structured,
+        learning,
     })
+}
+
+/// The ONE production event sink for the learner (D-14): the canonical
+/// facade, carrying the event name and a content-free detail object. The
+/// module itself opens no other channel.
+struct LearningLogSink;
+
+impl mem_profile::learning_service::RoundEventSink for LearningLogSink {
+    fn emit(&self, event: &str, detail: serde_json::Value) {
+        mem_core::logging::log(event, Some(&detail));
+    }
 }
 
 /// The no-provider milestone summarizer: every run fails closed (logged by

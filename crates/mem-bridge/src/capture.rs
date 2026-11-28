@@ -487,6 +487,21 @@ pub struct CaptureParams {
     pub vault: bool,
 }
 
+impl CaptureParams {
+    /// The dedupe key the prompt ledger already uses: `metadata.promptId`,
+    /// never a synthetic id. A blank id is absent (D-3).
+    pub fn prompt_id(&self) -> Option<String> {
+        prompt_id_of(self).filter(|id| !id.trim().is_empty())
+    }
+
+    /// The turn's user prompt, already carried in the payload: the bounded
+    /// `metadata.autoCaptureContext.userPrompt` when the wrapper sent one,
+    /// else the raw transcript (D-1).
+    pub fn user_prompt(&self) -> Option<&str> {
+        effective_prompt(self, self.transcript.as_deref())
+    }
+}
+
 /// The `featureFlags.soundMemory` + `soundMemory.rawContextRequired` slice
 /// the capture service reads (W7.1).
 ///
@@ -1957,7 +1972,47 @@ fn recent_action_lines(
 
 #[cfg(test)]
 mod tests {
-    use super::truncate_detail;
+    use super::{CaptureParams, truncate_detail};
+    use mem_store::serde_json::json;
+
+    fn params_with(
+        metadata: Option<mem_store::serde_json::Value>,
+        transcript: Option<&str>,
+    ) -> CaptureParams {
+        CaptureParams {
+            metadata,
+            transcript: transcript.map(str::to_string),
+            ..CaptureParams::default()
+        }
+    }
+
+    /// `metadata.autoCaptureContext.userPrompt` wins over the transcript; the
+    /// transcript is the fallback when the metadata prompt is absent.
+    #[test]
+    fn test_user_prompt_reads_metadata_then_transcript() {
+        let params = params_with(
+            Some(json!({"autoCaptureContext": {"userPrompt": "A"}})),
+            Some("B"),
+        );
+        assert_eq!(params.user_prompt(), Some("A"));
+
+        let params = params_with(None, Some("B"));
+        assert_eq!(params.user_prompt(), Some("B"));
+    }
+
+    /// `promptId` is read from metadata; blank or absent ids are rejected
+    /// (never a synthetic id — D-3).
+    #[test]
+    fn test_prompt_id_reads_metadata_and_rejects_blank() {
+        let params = params_with(Some(json!({"promptId": "msg_123"})), None);
+        assert_eq!(params.prompt_id().as_deref(), Some("msg_123"));
+
+        let params = params_with(Some(json!({"promptId": "   "})), None);
+        assert_eq!(params.prompt_id(), None);
+
+        let params = params_with(None, None);
+        assert_eq!(params.prompt_id(), None);
+    }
 
     /// The 120th byte lands inside `é`: a byte slice panics, a char take does not.
     #[test]

@@ -69,9 +69,9 @@ async fn missing_profile_message(state: &AppState, user_id: &str) -> String {
 
 /// The bound on the identity roster (issue 115): never an unbounded list.
 pub const PROFILE_ROSTER_MAX: usize = 200;
-/// The refresh note (issue 48.13 — D-4).
+/// The refresh note (issue 48.13 — D-4; the learner landed in 48/A1 — D-12).
 const REFRESH_NOTE: &str =
-    "Confidence decay runs immediately. Automatic profile learning is disabled in this release.";
+    "Confidence decay runs immediately. Profile learning runs on the session-idle path.";
 
 /// `{userId?}` — the optional body of `POST /api/user-profile/refresh`.
 #[derive(Debug, Clone, Default, Deserialize)]

@@ -700,6 +700,9 @@ pub async fn build_wire_fixture_gated(
         recall: Arc::new(recall),
         skills: None,
         tools: Some(Arc::new(tools)),
+        // The fixture drives dispatch, not the idle tick; issue 48's learner
+        // has its own binary (`profile_learning_wiring`).
+        learning: None,
     };
     WireFixture {
         engine: Engine::with_runtime(EngineConfig::default(), Arc::new(runtime)),

@@ -234,6 +234,7 @@ async fn test_filtered_structured_redacts_before_the_inner_call() {
         Some(CaptureProvider {
             base: recorder.clone() as Arc<dyn AiProvider>,
             structured: recorder.clone() as Arc<dyn StructuredCapture>,
+            host: None,
         }),
     )
     .await
@@ -298,6 +299,7 @@ async fn test_filtered_structured_never_calls_an_emptied_conversation() {
         Some(CaptureProvider {
             base: recorder.clone() as Arc<dyn AiProvider>,
             structured: recorder.clone() as Arc<dyn StructuredCapture>,
+            host: None,
         }),
     )
     .await

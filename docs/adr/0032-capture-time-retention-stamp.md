@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (owner ratification, 2026-11-09).
 - **Date:** 2026-11-10
-- **Extends:** ADR-0019 (erasure posture; closes 47.4 residual row), ADR-0021 (schema version discipline: v4 migration), ADR-0013 (production error handling: panic-free run guard).
+- **Extends:** ADR-0019 (erasure posture; records the 47.4 retention residual as accepted — see D-32-4, not closed), ADR-0021 (schema version discipline: v4 migration), ADR-0013 (production error handling: panic-free run guard).
 - **Supersedes:** Alternatives A (superseded 2026-10-25 design), B (ratified restart design, doubly superseded), C (never-delete-prompts).
 
 ## Context
@@ -53,16 +53,18 @@ The prompts read/delete and the memory deletes live in separate files; no cross-
 The sweep executes in four idempotent phases:
 1. **Read (prompts DB):** reads expired prompt facts (`created_at < cutoff`); derives `grace_ids` and the watermark for profile invalidation.
 2. **Sweep per shard (`ShardManager::run_retention_sweep`):** applies migrate-on-touch (`ensure_shard_schema`), queries candidates with `RETENTION_CANDIDATES_SELECT`, applies the single Rust filter (skipping pinned memories, stamped grace $s + 2r > c$, and NULL-stamp grace `grace_ids`), and deletes survivors in a single `BatchMode::Write`.
-3. **Erase + Delete Prompts + Clear Links (`UserPromptManager`):** joins profile invalidation (B2′) before deleting expired prompts, then clears `linked_memory_id` on surviving prompts whose memories were deleted.
+3. **Delete Prompts + Clear Links (`UserPromptManager`):** deletes expired prompts without erasing derived profiles (D-32-4), then clears `linked_memory_id` on surviving prompts whose memories were deleted.
 4. **VACUUM:** best-effort vacuum on `user-prompts.db`.
 
-### D-32-4 — Profile Invalidation Join (47.1-B2′) and ADR-0019 47.4 Residual Closure
+### D-32-4 — Retention Pruning Does Not Erase Derived Profiles (D-32-4 amended 2026-11-28)
 
-Retention pruning of prompts joins profile invalidation, reusing the exact B2′ machinery landed in issue 48 (`ProfileEraser` hook on `UserPromptManager`).
+Retention pruning deletes expired prompt rows and does **NOT** erase derived profiles. A prompt that ages out of the 30-day window is no longer treated as a deletion event: `delete_expired_prompts` performs a single `DELETE FROM user_prompts WHERE created_at < ?` with no `MIN(created_at)` probe and no `ProfileEraser` call, so an unrelated profile-store fault can never block prompt retention.
 
-Phase 3 queries `MIN(created_at)` across the expired prompt batch and calls `erase_derived_from(batch_min)` before executing `DELETE FROM user_prompts`. Following the E2 rule (erase before delete), a failed erasure aborts before prompt deletion, failing safely toward privacy.
+Erasure of a profile remains bound to an explicit prompt deletion (`UserPromptManager::delete_prompt`, reusing the B2′ `ProfileEraser` hook) and to `DELETE /api/user-profile`.
 
-**ADR-0019's 47.4 residual row ("retention-pruned prompts are a named residual until 39 decides") is hereby CLOSED** (resolved, not renamed).
+**Accepted residual:** a profile can retain model-derived text whose prompting rows have aged out of the 30-day window. The profile is erased when a still-live contributing prompt is deleted explicitly, or by the user's profile delete. This residual is recorded in ADR-0019 Clause 2, not closed.
+
+Rationale for amending the original join: the previous rule used the batch `MIN(created_at)`, so any single prompt ageing out erased **every** profile whose watermark was newer than the cutoff — the measured 2026-11-19 incident (660 prompts pruned, both profiles and 10 changelogs erased silently). Removing the join makes that data loss impossible by construction.
 
 ### D-32-5 — Shard v4 Schema Migration and INSERT Freeze
 

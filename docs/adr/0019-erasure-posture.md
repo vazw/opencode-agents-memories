@@ -116,7 +116,7 @@ a claim: the injected context *is* the memories (`FINDINGS-DETAIL.md:163-171`), 
 - **facts** (A8, class C) — derived; a prompt delete retains them, and only `purge-session`'s facts leg erases them;
 - **milestones** — the shipped `purge-session` **deletes the whole milestone row** when the triple is a contributor (`purge.rs:206-210`; `episodic_sql.rs:416`), so no part of that row is retained today; the **planned** H6 rewrite is what removes only the contributor entry, keeps the merged `summary` (C-H) and its `embedding` (V-inv) as named residuals (D-19-8), leaves `source_count` and the window unchanged, and adds `milestones_rewritten` to the report — and a prompt delete does not reach the milestone (`FINDINGS-DETAIL.md:163-171`);
 - the **vault** (A10) — named, with its per-request tri-state (D-19-9);
-- **profile rows and changelogs** (A2) — erased at delete time by the watermark rule (`erasure.rs:29-31`).
+- **profile rows and changelogs** (A2) — erased at explicit delete time by the watermark rule (`erasure.rs:29-31`). **Retention residual (D-32-4 amended 2026-11-28):** the automatic prompt-retention sweep no longer erases derived profiles, so a profile can retain model-derived text whose prompting rows have **aged out of the 30-day window**; the profile is erased when a still-live contributing prompt is deleted explicitly, or by the user's profile delete. This residual is recorded here, not closed.
 
 ### Clause 3 — what the sweep covers
 

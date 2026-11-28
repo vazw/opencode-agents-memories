@@ -61,6 +61,7 @@ fn full_engine() -> (Engine, common::TestDir) {
         recall: fixture.recall,
         skills: None,
         tools: None,
+        learning: None,
     };
     std::mem::forget(rt);
     (

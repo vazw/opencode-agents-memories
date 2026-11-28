@@ -221,7 +221,7 @@ async fn test_prompt_port_delete_prompt_erases_the_profile() {
 }
 
 #[tokio::test]
-async fn test_refresh_response_does_not_advertise_a_learning_backlog() {
+async fn test_refresh_note_states_learning_runs() {
     let root = temp_dir_unique("profile-erasure-refresh");
     let store = Arc::new(ProfileStore::new(
         root.clone(),
@@ -257,7 +257,11 @@ async fn test_refresh_response_does_not_advertise_a_learning_backlog() {
     );
     let note = data["note"].as_str().unwrap_or_default();
     assert!(
-        note.contains("disabled"),
-        "the note states that automatic learning is disabled in this release: {note}"
+        note.contains("learning"),
+        "the note names the learner that now runs: {note}"
+    );
+    assert!(
+        !note.contains("disabled"),
+        "the note must not claim the learner is disabled: {note}"
     );
 }

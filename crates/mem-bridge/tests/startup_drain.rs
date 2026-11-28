@@ -213,6 +213,7 @@ async fn parts(prefix: &str, summarizer: Option<Arc<dyn CaptureSummarizer>>) -> 
         recall: Arc::new(recall),
         skills: None,
         tools: None,
+        learning: None,
     };
     let mut engine = Engine::with_runtime(EngineConfig::default(), Arc::new(runtime));
     engine.schedule_startup_drain(Arc::clone(&capture));

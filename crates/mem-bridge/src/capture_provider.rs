@@ -137,4 +137,8 @@ pub struct CaptureProvider {
     pub base: Arc<dyn AiProvider>,
     /// For the capture summarizer, post-filter.
     pub structured: Arc<dyn StructuredCapture>,
+    /// The lazily-resolved host the learning round reuses as its native arm,
+    /// `Some` only when the host is the selected route (D-7/D-13). `None` in
+    /// the manual arm, where the manual provider is the native arm.
+    pub host: Option<Arc<LazyHostProvider>>,
 }

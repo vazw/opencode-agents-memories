@@ -33,6 +33,7 @@ async fn engine_with_counter(
         recall: fixture.recall,
         skills: None,
         tools: None,
+        learning: None,
     };
     let mut engine = Engine::with_runtime(EngineConfig::default(), Arc::new(runtime));
     let fired = Arc::new(AtomicUsize::new(0));

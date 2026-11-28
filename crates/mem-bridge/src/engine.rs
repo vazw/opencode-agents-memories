@@ -292,6 +292,10 @@ pub struct EngineRuntime {
     /// `None` is the fixture/degraded runtime: the nine answer `-32001`
     /// exactly as `capture`/`inject`/`recall` do without a runtime.
     pub tools: Option<Arc<crate::tools::ToolServices>>,
+    /// Issue 48 (A1): the wired learner. `capture` records into it after the
+    /// drain and the 250 ms tick drives its due rounds. `None` when the
+    /// composition built no learner (unknown identity or no provider arm).
+    pub learning: Option<Arc<crate::profile_learning::ProfileLearning>>,
 }
 
 impl Engine {
@@ -671,8 +675,20 @@ impl Engine {
 
         // Fire-and-forget drain — spawn-tracked so the shutdown oracle
         // sees it; the ACK remains the durability guarantee (queued now).
+        //
+        // Issue 48 (A1): the accepted capture is also the learner's input. The
+        // prompt is recorded (stripped and injected blocks filtered BEFORE the
+        // write) and the session's idle debounce is armed, then the existing
+        // drain runs. Nothing here can fail the ACK: `record` returns a typed
+        // outcome and `arm` a bool.
         let capture = runtime.capture.clone();
+        let learning = runtime.learning.clone();
+        let learned_params = params.clone();
         self.spawn_tracked(async move {
+            if let Some(learning) = learning.as_ref() {
+                let _ = learning.record(&learned_params).await;
+                let _ = learning.arm(&learned_params.session_id, mem_profile::ids::now_millis());
+            }
             let _ = capture.drain_once().await;
         });
 
@@ -959,6 +975,12 @@ impl Engine {
     pub fn is_shutting_down(&self) -> bool {
         self.shutting_down.load(Ordering::SeqCst)
     }
+
+    /// The same flag, shared with the lifecycle tasks that re-check it after
+    /// their sleep (issue 48's learner tick is one).
+    pub fn shutdown_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.shutting_down)
+    }
 }
 
 /// The dispatch services for one composed runtime. PRIVATE: the only caller
@@ -984,6 +1006,7 @@ fn runtime_for(
             core,
             portability,
         ))),
+        learning: composed.learning.clone(),
     }
 }
 
@@ -1501,6 +1524,7 @@ pub fn engine_capture_provider(
             Some(crate::capture_provider::CaptureProvider {
                 base: structured.clone(),
                 structured: Arc::new(crate::capture_provider::Structured::new(structured)),
+                host: None,
             })
         }
         // 4. Neither block: the host default.
@@ -1512,6 +1536,39 @@ pub fn engine_capture_provider(
             None
         }
     }
+}
+
+/// Issue 48 (A1): drives the learner's due rounds until shutdown.
+///
+/// The flag is re-checked AFTER the sleep and before any round, so a shutdown
+/// never starts new analysis work; the tick itself is spawn-tracked, so the
+/// live-task oracle still reaches zero. The log line carries counts only —
+/// never a prompt, a profile or a content-bearing id.
+pub fn spawn_profile_learning_tick(
+    engine: &Engine,
+    learning: Arc<crate::profile_learning::ProfileLearning>,
+) {
+    let shutting_down = engine.shutdown_flag();
+    engine.spawn_tracked(async move {
+        loop {
+            tokio::time::sleep(Duration::from_millis(PROFILE_LEARNING_TICK_MS)).await;
+            if shutting_down.load(Ordering::SeqCst) {
+                break;
+            }
+            let tick = learning.run_due(mem_profile::ids::now_millis()).await;
+            if tick.due == 0 {
+                continue;
+            }
+            mem_core::logging::log(
+                "profile.learning_tick",
+                Some(&serde_json::json!({
+                    "due": tick.due,
+                    "completed": tick.completed,
+                    "failed": tick.failed,
+                })),
+            );
+        }
+    });
 }
 
 /// The host arm: warm the lazy provider once, then hand BOTH halves to composition.
@@ -1530,7 +1587,10 @@ fn host_arm(
     let _ = host_provider.warm();
     crate::capture_provider::CaptureProvider {
         base: host_provider.clone(),
-        structured: Arc::new(crate::capture_provider::HostStructured::new(host_provider)),
+        structured: Arc::new(crate::capture_provider::HostStructured::new(
+            host_provider.clone(),
+        )),
+        host: Some(host_provider),
     }
 }
 
@@ -1745,6 +1805,11 @@ pub async fn run_in_runtime(
             Duration::from_secs(PROFILE_DECAY_TICK_SECS),
             Arc::new(mem_profile::ids::now_millis),
         );
+        // Issue 48 (A1): the idle-debounce driver. `None` (unknown identity or
+        // no provider arm) starts no task at all.
+        if let Some(learning) = runtime.learning.clone() {
+            spawn_profile_learning_tick(&engine, learning);
+        }
     }
 
     match mode {
@@ -2127,6 +2192,12 @@ pub fn spawn_consolidation_lifecycle(engine: &Engine, scheduler: Arc<Consolidati
 /// (`mem_profile::decay::SWEEP_INTERVAL_MILLIS`, enforced inside
 /// `sweep_decay_daily`), and a not-due wake-up writes nothing.
 pub const PROFILE_DECAY_TICK_SECS: u64 = 3600;
+
+/// Issue 48 (A1): how often the learner tick asks its debounce scheduler for
+/// due sessions. The scheduler's own window is 10 s; this is only the poll
+/// interval, small enough that a due arm fires promptly without a per-turn
+/// wake.
+pub const PROFILE_LEARNING_TICK_MS: u64 = 250;
 
 /// The decay sweep seam. It exists so a test can hand the lifecycle a
 /// `ProfileError::LockPoisoned` (a real `ProfileStore` cannot be poisoned from

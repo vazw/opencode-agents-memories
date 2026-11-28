@@ -75,6 +75,7 @@ fn engine(dir: &TestDir) -> Arc<Engine> {
         recall,
         skills: None,
         tools: None,
+        learning: None,
     };
     Arc::new(Engine::with_runtime(
         EngineConfig::default(),

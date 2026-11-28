@@ -9,8 +9,9 @@
 //!    can never add the FK) still loses its changelog snapshots, because the
 //!    explicit two-table delete is the contract, not the declared cascade.
 //!
-//! `delete_expired_prompts` joins retention pruning to profile invalidation
-//! (issue 39, 47.1-B2′).
+//! Retention pruning (`delete_expired_prompts`) no longer joins profile
+//! invalidation (D-9, D-10): it ages rows out and spares derived profiles.
+//! Erasure stays bound to an explicit `delete_prompt` (B2′).
 
 mod common;
 
@@ -272,11 +273,11 @@ async fn test_migrated_root_profile_is_erased_by_the_prompt_path() {
     assert_eq!(count_rows(&store, "user_profile_changelogs").await, 0);
 }
 
-/// Issue 39 joins retention pruning to profile invalidation (47.1-B2′).
-/// `delete_expired_prompts` removes prompts and invalidates profiles whose
-/// watermark says they could have been derived from the pruned batch.
+/// Retention pruning is ageing, not erasure (D-9, D-10): the automatic sweep
+/// removes expired prompt rows and does NOT erase derived profiles. Erasure
+/// stays bound to an explicit `delete_prompt`.
 #[tokio::test]
-async fn test_retention_batch_erase_joins_profile_invalidation() {
+async fn test_retention_prune_does_not_erase_profiles() {
     let root = seeded_root();
     let config = common::store_config(root.clone());
     let store = Arc::new(ProfileStore::new(
@@ -289,7 +290,7 @@ async fn test_retention_batch_erase_joins_profile_invalidation() {
         .save_prompt("session-48", "message-48", "/probe", "old prompt")
         .await
         .expect("seed the prompt");
-    let _profile_id = store
+    let profile_id = store
         .create_profile(USER_ID, "Migrated", "migrated", USER_ID, &profile_data(), 1)
         .await
         .expect("seed the profile");
@@ -312,21 +313,22 @@ async fn test_retention_batch_erase_joins_profile_invalidation() {
     );
     assert_eq!(
         count_rows(&store, "user_profiles").await,
-        0,
-        "pruning joins profile invalidation: the profile is erased"
+        1,
+        "retention pruning does not erase the profile"
     );
     assert_eq!(
         count_rows(&store, "user_profile_changelogs").await,
-        0,
-        "pruning joins profile invalidation: the changelog snapshots are erased"
+        1,
+        "retention pruning does not erase the changelog snapshots"
     );
     assert_eq!(
         store
             .get_active_profile(USER_ID)
             .await
-            .expect("read the profile"),
-        None,
-        "no profile survives after batch invalidation"
+            .expect("read the profile")
+            .map(|profile| profile.id),
+        Some(profile_id),
+        "the profile survives the aging sweep unchanged"
     );
 }
 
@@ -433,10 +435,11 @@ impl ProfileEraser for FailingEraser {
     }
 }
 
-/// E2 ordering: profile invalidation happens before prompt delete; if the erase
-/// fails, `delete_expired_prompts` aborts and leaves the prompts alive (fail toward privacy).
+/// A failing eraser cannot block prompt retention: the sweep ignores the
+/// eraser entirely, so an unrelated profile-store fault no longer aborts the
+/// prune (the secondary defect the retention join introduced).
 #[tokio::test]
-async fn test_retention_batch_erase_failure_leaves_prompts_alive() {
+async fn test_retention_prune_ignores_a_failing_eraser() {
     let root = seeded_root();
     let config = common::store_config(root.clone());
     let manager = UserPromptManager::new(root.clone(), config, 3);
@@ -446,15 +449,21 @@ async fn test_retention_batch_erase_failure_leaves_prompts_alive() {
         .expect("seed the prompt");
 
     let manager = manager.with_eraser(Arc::new(FailingEraser));
-    let outcome = manager.delete_expired_prompts(now_millis() + 1_000).await;
-    assert!(outcome.is_err(), "batch erase failure aborts before delete");
+    let removed = manager
+        .delete_expired_prompts(now_millis() + 1_000)
+        .await
+        .expect("retention pruning never consults the eraser");
+    assert_eq!(
+        removed, 1,
+        "the prompt is pruned despite the failing eraser"
+    );
 
     assert!(
         manager
             .get_prompt_by_id(&prompt_id)
             .await
             .expect("read prompt")
-            .is_some(),
-        "prompt survives when batch erase fails"
+            .is_none(),
+        "prompt is gone: the sweep does not consult the eraser"
     );
 }

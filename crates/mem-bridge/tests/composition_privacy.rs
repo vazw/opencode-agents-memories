@@ -173,6 +173,7 @@ async fn test_composed_runtime_wraps_the_minted_provider_in_the_privacy_layer() 
         Some(CaptureProvider {
             base: recorder.clone() as Arc<dyn AiProvider>,
             structured: recorder.clone() as Arc<dyn StructuredCapture>,
+            host: None,
         }),
     )
     .await
@@ -223,6 +224,7 @@ async fn test_the_minted_layer_reads_filter_injected_prompts() {
         Some(CaptureProvider {
             base: recorder.clone() as Arc<dyn AiProvider>,
             structured: recorder.clone() as Arc<dyn StructuredCapture>,
+            host: None,
         }),
     )
     .await

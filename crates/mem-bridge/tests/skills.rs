@@ -49,6 +49,7 @@ async fn engine_over(dir: &TestDir, manager: Arc<SkillsManager>) -> Engine {
         recall: fixture.recall,
         skills: Some(Arc::new(SkillsService::new(manager, resolver))),
         tools: None,
+        learning: None,
     };
     Engine::with_runtime(EngineConfig::default(), Arc::new(runtime))
 }

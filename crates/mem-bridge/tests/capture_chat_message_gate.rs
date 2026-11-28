@@ -37,6 +37,7 @@ async fn gated(storage_root: &Path, chat_capture_enabled: bool) -> (Engine, Arc<
         recall: fixture.recall,
         skills: None,
         tools: None,
+        learning: None,
     };
     (
         Engine::with_runtime(EngineConfig::default(), Arc::new(runtime)),

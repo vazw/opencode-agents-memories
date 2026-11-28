@@ -519,30 +519,18 @@ impl UserPromptManager {
             .collect())
     }
 
-    /// Retention pruning joined to B2′ profile invalidation (issue 39).
+    /// Retention pruning is ageing, not erasure (D-9, D-10): one `DELETE`,
+    /// no `MIN(created_at)` probe, no B2′ eraser call. An expired prompt row
+    /// simply ages out; the derived profile is left untouched, so an unrelated
+    /// profile-store fault can no longer block prompt retention.
     ///
-    /// Reads `MIN(created_at)` across the expired batch, triggers B2′ invalidation
-    /// on the watermark before deleting, and aborts if erasure fails (fail toward
-    /// privacy, E2 ordering).
+    /// Erasure of a profile remains bound to an explicit
+    /// [`UserPromptManager::delete_prompt`] and to `DELETE /api/user-profile`.
+    /// Accepted residual (ADR-0032 D-32-4, ADR-0019 Clause 2): a profile can
+    /// retain model-derived text whose prompting rows have aged out of the
+    /// 30-day window.
     pub async fn delete_expired_prompts(&self, cutoff_time: i64) -> Result<u64, ProfileError> {
         let db = self.ready().await?;
-        let row = query_one(
-            db.as_ref(),
-            "SELECT MIN(created_at) AS min_created_at FROM user_prompts WHERE created_at < ?",
-            vec![Value::Integer(cutoff_time)],
-        )
-        .await?;
-
-        let min_created_at = row.as_ref().and_then(|r| r.i64("min_created_at"));
-        if let (Some(min_ts), Some(eraser)) = (min_created_at, &self.eraser) {
-            eraser.erase_derived_from(min_ts).await.map_err(|error| {
-                ProfileError::ErasureFailed {
-                    prompt_id: format!("retention-batch-{cutoff_time}"),
-                    message: error.message(),
-                }
-            })?;
-        }
-
         let result = db
             .execute(
                 "DELETE FROM user_prompts WHERE created_at < ?",

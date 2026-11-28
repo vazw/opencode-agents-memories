@@ -232,3 +232,51 @@ appended **last** because the shared-router envelope walk deletes the fake profi
 **Open nit, not an AC gap.** D-6 (an existing row whose stored `created_at` is non-integer → `i64::MIN`, so it
 contributes) is the one matrix row proven by reading, not by running: no test writes `created_at = 'x'`
 through a raw peer connection. A one-statement `UPDATE user_prompts SET created_at='x'` arm would close it.
+
+## IMPLEMENTATION RECORD 2026-11-28 — learner leg landed (`A1`)
+
+The 2026-10-25 re-scope (A2, learner skipped) was reversed by the owner, and the blueprint
+`.tmp/blueprints/blueprint-20261128-0630-profile-learning-a1-r4.md` (r4, body sha256 `33a039b7eb7b`) shipped
+the learner on the idle path that already existed. The erasure leg is unchanged; the retention sweep is not.
+
+**AC mapping now.** 48.1 → `build_profile_learning` (`crates/mem-bridge/src/profile_learning.rs`) is called
+by the ONE composition root (`composition.rs`) with the hoisted identity resolver, the same `Arc`s the web
+surface and the eraser use, and the threshold from `user_profile_analysis_interval` (min 1). 48.2 → the
+`capture` drain task calls `record` then `arm` (pure `IdleScheduler`, 10 s debounce, re-arm REPLACES the
+deadline), and `spawn_profile_learning_tick` (250 ms, flag re-checked after the sleep) drives due rounds;
+`poll_due` stays the sole removal edge and only `run_due` calls it in `mem-bridge`. 48.3 → unknown identity
+builds no learner (one `profile.learning_identity_unknown` event); no provider arm builds no learner
+(`profile.learning_no_provider`). 48.4 → the round is the existing `LearningRound`; readiness is the
+construction-time fact, so a later provider fault is a typed round error retried on the next arm. 48.5 →
+`run_due` counts a failed round and emits `profile.learning_round_failed`; nothing panics. 48.8/48.9 →
+untouched by this wave (the retention sweep no longer erases derived profiles at all — ADR-0032 D-32-4 as
+amended). 48.10 → unchanged (the watermark path in `delete_prompt` still erases). 48.11 → erasure leg only,
+as landed. 48.12 → `record` runs `PrivacyConfig::strip_then_filter_text` BEFORE the durable write, and the
+store's own gate is the second gate.
+
+**Files.** `crates/mem-bridge/src/profile_learning.rs` (new: `record`/`arm`/`run_due`/`user_id`,
+`LazyHostCompletion`, `build_learning_gateway`, `build_profile_learning`, `LearningTick`, `RecordOutcome`);
+`crates/mem-bridge/src/capture.rs` (`CaptureParams::prompt_id` / `user_prompt`);
+`crates/mem-bridge/src/identity.rs` (new, hoisted from the root crate's `web_identity`), `src/web_identity.rs`
+(re-exports + wrapper), `crates/mem-bridge/src/tools/profile.rs` (hoisted `UNKNOWN_USER_ID`);
+`crates/mem-bridge/src/capture_provider.rs` (`host: Option<Arc<LazyHostProvider>>`);
+`crates/mem-bridge/src/composition.rs` (identity → `build_profile_learning`, `ComposedRuntime.learning`,
+`LearningLogSink`); `crates/mem-bridge/src/engine.rs` (`EngineRuntime.learning`, record/arm in the capture
+drain task, `shutdown_flag`, `spawn_profile_learning_tick`, `PROFILE_LEARNING_TICK_MS`);
+`crates/mem-profile/src/prompt.rs` (`delete_expired_prompts` is one `DELETE` — no `MIN`, no eraser);
+`crates/mem-web/src/api/profile.rs` (`REFRESH_NOTE`), `crates/mem-web/tests/profile_erasure.rs`.
+
+**Tests.** `crates/mem-bridge/tests/profile_learning_wiring.rs` (10: record filter/idempotency/no-id,
+debounce arithmetic, unknown identity, composed identity, manual-only native arm, R9 serialization via the
+round flag, canary with the facade positive control, typed round failure);
+`crates/mem-bridge/src/capture.rs` (`test_user_prompt_reads_metadata_then_transcript`,
+`test_prompt_id_reads_metadata_and_rejects_blank`); `crates/mem-profile/tests/profile_erasure_migrated_root.rs`
+(`test_retention_prune_does_not_erase_profiles`, `test_retention_prune_ignores_a_failing_eraser`);
+`crates/mem-web/tests/profile_erasure.rs` (`test_refresh_note_states_learning_runs`).
+
+**Logging discipline (D-14).** `profile_learning.rs` opens no channel: every diagnostic goes through the
+injected `RoundEventSink`, and the production sink is `LearningLogSink` in `composition.rs` (the
+`mem_core::logging::log` facade). A static scan over non-comment lines of the module is 0.
+
+**Lazy extra, named.** `build_learning_gateway` takes an optional manual-provider override — a test seam so
+the manual arm can be built over a recording `HttpTransport`. Production always passes `None`.

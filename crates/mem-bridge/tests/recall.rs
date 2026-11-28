@@ -72,6 +72,7 @@ async fn seeded_engine() -> Seeded {
         recall: fixture.recall,
         skills: None,
         tools: None,
+        learning: None,
     };
     Seeded {
         engine: Engine::with_runtime(EngineConfig::default(), Arc::new(runtime)),
