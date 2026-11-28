@@ -241,9 +241,7 @@ the startup capture replay has finished, one `engine.inject_barrier_timeout` —
 Then **quit and start once more** (a fresh-engine reopen). Never leave a `SIGTERM`'ed engine as the last
 opener — that state was observed once answering `hello`/`health` but `-32603` on `list-shards`/`list`.
 
-Expected on the reopen: `list-shards` reports 22 shards, `current 1 / linked 20 / orphaned 1` (the
-orphaned `usbgurad-tray` project path no longer exists — pre-existing data), `list` returns the newest
-memories, and the print/ask path still works.
+Expected on the reopen: `list-shards` answers `success:true` with the same `storagePath` it reported before the quit and no `-32603`, `list` returns the newest memories, and the print/ask path still works. The shard split is not a pass condition: the 2026-10-30 rehearsal reported 22 shards (§Appendix) and `current 1 / linked 20 / orphaned 1` (`docs/evidence/live-swap-2026-10-30/dry-run.md:60`, repeated at `docs/evidence/live-swap-script-2026-10-31/rehearsal-6-verify.txt:39-40`), the orphaned `usbgurad-tray` project path a pre-existing entry; 2026-11-28, three workspaces, identical summary `{total:38, current:0, linked:13, orphaned:12, ambiguous:4, empty:9, missingFile:0}` (`.tmp/scratch/list-shards-20261128.txt`).
 
 If a fresh engine answers `-32603` on `list-shards`/`list`/`add`:
 
@@ -289,20 +287,22 @@ endpoints, not the port's web server.
 | # | check | how | expected |
 |---|---|---|---|
 | 1 | handshake | `memory` tool `mode:"help"` in **two different workspaces** (two agent instances/locations); the engine `hello` (bridge) supplies version/protocol/capabilities | **both** workspaces' `help` answer `success:true`, nine commands, `unavailable: []` — the tool's `help` carries **no** `engine_version`/`protocol`; those are the engine `hello` fields: `engine_version 0.1.0`, protocol `1.0.0`, capabilities `add, compaction, export, import, list, list-shards, migrate, profile, search, skills, standalone, web`. Pre-fix the second workspace answered `engine_unavailable` (issue 82). |
-| 2 | health | `memory` tool `mode:"list-shards"` in **both workspaces** (or the RPC) | both `success:true`; `storagePath` = `~/.opencode-mem/data`; 22 shards; `current 1 / linked 20 / orphaned 1`. The second workspace is the fix's live discriminator: pre-fix it answers `engine_unavailable`. |
+| 2 | health | `memory` tool `mode:"list-shards"` in **both workspaces** (or the RPC) | both `success:true`; the same `storagePath` (`~/.opencode-mem/data`); no `engine_unavailable` — the second workspace is the fix's live discriminator (pre-fix it answers `engine_unavailable`, issue 82). Shard counts are **not** a pass criterion: 2026-10-30 rehearsal, 22 shards (§Appendix) and `current 1 / linked 20 / orphaned 1` (`docs/evidence/live-swap-2026-10-30/dry-run.md:60`); 2026-11-28, three workspaces, identical summary `{total:38, current:0, linked:13, orphaned:12, ambiguous:4, empty:9, missingFile:0}` (`.tmp/scratch/list-shards-20261128.txt`) — see the inventory note under this table. |
 | 3 | direct tool | ask the model to call `memory` with `options.codemode: false` (the tool is exposed directly, not via `execute`) | one direct `memory` call in the session, `success:true` — the tool lane was proven on 2026-10-30 in podman (11 calls, cost 0) |
 | 4 | skill listed | `curl -s http://127.0.0.1:<host-port>/api/skill` | list contains `opencode-mem.memory-usage` (`"path": ".../plugin/skills/memory-usage/SKILL.md"`); poll for it — a cold start answers `[]` first |
 | 5 | skill used | ask a model to load `opencode-mem.memory-usage` and follow it | the skill tool returns its 2,781-byte body and the answer applies it |
 | 6 | plugin state | `curl -s http://127.0.0.1:<host-port>/api/plugin` | `{"id":"opencode-mem","source":{"type":"local","path":"/home/vaz/.../plugin"},"state":{"status":"active"}}` |
 | 7 | skills RPC | `memory` tool `mode:"skills"` | `{"skills":[]}` (the port's `skills.db` registry is empty; the plugin skill is #4, not here) |
 | 8 | list | `memory` tool `mode:"list"` | newest-first, `count` 20 for the default page; `all-projects` caps at 1,000 |
-| 9 | search | `memory` tool `mode:"search"` for `W8 brute-force search cost benchmark shard layout` | rank 1 `mem_1792900662953_j6e64unbf`, similarity ≈0.54 (JSON-RPC; REST measured 0.5619 on the restored copy) |
+| 9 | search | `memory` tool `mode:"search"` for `W8 brute-force search cost benchmark shard layout` | `success:true`, non-empty `items`, and a `similarity` on the top hit, no `engine_unavailable`. Similarity level and rank are **not** pass criteria — pre-e5 (nomic, 2026-10-30): rank 1 `mem_1792900662953_j6e64unbf`, similarity ≈0.54 (JSON-RPC; REST measured 0.5619 on the restored copy); under e5 (2026-11-28) a stored row queried by its own text measured 0.8858 / 0.8887 / 0.9014 (`.tmp/scratch/probe28/selfq.txt`), and the §7 canary template ranked 33 of 200 at `pageSize` 50 (`.tmp/scratch/probe28/q.txt`) and 178 of 201 at `pageSize` 200 (`.tmp/scratch/probe28/natural2.txt`). |
 | 10 | profile | `memory` tool `mode:"profile"` | non-null profile (version 157 at 2026-10-30T14:05Z; changes as it learns) |
 | 11 | web UI | open `http://127.0.0.1:3742` (the engine's default; `OPENCODE_MEM_WEB_PORT` overrides) | HTTP 200, `OpenCode Memory Explorer` shell; `/api/health` = `{"success":true,"status":"ok","authEnabled":false}`; `/api/stats` total = memory count |
 | 12 | add + search | the §7 curl pair, or `memory` tool `mode:"add"` then `mode:"search"` for the canary | add 200 / `success:true`; `--verify` proves the stored row is in its tag's listing and that the `tag` filter is honored; rank is not a pass criterion (rank 1 pre-e5, 2026-10-30; under e5 the same template measured rank 33 of 200 at `pageSize` 50, `.tmp/scratch/probe28/q.txt`) |
 | 13 | capture | a real session with a prompt | a row appears in `user-prompts.db` (count grows past 1,745) and, with the provider configured, an auto-captured memory |
 | 14 | injection | start a second session in the same project | memory context is prepended (the response reflects stored facts); `injectProfile: true` also injects the profile block |
 | 15 | compaction | let a session compact (or trigger it) | the `experimental.session.compacting` hook runs and the compaction summary is produced; no engine error |
+
+The inventory's `current 0` with `ambiguous > 0` is expected, not a failure: a project that records both `<dir>` and `<dir>/.git` as project paths makes `path_candidates_len > 1`, and `derive_status` (`crates/mem-store/src/shard_inventory.rs`) returns `ambiguous` at `:296-297` before it can return `current` at `:306`.
 
 Checks 1–12 were measured on copies. 13–15 are the hooks, **not** covered by the tool-lane podman run
 (which proved the tool lane only) — treat them as observations to record, and a failure here is a finding,
