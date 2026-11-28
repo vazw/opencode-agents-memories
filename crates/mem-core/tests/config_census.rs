@@ -320,11 +320,6 @@ fn test_census_covers_all_schema_fields() {
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", schema_path.display()));
 
     let schema_fields = extract_schema_fields(&schema_source);
-    assert_eq!(
-        schema_fields.len(),
-        102,
-        "expected exactly 102 fields in schema (86 Config + 16 nested leaves)"
-    );
 
     let doc_path = manifest_dir.join("../../docs/config-surface.md");
     if !doc_path.exists() {
@@ -334,14 +329,24 @@ fn test_census_covers_all_schema_fields() {
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", doc_path.display()));
 
     let rows = parse_census_table(&doc_content).expect("valid census table");
-    assert!(
-        rows.len() >= 102,
-        "census table must contain at least 102 rows, got {}",
-        rows.len()
-    );
 
     validate_census_against_schema(&rows, &schema_fields)
         .expect("all schema fields present in census");
+
+    // The reverse direction: no numeral to drift, no row for a field the schema
+    // no longer has. Together with the forward check this is a bijection.
+    let schema_set: BTreeSet<(&str, &str)> = schema_fields
+        .iter()
+        .map(|(structure, field)| (structure.as_str(), field.as_str()))
+        .collect();
+    for row in &rows {
+        assert!(
+            schema_set.contains(&(row.struct_name.as_str(), row.field_name.as_str())),
+            "census row names a field the schema lacks: {}.{}",
+            row.struct_name,
+            row.field_name
+        );
+    }
 }
 
 #[test]
@@ -360,11 +365,6 @@ fn test_inert_field_names_match_dead_census_rows() {
 
     let inert_fields: BTreeSet<&str> = FileConfig::inert_field_names().iter().copied().collect();
 
-    assert_eq!(
-        dead_census_fields.len(),
-        20,
-        "expected exactly 20 dead census fields in docs/config-surface.md"
-    );
     assert_eq!(
         inert_fields, dead_census_fields,
         "FileConfig::inert_field_names() must match dead census rows 1:1"

@@ -426,6 +426,10 @@ fn summarize(arm: &str, samples: &[f64]) -> (f64, f64, f64) {
     (p50, p95, max)
 }
 
+#[cfg_attr(
+    debug_assertions,
+    ignore = "absolute G3 cap is a release-profile claim: the debug sweep is ~10x slower (measured 4956 ms vs 493 ms); run with --release"
+)]
 #[test]
 fn cleanup_tick_latency() {
     let root = scratch();

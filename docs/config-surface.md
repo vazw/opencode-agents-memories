@@ -1,6 +1,6 @@
 # Configuration Surface Census and Truth
 
-This document establishes the authoritative, rot-proof census of the configuration surface for `opencode-agents-memory` (resolving Issue 49 and Issue 63). It itemizes all 102 fields (86 `Config` fields comprising 79 leaf fields and 7 composite structures, plus 16 nested leaf fields across 7 sub-structures) defined in `crates/mem-core/src/config/schema.rs`.
+This document establishes the authoritative, rot-proof census of the configuration surface for `opencode-agents-memory` (resolving Issue 49 and Issue 63). It itemizes all 103 fields (87 `Config` fields comprising 80 leaf fields and 7 composite structures, plus 16 nested leaf fields across 7 sub-structures) defined in `crates/mem-core/src/config/schema.rs`.
 
 A rot-guard integration test in `crates/mem-core/tests/config_census.rs` validates this file on every run, asserting that every schema field is accounted for in the census table under its qualified struct with a non-empty disposition and valid row schema.
 
@@ -23,8 +23,8 @@ The 6-key chat message surface controls chat-mode memory injection and capture b
 
 ## 2. Configuration Surface Census
 
-The table below itemizes all 102 schema fields:
-- `Config`: 86 fields (79 leaf fields + 7 composite structs)
+The table below itemizes all 103 schema fields:
+- `Config`: 87 fields (80 leaf fields + 7 composite structs)
 - `MemoryScope`: 1 leaf field
 - `Compaction`: 2 leaf fields
 - `ChatMessage`: 8 leaf fields
@@ -85,6 +85,7 @@ Row format: `| Struct | Field | Status | Reader / Disposition | Upstream Referen
 | Config | max_vectors_per_shard | live | crates/mem-store/src/config.rs:16 | example/opencode-mem/src/config.ts:376 |
 | Config | auto_cleanup_enabled | live | crates/mem-profile/src/incremental_cleanup.rs:221 | example/opencode-mem/src/config.ts:377 |
 | Config | auto_cleanup_retention_days | dead | mark inert (issue 41) | example/opencode-mem/src/config.ts:378 |
+| Config | auto_cleanup_interval_seconds | live | src/main.rs:189 | issue 41 (port addition) |
 | Config | deduplication_enabled | live | src/main.rs:223 | example/opencode-mem/src/services/deduplication-service.ts:37 |
 | Config | deduplication_similarity_threshold | live | src/main.rs:224 | example/opencode-mem/src/services/deduplication-service.ts:38 |
 | Config | user_profile_analysis_interval | live | crates/mem-profile/src/profile_store.rs:102 | example/opencode-mem/src/services/user-profile.ts:40 |
@@ -152,10 +153,10 @@ The initial design concerns audit (2026-10-25, concern C4) reported:
 
 Subsequent verification at `8023dd8` and through HEAD (`5432ee748c1f`) resolved and reconciled the arithmetic:
 1. **Schema Expansion**:
-   - `Config` defines **86 fields**: 79 scalar/option leaves and 7 composite nested structures (`memory`, `compaction`, `chat_message`, `episodic`, `feature_flags`, `sound_memory`, `promotion`).
-   - The +1 leaf addition was `allow_unguarded_open` (issue 45), which is live in `crates/mem-store/src/db.rs:286`.
+   - `Config` defines **87 fields**: 80 scalar/option leaves and 7 composite nested structures (`memory`, `compaction`, `chat_message`, `episodic`, `feature_flags`, `sound_memory`, `promotion`).
+   - The +1 leaf additions were `allow_unguarded_open` (issue 45), live in `crates/mem-store/src/db.rs:286`, and `auto_cleanup_interval_seconds` (issue 41), live in `src/main.rs:189`.
    - The 7 nested structs define **16 leaf fields**: `MemoryScope` (1), `Compaction` (2), `ChatMessage` (8), `Episodic` (1), `FeatureFlags` (2), `SoundMemory` (1), `Promotion` (1).
-   - Total fields in schema and census: **102 fields** (95 leaf fields + 7 composite structures).
+   - Total fields in schema and census: **103 fields** (96 leaf fields + 7 composite structures).
 
 2. **10 Fields Landed Readers at `8023dd8`**:
    - `compaction.enabled` (`inject.rs:507`, issue 33)
@@ -176,10 +177,10 @@ Subsequent verification at `8023dd8` and through HEAD (`5432ee748c1f`) resolved 
    - Dedup attribution correction: `deduplication_enabled` and `deduplication_similarity_threshold` gate the manual maintenance endpoint (`crates/mem-web/src/api/maintenance.rs:245`) and are instantiated in `src/main.rs:223-224`.
 
 4. **Current Status Partition at HEAD**:
-   - Total Schema Fields: **102** (86 `Config` + 16 nested)
-   - Total Leaf Fields: **95** (79 `Config` + 16 nested)
+   - Total Schema Fields: **103** (87 `Config` + 16 nested)
+   - Total Leaf Fields: **96** (80 `Config` + 16 nested)
    - Composite Structures: **7** (all live in composition / schema initialization)
-   - Live Leaf Fields: **75** (60 `Config` + 15 nested)
+   - Live Leaf Fields: **76** (61 `Config` + 15 nested)
    - Dead Leaf Fields: **20** (19 `Config` + 1 `MemoryScope`)
    - Every one of the 20 dead leaf fields has exactly one disposition: `mark inert (issue <N>)`.
 
@@ -225,7 +226,7 @@ A naive text/grep census over field names is demonstrably inaccurate:
   - `ChatMessage.filter_injected_prompts` and `injection_markers` bound through destructuring in `crates/mem-ai/src/privacy/layer.rs:74-77`.
 
 ### 4.2 AST Call Site Verification
-All 102 fields have been audited against the Rust compiler AST call graph and hand-verified across all 12 crates in the workspace. The error rate of the census table above on hand-checked AST call sites is **0.0%**.
+All 103 fields have been audited against the Rust compiler AST call graph and hand-verified across all 12 crates in the workspace. The error rate of the census table above on hand-checked AST call sites is **0.0%**.
 
 ---
 

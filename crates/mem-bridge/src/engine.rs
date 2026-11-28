@@ -1540,10 +1540,11 @@ pub fn engine_capture_provider(
 
 /// Issue 48 (A1): drives the learner's due rounds until shutdown.
 ///
-/// The flag is re-checked AFTER the sleep and before any round, so a shutdown
-/// never starts new analysis work; the tick itself is spawn-tracked, so the
-/// live-task oracle still reaches zero. The log line carries counts only —
-/// never a prompt, a profile or a content-bearing id.
+/// The flag is re-checked AFTER the sleep and again before EVERY round inside
+/// `run_due`, so a teardown that lands while a provider is in flight never
+/// starts the next arm. The tick itself is spawn-tracked, so the live-task
+/// oracle still reaches zero. The log line carries counts only — never a
+/// prompt, a profile or a content-bearing id.
 pub fn spawn_profile_learning_tick(
     engine: &Engine,
     learning: Arc<crate::profile_learning::ProfileLearning>,
@@ -1555,7 +1556,9 @@ pub fn spawn_profile_learning_tick(
             if shutting_down.load(Ordering::SeqCst) {
                 break;
             }
-            let tick = learning.run_due(mem_profile::ids::now_millis()).await;
+            let tick = learning
+                .run_due(mem_profile::ids::now_millis(), &shutting_down)
+                .await;
             if tick.due == 0 {
                 continue;
             }

@@ -16,12 +16,18 @@
 //! - `test_concurrent_round_drives_are_serialized_by_the_round_flag`
 //! - `test_learning_canary_never_enters_any_log_channel`
 //! - `test_round_failures_are_typed_not_panics`
+//! - `test_round_failure_event_carries_the_closed_reason_token`
+//! - `test_shutdown_flag_stops_run_due_between_rounds`
 
 mod common;
 
+/// A flag that never flips: the default argument for every drive that is not
+/// testing shutdown.
+static NEVER_SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::json;
@@ -98,6 +104,15 @@ impl SpySink {
             .map(|(event, detail)| format!("{event} {detail}"))
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// The parsed detail of the FIRST event with this name, if any.
+    ///
+    /// `emit` stores `detail.to_string()`, so the getter re-parses that string.
+    fn detail(&self, event: &str) -> Option<serde_json::Value> {
+        let events = self.events.lock().expect("events lock");
+        let (_, detail) = events.iter().find(|(name, _)| name == event)?;
+        Some(serde_json::from_str(detail).expect("the sink stores JSON"))
     }
 }
 
@@ -203,10 +218,18 @@ impl ProfileWriter for CountingWriter {
     }
 }
 
+/// How the spy gateway answers a native call.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Failure {
+    None,
+    Provider,
+    InvalidJson,
+}
+
 /// A gateway that counts native calls and optionally parks inside one.
 struct SpyGateway {
     native_calls: AtomicUsize,
-    fail: bool,
+    failure: Failure,
     entered: Option<Arc<tokio::sync::Notify>>,
     release: Option<Arc<tokio::sync::Notify>>,
 }
@@ -215,7 +238,7 @@ impl SpyGateway {
     fn counting() -> Arc<Self> {
         Arc::new(Self {
             native_calls: AtomicUsize::new(0),
-            fail: false,
+            failure: Failure::None,
             entered: None,
             release: None,
         })
@@ -224,7 +247,19 @@ impl SpyGateway {
     fn failing() -> Arc<Self> {
         Arc::new(Self {
             native_calls: AtomicUsize::new(0),
-            fail: true,
+            failure: Failure::Provider,
+            entered: None,
+            release: None,
+        })
+    }
+
+    /// A provider that answers with a payload that is not JSON: the round's
+    /// parse turns it into `ProfileError::Json`, a different variant from the
+    /// `Analysis` one `failing()` produces.
+    fn invalid_json() -> Arc<Self> {
+        Arc::new(Self {
+            native_calls: AtomicUsize::new(0),
+            failure: Failure::InvalidJson,
             entered: None,
             release: None,
         })
@@ -233,7 +268,7 @@ impl SpyGateway {
     fn parked(entered: Arc<tokio::sync::Notify>, release: Arc<tokio::sync::Notify>) -> Arc<Self> {
         Arc::new(Self {
             native_calls: AtomicUsize::new(0),
-            fail: false,
+            failure: Failure::None,
             entered: Some(entered),
             release: Some(release),
         })
@@ -249,18 +284,25 @@ impl AnalysisGateway for SpyGateway {
         &'a self,
         _context: &'a AnalysisContext,
     ) -> BoxFuture<'a, Result<String, AnalysisError>> {
-        self.native_calls.fetch_add(1, Ordering::AcqRel);
+        let call = self.native_calls.fetch_add(1, Ordering::AcqRel);
         Box::pin(async move {
-            if let Some(entered) = self.entered.as_ref() {
-                entered.notify_one();
+            // Only the FIRST call parks: a mutant that drops the shutdown check
+            // then drives a second round that completes instead of hanging.
+            if call == 0 {
+                if let Some(entered) = self.entered.as_ref() {
+                    entered.notify_one();
+                }
+                if let Some(release) = self.release.as_ref() {
+                    release.notified().await;
+                }
             }
-            if let Some(release) = self.release.as_ref() {
-                release.notified().await;
+            match self.failure {
+                Failure::Provider => Err(AnalysisError::Provider("provider fault".to_string())),
+                Failure::InvalidJson => Ok("not json".to_string()),
+                Failure::None => {
+                    Ok(r#"{"preferences":[],"patterns":[],"workflows":[]}"#.to_string())
+                }
             }
-            if self.fail {
-                return Err(AnalysisError::Provider("provider fault".to_string()));
-            }
-            Ok(r#"{"preferences":[],"patterns":[],"workflows":[]}"#.to_string())
         })
     }
 
@@ -482,16 +524,16 @@ async fn test_two_idle_events_inside_one_window_produce_one_round() {
         "a second idle inside the window replaces the deadline"
     );
 
-    let early = learning.run_due(9_999).await;
+    let early = learning.run_due(9_999, &NEVER_SHUTDOWN).await;
     assert_eq!(early.due, 0, "the original 10 s deadline is gone");
     assert_eq!(gateway.calls(), 0);
 
-    let first = learning.run_due(12_000).await;
+    let first = learning.run_due(12_000, &NEVER_SHUTDOWN).await;
     assert_eq!(first.due, 1, "the replaced deadline is 12 000");
     assert_eq!(first.completed, 1);
     assert_eq!(gateway.calls(), 1);
 
-    let again = learning.run_due(12_001).await;
+    let again = learning.run_due(12_001, &NEVER_SHUTDOWN).await;
     assert_eq!(again.due, 0, "poll_due removes the arm it observed");
     assert!(again.outcomes.is_empty());
     assert_eq!(gateway.calls(), 1, "one window, one round");
@@ -677,7 +719,7 @@ async fn test_concurrent_round_drives_are_serialized_by_the_round_flag() {
     assert!(learning.arm("session-1", 0));
     let first = tokio::spawn({
         let learning = learning.clone();
-        async move { learning.run_due(10_000).await }
+        async move { learning.run_due(10_000, &NEVER_SHUTDOWN).await }
     });
     entered.notified().await;
 
@@ -685,7 +727,7 @@ async fn test_concurrent_round_drives_are_serialized_by_the_round_flag() {
     // not block: no scheduler guard is held across the drive.
     assert!(learning.arm("session-1", 10_000));
 
-    let second = learning.run_due(20_000).await;
+    let second = learning.run_due(20_000, &NEVER_SHUTDOWN).await;
     assert_eq!(second.due, 1, "the re-armed session is due again");
     assert!(
         second.outcomes.contains(&LearningOutcome::AlreadyRunning),
@@ -750,7 +792,7 @@ async fn test_learning_canary_never_enters_any_log_channel() {
         "{outcome:?}"
     );
     assert!(learning.arm("session-1", 0));
-    let tick = learning.run_due(10_000).await;
+    let tick = learning.run_due(10_000, &NEVER_SHUTDOWN).await;
     assert_eq!(tick.failed, 1, "the provider fault is typed, not a panic");
 
     // (1) The positive control proves the facade → layer → file route is live
@@ -787,10 +829,79 @@ async fn test_round_failures_are_typed_not_panics() {
     );
 
     assert!(learning.arm("session-1", 0));
-    let tick = learning.run_due(10_000).await;
+    let tick = learning.run_due(10_000, &NEVER_SHUTDOWN).await;
     assert_eq!(tick.due, 1);
     assert_eq!(tick.failed, 1, "a provider fault is a typed failure");
     assert_eq!(tick.completed, 0);
     assert_eq!(writes.load(Ordering::Acquire), 0, "nothing is written");
     assert_eq!(sink.count("profile.learning_round_failed"), 1);
+}
+
+#[mem_store::tokio::test(crate = "mem_store::tokio")]
+async fn test_round_failure_event_carries_the_closed_reason_token() {
+    // Two faults, two variants, two tokens: a hardcoded literal cannot satisfy
+    // both rows, so this is a test of `failure_reason()`, not of the event shape.
+    for (gateway, expected) in [
+        (SpyGateway::failing(), "analysis"),
+        (SpyGateway::invalid_json(), "json"),
+    ] {
+        let dir = common::TestDir::new("profile-learning-reason");
+        let sink = Arc::new(SpySink::default());
+        let (learning, _prompts, _writes) =
+            build_learner(dir.path(), sink.clone(), gateway, one_prompt_ledger(), 1);
+        assert!(learning.arm("session-1", 0));
+        let tick = learning.run_due(10_000, &NEVER_SHUTDOWN).await;
+        assert_eq!(tick.failed, 1, "{expected}");
+        let detail = sink
+            .detail("profile.learning_round_failed")
+            .expect("the failure event");
+        assert_eq!(detail["kind"], "round");
+        let reason = detail["reason"]
+            .as_str()
+            .expect("a closed-set reason token");
+        assert_eq!(
+            reason, expected,
+            "a hardcoded token cannot satisfy both rows"
+        );
+        assert!(
+            mem_profile::error::failure_reason::ALL.contains(&reason),
+            "{reason} is not in the closed set"
+        );
+        assert!(
+            !detail.to_string().contains("provider fault"),
+            "the provider message never enters the event"
+        );
+    }
+}
+
+#[mem_store::tokio::test(
+    flavor = "multi_thread",
+    worker_threads = 2,
+    crate = "mem_store::tokio"
+)]
+async fn test_shutdown_flag_stops_run_due_between_rounds() {
+    let dir = common::TestDir::new("profile-learning-shutdown");
+    let sink = Arc::new(SpySink::default());
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let gateway = SpyGateway::parked(entered.clone(), release.clone());
+    let (learning, _prompts, _writes) =
+        build_learner(dir.path(), sink, gateway.clone(), one_prompt_ledger(), 1);
+    assert!(learning.arm("session-1", 0));
+    assert!(learning.arm("session-2", 0));
+
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let drive = tokio::spawn({
+        let learning = learning.clone();
+        let shutdown = shutdown.clone();
+        async move { learning.run_due(10_000, &shutdown).await }
+    });
+    entered.notified().await; // round 1 is inside the provider
+    shutdown.store(true, Ordering::SeqCst);
+    release.notify_one();
+    let tick = drive.await.expect("the drive returns");
+
+    assert_eq!(tick.due, 2, "both arms were due");
+    assert_eq!(tick.outcomes.len(), 1, "only the in-flight round ran");
+    assert_eq!(gateway.calls(), 1, "the second round never starts");
 }

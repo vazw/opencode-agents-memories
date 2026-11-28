@@ -139,7 +139,13 @@ fn test_safe_cleanup_defaults_when_only_project_cleanup_settings() {
         Some(r#"{"autoCleanupEnabled": true, "autoCleanupRetentionDays": -1}"#),
         &Env::new(),
     );
-    assert!(config.auto_cleanup_enabled);
+    // `PROJECT_DROPPED_FIELDS` drops all three cleanup keys at project scope, so
+    // `-1` never reaches `normalize_auto_cleanup_retention_days` and the default
+    // stands: project files can carry the keys but never switch deletion on.
+    assert!(
+        !config.auto_cleanup_enabled,
+        "project cleanup keys are dropped; the default is false"
+    );
     assert_eq!(config.auto_cleanup_retention_days, 30);
 }
 

@@ -21,6 +21,7 @@
 //! `tracing::` macro, no `mem_core::logging::log`, no `structured_stderr`. The
 //! production sink lives in `composition.rs`. A static scan enforces this.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use mem_ai::privacy::PrivacyConfig;
@@ -238,7 +239,12 @@ impl ProfileLearning {
     /// The scheduler mutex is held ONLY across `poll_due` and dropped BEFORE
     /// the round is driven (D-15), so the R9 fixture's re-`arm` can proceed
     /// while a round is in flight. `poll_due` is the sole removal edge.
-    pub async fn run_due(&self, now: i64) -> LearningTick {
+    ///
+    /// `shutdown` is re-read before EVERY round, not once per tick: a teardown
+    /// that flips the flag while a slow provider is in flight stops the next
+    /// arm instead of driving it. An arm polled and then skipped stays
+    /// unanalyzed; the next boot's select reselects it, so nothing is lost.
+    pub async fn run_due(&self, now: i64, shutdown: &AtomicBool) -> LearningTick {
         let due = {
             let mut scheduler = lock_or_recover(&self.scheduler);
             scheduler.poll_due(now)
@@ -251,6 +257,9 @@ impl ProfileLearning {
             if !jobs.contains(&IdleJob::Learn) {
                 continue;
             }
+            if shutdown.load(Ordering::SeqCst) {
+                break;
+            }
             match self.round.run(now).await {
                 Ok(outcome) => {
                     if matches!(outcome, LearningOutcome::Completed { .. }) {
@@ -258,11 +267,14 @@ impl ProfileLearning {
                     }
                     tick.outcomes.push(outcome);
                 }
-                Err(_) => {
+                Err(error) => {
                     tick.failed += 1;
                     self.events.emit(
                         "profile.learning_round_failed",
-                        serde_json::json!({ "kind": "round" }),
+                        serde_json::json!({
+                            "kind": "round",
+                            "reason": error.failure_reason(),
+                        }),
                     );
                 }
             }

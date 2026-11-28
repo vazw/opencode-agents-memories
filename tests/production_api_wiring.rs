@@ -1400,13 +1400,27 @@ fn test_composition_root_passes_the_shutdown_cancel_flag_to_the_deduplication_po
     // `test_no_mem_bridge_to_mem_web_edge` below.
     let source = std::fs::read_to_string("src/main.rs").expect("read the composition root");
 
+    // Non-vacuity: `main.rs:201` also carries `Arc::clone(&deduplication_cancelled)`
+    // for the `.spawn(..)` of the cleanup tick, so a whole-file `contains` stays
+    // green even if the PORT received a fresh never-set flag. Slice the factory
+    // call itself: from its opening name to the `.spawn(` that follows it.
     assert!(
-        source.contains("production_deduplication_port_with_cancel("),
-        "the wired arm must use the cancellation-aware factory"
+        !source.contains("production_deduplication_port("),
+        "the wired arm must not use the cancel-less factory (a fresh never-set flag)"
+    );
+    let call_at = source
+        .find("production_deduplication_port_with_cleanup(")
+        .expect("the wired arm calls the cleanup-aware factory");
+    let spawn_at = source
+        .find(".spawn(")
+        .expect("the cleanup tick is spawned after the port is built");
+    assert!(
+        call_at < spawn_at,
+        "the port must be built before the tick is spawned"
     );
     assert!(
-        source.contains("Arc::clone(&deduplication_cancelled)"),
-        "the port must receive a clone of the launcher's flag"
+        source[call_at..spawn_at].contains("Arc::clone(&deduplication_cancelled)"),
+        "the port must receive a clone of the launcher's flag INSIDE the factory call"
     );
     assert!(
         source.contains("use std::sync::atomic::"),
@@ -1415,10 +1429,6 @@ fn test_composition_root_passes_the_shutdown_cancel_flag_to_the_deduplication_po
     assert!(
         source.contains("deduplication_cancelled.store(true"),
         "the stop closure must set the flag"
-    );
-    assert!(
-        !source.contains("with_maintenance(production_deduplication_port("),
-        "the 3-arg factory (a fresh never-set flag) must be gone from the wired arm"
     );
 
     // Condition: both `find`s must succeed before the positional comparison —

@@ -125,3 +125,60 @@ impl From<serde_json::Error> for ProfileError {
         Self::json(&error)
     }
 }
+
+/// The closed set of `profile.learning_round_failed` reason tokens.
+///
+/// One token per [`ProfileError`] variant: a classification an operator or a
+/// log consumer may branch on. Never a message, a path, a key, a prompt
+/// fragment or parser text. `ALL` is the set a table test pins; it is a slice,
+/// not a sized array, so the set has no length to drift.
+pub mod failure_reason {
+    pub const STORE: &str = "store";
+    pub const IO: &str = "io";
+    pub const JSON: &str = "json";
+    pub const COLD_BUFFER: &str = "cold-buffer";
+    pub const LOCK_UNTRUSTED: &str = "lock-untrusted";
+    pub const PRIVATE_CONTENT: &str = "private-content";
+    pub const SAVE: &str = "save";
+    pub const ANALYSIS: &str = "analysis";
+    pub const ERASURE_FAILED: &str = "erasure-failed";
+    pub const PROMPT_DELETE_AFTER_ERASURE: &str = "prompt-delete-after-erasure";
+    pub const LOCK_POISONED: &str = "lock-poisoned";
+
+    /// Every token, in declaration order.
+    pub const ALL: &[&str] = &[
+        STORE,
+        IO,
+        JSON,
+        COLD_BUFFER,
+        LOCK_UNTRUSTED,
+        PRIVATE_CONTENT,
+        SAVE,
+        ANALYSIS,
+        ERASURE_FAILED,
+        PROMPT_DELETE_AFTER_ERASURE,
+        LOCK_POISONED,
+    ];
+}
+
+impl ProfileError {
+    /// The closed-set token for a round failure.
+    ///
+    /// The match has NO wildcard arm: `#[non_exhaustive]` binds only external
+    /// crates, so a new variant is a compile error here until it gets a token.
+    pub fn failure_reason(&self) -> &'static str {
+        match self {
+            Self::Store(_) => failure_reason::STORE,
+            Self::Io { .. } => failure_reason::IO,
+            Self::Json { .. } => failure_reason::JSON,
+            Self::ColdBuffer(_) => failure_reason::COLD_BUFFER,
+            Self::LockUntrusted => failure_reason::LOCK_UNTRUSTED,
+            Self::PrivateContentBlocked => failure_reason::PRIVATE_CONTENT,
+            Self::Save(_) => failure_reason::SAVE,
+            Self::Analysis(_) => failure_reason::ANALYSIS,
+            Self::ErasureFailed { .. } => failure_reason::ERASURE_FAILED,
+            Self::PromptDeleteAfterErasure { .. } => failure_reason::PROMPT_DELETE_AFTER_ERASURE,
+            Self::LockPoisoned { .. } => failure_reason::LOCK_POISONED,
+        }
+    }
+}
