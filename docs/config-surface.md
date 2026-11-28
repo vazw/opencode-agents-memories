@@ -84,7 +84,7 @@ Row format: `| Struct | Field | Status | Reader / Disposition | Upstream Referen
 | Config | web_server_api_token | live | crates/mem-web/src/settings.rs:32 | example/opencode-mem/src/config.ts:375 |
 | Config | max_vectors_per_shard | live | crates/mem-store/src/config.rs:16 | example/opencode-mem/src/config.ts:376 |
 | Config | auto_cleanup_enabled | live | crates/mem-profile/src/incremental_cleanup.rs:221 | example/opencode-mem/src/config.ts:377 |
-| Config | auto_cleanup_retention_days | dead | mark inert (issue 41) | example/opencode-mem/src/config.ts:378 |
+| Config | auto_cleanup_retention_days | live | crates/mem-web/src/api/deduplication/mod.rs:569 | example/opencode-mem/src/config.ts:378 |
 | Config | auto_cleanup_interval_seconds | live | src/main.rs:189 | issue 41 (port addition) |
 | Config | deduplication_enabled | live | src/main.rs:223 | example/opencode-mem/src/services/deduplication-service.ts:37 |
 | Config | deduplication_similarity_threshold | live | src/main.rs:224 | example/opencode-mem/src/services/deduplication-service.ts:38 |
@@ -180,12 +180,12 @@ Subsequent verification at `8023dd8` and through HEAD (`5432ee748c1f`) resolved 
    - Total Schema Fields: **103** (87 `Config` + 16 nested)
    - Total Leaf Fields: **96** (80 `Config` + 16 nested)
    - Composite Structures: **7** (all live in composition / schema initialization)
-   - Live Leaf Fields: **76** (61 `Config` + 15 nested)
-   - Dead Leaf Fields: **20** (19 `Config` + 1 `MemoryScope`)
-   - Every one of the 20 dead leaf fields has exactly one disposition: `mark inert (issue <N>)`.
+   - Live Leaf Fields: **77** (62 `Config` + 15 nested)
+   - Dead Leaf Fields: **19** (18 `Config` + 1 `MemoryScope`)
+   - Every one of the 19 dead leaf fields has exactly one disposition: `mark inert (issue <N>)`.
 
 ### 3.2 Dead Field Dispositions and Itemized Forward Declarations
-The 20 dead leaf fields break down into three explicit categories:
+The 19 dead leaf fields break down into three explicit categories:
 1. **Dead Upstream Too (5 fields)**:
    - `Config.max_profile_items`: parsed and never read in upstream `example/opencode-mem/src/config.ts:337`; issue 44.9 explicitly ruled it stays unwired. Disposition: `mark inert (issue 44)`.
    - `Config.user_profile_max_context_bytes`: upstream `services/user-profile.ts` defines but never reads. Disposition: `mark inert (issue 44)`.
@@ -193,10 +193,9 @@ The 20 dead leaf fields break down into three explicit categories:
    - `Config.user_profile_display_patterns`: upstream UI display cap unreferenced in engine. Disposition: `mark inert (issue 44)`.
    - `Config.user_profile_display_workflows`: upstream UI display cap unreferenced in engine. Disposition: `mark inert (issue 44)`.
 
-2. **Forward Declarations Citing Open Issues (6 fields)**:
+2. **Forward Declarations Citing Open Issues (5 fields)**:
    - `Config.similarity_threshold`: vector search threshold (issue 40). Disposition: `mark inert (issue 40)`.
    - `Config.ai_session_retention_days`: periodic cleanup retention threshold (issue 39). Disposition: `mark inert (issue 39)`.
-   - `Config.auto_cleanup_retention_days`: background cleanup scheduler retention threshold (issue 41). Disposition: `mark inert (issue 41)`.
    - `Config.show_auto_capture_toasts`: UI toast notification flag (issue 20). Disposition: `mark inert (issue 20)`.
    - `Config.show_user_profile_toasts`: UI toast notification flag (issue 20). Disposition: `mark inert (issue 20)`.
    - `Config.show_error_toasts`: UI toast notification flag (issue 20). Disposition: `mark inert (issue 20)`.

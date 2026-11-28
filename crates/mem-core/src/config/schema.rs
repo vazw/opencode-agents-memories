@@ -487,7 +487,6 @@ define_file_config! {
     pub web_server_api_token: Option<String>,
     pub max_vectors_per_shard: Option<u32>,
     pub auto_cleanup_enabled: Option<bool>,
-    #[inert]
     pub auto_cleanup_retention_days: Option<f64>,
     /// Issue 41: `autoCleanupInterval`, a duration string such as `"24h"`,
     /// `"30m"`, `"90s"` or `"2h30m"`. Deliberately NOT `#[inert]` — the
